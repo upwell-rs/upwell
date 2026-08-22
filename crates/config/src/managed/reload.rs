@@ -354,6 +354,7 @@ impl ConfigReloader {
     /// affected `#[hook(ConfigReload)]` hooks, and — if every binding re-binds and every
     /// hook accepts — commits the new values into their shared slots. On any failure
     /// nothing is published and the live values are untouched.
+    #[allow(clippy::result_large_err)]
     pub async fn reload(&self) -> Result<ConfigReloadReport, ConfigReloadError> {
         // Serialize whole reloads so the prepare → hooks → commit phases are atomic with
         // respect to each other: a concurrent reload cannot commit a newer tree between this
