@@ -922,6 +922,7 @@ impl<D: ProtocolDefinition> App<D> {
 /// Runs startup hooks sequentially, returning the components whose startup fully
 /// succeeded. On failure the list lets the caller pair shutdown only with work that
 /// actually started.
+#[allow(clippy::result_large_err)]
 async fn run_startup(
     hooks: &HookManager,
 ) -> Result<HashSet<TypeId>, (crate::Error, HashSet<TypeId>)> {
