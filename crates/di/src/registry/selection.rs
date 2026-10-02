@@ -351,6 +351,10 @@ impl ProviderSelectionModel {
         self.components.get(&type_id).copied()
     }
 
+    pub(crate) fn components(&self) -> impl Iterator<Item = ComponentDescriptor> + '_ {
+        self.components.values().copied()
+    }
+
     fn selected_dependencies(
         &self,
         consumer: &ComponentDescriptor,

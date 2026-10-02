@@ -123,6 +123,18 @@ pub enum Error {
     #[error("condition evaluation belongs to another application config-binding catalog")]
     ConditionEvaluationApplicationMismatch,
 
+    /// The requested graph transition cannot be applied safely without restarting.
+    #[error(transparent)]
+    RestartRequired(#[from] crate::transition::RestartRequired),
+
+    /// The candidate graph was derived from another committed generation.
+    #[error(transparent)]
+    StaleGraphCandidate(#[from] upwell_di::StaleGraphCandidate),
+
+    /// Candidate preparation crossed a panicking extension boundary.
+    #[error("candidate runtime preparation panicked")]
+    CandidatePreparationPanicked,
+
     /// A configuration loading, binding, or substitution failure.
     #[error(transparent)]
     Config(#[from] upwell_config::ConfigError),
