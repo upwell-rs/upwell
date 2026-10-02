@@ -312,9 +312,16 @@ pub(crate) async fn construct_fresh_boxed(
                 component_id: Some(descriptor.id.to_string()),
                 type_name: (descriptor.ty.type_name)().to_string(),
             })?;
-    let target_scope = owner
-        .container_for_scope(descriptor.scope)
-        .ok_or(Error::MissingComponent(descriptor.name))?;
+    let target_scope = if descriptor.scope.is_transient() {
+        // A transient has no container of its own: rebuild it in a throwaway
+        // context parented to the requesting scope, like on-demand transient
+        // construction, so its dependencies resolve up the owner's chain.
+        Arc::clone(&owner)
+    } else {
+        owner
+            .container_for_scope(descriptor.scope)
+            .ok_or(Error::MissingComponent(descriptor.name))?
+    };
     let externals = target_scope.resolvers().clone();
     let slot = owner.slot.clone();
     let mut cx = ComponentConstructionContext::new_with_slot(
