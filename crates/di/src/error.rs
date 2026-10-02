@@ -287,6 +287,36 @@ pub enum Error {
     #[error("missing component: {0}")]
     MissingComponent(&'static str),
 
+    #[error("candidate component '{component}' is not part of the candidate registry")]
+    CandidateComponentMismatch { component: &'static str },
+
+    #[error(
+        "candidate factory for component '{component}' returned type '{actual}' instead of '{expected}'"
+    )]
+    CandidateFactoryTypeMismatch {
+        component: &'static str,
+        expected: &'static str,
+        actual: &'static str,
+    },
+
+    #[error("candidate factory for component '{component}' panicked")]
+    CandidateFactoryPanicked { component: &'static str },
+
+    #[error("candidate provider projection for component '{component}' panicked")]
+    CandidateProviderPanicked { component: &'static str },
+
+    #[error("candidate root finalization panicked")]
+    CandidateFinalizationPanicked,
+
+    #[error("candidate metadata evaluation panicked")]
+    CandidateMetadataPanicked,
+
+    #[error("candidate external resolvers contain an active component source")]
+    CandidateActiveResolver,
+
+    #[error("candidate root cannot retain generation-bound component '{component}'")]
+    CandidateRuntimeBoundComponent { component: &'static str },
+
     #[error(
         "the root resolver is unavailable: the root container was never attached or has been dropped"
     )]

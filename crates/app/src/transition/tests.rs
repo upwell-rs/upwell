@@ -1,9 +1,20 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use upwell_config::{ConfigBinding, ConfigProperties};
 use upwell_core::{
-    ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId, RuntimeGenerationId,
+    Cardinality, ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId,
+    DependencyDescriptor, DependencyObservation, ResolutionMode, ResolverSet, RuntimeGenerationId,
+    TypeDescriptor,
+};
+use upwell_di::{
+    BoxedComponent, ComponentConstructionContext, ComponentDescriptor, ComponentFactoryDescriptor,
+    EffectiveGraph, Singleton,
 };
 
-use super::CandidateGraph;
+use super::{
+    CandidateGraph, ComponentTransitionDecision, ComponentTransitionStrategy, RestartReason,
+};
 use crate::{AppRegistry, Error, ScopeTopology};
 
 const ENABLED: ConfigFactId = ConfigFactId::new("test::Settings", "settings", "enabled");
@@ -165,4 +176,355 @@ fn incremental_app_evaluation_remains_accepted_by_candidate_preparation() {
         &topology(),
     )
     .expect("incremental evaluation retains application identity");
+}
+
+struct Replaceable;
+struct RootBoundConsumer;
+
+fn construct_replaceable(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<Replaceable>("Replaceable"),
+            value: Box::new(upwell_di::Injectable::into_stored(std::sync::Arc::new(
+                Replaceable,
+            ))),
+        })
+    })
+}
+
+fn no_dependencies() -> Vec<upwell_core::DependencyDescriptor> {
+    Vec::new()
+}
+
+fn root_resolver_dependencies() -> Vec<DependencyDescriptor> {
+    vec![DependencyDescriptor {
+        name: "RootResolver",
+        ty: TypeDescriptor::of::<upwell_di::RootResolver>("RootResolver"),
+        cardinality: Cardinality::One,
+        optional: false,
+        dynamic: false,
+        qualifier: None,
+        config: false,
+        resolution: ResolutionMode::Eager,
+        observation: DependencyObservation::Snapshot,
+    }]
+}
+
+static ACTIVE_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "active",
+    construct: construct_replaceable,
+    dependencies: no_dependencies,
+    default: false,
+}];
+static CANDIDATE_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "candidate",
+    construct: construct_replaceable,
+    dependencies: no_dependencies,
+    default: false,
+}];
+static ROOT_BOUND_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "root-bound",
+    construct: construct_replaceable,
+    dependencies: root_resolver_dependencies,
+    default: false,
+}];
+
+fn active_factories() -> &'static [ComponentFactoryDescriptor] {
+    &ACTIVE_FACTORY
+}
+
+fn candidate_factories() -> &'static [ComponentFactoryDescriptor] {
+    &CANDIDATE_FACTORY
+}
+
+fn root_bound_factories() -> &'static [ComponentFactoryDescriptor] {
+    &ROOT_BOUND_FACTORY
+}
+
+fn replaceable(factories: fn() -> &'static [ComponentFactoryDescriptor]) -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "replaceable",
+        name: "Replaceable",
+        ty: TypeDescriptor::of::<Replaceable>("Replaceable"),
+        scope: &Singleton,
+        condition: None,
+        factories,
+        hooks: upwell_hooks::no_hooks,
+    }
+}
+
+fn strategy_fixture() -> (EffectiveGraph, CandidateGraph) {
+    let mut active = AppRegistry::default();
+    active.components.push(replaceable(active_factories));
+    let active = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &active.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+    let mut candidate = AppRegistry::default();
+    candidate.components.push(replaceable(candidate_factories));
+    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &candidate, &topology())
+        .expect("candidate graph validates");
+
+    (active, candidate)
+}
+
+#[test]
+fn replacement_requires_an_explicit_component_decision() {
+    let (active, candidate) = strategy_fixture();
+
+    let error = candidate
+        .resolve_transition(&active, [])
+        .expect_err("missing component decision requires restart");
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            reason: RestartReason::MissingDecision,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn replacement_cannot_retain_a_stale_instance() {
+    let (active, candidate) = strategy_fixture();
+
+    let error = candidate
+        .resolve_transition(
+            &active,
+            [ComponentTransitionDecision {
+                component: "replaceable",
+                strategy: ComponentTransitionStrategy::Retain,
+            }],
+        )
+        .expect_err("structural replacement cannot retain");
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            reason: RestartReason::StaleRetention,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn explicit_reconstruction_uses_candidate_graph_order() {
+    let (active, candidate) = strategy_fixture();
+
+    let resolved = candidate
+        .resolve_transition(
+            &active,
+            [ComponentTransitionDecision {
+                component: "replaceable",
+                strategy: ComponentTransitionStrategy::Reconstruct,
+            }],
+        )
+        .expect("ordinary reconstruction is supported");
+
+    assert_eq!(resolved.construction_order(), ["replaceable"]);
+    assert_eq!(resolved.decisions().len(), 1);
+}
+
+#[test]
+fn duplicate_component_decisions_are_rejected() {
+    let (active, candidate) = strategy_fixture();
+    let decision = ComponentTransitionDecision {
+        component: "replaceable",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    };
+
+    let error = candidate
+        .resolve_transition(&active, [decision, decision])
+        .expect_err("duplicate component decisions are invalid");
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            reason: RestartReason::DuplicateDecision,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn unknown_component_decisions_are_rejected() {
+    let (active, candidate) = strategy_fixture();
+
+    let error = candidate
+        .resolve_transition(
+            &active,
+            [
+                ComponentTransitionDecision {
+                    component: "replaceable",
+                    strategy: ComponentTransitionStrategy::Reconstruct,
+                },
+                ComponentTransitionDecision {
+                    component: "unknown",
+                    strategy: ComponentTransitionStrategy::Retain,
+                },
+            ],
+        )
+        .expect_err("unknown component decision is invalid");
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            reason: RestartReason::UnknownDecision,
+            ..
+        })
+    ));
+}
+
+#[tokio::test]
+async fn resolved_plan_builds_only_the_candidate_factory() {
+    let (active, candidate) = strategy_fixture();
+    let resolved = candidate
+        .resolve_transition(
+            &active,
+            [ComponentTransitionDecision {
+                component: "replaceable",
+                strategy: ComponentTransitionStrategy::Reconstruct,
+            }],
+        )
+        .expect("ordinary reconstruction is supported");
+
+    let (root, scopes) = resolved
+        .build_candidate_root(&candidate, Vec::new(), ResolverSet::new())
+        .await
+        .expect("resolved plan constructs candidate root");
+
+    assert!(root.belongs_to_registry(&scopes));
+    assert!(root.resolve::<std::sync::Arc<Replaceable>>().await.is_ok());
+}
+
+#[tokio::test]
+async fn resolved_plan_cannot_build_another_candidate() {
+    let (active, candidate) = strategy_fixture();
+    let (_, other_candidate) = strategy_fixture();
+    let resolved = candidate
+        .resolve_transition(
+            &active,
+            [ComponentTransitionDecision {
+                component: "replaceable",
+                strategy: ComponentTransitionStrategy::Reconstruct,
+            }],
+        )
+        .expect("ordinary reconstruction is supported");
+
+    let result = resolved
+        .build_candidate_root(&other_candidate, Vec::new(), ResolverSet::new())
+        .await;
+    let Err(error) = result else {
+        panic!("resolved plan is bound to its candidate");
+    };
+
+    assert!(matches!(error, Error::StaleGraphCandidate(_)));
+}
+
+#[tokio::test]
+async fn retained_values_must_match_complete_plan_dispositions() {
+    let mut active = AppRegistry::default();
+    active.components.push(replaceable(active_factories));
+    active.components.push(ComponentDescriptor::manual(
+        "retained",
+        "Retained",
+        TypeDescriptor::of::<u8>("Retained"),
+        &Singleton,
+    ));
+    let active_graph = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &active.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+    let mut candidate = AppRegistry::default();
+    candidate.components.push(replaceable(candidate_factories));
+    candidate.components.push(ComponentDescriptor::manual(
+        "retained",
+        "Retained",
+        TypeDescriptor::of::<u8>("Retained"),
+        &Singleton,
+    ));
+    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &candidate, &topology())
+        .expect("candidate graph validates");
+    let resolved = candidate
+        .resolve_transition(
+            &active_graph,
+            [ComponentTransitionDecision {
+                component: "replaceable",
+                strategy: ComponentTransitionStrategy::Reconstruct,
+            }],
+        )
+        .expect("unchanged component receives retain disposition");
+
+    let result = resolved
+        .build_candidate_root(&candidate, Vec::new(), ResolverSet::new())
+        .await;
+    let Err(error) = result else {
+        panic!("missing retained value is rejected");
+    };
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            reason: RestartReason::RetainedInstancePreparationUnsupported,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn unchanged_root_resolver_consumers_require_reconstruction() {
+    let root_bound = ComponentDescriptor {
+        id: "root-bound",
+        name: "RootBoundConsumer",
+        ty: TypeDescriptor::of::<RootBoundConsumer>("RootBoundConsumer"),
+        scope: &Singleton,
+        condition: None,
+        factories: root_bound_factories,
+        hooks: upwell_hooks::no_hooks,
+    };
+    let mut active = AppRegistry::default();
+    active.components.extend([
+        replaceable(active_factories),
+        upwell_di::root_resolver_descriptor(),
+        root_bound,
+    ]);
+    let active_graph = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &active.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+    let mut candidate = AppRegistry::default();
+    candidate.components.extend([
+        replaceable(candidate_factories),
+        upwell_di::root_resolver_descriptor(),
+        root_bound,
+    ]);
+    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &candidate, &topology())
+        .expect("candidate graph validates");
+
+    let error = candidate
+        .resolve_transition(
+            &active_graph,
+            [ComponentTransitionDecision {
+                component: "replaceable",
+                strategy: ComponentTransitionStrategy::Reconstruct,
+            }],
+        )
+        .expect_err("root-bound consumer cannot be retained");
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            reason: RestartReason::GenerationBoundDependency,
+            ..
+        })
+    ));
 }

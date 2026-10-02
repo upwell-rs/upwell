@@ -77,7 +77,7 @@ pub use tooling::{
     ToolingProbeOutputError, ToolingProbeOutputTargetError, ToolingProbeTargetError,
     ToolingProjectionError, ToolingRelationshipKind,
 };
-pub use transition::CandidateGraph;
+pub use transition::{CandidateGraph, RestartReason, RestartRequired};
 pub use upwell_core::{Scope, ScopeId, StaticScope, namespaced_id};
 
 #[cfg(feature = "tooling")]

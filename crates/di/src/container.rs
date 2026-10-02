@@ -19,6 +19,8 @@ use crate::{
     error::Error,
 };
 
+mod candidate;
+
 /// Shared, immutable data a [`ScopeContainer`] needs to resolve beyond its own
 /// store: the `Transient` components it may construct on demand and the trait
 /// providers used to alias instances. Held behind an `Arc` and shared by every
@@ -143,6 +145,14 @@ impl ScopeRegistry {
 
     pub(crate) fn component(&self, target: TypeId) -> Option<ComponentDescriptor> {
         self.selection.component(target)
+    }
+
+    pub(crate) fn components(&self) -> impl Iterator<Item = ComponentDescriptor> + '_ {
+        self.selection.components()
+    }
+
+    pub(crate) fn component_by_id(&self, id: &str) -> Option<ComponentDescriptor> {
+        self.components().find(|component| component.id == id)
     }
 }
 
