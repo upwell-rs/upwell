@@ -149,15 +149,14 @@ impl ResolvedTransitionPlan {
                 .filter(|component| component.scope.is_transient())
                 .map(|component| (component.ty.type_id, *component))
                 .collect();
-            let stored = candidate
+            let components = candidate
                 .components
                 .iter()
-                .filter(|component| !component.scope.is_transient())
                 .map(|component| (component.ty.type_id, *component))
                 .collect();
             let scopes = Arc::new(ScopeRegistry::from_selection_model(
                 transient,
-                stored,
+                components,
                 Arc::clone(candidate.provider_selection()),
             )?);
             let root = ScopeContainer::build_candidate_root(
