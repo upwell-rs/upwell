@@ -92,6 +92,9 @@ impl From<tracing::Level> for JobLogLevel {
 /// reads back through it.
 ///
 /// Implementations must be cheap to clone-share (`Arc`-held) and safe to call concurrently.
+// `async_trait` stamps `#[must_use]` on the generated methods whose boxed-future
+// return type is already `must_use`; newer clippy flags that as `double_must_use`.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait JobLogSink: Send + Sync + 'static {
     /// Stores one captured event.
