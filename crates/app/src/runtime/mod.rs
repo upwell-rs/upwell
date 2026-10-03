@@ -2,10 +2,10 @@
 //!
 //! [`AppRuntime`] is the cheap-clone handle a [`ProtocolRuntime`](crate::ProtocolRuntime)
 //! receives to drive requests through the DI container and reach the app's support
-//! systems. It owns the *agnostic* runtime state — the built scope containers, the
-//! per-scope construction orders, and the hook manager — that the serve loop used to
-//! take as a long argument list, and exposes the scope-opening primitives a protocol
-//! drives per connection and per request.
+//! systems. It owns the *agnostic* runtime state — the built scope containers and the
+//! per-scope construction orders — that the serve loop used to take as a long argument
+//! list, and exposes the scope-opening primitives a protocol drives per connection and
+//! per request. Each committed runtime generation carries its own hook manager.
 
 use std::any::TypeId;
 use std::collections::HashMap;
@@ -27,13 +27,13 @@ use generation::{RuntimeGeneration, RuntimeTransitionCoordinator};
 ///
 /// Agnostic to any particular protocol: it holds the built root scope, the per-scope
 /// construction orders keyed by stable scope identity, the prepared protocol-owned
-/// topology, the resolved component set, and the hook manager. A protocol opens its
-/// declared boundaries through [`open_scope`](Self::open_scope).
+/// topology, and the resolved component set. The hook manager is generation-local and
+/// read from the pinned current view. A protocol opens its declared boundaries through
+/// [`open_scope`](Self::open_scope).
 #[derive(Clone)]
 pub struct AppRuntime {
     name: Arc<str>,
     transitions: RuntimeTransitionCoordinator,
-    hooks: HookManager,
 }
 
 /// Prepared scope state shared by every clone of an application runtime.
@@ -59,15 +59,10 @@ impl RuntimeScopePlan {
 }
 
 impl AppRuntime {
-    pub(crate) fn new(
-        name: Arc<str>,
-        generation: PreparedRuntimeGeneration,
-        hooks: HookManager,
-    ) -> Self {
+    pub(crate) fn new(name: Arc<str>, generation: PreparedRuntimeGeneration) -> Self {
         Self {
             name,
-            transitions: RuntimeTransitionCoordinator::new(generation, hooks.clone()),
-            hooks,
+            transitions: RuntimeTransitionCoordinator::new(generation),
         }
     }
 
@@ -86,9 +81,13 @@ impl AppRuntime {
         Arc::clone(&self.view().scope_plan().topology)
     }
 
-    /// The hook manager, for running lifecycle/event hooks by kind.
-    pub fn hooks(&self) -> &HookManager {
-        &self.hooks
+    /// The hook manager of the currently committed runtime generation, for running
+    /// lifecycle/event hooks by kind.
+    ///
+    /// Cloned from a pinned current view, so the handle is cheap and stays bound to the
+    /// generation that was current when it was taken.
+    pub fn hooks(&self) -> HookManager {
+        self.view().hooks().clone()
     }
 
     /// The resolved component set (the effective per-type descriptors). A protocol may

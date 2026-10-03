@@ -1,3 +1,4 @@
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -5,15 +6,15 @@ use std::sync::Arc;
 
 use upwell_core::{
     ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
-    ConfigFactDescriptor, ConfigFactId, DescriptorSource, ResolverSet, RuntimeGenerationId,
-    TypeDescriptor,
+    ConfigFactDescriptor, ConfigFactId, DescriptorSource, Resolver, ResolverCtx, ResolverCtxExt,
+    ResolverSet, RuntimeGenerationId, TypeDescriptor,
 };
 use upwell_di::{
     BoxedComponent, ComponentConstructionContext, ComponentDescriptor, ComponentFactoryDescriptor,
-    ComponentRegistry, ConditionFactSnapshot, EffectiveGraph, ScopeContainer, ScopeRegistry,
-    Singleton,
+    ComponentRegistry, ConditionFactSnapshot, EffectiveGraph, Injectable, ScopeContainer,
+    ScopeRegistry, Singleton,
 };
-use upwell_hooks::HookManager;
+use upwell_hooks::{HOOK_MANAGER_NAME, HookDescriptor, HookKind, HookManager};
 
 use super::*;
 use crate::{AppRegistry, ScopeTopology};
@@ -109,14 +110,33 @@ async fn prepared() -> PreparedRuntimeGeneration {
 }
 
 async fn prepared_with_condition(condition: Arc<AppConditionState>) -> PreparedRuntimeGeneration {
+    prepared_with_hooks(condition, HookManager::new(Vec::new()), ResolverSet::new()).await
+}
+
+fn seed_hook_manager(hooks: &HookManager) -> BoxedComponent {
+    BoxedComponent {
+        ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
+        value: Box::new(Injectable::into_stored(hooks.clone())),
+    }
+}
+
+async fn prepared_with_hooks(
+    condition: Arc<AppConditionState>,
+    hooks: HookManager,
+    externals: ResolverSet,
+) -> PreparedRuntimeGeneration {
     let registry = Arc::new(
         ScopeRegistry::new(HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
             .expect("empty scope registry validates"),
     );
-    let root =
-        ScopeContainer::build_root(&[], Vec::new(), ResolverSet::new(), Arc::clone(&registry))
-            .await
-            .expect("empty root builds");
+    let root = ScopeContainer::build_root(
+        &[],
+        vec![seed_hook_manager(&hooks)],
+        externals,
+        Arc::clone(&registry),
+    )
+    .await
+    .expect("empty root builds");
     let topology = Arc::new(
         ScopeTopology::empty()
             .prepare()
@@ -146,10 +166,7 @@ async fn coordinator() -> RuntimeTransitionCoordinator {
 async fn coordinator_with_condition(
     condition: Arc<AppConditionState>,
 ) -> RuntimeTransitionCoordinator {
-    RuntimeTransitionCoordinator::new(
-        prepared_with_condition(condition).await,
-        HookManager::new(Vec::new()),
-    )
+    RuntimeTransitionCoordinator::new(prepared_with_condition(condition).await)
 }
 
 #[tokio::test]
@@ -306,4 +323,185 @@ async fn committed_condition_state_survives_initial_commit_and_publication() {
         RuntimeGenerationId::new(1)
     );
     assert!(Arc::ptr_eq(&state, committed.condition()));
+}
+
+// ---------------------------------------------------------------------------
+// Generation-local hook-manager routing.
+// ---------------------------------------------------------------------------
+
+/// A hook kind whose outcome reports which generation root resolved the hook.
+struct ProbeKind;
+
+impl HookKind for ProbeKind {
+    type Output = &'static str;
+    type Cx = ();
+
+    const NAME: &'static str = "probe";
+}
+
+/// A resolver seeded into one generation's root, identifying it to probe hooks.
+#[derive(Clone)]
+struct GenerationProbe(&'static str);
+
+impl Resolver for GenerationProbe {}
+
+/// The hook's nominal receiver type; the probe call never resolves a component.
+struct ProbeComponent;
+
+fn probe_kind_ty() -> TypeId {
+    TypeId::of::<ProbeKind>()
+}
+
+/// The boxed future shape of an erased hook call.
+type ProbeCallFuture<'a> =
+    Pin<Box<dyn Future<Output = upwell_hooks::Result<Box<dyn Any + Send>>> + Send + 'a>>;
+
+fn probe_call<'a>(
+    ctx: &'a (dyn ResolverCtx + Send + Sync),
+    _: &'a (dyn Any + Send + Sync),
+) -> ProbeCallFuture<'a> {
+    Box::pin(async move {
+        let tag = ctx
+            .get_resolver::<GenerationProbe>()
+            .map(|probe| probe.0)
+            .unwrap_or("<unresolved>");
+
+        Ok(Box::new(tag) as Box<dyn Any + Send>)
+    })
+}
+
+static PROBE_HOOK: HookDescriptor = HookDescriptor::new(
+    1,
+    TypeDescriptor::of::<ProbeComponent>("ProbeComponent"),
+    ProbeKind::NAME,
+    probe_kind_ty,
+    no_dependencies,
+    probe_call,
+);
+
+fn probe_manager() -> HookManager {
+    HookManager::new(vec![PROBE_HOOK])
+}
+
+fn probe_externals(tag: &'static str) -> ResolverSet {
+    let mut externals = ResolverSet::new();
+
+    externals.insert(Arc::new(GenerationProbe(tag)));
+
+    externals
+}
+
+async fn probe_tags(hooks: &HookManager) -> Vec<&'static str> {
+    hooks
+        .run::<ProbeKind>(&(), |_| true)
+        .await
+        .into_iter()
+        .map(|(_, outcome)| outcome.expect("probe hook resolves through its root"))
+        .collect()
+}
+
+#[tokio::test]
+async fn pinned_views_resolve_hooks_through_their_own_generation_manager() {
+    let coordinator = RuntimeTransitionCoordinator::new(
+        prepared_with_hooks(
+            empty_condition(),
+            probe_manager(),
+            probe_externals("initial"),
+        )
+        .await,
+    );
+    let old = coordinator.current();
+
+    let candidate = prepared_with_hooks(
+        empty_condition(),
+        probe_manager(),
+        probe_externals("candidate"),
+    )
+    .await;
+    let committed = coordinator
+        .begin()
+        .await
+        .publish(candidate)
+        .expect("candidate publishes");
+
+    assert_eq!(probe_tags(old.hooks()).await, ["initial"]);
+    assert_eq!(
+        probe_tags(coordinator.current().hooks()).await,
+        ["candidate"]
+    );
+    assert_eq!(probe_tags(committed.hooks()).await, ["candidate"]);
+}
+
+#[tokio::test]
+async fn prepared_generation_binds_the_root_seeded_hook_manager() {
+    let coordinator = RuntimeTransitionCoordinator::new(
+        prepared_with_hooks(
+            empty_condition(),
+            probe_manager(),
+            probe_externals("seeded"),
+        )
+        .await,
+    );
+    let view = coordinator.current();
+    let root_hooks = view
+        .root()
+        .get::<HookManager>()
+        .expect("every prepared root seeds the framework hook manager");
+
+    assert!(root_hooks.has::<ProbeKind>());
+    assert!(view.hooks().has::<ProbeKind>());
+    assert!(root_hooks.component_has::<ProbeKind>(TypeId::of::<ProbeComponent>()));
+    assert!(
+        view.hooks()
+            .component_has::<ProbeKind>(TypeId::of::<ProbeComponent>())
+    );
+
+    // The generation attached the root-resolved manager, so both handles route hook
+    // receivers through this generation's root.
+    assert_eq!(probe_tags(&root_hooks).await, ["seeded"]);
+    assert_eq!(probe_tags(view.hooks()).await, ["seeded"]);
+}
+
+#[tokio::test]
+async fn cloned_lifecycle_manager_survives_publication_while_its_view_is_held() {
+    let coordinator = RuntimeTransitionCoordinator::new(
+        prepared_with_hooks(
+            empty_condition(),
+            probe_manager(),
+            probe_externals("initial"),
+        )
+        .await,
+    );
+    let lifecycle_view = coordinator.current();
+    let hooks = lifecycle_view.hooks().clone();
+    let root = Arc::downgrade(lifecycle_view.root());
+
+    let candidate = prepared_with_hooks(
+        empty_condition(),
+        probe_manager(),
+        probe_externals("candidate"),
+    )
+    .await;
+    coordinator
+        .begin()
+        .await
+        .publish(candidate)
+        .expect("candidate publishes");
+
+    // While the old view is held, the cloned manager still routes through its own root.
+    assert_eq!(probe_tags(&hooks).await, ["initial"]);
+    assert!(
+        root.upgrade().is_some(),
+        "the pinned view keeps the generation root alive"
+    );
+
+    // Dropping the view and the manager must release the root: the manager retains only
+    // a weak reference, so no strong cycle keeps the generation alive.
+    drop(hooks);
+    drop(lifecycle_view);
+
+    assert!(
+        root.upgrade().is_none(),
+        "the cloned manager must not retain its generation root"
+    );
 }

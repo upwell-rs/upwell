@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use arc_swap::ArcSwap;
 use tokio::sync::{Mutex, OwnedMutexGuard};
-use upwell_core::RuntimeGenerationId;
+use upwell_core::{ResolverCtx, RuntimeGenerationId};
 use upwell_di::{ComponentDescriptor, EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
@@ -62,6 +62,7 @@ pub(crate) struct RuntimeGeneration {
     resolved: Arc<[ComponentDescriptor]>,
     graph: Arc<EffectiveGraph>,
     condition: Arc<AppConditionState>,
+    hooks: HookManager,
 }
 
 /// A complete prepared generation whose semantic ID is assigned only at commit.
@@ -72,6 +73,7 @@ pub(crate) struct PreparedRuntimeGeneration {
     resolved: Arc<[ComponentDescriptor]>,
     graph: EffectiveGraph,
     condition: Arc<AppConditionState>,
+    hooks: HookManager,
 }
 
 impl PreparedRuntimeGeneration {
@@ -83,6 +85,15 @@ impl PreparedRuntimeGeneration {
         graph: EffectiveGraph,
         condition: Arc<AppConditionState>,
     ) -> Self {
+        // The generation's manager is the exact HookManager seeded in this root, so hook
+        // receivers resolve through this generation's root only. The weak reference never
+        // keeps the root alive.
+        let hooks = root
+            .get::<HookManager>()
+            .expect("prepared runtime root seeds the framework hook manager");
+        let hook_ctx: Arc<dyn ResolverCtx + Send + Sync> = root.clone();
+        hooks.attach(Arc::downgrade(&hook_ctx));
+
         Self {
             root,
             scopes,
@@ -90,6 +101,7 @@ impl PreparedRuntimeGeneration {
             resolved,
             graph,
             condition,
+            hooks,
         }
     }
 
@@ -103,6 +115,7 @@ impl PreparedRuntimeGeneration {
             resolved: self.resolved,
             graph: Arc::new(self.graph.into_committed_generation(id)),
             condition: self.condition,
+            hooks: self.hooks,
         }
     }
 }
@@ -121,21 +134,6 @@ impl RuntimePublication {
 
     fn pin(&self) -> RuntimeView {
         RuntimeView::from_generation(self.current.load_full())
-    }
-
-    fn resolver_provider(
-        &self,
-    ) -> impl Fn() -> Option<Arc<dyn upwell_core::ResolverCtx + Send + Sync>> + Send + Sync + 'static
-    {
-        let current = Arc::downgrade(&self.current);
-
-        move || {
-            let current = current.upgrade()?;
-            let generation = current.load_full();
-            let root: Arc<dyn upwell_core::ResolverCtx + Send + Sync> = generation.root.clone();
-
-            Some(root)
-        }
     }
 
     #[allow(dead_code, reason = "used by the next component-strategy integration")]
@@ -171,12 +169,10 @@ pub(crate) struct RuntimeTransitionCoordinator {
 }
 
 impl RuntimeTransitionCoordinator {
-    pub(crate) fn new(initial: PreparedRuntimeGeneration, hooks: HookManager) -> Self {
+    pub(crate) fn new(initial: PreparedRuntimeGeneration) -> Self {
         let owner = Arc::new(());
         let initial = initial.commit(Arc::clone(&owner), RuntimeGenerationId::INITIAL);
         let publication = RuntimePublication::new(initial);
-
-        hooks.attach_resolver_provider(publication.resolver_provider());
 
         Self {
             owner,
@@ -352,6 +348,12 @@ impl RuntimeView {
     )]
     pub(crate) fn condition(&self) -> &Arc<AppConditionState> {
         &self.generation.condition
+    }
+
+    /// The hook manager pinned by this generation. Hook receivers resolve through this
+    /// generation's root, so an old pinned view keeps invoking through its own manager.
+    pub fn hooks(&self) -> &HookManager {
+        &self.generation.hooks
     }
 }
 

@@ -16,8 +16,7 @@ use upwell_config::{
     spawn_reload_triggers, stop_reload_triggers,
 };
 use upwell_core::{
-    Descriptor, ResolverCtx, ResolverSet, RuntimeGenerationId, Singleton as SingletonScope,
-    TypeDescriptor,
+    Descriptor, ResolverSet, RuntimeGenerationId, Singleton as SingletonScope, TypeDescriptor,
 };
 use upwell_di::{
     BoxedComponent, Component, ComponentDescriptor, EffectiveGraph, Injectable, RootResolver,
@@ -96,7 +95,6 @@ pub struct PreparedApp<D: ProtocolDefinition> {
     plugin_plan: EffectivePluginPlan,
     shutdown: ShutdownSignal,
     root_resolver: RootResolver,
-    hook_manager: HookManager,
     reloader: ConfigReloader,
     reload_triggers: ReloadTriggers,
     resolved: Arc<[ComponentDescriptor]>,
@@ -554,7 +552,6 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             plugin_plan,
             shutdown,
             root_resolver,
-            hook_manager,
             reloader,
             reload_triggers,
             resolved: Arc::from(resolved),
@@ -677,7 +674,6 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             plugin_plan,
             shutdown,
             root_resolver,
-            hook_manager,
             reloader,
             reload_triggers,
             resolved,
@@ -710,10 +706,6 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
         .await
         .map_err(Error::from)?;
 
-        // Hooks resolve their `&self` receiver through the root container.
-        let hook_ctx: Arc<dyn ResolverCtx + Send + Sync> = root.clone();
-        hook_manager.attach(Arc::downgrade(&hook_ctx));
-
         // The root resolver hands the finished root to any singleton that needs to resolve
         // from the container at run time (kept as a `Weak`, so it adds no reference cycle).
         root_resolver.attach(&root);
@@ -724,6 +716,8 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             "app built"
         );
 
+        // The generation resolves the root-seeded hook manager and attaches it to this
+        // root, so hook receivers resolve through the generation that owns them.
         let generation = PreparedRuntimeGeneration::new(
             root,
             scope_registry,
@@ -732,7 +726,7 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             effective_graph,
             condition,
         );
-        let runtime = AppRuntime::new(Arc::from(name.as_str()), generation, hook_manager);
+        let runtime = AppRuntime::new(Arc::from(name.as_str()), generation);
 
         // Hand off to the prepared protocol: it constructs the served runtime.
         let protocol = protocol.build(&runtime)?;
@@ -893,9 +887,10 @@ impl<D: ProtocolDefinition> App<D> {
         self.reloader.clone()
     }
 
-    /// The hook manager, for running lifecycle/event hooks by kind.
+    /// The hook manager of the currently committed runtime generation, for running
+    /// lifecycle/event hooks by kind.
     pub fn hook_manager(&self) -> HookManager {
-        self.runtime.hooks().clone()
+        self.runtime.hooks()
     }
 
     /// Serves the app's protocol over `endpoint` until ctrl-c or a shutdown signal.
@@ -920,10 +915,15 @@ impl<D: ProtocolDefinition> App<D> {
             ..
         } = self;
 
-        let started = match run_startup(runtime.hooks()).await {
+        // Pin the generation the lifecycle runs in: the cloned manager resolves hook
+        // receivers through its root, which stays alive only while this view is held.
+        let lifecycle_view = runtime.view();
+        let hooks = lifecycle_view.hooks().clone();
+
+        let started = match run_startup(&hooks).await {
             Ok(started) => started,
             Err((error, started)) => {
-                run_shutdown(runtime.hooks(), &started).await;
+                run_shutdown(&hooks, &started).await;
 
                 return Err(error.into());
             }
@@ -951,7 +951,7 @@ impl<D: ProtocolDefinition> App<D> {
 
         stop_reload_triggers(trigger_tasks).await;
 
-        run_shutdown(runtime.hooks(), &started).await;
+        run_shutdown(&hooks, &started).await;
 
         match result {
             Ok(result) => result,
@@ -969,10 +969,15 @@ impl<D: ProtocolDefinition> App<D> {
             ..
         } = self;
 
-        let started = match run_startup(runtime.hooks()).await {
+        // Pin the generation the lifecycle runs in: the cloned manager resolves hook
+        // receivers through its root, which stays alive only while this view is held.
+        let lifecycle_view = runtime.view();
+        let hooks = lifecycle_view.hooks().clone();
+
+        let started = match run_startup(&hooks).await {
             Ok(started) => started,
             Err((error, started)) => {
-                run_shutdown(runtime.hooks(), &started).await;
+                run_shutdown(&hooks, &started).await;
 
                 return Err(error);
             }
@@ -987,7 +992,7 @@ impl<D: ProtocolDefinition> App<D> {
 
         stop_reload_triggers(trigger_tasks).await;
 
-        run_shutdown(runtime.hooks(), &started).await;
+        run_shutdown(&hooks, &started).await;
 
         Ok(())
     }
