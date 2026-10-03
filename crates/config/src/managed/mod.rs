@@ -25,7 +25,7 @@ use reload::ConfigSlot;
 pub use reload::{
     CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ChangedBinding, ComponentHookReport, ConfigReload,
     ConfigReloadError, ConfigReloadReport, ConfigReloader, HookOutcome, ReloadProposal,
-    ReloadableConfig, StagedConfig,
+    ReloadableConfig, StagedConfig, StagedReload,
 };
 pub use store::{ConfigStore, ContainerConfigExt};
 pub use trigger::{spawn_reload_triggers, stop_reload_triggers};

@@ -153,6 +153,12 @@ pub enum Error {
     #[error(transparent)]
     Config(#[from] upwell_config::ConfigError),
 
+    /// A configuration reload failed (load, bind, hook rejection, or panic) before
+    /// anything was published. Boxed to keep the app error within the
+    /// `result_large_err` budget every `crate::Result` in the crate shares.
+    #[error(transparent)]
+    ConfigReload(Box<upwell_config::ConfigReloadError>),
+
     /// A hook failure (e.g. an unresolvable receiver or parameter).
     #[error(transparent)]
     Hook(#[from] upwell_hooks::Error),
@@ -177,6 +183,12 @@ pub enum Error {
     /// An application-defined error surfaced through the framework.
     #[error(transparent)]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl From<upwell_config::ConfigReloadError> for Error {
+    fn from(error: upwell_config::ConfigReloadError) -> Self {
+        Self::ConfigReload(Box::new(error))
+    }
 }
 
 /// The app-layer result type.

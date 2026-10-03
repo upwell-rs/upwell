@@ -219,7 +219,7 @@ pub struct ConfigReloadReport {
 /// hook accepts.
 pub struct PreparedSwap {
     staged: StagedConfig,
-    commit: Box<dyn FnOnce() + Send>,
+    commit: Box<dyn FnOnce() + Send + Sync>,
 }
 
 /// A config binding the reloader can re-bind: it knows its path, how to re-deserialize its
@@ -396,6 +396,11 @@ impl ConfigReloader {
         self.inner.generation.load(Ordering::SeqCst)
     }
 
+    /// Advances the reload generation, returning the new value.
+    fn advance_generation(&self) -> u64 {
+        self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
     /// A snapshot of the config source files, in merge order — the inputs a file watcher
     /// observes to drive [`reload`](Self::reload).
     pub fn sources(&self) -> Vec<std::path::PathBuf> {
@@ -437,7 +442,7 @@ impl ConfigReloader {
         // Nothing changed: no commit, no hooks — but a successful reload still advances the
         // generation so observers can tell a reload ran.
         if changed.is_empty() {
-            let generation = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
+            let generation = self.advance_generation();
 
             return Ok(ConfigReloadReport {
                 generation,
@@ -448,46 +453,12 @@ impl ConfigReloader {
 
         // Phase 2 (hooks): run every config_reload hook that targets a changed path. Any
         // hook error aborts — the staged swaps are dropped, so nothing is committed.
-        let mut hooks = Vec::new();
+        let hooks = staged.run_config_reload_hooks(&self.inner.hooks).await?;
 
-        if run_hooks {
-            let changed_paths = changed
-                .iter()
-                .map(|binding| binding.path.clone())
-                .collect::<HashSet<String>>();
-            let bindings_by_type = bindings_by_type_index(&self.lock_manager());
-            let proposal = ReloadProposal::new(staged.staged.clone());
-            let outcomes = self
-                .inner
-                .hooks
-                .run::<ConfigReload>(&proposal, |hook| {
-                    hook_targets_changed(hook, &changed_paths, &bindings_by_type)
-                })
-                .await;
-
-            hooks.reserve(outcomes.len());
-
-            for (component, result) in outcomes {
-                match result {
-                    Ok(outcome) => hooks.push(ComponentHookReport {
-                        component: component.name,
-                        outcome,
-                    }),
-
-                    Err(source) => {
-                        return Err(ConfigReloadError::Hook {
-                            component: component.name,
-                            source: Box::new(source),
-                        });
-                    }
-                }
-            }
-        }
-
-        // Phase 3 (commit): every binding re-bound and every hook accepted.
-        staged.commit();
-
-        let generation = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        // Phase 3 (commit): every binding re-bound and every hook accepted. The commit
+        // publishes the swaps, adopts the re-read tree, and advances (and returns) the
+        // reloader generation.
+        let generation = staged.commit();
 
         Ok(ConfigReloadReport {
             generation,
@@ -620,8 +591,13 @@ impl StagedReload {
         self.changed.is_empty()
     }
 
-    /// Publishes every staged swap into its live slot and adopts the re-read tree.
-    pub fn commit(self) {
+    /// Publishes every staged swap into its live slot, adopts the re-read tree, and
+    /// advances the reloader generation, returning the new generation.
+    ///
+    /// The generation advance lives here — not with the caller — so every pipeline that
+    /// commits a staged reload (the legacy [`ConfigReloader::reload`] and the app
+    /// runtime's transactional reload) observes exactly one increment per commit.
+    pub fn commit(self) -> u64 {
         let mut manager = self.reloader.lock_manager();
 
         for swap in self.prepared {
@@ -629,6 +605,58 @@ impl StagedReload {
         }
 
         manager.adopt(self.new_root);
+
+        self.reloader.advance_generation()
+    }
+
+    /// Runs every config-reload hook that targets a changed binding against `hooks`,
+    /// returning the accepted outcomes in registration order. Any hook error aborts the
+    /// whole reload with [`ConfigReloadError::Hook`].
+    ///
+    /// Shared by the legacy [`ConfigReloader::reload`] (against the active generation's
+    /// manager) and the app runtime's transactional reload (against the candidate
+    /// generation's manager), so both pipelines filter and execute hooks identically.
+    pub async fn run_config_reload_hooks(
+        &self,
+        hooks: &HookManager,
+    ) -> Result<Vec<ComponentHookReport>, ConfigReloadError> {
+        // Nothing listens for config_reload: no proposal is built (O(1)).
+        if !hooks.has::<ConfigReload>() {
+            return Ok(Vec::new());
+        }
+
+        let changed_paths = self
+            .changed
+            .iter()
+            .map(|binding| binding.path.clone())
+            .collect::<HashSet<String>>();
+        let bindings_by_type = bindings_by_type_index(&self.reloader.lock_manager());
+        let proposal = ReloadProposal::new(self.staged.clone());
+        let outcomes = hooks
+            .run::<ConfigReload>(&proposal, |hook| {
+                hook_targets_changed(hook, &changed_paths, &bindings_by_type)
+            })
+            .await;
+
+        let mut reports = Vec::with_capacity(outcomes.len());
+
+        for (component, result) in outcomes {
+            match result {
+                Ok(outcome) => reports.push(ComponentHookReport {
+                    component: component.name,
+                    outcome,
+                }),
+
+                Err(source) => {
+                    return Err(ConfigReloadError::Hook {
+                        component: component.name,
+                        source: Box::new(source),
+                    });
+                }
+            }
+        }
+
+        Ok(reports)
     }
 }
 

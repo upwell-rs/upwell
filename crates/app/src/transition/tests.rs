@@ -4,7 +4,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use upwell_config::{ConfigBinding, ConfigProperties};
+use upwell_config::{ConfigBinding, ConfigManager, ConfigProperties, ConfigReloader};
 use upwell_core::{
     Cardinality, ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId,
     DependencyDescriptor, DependencyObservation, ResolutionMode, ResolverCtx, ResolverSet,
@@ -109,7 +109,16 @@ fn runtime_view(
         condition,
     );
 
-    AppRuntime::new(Arc::from("transition-test"), generation).view()
+    AppRuntime::new(
+        Arc::from("transition-test"),
+        generation,
+        ConfigReloader::new(
+            ConfigManager::empty(),
+            Vec::new(),
+            HookManager::new(Vec::new()),
+        ),
+    )
+    .view()
 }
 
 #[test]
