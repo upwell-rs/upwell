@@ -11,8 +11,9 @@ use std::path::PathBuf;
 use futures::FutureExt;
 use tracing::{debug, error, info};
 use upwell_config::{
-    CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ConfigBinding, ConfigManager, ConfigProperties,
-    ConfigReloader, ConfigStore, ReloadTriggers, spawn_reload_triggers, stop_reload_triggers,
+    CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ConditionFactSource, ConditionFacts, ConfigBinding,
+    ConfigManager, ConfigProperties, ConfigReloader, ConfigStore, ReloadTriggers,
+    spawn_reload_triggers, stop_reload_triggers,
 };
 use upwell_core::{
     Descriptor, ResolverCtx, ResolverSet, RuntimeGenerationId, Singleton as SingletonScope,
@@ -207,6 +208,17 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         self.registry
             .config_bindings
             .push(ConfigBinding::of::<T>(path));
+
+        self
+    }
+
+    /// Registers the condition facts of config type `T` at `path`, so conditional
+    /// components can key their availability on `T`'s values. The transactional reload
+    /// extracts the scalars from every staged binding of the type.
+    pub fn condition_facts<T: ConditionFacts>(mut self, path: impl Into<String>) -> Self {
+        self.registry
+            .condition_facts
+            .push(ConditionFactSource::of::<T>(path));
 
         self
     }

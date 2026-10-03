@@ -90,15 +90,15 @@ async fn staged_reload_commits_only_when_explicitly_committed() {
 ### Task 2: Condition facts from typed config values
 
 **Files:**
-- Modify: `crates/config/src/managed/mod.rs` (trait + re-export) or a new `crates/config/src/managed/facts.rs`
-- Modify: `crates/app/src/registry.rs` (collect facts from `config_bindings`)
-- Test: `crates/config/tests/config_condition_facts.rs` (new), `crates/app/src/registry/tests.rs` if it exists, else `crates/app/tests/`
+- Modify: `crates/config/src/managed/mod.rs` and `crates/config/src/managed/reload.rs`
+- Modify: `crates/app/src/registry.rs` and `crates/app/src/app.rs`
+- Test: `crates/config/src/managed/tests.rs`, `crates/app/src/registry.rs`, `tests/config_macro.rs`
 
 **Interfaces:**
 - Produces:
-  - `pub trait ConditionFacts: ConfigProperties { fn condition_facts() -> Vec<ConfigFactDescriptor>; fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)>; }` — default implementations return empty vecs, so existing config types are unaffected. `ConfigFactId::new(config_type: T::NAME, binding_path, property_path)` per fact.
-  - `AppRegistry::condition_facts(&self) -> crate::Result<Vec<ConfigFactDescriptor>>` — collects `ConditionFacts::condition_facts()` from every bound type (types are erased in `ConfigBinding`, so the binding must carry the fact list; see Step 3 note).
-  - `AppRegistry::condition_snapshot(&self, values: &[(TypeId, path, erased value)]) -> ConditionFactSnapshot` — or, simpler and preferred: `ConfigBinding` gains a way to extract scalars from a staged erased value (a stored `fn(&dyn Any) -> Vec<(ConfigFactId, ConditionScalar)>` captured from `ConditionFacts::condition_scalars` via a generic helper at binding construction).
+  - `pub trait ConditionFacts: ConfigProperties { fn condition_facts() -> Vec<ConfigFactDescriptor>; fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)>; }` with explicit per-type implementations. The trait is separate because `#[config]` already emits `ConfigProperties`, so macro config types cannot override methods on that impl.
+  - `ConditionFactSource::of::<T: ConditionFacts>(path)` captures descriptors and an erased scalar thunk. `AppBuilder::condition_facts::<T>(path)` registers that source explicitly; macro registration remains deferred to #208.
+  - `AppRegistry::condition_snapshot(values)` extracts scalars from staged `(TypeId, path, value)` tuples. The thunk accepts both staging representations: plain `T` for changed bindings and `Arc<T>` for unchanged bindings.
 - Consumes: `ConfigFactDescriptor`, `ConditionScalar`, `ConditionFactSnapshot` from `upwell-core`/`upwell-di`.
 
 - [ ] **Step 1: Write the failing test** (config crate):
@@ -137,9 +137,9 @@ fn condition_facts_extract_scalars_from_bound_values() {
 
 - [ ] **Step 2: Run it** — expected FAIL (`ConditionFacts` undefined).
 
-- [ ] **Step 3: Implement.** Key decision: `ConfigBinding::of::<T>(path)` is erased, so capture the extraction at construction time — add to `ConfigBinding` a `fact_extractor: Option<Arc<dyn Fn(&dyn Any) -> Vec<(ConfigFactId, ConditionScalar)> + Send + Sync>>` populated when `T: ConditionFacts` (add a `ConfigBinding::of_facts::<T: ConditionFacts>(path)` constructor or make `of` detect the trait via a generic specialization helper — prefer an explicit constructor to keep `of` non-magic). `AppRegistry::condition_facts()` and `condition_snapshot(staged: &[(TypeId, String, Arc<dyn Any + Send + Sync>)])` then drive off the bindings.
+- [x] **Step 3: Implement.** Keep `ConfigBinding` unchanged. Capture type-erased extraction in an explicit `ConditionFactSource`, register sources separately on `AppRegistry`, and add accessors to `StagedConfig` for the transactional app layer.
 
-- [ ] **Step 4: Run** `cargo nextest run -p upwell-config -p upwell-app`. Expected: PASS.
+- [x] **Step 4: Run** config, macro, and app registry tests plus workspace clippy. Expected: PASS.
 
 - [ ] **Step 5: Commit** — `feat(config): extract condition facts from typed config values`.
 

@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::de::DeserializeOwned;
 
-use upwell_core::TypeDescriptor;
+use upwell_core::{ConditionScalar, ConfigFactDescriptor, ConfigFactId, TypeDescriptor};
 use upwell_di::{BoxedComponent, Injectable, Live, LiveRef};
 
 pub use dirs::DirectoriesResolver;
@@ -25,7 +25,7 @@ use reload::ConfigSlot;
 pub use reload::{
     CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ChangedBinding, ComponentHookReport, ConfigReload,
     ConfigReloadError, ConfigReloadReport, ConfigReloader, HookOutcome, ReloadProposal,
-    ReloadableConfig,
+    ReloadableConfig, StagedConfig,
 };
 pub use store::{ConfigStore, ContainerConfigExt};
 pub use trigger::{spawn_reload_triggers, stop_reload_triggers};
@@ -275,6 +275,76 @@ pub trait ConfigProperties: DeserializeOwned + Send + Sync + 'static + Sized {
 /// Monomorphized-per-type recovery of a [`ReloadableConfig`] from a bind seed, so the
 /// type-erased manager can build reload slots without naming the config type.
 pub type SlotThunk = fn(&ConfigManager, &BoxedComponent, &str) -> Option<Box<dyn ReloadableConfig>>;
+
+/// The condition-fact extraction thunks captured from a config type: its declared fact
+/// descriptors and an erased scalar extractor over a staged value.
+#[derive(Clone, Copy)]
+pub struct BindingFacts {
+    pub descriptors: fn() -> Vec<ConfigFactDescriptor>,
+    pub scalars: fn(&dyn std::any::Any) -> Vec<(ConfigFactId, ConditionScalar)>,
+}
+
+/// A config type whose values expose typed facts to component conditions.
+///
+/// Implemented manually per type (macro support is deferred); registered per binding
+/// path through [`ConditionFactSource::of`] so the transactional reload can extract the
+/// scalars of every staged binding of the type.
+pub trait ConditionFacts: ConfigProperties {
+    /// The typed facts this type exposes, identified by this type's name, the binding
+    /// path, and the property path within the value.
+    fn condition_facts() -> Vec<ConfigFactDescriptor>;
+
+    /// The current scalar values of [`condition_facts`](Self::condition_facts), in the
+    /// same order.
+    fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)>;
+}
+
+/// One registered condition-fact source: a config type's facts at one binding path.
+#[derive(Clone)]
+pub struct ConditionFactSource {
+    pub ty: TypeDescriptor,
+    pub path: String,
+    pub facts: BindingFacts,
+}
+
+impl std::fmt::Debug for ConditionFactSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConditionFactSource")
+            .field("ty", &self.ty)
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ConditionFactSource {
+    /// Registers the condition facts of type `T` at `path`.
+    pub fn of<T: ConditionFacts>(path: impl Into<String>) -> Self {
+        Self {
+            ty: TypeDescriptor::of::<T>(T::NAME),
+            path: path.into(),
+            facts: BindingFacts {
+                descriptors: T::condition_facts,
+                scalars: condition_scalars_erased::<T>,
+            },
+        }
+    }
+}
+
+/// Captures `T`'s condition scalars from an erased staged value. Changed bindings stage
+/// the plain value; unchanged bindings stage an `Arc` of it — both shapes extract.
+fn condition_scalars_erased<T: ConditionFacts>(
+    value: &dyn std::any::Any,
+) -> Vec<(ConfigFactId, ConditionScalar)> {
+    if let Some(value) = value.downcast_ref::<T>() {
+        return value.condition_scalars();
+    }
+
+    if let Some(value) = value.downcast_ref::<Arc<T>>() {
+        return value.condition_scalars();
+    }
+
+    Vec::new()
+}
 
 #[derive(Clone)]
 pub struct ConfigBinding {

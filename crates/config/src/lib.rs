@@ -30,10 +30,11 @@ pub use managed::Toml;
 #[cfg(feature = "yaml")]
 pub use managed::Yaml;
 pub use managed::{
-    CONFIG_BINDINGS, CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, Cfg, CfgNext, ChangedBinding,
-    ComponentHookReport, ConfigBinding, ConfigBindingDescriptor, ConfigDefaults, ConfigError,
-    ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError, ConfigReloadReport,
-    ConfigReloader, ConfigStore, ContainerConfigExt, DirectoriesResolver, Dynamic, Format,
-    FormatId, HookOutcome, ReloadProposal, ReloadTriggers, ReloadableConfig, spawn_reload_triggers,
+    BindingFacts, CONFIG_BINDINGS, CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, Cfg, CfgNext,
+    ChangedBinding, ComponentHookReport, ConditionFactSource, ConditionFacts, ConfigBinding,
+    ConfigBindingDescriptor, ConfigDefaults, ConfigError, ConfigManager, ConfigProperties,
+    ConfigReload, ConfigReloadError, ConfigReloadReport, ConfigReloader, ConfigStore,
+    ContainerConfigExt, DirectoriesResolver, Dynamic, Format, FormatId, HookOutcome,
+    ReloadProposal, ReloadTriggers, ReloadableConfig, StagedConfig, spawn_reload_triggers,
     stop_reload_triggers,
 };
