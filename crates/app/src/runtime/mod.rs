@@ -111,9 +111,9 @@ impl AppRuntime {
     /// Pins the complete current runtime generation for consistent multi-field reads.
     ///
     /// Separate convenience reads may straddle a runtime publication. Hold this view when the
-    /// root, component descriptors, effective graph metadata, and future-scope plans must belong
-    /// to one generation. Config and live dependency slots retain their existing per-slot reload
-    /// semantics until transactional config integration is added.
+    /// root, component descriptors, effective graph metadata, scope plans, condition state, and
+    /// hook manager belong to one generation. It does not freeze separately held legacy live
+    /// `Cfg<T>` cells: each slot commits atomically, but no atomicity across handles is promised.
     pub fn view(&self) -> RuntimeView {
         self.transitions.current()
     }

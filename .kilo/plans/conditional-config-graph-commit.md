@@ -1,218 +1,109 @@
-# Conditional config and graph commit (#206) Implementation Plan
+# Conditional config and graph commit (#206) Implementation Record
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Completion status:** Implemented on `feat/app/206/transactional-config-graph-commit-v2`. Every checklist item below records completed work rather than remaining implementation work.
 
-**Goal:** Integrate conditional graph transitions with `ConfigReloader` as one serialized prepare → validate → hook → construct → commit transaction, so a config change that flips a component condition switches the effective graph transactionally.
+**Goal:** Make a configuration change that alters component eligibility commit its configuration and effective runtime graph through one serialized, transactional reload path.
 
-**Architecture:** The `RuntimeTransitionCoordinator` (from #216) remains the sole serializer and publication owner. The config crate gains public *staged reload* primitives (`stage()` / `StagedReload::commit()`) so the app layer can drive one pipeline: begin transition → stage config → derive condition facts → evaluate candidate graph → plan transitions → prepare candidate root → run hooks → commit config slots and publish the runtime generation together. The existing `ConfigReloader::reload()` is refactored onto the same primitives and keeps its current config-only semantics until #211 migrates triggers.
+**Architecture:** `AppRuntime::reload_config` holds the `ConfigReloader` serialization lock and the runtime-transition writer in that order. It stages an isolated, generation-local candidate `ConfigStore`, derives condition facts, evaluates and validates a candidate graph, constructs its root against that candidate store, and builds a generation-local `HookManager` seeded into the candidate root. The candidate runtime generation is the authoritative publication; legacy `Cfg<T>` slots are committed synchronously afterwards for compatibility while both locks remain held.
 
-**Tech Stack:** Rust 2024, tokio, arc-swap; crates: `upwell-config`, `upwell-app`, `upwell-di`, `upwell-core`.
+**Tech Stack:** Rust 2024, tokio, arc-swap; crates: `upwell-config`, `upwell-app`, `upwell-di`, `upwell-core`, `upwell-hooks`.
 
-**Spec:** https://github.com/upwell-rs/upwell/issues/206 (required sequence, failure/concurrency contract, acceptance criteria); epic boundary: PR #212 "Established v1 boundary" and "Governing invariants".
+**Spec:** https://github.com/upwell-rs/upwell/issues/206
 
-## Global Constraints
+## Completed Contract
 
-- One coordinator serializes every graph-changing trigger; there is no second reload pipeline (`RuntimeTransitionCoordinator`).
-- All fallible and user-controlled work completes before publication; commit is one infallible publication.
-- A proposal cannot commit unless its base generation is still current (`RuntimeTransition::publish` already enforces this).
-- Failed, panicked, cancelled, or rejected preparation leaves the complete previous generation active — config slots included.
-- Reports and traces contain stable IDs and categories, never raw current or expected config values.
-- `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --all-features` must pass before every commit; run `just test` before pushing.
-- Test modules live in sibling `tests.rs` files; never inline in impl files.
-- Branch: `feat/app/206/transactional-config-graph-commit`, PR targets `feat/conditional-components/203`. Never merge locally; the project owner merges.
+- `ConfigReloader::stage()` prepares `StagedReload` without changing active state. It produces changed bindings, staged values, committable live-slot swaps, the re-read config tree, and a fresh candidate `ConfigStore` containing every bound configuration value.
+- Candidate construction resolves configuration from that generation-local store. Its `Cfg` cells do not alias the active generation's cells, so factories and hooks observe only candidate values before publication.
+- `ConditionFacts` remains a standalone trait extending `ConfigProperties`; configuration types explicitly implement it. `ConditionFactSource` stores the descriptors and erased scalar extraction, and explicit builder registration supplies sources to the application catalog. The abandoned approach of adding condition-fact methods to `ConfigProperties` is not part of the implementation.
+- Every `RuntimeGeneration` carries `AppConditionState`: the immutable application catalog and the evaluation used to build that generation. Reload incrementally evaluates staged facts against the base generation's condition state.
+- Each runtime generation owns a generation-local `HookManager`. Reload derives its descriptors from the candidate graph and seeds that manager into the candidate root; it does not reuse the active generation's manager.
+- The config-reload and runtime-transition serializers are both held for the transaction. Lock order is config-reload serialization first, then the runtime-transition writer; a legacy config-only reload cannot interleave with a transactional reload.
+- `PreparedRuntimeCommit` validates the candidate against the exact pinned base while the sole writer is held. It owns the stamped candidate and commit token, leaving no recoverable terminal publication failure.
+- Terminal order is fixed: publish the authoritative candidate runtime generation first; then synchronously commit the legacy live config slots while both locks remain held; then release the locks. Runtime generation state is authoritative. Compatibility `Cfg<T>` slots are atomic per slot only, not atomically consistent across separately held handles.
+- Before the commit token is consumed, every recoverable error, hook rejection, failed candidate factory, and cancellation leaves the active runtime generation and live configuration unchanged. A callback panic after publication is outside this rollback guarantee and is an internal-contract failure, not a recoverable transaction rejection.
+- An unchanged source is a true no-op: no condition evaluation, graph planning, candidate construction, hook execution, root replacement, config-generation advance, or runtime-generation publication occurs.
+- `RuntimeReloadReport` records `runtime_generation`, `config_generation`, `changed`, `hooks`, and `published`.
+- Direct `ConfigReloader::reload()` remains config-only compatibility behavior. Its reload, watch, and signal trigger migration to transactional graph reload is explicitly deferred to #211.
 
-## Current-state facts (verified)
+## File Layout
 
-- `ConfigReloader::reload` (`crates/config/src/managed/reload.rs:359`): serialized by `inner.in_progress`; phase 1 re-reads/diffs/deserializes under the manager lock producing `prepared` slot swaps + `staged` values; phase 2 runs `ConfigReload` hooks; phase 3 commits swaps and `manager.adopt(new_root)`. No-op reloads advance a `u64` generation.
-- `RuntimeTransitionCoordinator` (`crates/app/src/runtime/generation.rs:127`): `begin()` → `RuntimeTransition { attempt(), base(), finish_noop(), publish(PreparedRuntimeGeneration) }`; `publish` CAS-commits and stamps `base.id() + 1`; stale candidates rejected with `StaleRuntimeProposal`.
-- `PreparedRuntimeGeneration::new(root, scopes, scope_plan, resolved, graph)`; `RuntimeGeneration` holds `graph: Arc<EffectiveGraph>` but **no condition-evaluation state**.
-- `CandidateGraph::prepare_evaluation(base_generation, &AppRegistry, &AppConditionEvaluation, &PreparedScopeTopology)`, `resolve_transition(&active_graph, decisions)`, `ResolvedTransitionPlan::build_candidate_root(&candidate, retained, externals)` (`crates/app/src/transition.rs`).
-- `AppRegistry::evaluate_conditions(facts, snapshot)` / `evaluate_changed_conditions(facts, previous, snapshot)` (`crates/app/src/registry.rs:99,114`) — **no production callers yet**; startup builds the graph from the full registry without condition evaluation.
-- Condition facts: `ConfigFactDescriptor { id: ConfigFactId { config_type, binding_path, property_path }, kind, source }`; `ConditionFactSnapshot::new([(ConfigFactId, ConditionScalar)])`. **No mechanism exists to extract scalars from typed config values** — this slice introduces it (manual trait; macro ergonomics is #208).
-- `App::build` (`crates/app/src/app.rs:609`) constructs the root, then `AppRuntime::new(...)`, and holds `reloader: ConfigReloader`.
+- Transactional entry point: `crates/app/src/runtime/reload/mod.rs`.
+- Reload tests: sibling directory `crates/app/src/runtime/reload/tests/`, rooted by `tests/mod.rs` with focused modules for no-op, publication, hook rejection, candidate failure, cancellation, concurrency, and provider switching.
+- Runtime generation and commit token: `crates/app/src/runtime/generation.rs` with tests in `crates/app/src/runtime/generation/tests.rs`.
+- Staged config reload and candidate store: `crates/config/src/managed/reload.rs`.
+- Condition-fact trait and registration support: `crates/config/src/managed/mod.rs` and the application registry/builder integration.
+- App error integration: `crates/app/src/error.rs`, where `ConfigReloadError` is boxed to remain within the crate-wide `result_large_err` budget.
 
-## Non-goals (deferred by the epic)
+## Completed Tasks
 
-- Proposal/decision hook kinds, canonical reports, reentrancy protection, and `ConfigReload` trigger migration — #211.
-- Static replacement and transition-local/one-shot factories — #209 follow-ups.
-- Macro-generated condition-fact extraction — #208 (this slice ships the manual trait).
-- File-watch/signal trigger rewiring — documented as a migration path; triggers keep calling `ConfigReloader::reload()` until #211.
+### Task 1: Stage config reloads
 
----
+**Files:** `crates/config/src/managed/reload.rs`; config reload tests.
 
-### Task 1: Staged reload primitives on `ConfigReloader`
+- [x] Extracted staged reload preparation from legacy reload behavior.
+- [x] Added `StagedReload` access to changed bindings, staged values, candidate store, empty-state detection, hook execution, and synchronous live-slot commit.
+- [x] Built the candidate `ConfigStore` from both changed and unchanged bindings, with fresh cells for the candidate generation.
+- [x] Retained config-only compatibility semantics for direct `ConfigReloader::reload()`.
+- [x] Verified candidate staging without publication.
 
-**Files:**
-- Modify: `crates/config/src/managed/reload.rs`
-- Test: `crates/config/tests/config_reload.rs` (existing suite must stay green; add one new test)
+### Task 2: Register and extract condition facts
 
-**Interfaces:**
-- Produces:
-  - `pub struct StagedReload { changed: Vec<ChangedBinding>, staged: Vec<StagedConfig>, prepared: Vec<BindingSwap>, new_root: ConfigTree, hooks_run: bool }` (exact field types = whatever phase 1 of `reload()` already produces; `BindingSwap`/tree types are the existing private ones — the struct stays in `reload.rs` and only the type is made `pub`).
-  - `impl ConfigReloader { pub fn stage(&self) -> Result<StagedReload, ConfigReloadError> }` — phase 1 only (re-read, diff, deserialize; panics converted to `ConfigReloadError::Panicked`).
-  - `impl StagedReload { pub fn changed(&self) -> &[ChangedBinding]; pub fn staged(&self) -> &[StagedConfig]; pub fn commit(self) }` — `commit` performs the slot swaps and `manager.adopt(new_root)` under the manager lock (phase 3).
-- Consumes: existing private phase-1/phase-3 code in `reload()`.
+**Files:** `crates/config/src/managed/mod.rs`; application registry and builder integration.
 
-- [ ] **Step 1: Write the failing test** in `crates/config/tests/config_reload.rs`:
+- [x] Added standalone `ConditionFacts` with explicit typed descriptors and scalar extraction.
+- [x] Added explicit `ConditionFactSource` / builder registration rather than modifying `ConfigProperties`.
+- [x] Extracted scalar snapshots from staged typed values, including supported erased-value shapes.
+- [x] Preserved the macro-generated ergonomics follow-up for #208 without embedding it in #206.
 
-```rust
-#[tokio::test]
-async fn staged_reload_commits_only_when_explicitly_committed() {
-    // Build a manager with one bound config type (reuse the file's existing
-    // helper for a temp source file; mirror `reload_publishes_changed_bindings`).
-    let reloader = /* same setup as the existing changed-binding test */;
+### Task 3: Carry generation-local condition and hook state
 
-    let staged = reloader.stage().expect("initial stage");
-    assert!(staged.changed().is_empty(), "no changes before any edit");
+**Files:** `crates/app/src/runtime/generation.rs`, runtime construction, and generation tests.
 
-    // Rewrite the source file with a changed value (same helper as existing tests).
-    /* rewrite file */;
+- [x] Added `AppConditionState` to each runtime generation and prepared generation.
+- [x] Evaluated startup conditions through the same catalog/evaluation model used by reloads.
+- [x] Added generation-local `HookManager` ownership and generation-pinned hook resolution.
+- [x] Ensured candidate roots receive their own seeded hook manager.
 
-    let staged = reloader.stage().expect("stage after edit");
-    assert_eq!(staged.changed().len(), 1);
+### Task 4: Implement the transactional reload path
 
-    // Live value is untouched before commit.
-    assert_eq!(live_value(&reloader), OLD_VALUE);
+**Files:** `crates/app/src/runtime/reload/mod.rs`; runtime wiring; `crates/app/src/error.rs`.
 
-    staged.commit();
-    assert_eq!(live_value(&reloader), NEW_VALUE);
-}
-```
+- [x] Added `AppRuntime::reload_config()`.
+- [x] Serialized staging, condition evaluation, graph planning, candidate factory construction, candidate hook execution, and terminal commit under both serializers.
+- [x] Prepared `PreparedRuntimeCommit` against the exact base before token consumption.
+- [x] Published the candidate runtime generation before committing compatibility live slots, synchronously under both locks.
+- [x] Returned `RuntimeReloadReport { runtime_generation, config_generation, changed, hooks, published }`.
+- [x] Boxed `ConfigReloadError` in the app error type.
 
-- [ ] **Step 2: Run it** — `cargo nextest run -p upwell-config staged_reload_commits_only_when_explicitly_committed`. Expected: FAIL (`stage` does not exist).
+### Task 5: Validate rollback, no-op, and serialization behavior
 
-- [ ] **Step 3: Implement** — extract phase 1 of `reload()` verbatim into `stage()`, phase 3 into `StagedReload::commit()`, and reimplement `reload()` as `stage()` → hooks (phase 2, unchanged) → `staged.commit()`. No behavior change to `reload()`.
+**Files:** `crates/app/src/runtime/reload/tests/`.
 
-- [ ] **Step 4: Run the full config suite** — `cargo nextest run -p upwell-config`. Expected: all pass, including the new test.
+- [x] Verified that a candidate-staged factory reads staged configuration and not active live slots.
+- [x] Verified a true no-op leaves both generations, root, construction, and hooks unchanged.
+- [x] Verified hook rejection preserves the previous configuration and runtime generation.
+- [x] Verified candidate factory failure preserves the previous configuration and runtime generation.
+- [x] Verified cancellation releases both locks and does not block a subsequent reload.
+- [x] Verified concurrent V2/V3 staging commits in serialized order without stale overwrite.
+- [x] Verified primary-to-fallback and fallback-to-primary `Authenticator` provider transitions are accepted and resolve the effective provider transactionally.
 
-- [ ] **Step 5: Commit** — `feat(config): expose staged reload primitives for transactional graph commits`.
+### Task 6: Document compatibility and terminal semantics
 
-### Task 2: Condition facts from typed config values
+**Files:** `crates/app/src/runtime/reload/mod.rs` and this implementation record.
 
-**Files:**
-- Modify: `crates/config/src/managed/mod.rs` and `crates/config/src/managed/reload.rs`
-- Modify: `crates/app/src/registry.rs` and `crates/app/src/app.rs`
-- Test: `crates/config/src/managed/tests.rs`, `crates/app/src/registry.rs`, `tests/config_macro.rs`
+- [x] Documented the two serializers and their lock order.
+- [x] Documented runtime-first terminal publication and synchronous compatibility-slot commit.
+- [x] Documented generation-pinned consistency versus per-slot legacy `Cfg<T>` observation limits.
+- [x] Documented pre-publication rollback boundaries and the post-publication callback-panic internal contract.
+- [x] Recorded direct `ConfigReloader` reload/watch/signal migration as #211 work.
 
-**Interfaces:**
-- Produces:
-  - `pub trait ConditionFacts: ConfigProperties { fn condition_facts() -> Vec<ConfigFactDescriptor>; fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)>; }` with explicit per-type implementations. The trait is separate because `#[config]` already emits `ConfigProperties`, so macro config types cannot override methods on that impl.
-  - `ConditionFactSource::of::<T: ConditionFacts>(path)` captures descriptors and an erased scalar thunk. `AppBuilder::condition_facts::<T>(path)` registers that source explicitly; macro registration remains deferred to #208.
-  - `AppRegistry::condition_snapshot(values)` extracts scalars from staged `(TypeId, path, value)` tuples. The thunk accepts the normal erased `T` target and explicitly nested `Arc<T>` values supplied through extension seams.
-- Consumes: `ConfigFactDescriptor`, `ConditionScalar`, `ConditionFactSnapshot` from `upwell-core`/`upwell-di`.
+## Pre-Implementation Notes Superseded by Completion
 
-- [ ] **Step 1: Write the failing test** (config crate):
+- The earlier proposal to make `ConfigProperties` expose condition-fact methods was replaced by standalone `ConditionFacts` plus explicit builder registration.
+- The earlier proposed `crates/app/src/runtime/reload.rs` single-file layout was replaced by `crates/app/src/runtime/reload/mod.rs` and its sibling test directory.
+- The earlier ambiguous commit ordering was resolved as runtime publication first, then synchronous legacy live-slot commit while both serializers remain held.
+- The previous suggestion that legacy config triggers would be refactored as part of #206 was not implemented; they remain compatibility behavior until #211.
 
-```rust
-#[derive(serde::Deserialize, Default)]
-struct FeatureFlags {
-    enabled: bool,
-    level: i64,
-}
+## Implementation Deviations and Completion Note
 
-impl ConfigProperties for FeatureFlags { const NAME: &'static str = "FeatureFlags"; }
-
-impl ConditionFacts for FeatureFlags {
-    fn condition_facts() -> Vec<ConfigFactDescriptor> {
-        vec![
-            ConfigFactDescriptor { id: ConfigFactId::new("FeatureFlags", "flags", "enabled"), kind: ConditionScalarKind::Bool, source: descriptor_source!() },
-            ConfigFactDescriptor { id: ConfigFactId::new("FeatureFlags", "flags", "level"), kind: ConditionScalarKind::Integer, source: descriptor_source!() },
-        ]
-    }
-
-    fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)> {
-        vec![
-            (ConfigFactId::new("FeatureFlags", "flags", "enabled"), ConditionScalar::Bool(self.enabled)),
-            (ConfigFactId::new("FeatureFlags", "flags", "level"), ConditionScalar::Integer(self.level as i128)),
-        ]
-    }
-}
-
-#[test]
-fn condition_facts_extract_scalars_from_bound_values() {
-    // Bind FeatureFlags at "flags", load, and assert the extracted snapshot
-    // contains Bool(enabled) and Integer(level) under the right fact ids.
-}
-```
-
-- [ ] **Step 2: Run it** — expected FAIL (`ConditionFacts` undefined).
-
-- [x] **Step 3: Implement.** Keep `ConfigBinding` unchanged. Capture type-erased extraction in an explicit `ConditionFactSource`, register sources separately on `AppRegistry`, and add accessors to `StagedConfig` for the transactional app layer.
-
-- [x] **Step 4: Run** config, macro, and app registry tests plus workspace clippy. Expected: PASS.
-
-- [ ] **Step 5: Commit** — `feat(config): extract condition facts from typed config values`.
-
-### Task 3: Retain condition-evaluation state in the runtime generation
-
-**Files:**
-- Modify: `crates/app/src/runtime/generation.rs` (`RuntimeGeneration`, `PreparedRuntimeGeneration`)
-- Modify: `crates/app/src/runtime/mod.rs` (`AppRuntime::new` signature if needed)
-- Modify: `crates/app/src/app.rs` (`PreparedApp::build` — evaluate initial conditions)
-- Test: `crates/app/src/runtime/generation/tests.rs`
-
-**Interfaces:**
-- Produces: `RuntimeGeneration.condition: Arc<AppConditionState>` where `pub struct AppConditionState { facts: Vec<ConfigFactDescriptor>, evaluation: AppConditionEvaluation }` (exact shape: whatever lets `evaluate_changed_conditions` run against the committed generation). `PreparedRuntimeGeneration::new` gains the state parameter; the initial build evaluates conditions from the startup config snapshot with the same `evaluate_conditions` path reloads use (acceptance criterion: identical semantics).
-- Consumes: Task 2's fact extraction; `AppRegistry::evaluate_conditions`.
-
-- [ ] **Step 1: Write the failing test** in `crates/app/src/runtime/generation/tests.rs`: a prepared generation built with a non-empty `AppConditionState` exposes it through `RuntimeView` (`view.condition()`), and the initial generation's evaluation matches a direct `evaluate_conditions` call.
-
-- [ ] **Step 2: Run** — expected FAIL.
-
-- [ ] **Step 3: Implement** — thread the state through `PreparedRuntimeGeneration::new` and `commit`; update `AppRuntime::new` and `PreparedApp::build` (evaluate at startup from the initial config values; an app with no condition facts gets an empty-facts evaluation, which is a valid no-op catalog).
-
-- [ ] **Step 4: Run** `cargo nextest run -p upwell-app`. Expected: PASS.
-
-- [ ] **Step 5: Commit** — `feat(app): retain condition evaluation state per runtime generation`.
-
-### Task 4: The transactional reload entry point
-
-**Files:**
-- Create: `crates/app/src/runtime/reload.rs` (+ `crates/app/src/runtime/reload/tests.rs`)
-- Modify: `crates/app/src/runtime/mod.rs`, `crates/app/src/app.rs` (wire the reloader + registry + topology into the runtime), `crates/app/src/error.rs` (new error variants)
-
-**Interfaces:**
-- Consumes: Task 1 `stage()`/`commit()`, Task 2 snapshot, Task 3 generation state, `RuntimeTransitionCoordinator::begin/publish`, `CandidateGraph::prepare_evaluation`/`resolve_transition`/`build_candidate_root`.
-- Produces:
-  - `impl AppRuntime { pub async fn reload_config(&self) -> Result<ConfigReloadReport, crate::Error> }` (report type reused from config crate, or a new app-level report carrying generation + changed bindings + hook outcomes + transition summary).
-  - Sequence inside one `transitions.begin()` lease: `reloader.stage()` → no-changes shortcut (`finish_noop`) → build `ConditionFactSnapshot` from staged values → `evaluate_changed_conditions(facts, &base.condition.evaluation, &snapshot)` → `CandidateGraph::prepare_evaluation(base.id(), ...)` → `resolve_transition(&base.effective_graph, [])` (v1: no explicit decisions; `validate_decision` defaults drive `RestartRequired` for unsupported cases) → `build_candidate_root(&candidate, Vec::new(), externals)` → run `ConfigReload` hooks (same filtering as `reload()`) → `staged.commit()` then `transition.publish(PreparedRuntimeGeneration::new(root, scopes, scope_plan, resolved, candidate_graph))`.
-  - Failure contract: any `Err` before publish → drop the transition lease and the staged reload; nothing published, config untouched. `publish` failure (`StaleRuntimeProposal`) → report stale; config slots must **not** be committed before publish succeeds — commit order is `publish` first, then `staged.commit()`, with the writer lease still held so no other transition can interleave (document this ordering and its multi-slot observation limit).
-
-- [ ] **Step 1: Write the failing test** — an app with one conditional component (condition on a bound config fact) built with the fact false; flip the config source; `runtime.reload_config()` succeeds; `runtime.view().root()` resolves the newly eligible component and `runtime.generation()` advanced; the old component is gone from the new generation's resolved set.
-- [ ] **Step 2: Run** — expected FAIL (`reload_config` undefined).
-- [ ] **Step 3: Implement** the sequence above, smallest correct version.
-- [ ] **Step 4: Run** `cargo nextest run -p upwell-app`. Expected: PASS.
-- [ ] **Step 5: Commit** — `feat(app): transactional config and graph reload through the transition coordinator`.
-
-### Task 5: Failure, no-op, and concurrency contract tests
-
-**Files:**
-- Test: `crates/app/src/runtime/reload/tests.rs`
-
-- [ ] **Step 1: Write tests** (each one first, watch it fail where it exercises new behavior):
-  - `failed_dependent_reconstruction_retains_old_config_and_graph`: candidate factory fails → `reload_config` errors → old generation id unchanged, old config value still live, old component still resolvable.
-  - `rejected_hook_aborts_the_whole_reload`: a `ConfigReload` hook returns reject → nothing committed.
-  - `no_change_reload_is_cheap_and_reports_consistently`: no diff → `finish_noop`, generation id unchanged, report says no changes.
-  - `concurrent_reloads_cannot_commit_out_of_order`: two `reload_config()` futures raced → both complete, final generation reflects the last-committed staging, no panic, no stale overwrite (coordinator serialization).
-  - `restart_required_leaves_previous_generation_active`: a transition needing an unsupported strategy → `RestartRequired` error, generation unchanged.
-- [ ] **Step 2: Run each; implement only what the failures demand** (this task should be mostly tests against Task 4's implementation; fix bugs it exposes).
-- [ ] **Step 3: Full suite** — `just test`. Expected: PASS.
-- [ ] **Step 4: Commit** — `test(app): pin the transactional reload failure and concurrency contract`.
-
-### Task 6: Acceptance test and documentation
-
-**Files:**
-- Test: `crates/app/tests/` (or the existing integration-test location for app-level acceptance; check `crates/app/tests/` layout first)
-- Modify: `crates/app/src/runtime/reload.rs` (doc comments), `crates/app/src/runtime/mod.rs` (`view()` doc: replace the "until transactional config integration is added" note)
-
-- [ ] **Step 1: Write the acceptance test** from issue #206: enabling and disabling a custom `Authenticator` trait provider through config switches the effective provider transactionally — two conditional components providing the same trait, condition on a config enum fact; flip; reload; resolve the trait and assert the new provider; flip back; assert the old one.
-- [ ] **Step 2: Run** — expected PASS after Task 4 (if it fails, fix Task 4's implementation, not the test).
-- [ ] **Step 3: Document** in `reload.rs` module docs: the commit ordering (generation publish before config slot commit, both under the writer lease), the multi-slot observation limit (a reader holding only a `Cfg<T>` handle may observe new config one publication before/after the graph switch; a generation-pinned view via `AppRuntime::view()` is the consistent read), and the `ConfigReload` migration path (watch/signal triggers still use `ConfigReloader::reload()` until #211 migrates them onto this entry point).
-- [ ] **Step 4: Full validation** — `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features`, `just test`, `cargo check --workspace --no-default-features`.
-- [ ] **Step 5: Commit** — `docs(app): document transactional reload semantics and ConfigReload migration`.
-
-## Self-review notes
-
-- Spec coverage: required sequence steps 1–8 map to Tasks 1 (staging), 2 (condition inputs), 3+4 (evaluate/validate/plan/prepare/commit), 4 (hooks inside the transaction), 4+6 (reports, retirement via generation drop), 5 (failure/concurrency), 6 (docs + acceptance). Acceptance criteria map to Tasks 4–6.
-- Type consistency: `StagedReload`, `ConditionFacts`, `AppConditionState`, `reload_config` are each defined once and referenced by exact name in later tasks.
-- Known risk: `publish`-before-`staged.commit()` ordering means a crash between the two leaves config slots uncommitted while the graph switched — acceptable for v1 because the writer lease serializes transitions and the process is going down anyway; documented in Task 6. If review rejects this, invert to commit-then-publish and accept the mirrored observation window; both orderings must be documented, only one implemented.
+The completed implementation deliberately uses a candidate `ConfigStore` rather than exposing staged values only, so candidate factories and hooks have a coherent generation-local config view. It creates a fresh `HookManager` per generation and seeds it into the candidate root, rather than retaining or mutating the active manager. `PreparedRuntimeCommit` is the terminal commit token that fixes base validation and publication order. `ConfigReloadError` is boxed at the app boundary to satisfy the existing result-size constraint. These deviations are implemented behavior, not pending work.
