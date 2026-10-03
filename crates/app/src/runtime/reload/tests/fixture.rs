@@ -3,10 +3,10 @@
 //! `ConfigReload` hook records the proposed value.
 //!
 //! The factory and hook honor shared controls so a test can inject a failure or a
-//! cancellation point at a specific stage of the transaction. Every control is
-//! tokio-guarded, so tests mutate them across awaits without blocking, and the
+//! cancellation point at a specific stage of the transaction. Cross-await controls are
+//! tokio-guarded; the synchronous config-deserialization log uses a `std::sync::Mutex`.
 //! [`TEST_GUARD`] serializes the tests themselves under the default `cargo test`
-//! parallelism (they share the counters and controls).
+//! parallelism because they share the counters and controls.
 
 use std::any::{Any, TypeId};
 use std::fs;
@@ -44,9 +44,11 @@ static PROBE_CONDITION: ConditionDescriptor = ConditionDescriptor {
 
 static FACTORY_CALLS: AtomicUsize = AtomicUsize::new(0);
 static HOOK_CALLS: AtomicUsize = AtomicUsize::new(0);
+static STAGE_ENTRIES: AtomicUsize = AtomicUsize::new(0);
 
 static PROPOSED_TOKENS: tokio::sync::Mutex<Vec<i64>> = tokio::sync::Mutex::const_new(Vec::new());
 static FACTORY_TOKENS: tokio::sync::Mutex<Vec<i64>> = tokio::sync::Mutex::const_new(Vec::new());
+static STAGED_TOKENS: std::sync::Mutex<Vec<i64>> = std::sync::Mutex::new(Vec::new());
 
 /// The proposed token the config-reload hook rejects. `None` accepts every proposal.
 static HOOK_REJECT_TOKEN: tokio::sync::Mutex<Option<i64>> = tokio::sync::Mutex::const_new(None);
@@ -79,9 +81,14 @@ pub(super) async fn lock_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
 pub(super) async fn reset_controls() {
     FACTORY_CALLS.store(0, Ordering::SeqCst);
     HOOK_CALLS.store(0, Ordering::SeqCst);
+    STAGE_ENTRIES.store(0, Ordering::SeqCst);
 
     *PROPOSED_TOKENS.lock().await = Vec::new();
     *FACTORY_TOKENS.lock().await = Vec::new();
+    STAGED_TOKENS
+        .lock()
+        .expect("staged token log is available")
+        .clear();
     *HOOK_REJECT_TOKEN.lock().await = None;
     *FACTORY_FAILS.lock().await = false;
     *FACTORY_WAITS.lock().await = false;
@@ -89,6 +96,11 @@ pub(super) async fn reset_controls() {
 
 pub(super) fn factory_calls() -> usize {
     FACTORY_CALLS.load(Ordering::SeqCst)
+}
+
+/// Returns how many reload attempts entered config staging.
+pub(super) fn stage_entries() -> usize {
+    STAGE_ENTRIES.load(Ordering::SeqCst)
 }
 
 pub(super) fn hook_calls() -> usize {
@@ -101,6 +113,14 @@ pub(super) async fn proposed_tokens() -> Vec<i64> {
 
 pub(super) async fn factory_tokens() -> Vec<i64> {
     FACTORY_TOKENS.lock().await.clone()
+}
+
+/// Returns the candidate config tokens deserialized during reload staging.
+pub(super) fn staged_tokens() -> Vec<i64> {
+    STAGED_TOKENS
+        .lock()
+        .expect("staged token log is available")
+        .clone()
 }
 
 /// Makes the config-reload hook reject the proposal whose token is `token`.
@@ -124,11 +144,41 @@ pub(super) async fn factory_parked() {
     FACTORY_PARKED.notified().await;
 }
 
-#[derive(Deserialize)]
+/// Releases one factory blocked by [`park_factory_after_staging`].
+pub(super) fn release_factory() {
+    FACTORY_RELEASE.notify_one();
+}
+
 pub(super) struct ProbeConfig {
     #[allow(dead_code, reason = "the condition fact reads the enabled field")]
     enabled: bool,
     pub(super) token: i64,
+}
+
+#[derive(Deserialize)]
+struct ProbeConfigInput {
+    enabled: bool,
+    token: i64,
+}
+
+impl<'de> Deserialize<'de> for ProbeConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let input = ProbeConfigInput::deserialize(deserializer)?;
+
+        STAGE_ENTRIES.fetch_add(1, Ordering::SeqCst);
+        STAGED_TOKENS
+            .lock()
+            .expect("staged token log is available")
+            .push(input.token);
+
+        Ok(Self {
+            enabled: input.enabled,
+            token: input.token,
+        })
+    }
 }
 
 impl ConfigProperties for ProbeConfig {
