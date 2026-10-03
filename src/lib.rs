@@ -76,11 +76,12 @@ pub use upwell_dirs::{Dir, DirKind, DirectoriesManager};
 // ---------------------------------------------------------------------------
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_config::{
-    CONFIG_BINDINGS, Cfg, CfgNext, ChangedBinding, ComponentHookReport, ConfigBinding,
-    ConfigBindingDescriptor, ConfigDefaults, ConfigError, ConfigManager, ConfigProperties,
-    ConfigReload, ConfigReloadError, ConfigReloadReport, ConfigReloader, ConfigStore,
-    ContainerConfigExt, DefaultSpec, DirectoriesResolver, EnumTag, HookOutcome, ReloadProposal,
-    ReloadTriggers, ReloadableConfig, spawn_reload_triggers, stop_reload_triggers,
+    BindingFacts, CONFIG_BINDINGS, Cfg, CfgNext, ChangedBinding, ComponentHookReport,
+    ConditionFactSource, ConditionFacts, ConfigBinding, ConfigBindingDescriptor, ConfigDefaults,
+    ConfigError, ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError,
+    ConfigReloadReport, ConfigReloader, ConfigStore, ContainerConfigExt, DefaultSpec,
+    DirectoriesResolver, EnumTag, HookOutcome, ReloadProposal, ReloadTriggers, ReloadableConfig,
+    spawn_reload_triggers, stop_reload_triggers,
 };
 
 // ---------------------------------------------------------------------------

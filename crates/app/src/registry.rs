@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write;
 
-use upwell_config::{CONFIG_BINDINGS, ConfigBinding};
+use upwell_config::{CONFIG_BINDINGS, ConditionFactSource, ConfigBinding};
 use upwell_core::{ConfigFactDescriptor, DependencyDescriptor};
 use upwell_di::{
     COMPONENTS, Component, ComponentDescriptor, ComponentRegistry, ConditionCatalog,
@@ -46,6 +46,9 @@ pub struct AppRegistry {
     /// Config bindings (a config type bound to a property path). Populated from the
     /// auto-discovered config bindings slice and from explicit builder bindings.
     pub config_bindings: Vec<ConfigBinding>,
+    /// Registered condition-fact sources (a config type's condition facts at one binding
+    /// path). Populated from explicit builder registrations.
+    pub condition_facts: Vec<ConditionFactSource>,
 }
 
 impl AppRegistry {
@@ -76,6 +79,7 @@ impl AppRegistry {
             components,
             providers,
             config_bindings,
+            condition_facts: Vec::new(),
         }
     }
 
@@ -108,6 +112,30 @@ impl AppRegistry {
             evaluation,
             bindings: self.condition_identity(),
         })
+    }
+
+    /// Extracts the condition-fact scalars of every registered fact source from a
+    /// staged reload's values, producing a validated fact snapshot.
+    ///
+    /// Each staged value is its binding's `(TypeId, path, erased value)`. A source whose
+    /// binding has no staged value contributes nothing — the transactional reload stages
+    /// every binding, changed or not, so registered sources always resolve.
+    pub fn condition_snapshot<'a>(
+        &self,
+        staged: impl IntoIterator<Item = (TypeId, &'a str, &'a dyn std::any::Any)>,
+    ) -> Result<ConditionFactSnapshot, upwell_di::ConditionError> {
+        let staged = staged.into_iter().collect::<Vec<_>>();
+        let mut scalars = Vec::new();
+
+        for source in &self.condition_facts {
+            for (type_id, path, value) in &staged {
+                if *type_id == source.ty.type_id && *path == source.path {
+                    scalars.extend((source.facts.scalars)(*value));
+                }
+            }
+        }
+
+        ConditionFactSnapshot::new(scalars)
     }
 
     /// Incrementally re-evaluates conditions while preserving this application's catalog identity.
@@ -317,8 +345,11 @@ mod tests {
     use std::future::Future;
     use std::pin::Pin;
 
-    use upwell_config::{ConfigBinding, ConfigProperties};
-    use upwell_core::{Cardinality, DependencyDescriptor, TypeDescriptor};
+    use upwell_config::{ConditionFactSource, ConditionFacts, ConfigBinding, ConfigProperties};
+    use upwell_core::{
+        Cardinality, ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId,
+        DependencyDescriptor, TypeDescriptor,
+    };
     use upwell_di::{
         BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
         ComponentFactoryDescriptor, Singleton,
@@ -396,6 +427,7 @@ mod tests {
             components: vec![ComponentDescriptor::of::<RegisteredComponent>()],
             providers: Vec::new(),
             config_bindings: Vec::new(),
+            condition_facts: Vec::new(),
         };
 
         let descriptor = registry
@@ -413,6 +445,7 @@ mod tests {
             components: vec![component()],
             providers: Vec::new(),
             config_bindings: Vec::new(),
+            condition_facts: Vec::new(),
         };
 
         let err = registry.validate().expect_err("config binding is missing");
@@ -438,6 +471,7 @@ mod tests {
                 ConfigBinding::of::<TestConfig>("one"),
                 ConfigBinding::of::<TestConfig>("two"),
             ],
+            condition_facts: Vec::new(),
         };
 
         let err = registry
@@ -455,5 +489,67 @@ mod tests {
                 && type_name.ends_with("TestConfig")
                 && paths == "one, two"
         ));
+    }
+
+    #[test]
+    fn condition_snapshot_extracts_scalars_from_staged_values() {
+        #[derive(serde::Deserialize)]
+        struct FlagConfig {
+            enabled: bool,
+        }
+
+        impl ConfigProperties for FlagConfig {
+            const NAME: &'static str = "FlagConfig";
+        }
+
+        impl ConditionFacts for FlagConfig {
+            fn condition_facts() -> Vec<ConfigFactDescriptor> {
+                vec![ConfigFactDescriptor {
+                    id: ConfigFactId::new("FlagConfig", "flags", "enabled"),
+                    kind: ConditionScalarKind::Bool,
+                    source: upwell_core::descriptor_source!(),
+                }]
+            }
+
+            fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)> {
+                vec![(
+                    ConfigFactId::new("FlagConfig", "flags", "enabled"),
+                    ConditionScalar::Bool(self.enabled),
+                )]
+            }
+        }
+
+        let mut registry = AppRegistry::default();
+        registry
+            .condition_facts
+            .push(ConditionFactSource::of::<FlagConfig>("flags"));
+
+        let enabled = FlagConfig { enabled: true };
+        let disabled = FlagConfig { enabled: false };
+        let unrelated = TestConfig;
+
+        let snapshot = registry
+            .condition_snapshot([
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "flags",
+                    &std::sync::Arc::new(enabled) as &dyn std::any::Any,
+                ),
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "other",
+                    &disabled as &dyn std::any::Any,
+                ),
+                (
+                    TypeId::of::<TestConfig>(),
+                    "flags",
+                    &unrelated as &dyn std::any::Any,
+                ),
+            ])
+            .expect("snapshot validates");
+
+        registry
+            .evaluate_conditions(<FlagConfig as ConditionFacts>::condition_facts(), &snapshot)
+            .expect("the matching staged binding supplies the declared fact");
     }
 }

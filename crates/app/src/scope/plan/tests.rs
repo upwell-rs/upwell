@@ -389,6 +389,7 @@ fn topology_aware_registry_validation_rejects_sibling_dependencies() {
         ],
         providers: Vec::new(),
         config_bindings: Vec::new(),
+        condition_facts: Vec::new(),
     };
 
     let error = registry
