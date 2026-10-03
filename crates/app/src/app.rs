@@ -57,9 +57,10 @@ static CONFIG_RELOADER_DESCRIPTOR: ComponentDescriptor =
     );
 
 /// The framework-provided singleton injectable that runs lifecycle/event hooks.
-static HOOK_MANAGER_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual_of::<HookManager>(
+static HOOK_MANAGER_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
     HOOK_MANAGER_ID,
     HOOK_MANAGER_NAME,
+    TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
     &SingletonScope,
 );
 

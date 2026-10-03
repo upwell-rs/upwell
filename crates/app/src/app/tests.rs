@@ -8,7 +8,7 @@ use upwell_config::{ConfigManager, ConfigReloader, Toml};
 use upwell_core::{ResolverSet, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, Injectable, ScopeContainer, ScopeRegistry, Singleton,
+    ComponentFactoryDescriptor, Injectable, RootResolver, ScopeContainer, ScopeRegistry, Singleton,
     root_resolver_descriptor,
 };
 use upwell_dirs::{Config as ConfigDir, Dir, DirectoriesManager};
@@ -54,6 +54,8 @@ impl Component for SeededComponent {
 
 /// A user-supplied pre-built component registered through `with_component`.
 struct UserProvided;
+
+static TYPED_USER_PROVIDED: ComponentDescriptor = ComponentDescriptor::of::<UserProvided>();
 
 impl Component for UserProvided {
     type Handle = Arc<Self>;
@@ -277,8 +279,8 @@ fn framework_singletons_are_snapshot_capable_and_user_prebuilts_are_not() {
         "the config reloader must be retainable across generations"
     );
     assert!(
-        super::HOOK_MANAGER_DESCRIPTOR.generation_snapshot.is_some(),
-        "the hook manager must be retainable across generations"
+        super::HOOK_MANAGER_DESCRIPTOR.generation_snapshot.is_none(),
+        "the hook manager catalog and resolver routing stay generation-local"
     );
     assert!(
         root_resolver_descriptor().generation_snapshot.is_none(),
@@ -316,6 +318,37 @@ fn framework_singletons_are_snapshot_capable_and_user_prebuilts_are_not() {
 }
 
 #[tokio::test]
+async fn candidate_metadata_cannot_upgrade_user_prebuilt_provenance() {
+    let app = App::<BoundaryProtocol>::builder("prepare-boundary-test")
+        .config_source(
+            ConfigManager::<Toml>::from_str(
+                r#"
+                    [logging]
+                    level = "debug"
+                    format = "compact"
+                    ansi = false
+                "#,
+            )
+            .expect("test config parses"),
+        )
+        .component_descriptor(&TYPED_USER_PROVIDED)
+        .with_component(UserProvided)
+        .build()
+        .await
+        .expect("app builds");
+
+    let error = app
+        .container()
+        .snapshot_singleton(TYPED_USER_PROVIDED)
+        .expect_err("the active user seed remains non-retainable");
+
+    assert!(matches!(
+        error,
+        upwell_di::Error::SnapshotUnavailable { .. }
+    ));
+}
+
+#[tokio::test]
 async fn framework_singletons_snapshot_out_of_a_built_root() {
     let shutdown = ShutdownSignal::new();
     let hooks = HookManager::new(Vec::new());
@@ -338,6 +371,7 @@ async fn framework_singletons_snapshot_out_of_a_built_root() {
         super::HOOK_MANAGER_DESCRIPTOR,
         ComponentDescriptor::of::<DirectoriesManager>(),
         ComponentDescriptor::of::<Dir<ConfigDir>>(),
+        root_resolver_descriptor(),
     ];
     let seeds = vec![
         BoxedComponent {
@@ -360,6 +394,10 @@ async fn framework_singletons_snapshot_out_of_a_built_root() {
             ty: descriptors[4].ty,
             value: Box::new(dirs.dir::<ConfigDir>()),
         },
+        BoxedComponent {
+            ty: descriptors[5].ty,
+            value: Box::new(Injectable::into_stored(RootResolver::new())),
+        },
     ];
     let components = descriptors
         .iter()
@@ -373,10 +411,24 @@ async fn framework_singletons_snapshot_out_of_a_built_root() {
         .await
         .expect("framework root builds");
 
-    for descriptor in descriptors {
+    for descriptor in [
+        descriptors[0],
+        descriptors[1],
+        descriptors[3],
+        descriptors[4],
+    ] {
         root.snapshot_singleton(descriptor)
             .expect("framework singletons are snapshot-capable");
     }
+
+    let hook_error = root
+        .snapshot_singleton(descriptors[2])
+        .expect_err("the hook manager is generation-local");
+
+    assert!(matches!(
+        hook_error,
+        upwell_di::Error::SnapshotUnavailable { .. }
+    ));
 
     let error = root
         .snapshot_singleton(root_resolver_descriptor())

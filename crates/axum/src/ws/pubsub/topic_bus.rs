@@ -141,6 +141,10 @@ impl<P: PubSubProtocol> Injectable for TopicBus<P> {
     fn from_stored(stored: &Self) -> Self {
         stored.clone()
     }
+
+    fn snapshot_stored(stored: &Self) -> Option<Self> {
+        Some(stored.clone())
+    }
 }
 
 fn topic_bus_dependencies() -> Vec<DependencyDescriptor> {

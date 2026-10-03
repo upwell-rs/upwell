@@ -52,6 +52,7 @@ pub enum RestartReason {
     StaleRetention,
     GenerationBoundDependency,
     ManualInstanceUnsupported,
+    LiveRebindUnsupported,
     RemovalUnsupported,
     NonSingleton,
     FactoryUnavailable,
@@ -68,6 +69,9 @@ impl fmt::Display for RestartReason {
                 "the component depends on generation-bound runtime state"
             }
             Self::ManualInstanceUnsupported => "the pre-built component has no transition contract",
+            Self::LiveRebindUnsupported => {
+                "retained live dependency rebinding is not integrated yet"
+            }
             Self::RemovalUnsupported => "component removal is not integrated yet",
             Self::NonSingleton => "runtime transitions are singleton-only",
             Self::FactoryUnavailable => "the candidate component has no ordinary factory",
@@ -91,6 +95,7 @@ pub struct RestartRequired {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedTransitionPlan {
     candidate_identity: Arc<()>,
+    active_identity: Arc<()>,
     structural: TransitionPlan,
     decisions: Box<[ComponentTransitionDecision]>,
     construction_order: Box<[&'static str]>,
@@ -175,10 +180,18 @@ impl ResolvedTransitionPlan {
     pub async fn build_candidate_root_from_active(
         &self,
         candidate: &CandidateGraph,
-        active_root: &ScopeContainer,
+        active: &crate::RuntimeView,
         externals: ResolverSet,
     ) -> crate::Result<(Arc<ScopeContainer>, Arc<ScopeRegistry>)> {
-        let retained = self.derive_retained_from_active(candidate, active_root)?;
+        if !Arc::ptr_eq(&self.active_identity, active.effective_graph().identity()) {
+            return Err(upwell_di::StaleGraphCandidate {
+                active: self.structural.base_generation,
+                candidate: active.id(),
+            }
+            .into());
+        }
+
+        let retained = self.derive_retained_from_active(candidate, active.root())?;
 
         self.build_candidate_root(candidate, retained, externals)
             .await
@@ -458,6 +471,7 @@ impl CandidateGraph {
 
         Ok(ResolvedTransitionPlan {
             candidate_identity: Arc::clone(&self.identity),
+            active_identity: Arc::clone(active.identity()),
             structural,
             decisions: resolved.into_boxed_slice(),
             construction_order,
@@ -476,7 +490,9 @@ fn validate_decision(
 
     match node.action {
         NodeAction::Remove => restart(node, RestartReason::RemovalUnsupported),
-        NodeAction::RebindLive if strategy == Some(ComponentTransitionStrategy::Retain) => Ok(()),
+        NodeAction::RebindLive if strategy == Some(ComponentTransitionStrategy::Retain) => {
+            restart(node, RestartReason::LiveRebindUnsupported)
+        }
         NodeAction::Replace if strategy == Some(ComponentTransitionStrategy::Retain) => {
             restart(node, RestartReason::StaleRetention)
         }

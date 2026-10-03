@@ -37,7 +37,11 @@ impl ScopeContainer {
             });
         }
 
-        let Some(snapshot) = descriptor.generation_snapshot else {
+        let active_descriptor = self
+            .registry
+            .component(descriptor.ty.type_id)
+            .ok_or(Error::MissingComponent(descriptor.name))?;
+        let Some(snapshot) = active_descriptor.generation_snapshot else {
             return Err(Error::SnapshotUnavailable {
                 component: descriptor.id,
             });
@@ -49,13 +53,14 @@ impl ScopeContainer {
             .get(&descriptor.ty.type_id)
             .ok_or(Error::MissingComponent(descriptor.name))?;
 
-        let boxed = catch_unwind(AssertUnwindSafe(|| snapshot(active))).map_err(|_| {
-            Error::SnapshotPanicked {
-                component: descriptor.id,
-            }
-        })??;
+        let boxed =
+            catch_unwind(AssertUnwindSafe(|| snapshot.snapshot(active))).map_err(|_| {
+                Error::SnapshotPanicked {
+                    component: descriptor.id,
+                }
+            })??;
 
-        if boxed.ty.type_id != descriptor.ty.type_id {
+        if boxed.ty.type_id != descriptor.ty.type_id || !snapshot.validates(&boxed) {
             return Err(Error::SnapshotOutputMismatch {
                 component: descriptor.id,
             });

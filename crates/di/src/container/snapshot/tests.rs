@@ -62,9 +62,26 @@ impl Injectable for ByValueService {
     fn from_stored(stored: &Self) -> Self {
         stored.clone()
     }
+
+    fn snapshot_stored(stored: &Self) -> Option<Self> {
+        Some(stored.clone())
+    }
 }
 
 struct PanickingComponent;
+
+struct LiveHandleComponent;
+
+impl Component for LiveHandleComponent {
+    type Handle = crate::Dep<Self>;
+
+    const ID: &'static str = "snapshot-live-handle";
+    const NAME: &'static str = "LiveHandleComponent";
+
+    fn into_handle(self) -> Self::Handle {
+        Live::new(Arc::new(self))
+    }
+}
 
 #[derive(Clone)]
 struct PanickingHandle;
@@ -89,6 +106,10 @@ impl Injectable for PanickingHandle {
     }
 
     fn from_stored(_: &Arc<PanickingComponent>) -> Self {
+        panic!("snapshot canary")
+    }
+
+    fn snapshot_stored(_: &Arc<PanickingComponent>) -> Option<Arc<PanickingComponent>> {
         panic!("snapshot canary")
     }
 }
@@ -235,14 +256,30 @@ async fn plain_manual_descriptor_cannot_snapshot() {
         &Singleton,
     );
     let root = root_with(
-        &[typed],
-        vec![seed(&typed, Arc::new(SharedService { label: "active" }))],
+        &[manual],
+        vec![seed(&manual, Arc::new(SharedService { label: "active" }))],
     )
     .await;
 
     let error = root
-        .snapshot_singleton(manual)
-        .expect_err("raw manual descriptors are not retainable");
+        .snapshot_singleton(typed)
+        .expect_err("candidate metadata cannot upgrade active manual provenance");
+
+    assert!(matches!(error, Error::SnapshotUnavailable { .. }));
+}
+
+#[tokio::test]
+async fn live_component_handle_cannot_share_its_slot_across_generations() {
+    let descriptor = ComponentDescriptor::of::<LiveHandleComponent>();
+    let root = root_with(
+        &[descriptor],
+        vec![seed(&descriptor, Live::new(Arc::new(LiveHandleComponent)))],
+    )
+    .await;
+
+    let error = root
+        .snapshot_singleton(descriptor)
+        .expect_err("a Dep component handle cannot share its Live slot");
 
     assert!(matches!(error, Error::SnapshotUnavailable { .. }));
 }
@@ -315,23 +352,58 @@ async fn snapshot_panics_are_redacted() {
 #[tokio::test]
 async fn snapshot_output_type_is_validated() {
     let mut descriptor = ComponentDescriptor::of::<SharedService>();
-    descriptor.generation_snapshot = Some(|_: &BoxedComponent| {
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<ByValueService>("ByValueService"),
-            value: Box::new(Injectable::into_stored(ByValueService { label: "alien" })),
-        })
-    });
+    descriptor.generation_snapshot =
+        Some(crate::descriptors::component::GenerationSnapshot::for_test(
+            |_| {
+                Ok(BoxedComponent {
+                    ty: TypeDescriptor::of::<ByValueService>("ByValueService"),
+                    value: Box::new(Injectable::into_stored(ByValueService { label: "alien" })),
+                })
+            },
+            |_| true,
+        ));
 
-    let typed = ComponentDescriptor::of::<SharedService>();
     let root = root_with(
-        &[typed],
-        vec![seed(&typed, Arc::new(SharedService { label: "active" }))],
+        &[descriptor],
+        vec![seed(
+            &descriptor,
+            Arc::new(SharedService { label: "active" }),
+        )],
     )
     .await;
 
     let error = root
         .snapshot_singleton(descriptor)
         .expect_err("mismatched snapshot output is rejected");
+
+    assert!(matches!(error, Error::SnapshotOutputMismatch { .. }));
+}
+
+#[tokio::test]
+async fn snapshot_output_payload_is_validated() {
+    let mut descriptor = ComponentDescriptor::of::<SharedService>();
+    descriptor.generation_snapshot =
+        Some(crate::descriptors::component::GenerationSnapshot::for_test(
+            |active| {
+                Ok(BoxedComponent {
+                    ty: active.ty,
+                    value: Box::new(ByValueService { label: "alien" }),
+                })
+            },
+            |candidate| candidate.downcast_ref::<Live<SharedService>>().is_some(),
+        ));
+    let root = root_with(
+        &[descriptor],
+        vec![seed(
+            &descriptor,
+            Arc::new(SharedService { label: "active" }),
+        )],
+    )
+    .await;
+
+    let error = root
+        .snapshot_singleton(descriptor)
+        .expect_err("mismatched snapshot payload is rejected");
 
     assert!(matches!(error, Error::SnapshotOutputMismatch { .. }));
 }

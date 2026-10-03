@@ -564,6 +564,10 @@ impl Injectable for ConfigReloader {
     fn from_stored(stored: &Self) -> Self {
         stored.clone()
     }
+
+    fn snapshot_stored(stored: &Self) -> Option<Self> {
+        Some(stored.clone())
+    }
 }
 
 /// Under `di-check`, the reloader is framework-seeded, so it is always provided.
