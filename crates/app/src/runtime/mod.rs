@@ -12,17 +12,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use upwell_core::{RuntimeGenerationId, Scope, ScopeId};
-use upwell_di::{
-    BoxedComponent, ComponentDescriptor, EffectiveGraph, ScopeContainer, ScopeRegistry,
-};
+use upwell_di::{BoxedComponent, ComponentDescriptor, ScopeContainer};
 use upwell_hooks::HookManager;
 
 use crate::scope::{PreparedScopeTopology, ScopeParent, SeedDestination};
 
 mod generation;
 
-pub use generation::RuntimeView;
-use generation::{PreparedRuntimeGeneration, RuntimeGeneration, RuntimeTransitionCoordinator};
+pub(crate) use generation::PreparedRuntimeGeneration;
+pub use generation::{AppConditionState, RuntimeView};
+use generation::{RuntimeGeneration, RuntimeTransitionCoordinator};
 
 /// Everything a protocol needs to drive requests through DI, cheaply cloneable.
 ///
@@ -62,15 +61,9 @@ impl RuntimeScopePlan {
 impl AppRuntime {
     pub(crate) fn new(
         name: Arc<str>,
-        root: Arc<ScopeContainer>,
-        scopes: Arc<ScopeRegistry>,
-        scope_plan: RuntimeScopePlan,
-        resolved: Arc<[ComponentDescriptor]>,
-        graph: EffectiveGraph,
+        generation: PreparedRuntimeGeneration,
         hooks: HookManager,
     ) -> Self {
-        let generation = PreparedRuntimeGeneration::new(root, scopes, scope_plan, resolved, graph);
-
         Self {
             name,
             transitions: RuntimeTransitionCoordinator::new(generation, hooks.clone()),

@@ -1,14 +1,114 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
-use upwell_core::{ResolverSet, RuntimeGenerationId};
-use upwell_di::{ComponentRegistry, EffectiveGraph, ScopeContainer, ScopeRegistry};
+use upwell_core::{
+    ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
+    ConfigFactDescriptor, ConfigFactId, DescriptorSource, ResolverSet, RuntimeGenerationId,
+    TypeDescriptor,
+};
+use upwell_di::{
+    BoxedComponent, ComponentConstructionContext, ComponentDescriptor, ComponentFactoryDescriptor,
+    ComponentRegistry, ConditionFactSnapshot, EffectiveGraph, ScopeContainer, ScopeRegistry,
+    Singleton,
+};
 use upwell_hooks::HookManager;
 
 use super::*;
-use crate::ScopeTopology;
+use crate::{AppRegistry, ScopeTopology};
+
+const ENABLED: ConfigFactId = ConfigFactId::new("test::GenerationConfig", "generation", "enabled");
+const SOURCE: DescriptorSource = upwell_core::descriptor_source!();
+
+static GENERATION_CONDITION: ConditionDescriptor = ConditionDescriptor {
+    id: "generation-enabled",
+    source: SOURCE,
+    predicate: ConditionPredicate::ConfigBool(ENABLED),
+};
+
+struct GenerationComponent;
+
+fn no_dependencies() -> Vec<upwell_core::DependencyDescriptor> {
+    Vec::new()
+}
+
+fn unreachable_factory<'a>(
+    _: &'a mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + 'a>> {
+    Box::pin(async { unreachable!("generation fixtures never construct components") })
+}
+
+static GENERATION_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
+    construct: unreachable_factory,
+    dependencies: no_dependencies,
+    default: true,
+}];
+
+fn generation_factories() -> &'static [ComponentFactoryDescriptor] {
+    &GENERATION_FACTORIES
+}
+
+static GENERATION_COMPONENT: ComponentDescriptor = ComponentDescriptor {
+    id: "generation_component",
+    name: "GenerationComponent",
+    ty: TypeDescriptor::of::<GenerationComponent>("GenerationComponent"),
+    scope: &Singleton,
+    condition: Some(&GENERATION_CONDITION),
+    factories: generation_factories,
+    hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
+};
+
+fn condition_facts() -> [ConfigFactDescriptor; 1] {
+    [ConfigFactDescriptor {
+        id: ENABLED,
+        kind: ConditionScalarKind::Bool,
+        source: SOURCE,
+    }]
+}
+
+fn condition_snapshot(enabled: bool) -> ConditionFactSnapshot {
+    ConditionFactSnapshot::new([(ENABLED, ConditionScalar::Bool(enabled))])
+        .expect("facts are unique")
+}
+
+fn condition_registry() -> AppRegistry {
+    AppRegistry {
+        components: vec![GENERATION_COMPONENT],
+        providers: Vec::new(),
+        config_bindings: Vec::new(),
+        condition_facts: Vec::new(),
+    }
+}
+
+fn condition_state(enabled: bool) -> Arc<AppConditionState> {
+    let registry = condition_registry();
+    let evaluation = registry
+        .evaluate_conditions(condition_facts(), &condition_snapshot(enabled))
+        .expect("conditions evaluate");
+
+    Arc::new(AppConditionState::new(Arc::new(registry), evaluation))
+}
+
+fn empty_condition() -> Arc<AppConditionState> {
+    let registry = AppRegistry::default();
+    let evaluation = registry
+        .evaluate_conditions(
+            [],
+            &ConditionFactSnapshot::new([]).expect("empty snapshot validates"),
+        )
+        .expect("empty evaluation succeeds");
+
+    Arc::new(AppConditionState::new(Arc::new(registry), evaluation))
+}
 
 async fn prepared() -> PreparedRuntimeGeneration {
+    prepared_with_condition(empty_condition()).await
+}
+
+async fn prepared_with_condition(condition: Arc<AppConditionState>) -> PreparedRuntimeGeneration {
     let registry = Arc::new(
         ScopeRegistry::new(HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
             .expect("empty scope registry validates"),
@@ -35,11 +135,21 @@ async fn prepared() -> PreparedRuntimeGeneration {
         RuntimeScopePlan::new(topology, Arc::new(HashMap::new()), Arc::new(HashMap::new())),
         Arc::from([]),
         graph,
+        condition,
     )
 }
 
 async fn coordinator() -> RuntimeTransitionCoordinator {
-    RuntimeTransitionCoordinator::new(prepared().await, HookManager::new(Vec::new()))
+    coordinator_with_condition(empty_condition()).await
+}
+
+async fn coordinator_with_condition(
+    condition: Arc<AppConditionState>,
+) -> RuntimeTransitionCoordinator {
+    RuntimeTransitionCoordinator::new(
+        prepared_with_condition(condition).await,
+        HookManager::new(Vec::new()),
+    )
 }
 
 #[tokio::test]
@@ -158,4 +268,42 @@ async fn coordinator_serializes_attempts_and_pins_the_latest_base() {
 
     assert_eq!(second.attempt(), TransitionAttemptId(2));
     assert_eq!(second.base().id(), committed.id());
+}
+
+#[tokio::test]
+async fn committed_condition_state_survives_initial_commit_and_publication() {
+    let state = condition_state(true);
+    let direct = condition_registry()
+        .evaluate_conditions(condition_facts(), &condition_snapshot(true))
+        .expect("direct evaluation succeeds");
+    let eligible_ids = |evaluation: &crate::AppConditionEvaluation| {
+        evaluation
+            .evaluation()
+            .eligible_registry()
+            .components
+            .iter()
+            .map(|component| component.id)
+            .collect::<Vec<_>>()
+    };
+
+    let coordinator = coordinator_with_condition(Arc::clone(&state)).await;
+    let initial = coordinator.current();
+
+    assert!(Arc::ptr_eq(&state, initial.condition()));
+    assert_eq!(
+        eligible_ids(initial.condition().evaluation()),
+        eligible_ids(&direct)
+    );
+
+    let transition = coordinator.begin().await;
+    let committed = transition
+        .publish(prepared_with_condition(Arc::clone(&state)).await)
+        .expect("current transition publishes");
+
+    assert_eq!(committed.id(), RuntimeGenerationId::new(1));
+    assert_eq!(
+        committed.effective_graph().generation(),
+        RuntimeGenerationId::new(1)
+    );
+    assert!(Arc::ptr_eq(&state, committed.condition()));
 }

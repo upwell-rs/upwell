@@ -4,8 +4,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use upwell_config::{ConfigManager, ConfigReloader, Toml};
-use upwell_core::{ResolverSet, TypeDescriptor};
+use upwell_config::{ConditionFacts, ConfigManager, ConfigProperties, ConfigReloader, Toml};
+use upwell_core::{
+    ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
+    ConfigFactDescriptor, ConfigFactId, ResolverSet, TypeDescriptor,
+};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, Injectable, RootResolver, ScopeContainer, ScopeRegistry, Singleton,
@@ -438,4 +441,139 @@ async fn framework_singletons_snapshot_out_of_a_built_root() {
         error,
         upwell_di::Error::SnapshotUnavailable { .. }
     ));
+}
+
+const FLAG_ENABLED: ConfigFactId = ConfigFactId::new("test::FlagConfig", "flags", "enabled");
+
+static FLAG_CONDITION: ConditionDescriptor = ConditionDescriptor {
+    id: "flag-enabled",
+    source: upwell_core::descriptor_source!(),
+    predicate: ConditionPredicate::ConfigBool(FLAG_ENABLED),
+};
+
+#[derive(serde::Deserialize)]
+struct FlagConfig {
+    enabled: bool,
+}
+
+impl ConfigProperties for FlagConfig {
+    const NAME: &'static str = "FlagConfig";
+}
+
+impl ConditionFacts for FlagConfig {
+    fn condition_facts() -> Vec<ConfigFactDescriptor> {
+        vec![ConfigFactDescriptor {
+            id: FLAG_ENABLED,
+            kind: ConditionScalarKind::Bool,
+            source: upwell_core::descriptor_source!(),
+        }]
+    }
+
+    fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)> {
+        vec![(FLAG_ENABLED, ConditionScalar::Bool(self.enabled))]
+    }
+}
+
+/// Factory-backed singleton whose availability keys on the `flags.enabled` fact.
+struct FlagComponent;
+
+impl Component for FlagComponent {
+    type Handle = Arc<Self>;
+
+    const ID: &'static str = "flag_component";
+    const NAME: &'static str = "FlagComponent";
+
+    fn into_handle(self) -> Self::Handle {
+        Arc::new(self)
+    }
+}
+
+fn construct_flag_component(
+    _context: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<FlagComponent>(FlagComponent::NAME),
+            value: Box::new(Injectable::into_stored(Arc::new(FlagComponent))),
+        })
+    })
+}
+
+static FLAG_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
+    construct: construct_flag_component,
+    dependencies: no_dependencies,
+    default: true,
+}];
+
+fn flag_factories() -> &'static [ComponentFactoryDescriptor] {
+    &FLAG_FACTORIES
+}
+
+static FLAG_COMPONENT: ComponentDescriptor = ComponentDescriptor {
+    id: FlagComponent::ID,
+    name: FlagComponent::NAME,
+    ty: TypeDescriptor::of::<FlagComponent>(FlagComponent::NAME),
+    scope: &Singleton,
+    condition: Some(&FLAG_CONDITION),
+    factories: flag_factories,
+    hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
+};
+
+async fn build_flag_app(enabled: bool) -> crate::Result<App<()>> {
+    let source = if enabled {
+        "[flags]\nenabled = true\n"
+    } else {
+        "[flags]\nenabled = false\n"
+    };
+
+    App::<()>::builder("conditional-fact-test")
+        .config_source(ConfigManager::<Toml>::from_str(source).expect("test config parses"))
+        .config::<FlagConfig>("flags")
+        .condition_facts::<FlagConfig>("flags")
+        .component_descriptor(&FLAG_COMPONENT)
+        .build()
+        .await
+}
+
+#[tokio::test]
+async fn initial_build_excludes_components_whose_config_fact_is_false() {
+    let app = build_flag_app(false).await.expect("disabled app builds");
+    let view = app.runtime().view();
+
+    assert!(
+        !view
+            .resolved_components()
+            .iter()
+            .any(|component| component.id == FlagComponent::ID)
+    );
+    assert!(app.container().get::<FlagComponent>().is_none());
+    assert_eq!(
+        view.condition()
+            .evaluation()
+            .evaluation()
+            .component_eligible(FlagComponent::ID),
+        Some(false)
+    );
+}
+
+#[tokio::test]
+async fn initial_build_includes_components_whose_config_fact_is_true() {
+    let app = build_flag_app(true).await.expect("enabled app builds");
+    let view = app.runtime().view();
+
+    assert!(
+        view.resolved_components()
+            .iter()
+            .any(|component| component.id == FlagComponent::ID)
+    );
+    assert!(app.container().get::<FlagComponent>().is_some());
+    assert_eq!(
+        view.condition()
+            .evaluation()
+            .evaluation()
+            .component_eligible(FlagComponent::ID),
+        Some(true)
+    );
 }

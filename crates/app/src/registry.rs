@@ -39,7 +39,7 @@ impl AppConditionEvaluation {
 /// bindings, and runs the cross-cutting validation the component graph alone cannot
 /// (config edges). Protocol-specific declarations (services/routes) live in the protocol
 /// plugin, not here, so this stays usable by any protocol.
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct AppRegistry {
     pub components: Vec<ComponentDescriptor>,
     pub providers: Vec<ProviderDescriptor>,

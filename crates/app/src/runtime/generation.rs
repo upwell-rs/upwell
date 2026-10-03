@@ -8,6 +8,8 @@ use upwell_di::{ComponentDescriptor, EffectiveGraph, ScopeContainer, ScopeRegist
 use upwell_hooks::HookManager;
 
 use super::RuntimeScopePlan;
+use crate::registry::AppConditionEvaluation;
+use crate::registry::AppRegistry;
 
 /// Stable identity of one runtime transition attempt, including no-op and failed attempts.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -21,6 +23,36 @@ impl TransitionAttemptId {
     }
 }
 
+/// The committed condition state of one runtime generation: the full immutable application
+/// catalog plus the condition evaluation the generation was built from.
+///
+/// Publication stamps only the graph generation; this state is carried intact so a
+/// transactional reload can re-evaluate conditions against the same catalog.
+#[derive(Clone, Debug)]
+pub struct AppConditionState {
+    catalog: Arc<AppRegistry>,
+    evaluation: AppConditionEvaluation,
+}
+
+impl AppConditionState {
+    pub(crate) fn new(catalog: Arc<AppRegistry>, evaluation: AppConditionEvaluation) -> Self {
+        Self {
+            catalog,
+            evaluation,
+        }
+    }
+
+    /// The full immutable application catalog, including conditionally disabled descriptors.
+    pub fn catalog(&self) -> &Arc<AppRegistry> {
+        &self.catalog
+    }
+
+    /// The condition evaluation this generation was built from.
+    pub fn evaluation(&self) -> &AppConditionEvaluation {
+        &self.evaluation
+    }
+}
+
 pub(crate) struct RuntimeGeneration {
     owner: Arc<()>,
     id: RuntimeGenerationId,
@@ -29,6 +61,7 @@ pub(crate) struct RuntimeGeneration {
     scope_plan: RuntimeScopePlan,
     resolved: Arc<[ComponentDescriptor]>,
     graph: Arc<EffectiveGraph>,
+    condition: Arc<AppConditionState>,
 }
 
 /// A complete prepared generation whose semantic ID is assigned only at commit.
@@ -38,6 +71,7 @@ pub(crate) struct PreparedRuntimeGeneration {
     scope_plan: RuntimeScopePlan,
     resolved: Arc<[ComponentDescriptor]>,
     graph: EffectiveGraph,
+    condition: Arc<AppConditionState>,
 }
 
 impl PreparedRuntimeGeneration {
@@ -47,6 +81,7 @@ impl PreparedRuntimeGeneration {
         scope_plan: RuntimeScopePlan,
         resolved: Arc<[ComponentDescriptor]>,
         graph: EffectiveGraph,
+        condition: Arc<AppConditionState>,
     ) -> Self {
         Self {
             root,
@@ -54,6 +89,7 @@ impl PreparedRuntimeGeneration {
             scope_plan,
             resolved,
             graph,
+            condition,
         }
     }
 
@@ -66,6 +102,7 @@ impl PreparedRuntimeGeneration {
             scope_plan: self.scope_plan,
             resolved: self.resolved,
             graph: Arc::new(self.graph.into_committed_generation(id)),
+            condition: self.condition,
         }
     }
 }
@@ -306,6 +343,15 @@ impl RuntimeView {
     /// The immutable effective dependency graph committed in this generation.
     pub fn effective_graph(&self) -> &Arc<EffectiveGraph> {
         &self.generation.graph
+    }
+
+    /// The committed condition state pinned by this generation.
+    #[allow(
+        dead_code,
+        reason = "used by the next transactional reload integration"
+    )]
+    pub(crate) fn condition(&self) -> &Arc<AppConditionState> {
+        &self.generation.condition
     }
 }
 
