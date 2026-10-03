@@ -88,6 +88,16 @@ impl ComponentRegistry {
                         // An override replaces the descriptor at its original position.
                         // Lifecycle hook ordering must not depend on HashMap iteration.
                         chosen[position] = *component;
+                    } else if new_manual
+                        && existing_manual
+                        && existing.id == component.id
+                        && existing.generation_snapshot.is_some()
+                        && component.generation_snapshot.is_none()
+                    {
+                        // A raw pre-built registration has stronger provenance than a
+                        // snapshot-capable factoryless catalog descriptor for the same
+                        // component. Preserve that active-seed policy for later transitions.
+                        chosen[position] = *component;
                     } else if new_manual == existing_manual && existing.id != component.id {
                         return Err(Error::DuplicateComponentType(
                             (component.ty.type_name)().to_string(),

@@ -75,6 +75,17 @@ pub trait Injectable: Clone + Send + Sync + 'static {
     /// Derives this handle from a stored slot. Called on every resolution — a
     /// snapshot for `Arc<T>`, a shared clone for `Dep<T>`, a plain clone otherwise.
     fn from_stored(stored: &Self::Stored) -> Self;
+
+    /// Creates storage for the same component instance in another runtime generation.
+    ///
+    /// The default rejects retention. Handles opt in only when they can guarantee that
+    /// the returned storage does not share generation-local mutable binding state with
+    /// `stored`. `Arc<T>` creates a fresh [`Live<T>`] cell around the current snapshot;
+    /// `Dep<T>` deliberately keeps the default because cloning it would share the cell.
+    #[doc(hidden)]
+    fn snapshot_stored(_: &Self::Stored) -> Option<Self::Stored> {
+        None
+    }
 }
 
 /// A shared, swappable cell holding the current `Arc<T>` instance — the interior
@@ -184,6 +195,10 @@ impl<T: ?Sized + Send + Sync + 'static> Injectable for Arc<T> {
 
     fn from_stored(stored: &Live<T>) -> Self {
         stored.snapshot()
+    }
+
+    fn snapshot_stored(stored: &Live<T>) -> Option<Live<T>> {
+        Some(Live::new(stored.snapshot()))
     }
 }
 
@@ -374,10 +389,31 @@ pub fn from_boxed<H: Injectable>(boxed: &BoxedComponent) -> Option<H> {
     boxed.value.downcast_ref::<H::Stored>().map(H::from_stored)
 }
 
-/// Hidden typed generation-snapshot adapter: reboxes an active component's stored
-/// representation into a fresh generation-local slot.
+/// Hidden typed generation-snapshot adapter and payload validator.
+#[derive(Clone, Copy)]
 #[doc(hidden)]
-pub type GenerationSnapshot = fn(&BoxedComponent) -> crate::Result<BoxedComponent>;
+pub struct GenerationSnapshot {
+    snapshot: fn(&BoxedComponent) -> crate::Result<BoxedComponent>,
+    validate: fn(&BoxedComponent) -> bool,
+}
+
+impl GenerationSnapshot {
+    pub(crate) fn snapshot(self, active: &BoxedComponent) -> crate::Result<BoxedComponent> {
+        (self.snapshot)(active)
+    }
+
+    pub(crate) fn validates(self, candidate: &BoxedComponent) -> bool {
+        (self.validate)(candidate)
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn for_test(
+        snapshot: fn(&BoxedComponent) -> crate::Result<BoxedComponent>,
+        validate: fn(&BoxedComponent) -> bool,
+    ) -> Self {
+        Self { snapshot, validate }
+    }
+}
 
 /// The generic generation-snapshot adapter for a typed component: recovers the
 /// handle from the active stored slot and boxes a *new* stored representation.
@@ -391,12 +427,20 @@ pub(crate) fn generation_snapshot_adapter<T: Component>(
         .downcast_ref::<<T::Handle as Injectable>::Stored>()
         .ok_or(crate::Error::SnapshotStorageMismatch { component: T::ID })?;
 
-    let handle = <T::Handle as Injectable>::from_stored(stored);
+    let candidate_stored = <T::Handle as Injectable>::snapshot_stored(stored)
+        .ok_or(crate::Error::SnapshotUnavailable { component: T::ID })?;
 
     Ok(BoxedComponent {
         ty: active.ty,
-        value: Box::new(<T::Handle as Injectable>::into_stored(handle)),
+        value: Box::new(candidate_stored),
     })
+}
+
+fn generation_snapshot_validates<T: Component>(candidate: &BoxedComponent) -> bool {
+    candidate
+        .value
+        .downcast_ref::<<T::Handle as Injectable>::Stored>()
+        .is_some()
 }
 
 impl ScopeStore {
@@ -960,6 +1004,13 @@ pub trait ComponentFactories {
 /// `Copy` so the registry can own a flat `Vec<ComponentDescriptor>` holding both
 /// link-time-collected descriptors and ones synthesized at runtime for
 /// manually-provided instances.
+///
+/// # Pre-1.0 descriptor migration
+///
+/// Handwritten literals must set [`generation_snapshot`](Self::generation_snapshot) to
+/// [`ComponentDescriptor::typed_snapshot::<T>()`] for a typed, retainable component or
+/// `None` for a raw/manual descriptor. Prefer [`of`](Self::of), [`manual`](Self::manual),
+/// or [`manual_of`](Self::manual_of); generated descriptors are updated automatically.
 #[derive(Clone, Copy)]
 pub struct ComponentDescriptor {
     pub id: &'static str,
@@ -996,7 +1047,7 @@ impl ComponentDescriptor {
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
-            generation_snapshot: Some(generation_snapshot_adapter::<T>),
+            generation_snapshot: Self::typed_snapshot::<T>(),
         }
     }
 
@@ -1039,7 +1090,7 @@ impl ComponentDescriptor {
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
-            generation_snapshot: Some(generation_snapshot_adapter::<T>),
+            generation_snapshot: Self::typed_snapshot::<T>(),
         }
     }
 
@@ -1048,7 +1099,10 @@ impl ComponentDescriptor {
     /// handwritten literals with custom identity or factory slices.
     #[doc(hidden)]
     pub const fn typed_snapshot<T: Component>() -> Option<GenerationSnapshot> {
-        Some(generation_snapshot_adapter::<T>)
+        Some(GenerationSnapshot {
+            snapshot: generation_snapshot_adapter::<T>,
+            validate: generation_snapshot_validates::<T>,
+        })
     }
 
     /// The factory the container should use: an explicit one if present (the default

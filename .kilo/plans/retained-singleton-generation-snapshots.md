@@ -4,7 +4,7 @@
 
 **Goal:** Allow an isolated candidate root to share explicitly retainable unchanged singleton instances with the active generation while giving each generation independent DI slots and candidate-local provider projections.
 
-**Architecture:** `ComponentDescriptor` carries a hidden typed generation-snapshot thunk. The thunk derives the component handle from active storage and re-boxes it into fresh generation-local storage (`Arc<T>` identity shared, `Live<T>` cell not shared). The app resolves `Retain` decisions from the pinned base root, applies explicit provenance policy to factoryless seeds, and keeps `RootResolver` generation-local.
+**Architecture:** `ComponentDescriptor` carries hidden typed generation-snapshot metadata. A handle must explicitly implement `Injectable::snapshot_stored`; `Arc<T>` creates a fresh `Live<T>` around the current snapshot, while `Dep<T>` remains unsupported so its mutable slot cannot cross generations. The app resolves `Retain` decisions from the exact pinned base `RuntimeView`, applies explicit provenance policy to factoryless seeds, and keeps `RootResolver` and `HookManager` generation-local.
 
 **Spec:** #209, #203 architecture comment; prerequisite for #206 integration.
 
@@ -14,13 +14,13 @@
 - Providers are re-erased from candidate concrete slots using candidate selection/ordinals.
 - Public user prebuilt instances remain unsupported and return `RestartRequired`.
 - Framework-owned clone-safe seeds are explicitly marked shareable; ownership is never inferred from IDs.
-- RootResolver is always recreated and attached to the candidate root.
+- RootResolver is always recreated and attached to the candidate root; HookManager is not retained and #206 must rebuild it per generation.
 - No hot update, static replacement factory, state export, or transition-local factory in this slice.
 
 ### Task 1: Typed component snapshot metadata
 
 - Add hidden `generation_snapshot` metadata to `ComponentDescriptor`.
-- Generated/typed descriptors use a generic adapter that calls `Injectable::from_stored` then `into_stored`.
+- Generated/typed descriptors use a generic adapter that calls the opt-in `Injectable::snapshot_stored`; handles without an isolation-safe implementation are rejected.
 - Plain `manual(...)` descriptors carry no adapter; add hidden typed `manual_of<T: Component>(...)` for framework seeds.
 - Update macro-generated and handwritten descriptors.
 - Tests: retained `Arc<T>` preserves `Arc::ptr_eq` but uses an independent `Live<T>` slot; by-value handles re-box correctly; mismatches are redacted errors.
@@ -35,10 +35,20 @@
 ### Task 3: App provenance and retained candidate preparation
 
 - Add private `SingletonSeedPolicy`/registry to application runtime assembly.
-- Mark directories, `Dir<K>`, shutdown handle, hook manager, and config reloader framework-shareable; RootResolver runtime-bound; public `with_component` and protocol/manual seeds unsupported by default.
-- Resolve plan `Retain` decisions directly from the pinned base root; remove unconditional retained-preparation rejection.
-- Return `RestartRequired::ManualInstanceUnsupported` for unsupported manual seeds.
-- Tests: mixed retain/reconstruct builds a complete root; framework builtins are present; user manual singleton requires restart; root-bound consumer behavior remains rejected.
+- Mark directories, `Dir<K>`, shutdown handle, and config reloader framework-shareable; RootResolver and HookManager runtime-bound; public `with_component` and protocol/manual seeds unsupported by default.
+- Resolve plan `Retain` decisions directly from the exact pinned base `RuntimeView`; remove unconditional retained-preparation rejection.
+- Return `RestartRequired` with `reason: RestartReason::ManualInstanceUnsupported` for unsupported manual seeds.
+- Tests: mixed retain/reconstruct builds a complete root; safe framework seeds snapshot while HookManager/RootResolver remain generation-local; user manual singleton requires restart; root-bound consumer behavior remains rejected.
+
+## Descriptor migration
+
+This is an intentional pre-1.0 source-breaking metadata addition. Downstream handwritten
+`ComponentDescriptor` literals must add either
+`generation_snapshot: ComponentDescriptor::typed_snapshot::<T>()` for typed components or
+`generation_snapshot: None` for non-retainable/manual descriptors. Constructor users
+(`of`, `manual`, `manual_of`) are updated automatically. The field remains public because
+downstream descriptor literals are currently a supported extension seam; #208 will replace
+literal ergonomics with explicit builders/macros.
 
 ### Task 4: Validation
 

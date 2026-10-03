@@ -134,6 +134,7 @@ impl std::fmt::Debug for FactoryIdentity {
 
 /// A complete immutable effective dependency graph derived without constructing components.
 pub struct EffectiveGraph {
+    identity: Arc<()>,
     generation: RuntimeGenerationId,
     nodes: BTreeMap<&'static str, EffectiveNode>,
     reverse: BTreeMap<&'static str, Box<[DependencyDemandId]>>,
@@ -230,6 +231,7 @@ impl EffectiveGraph {
             .into_boxed_slice();
 
         Ok(Self {
+            identity: Arc::new(()),
             generation,
             nodes,
             reverse,
@@ -240,6 +242,13 @@ impl EffectiveGraph {
 
     pub const fn generation(&self) -> RuntimeGenerationId {
         self.generation
+    }
+
+    /// Process-local identity used to bind prepared transition work to the exact active
+    /// graph instance rather than only its numeric generation.
+    #[doc(hidden)]
+    pub fn identity(&self) -> &Arc<()> {
+        &self.identity
     }
 
     /// Assigns the semantic generation allocated when this prepared graph is committed.

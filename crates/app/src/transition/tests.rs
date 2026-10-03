@@ -11,15 +11,17 @@ use upwell_core::{
 };
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, EffectiveGraph, Fresh, FromContainer, Injectable, Live, NodeAction,
-    ProviderDescriptor, RootResolver, ScopeContainer, ScopeRegistry, Singleton,
-    root_resolver_descriptor,
+    ComponentFactoryDescriptor, EffectiveGraph, EffectiveNodeRole, Fresh, FromContainer,
+    Injectable, Live, NodeAction, PlannedNode, ProviderDescriptor, RootResolver, ScopeContainer,
+    ScopeRegistry, Singleton, root_resolver_descriptor,
 };
+use upwell_hooks::HookManager;
 
 use super::{
     CandidateGraph, ComponentTransitionDecision, ComponentTransitionStrategy, RestartReason,
 };
-use crate::{AppRegistry, Error, ScopeTopology};
+use crate::runtime::{AppRuntime, RuntimeScopePlan};
+use crate::{AppRegistry, Error, RuntimeView, ScopeTopology};
 
 const ENABLED: ConfigFactId = ConfigFactId::new("test::Settings", "settings", "enabled");
 const SOURCE: upwell_core::DescriptorSource = upwell_core::descriptor_source!();
@@ -48,6 +50,57 @@ fn topology() -> crate::PreparedScopeTopology {
     ScopeTopology::empty()
         .prepare()
         .expect("empty topology validates")
+}
+
+#[test]
+fn retained_live_rebinding_requires_restart_until_bindings_can_be_applied() {
+    let candidate = CandidateGraph::prepare(
+        RuntimeGenerationId::INITIAL,
+        &AppRegistry::default(),
+        &topology(),
+    )
+    .expect("empty candidate validates");
+    let node = PlannedNode {
+        component: "live-consumer",
+        role: EffectiveNodeRole::Singleton,
+        action: NodeAction::RebindLive,
+        reasons: Box::new([]),
+    };
+
+    let error =
+        super::validate_decision(&candidate, &node, Some(ComponentTransitionStrategy::Retain))
+            .expect_err("live binding transitions are not applied yet");
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            component: "live-consumer",
+            required: Some(NodeAction::RebindLive),
+            reason: RestartReason::LiveRebindUnsupported,
+        })
+    ));
+}
+
+fn runtime_view(
+    root: Arc<ScopeContainer>,
+    scopes: Arc<ScopeRegistry>,
+    resolved: Vec<ComponentDescriptor>,
+    graph: EffectiveGraph,
+) -> RuntimeView {
+    AppRuntime::new(
+        Arc::from("transition-test"),
+        root,
+        scopes,
+        RuntimeScopePlan::new(
+            Arc::new(topology()),
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+        ),
+        Arc::from(resolved),
+        graph,
+        HookManager::new(Vec::new()),
+    )
+    .view()
 }
 
 #[test]
@@ -823,11 +876,12 @@ async fn mixed_retain_and_reconstruct_builds_a_complete_candidate_root() {
     let active_instance = Arc::new(Retainable {
         label: "active-instance",
     });
+    let active_scopes = scope_registry(&active.components, active.providers.clone());
     let active_root = ScopeContainer::build_root(
         &active.components,
         vec![seed_retainable(&active_instance), seed_root_resolver()],
         ResolverSet::new(),
-        scope_registry(&active.components, active.providers.clone()),
+        Arc::clone(&active_scopes),
     )
     .await
     .expect("active root builds");
@@ -835,6 +889,24 @@ async fn mixed_retain_and_reconstruct_builds_a_complete_candidate_root() {
         .get::<RootResolver>()
         .expect("active resolver is seeded")
         .attach(&active_root);
+    let foreign_graph = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &active.component_registry(),
+        |_, _| true,
+    )
+    .expect("foreign graph validates");
+    let foreign = runtime_view(
+        Arc::clone(&active_root),
+        Arc::clone(&active_scopes),
+        active.components.clone(),
+        foreign_graph,
+    );
+    let active = runtime_view(
+        Arc::clone(&active_root),
+        active_scopes,
+        active.components.clone(),
+        active_graph,
+    );
 
     let mut candidate = AppRegistry::default();
     candidate.components.extend([
@@ -847,7 +919,7 @@ async fn mixed_retain_and_reconstruct_builds_a_complete_candidate_root() {
         .expect("candidate graph validates");
     let resolved = candidate
         .resolve_transition(
-            &active_graph,
+            active.effective_graph(),
             [ComponentTransitionDecision {
                 component: "replaceable",
                 strategy: ComponentTransitionStrategy::Reconstruct,
@@ -855,8 +927,17 @@ async fn mixed_retain_and_reconstruct_builds_a_complete_candidate_root() {
         )
         .expect("mixed retain and reconstruct resolves");
 
+    let Err(foreign_error) = resolved
+        .build_candidate_root_from_active(&candidate, &foreign, ResolverSet::new())
+        .await
+    else {
+        panic!("a foreign runtime view cannot supply retained instances");
+    };
+
+    assert!(matches!(foreign_error, Error::StaleGraphCandidate(_)));
+
     let (root, scopes) = resolved
-        .build_candidate_root_from_active(&candidate, &active_root, ResolverSet::new())
+        .build_candidate_root_from_active(&candidate, &active, ResolverSet::new())
         .await
         .expect("retained candidate root builds");
 
@@ -939,6 +1020,7 @@ async fn raw_manual_singleton_requires_restart() {
         |_, _| true,
     )
     .expect("active graph validates");
+    let active_scopes = scope_registry(&active.components, Vec::new());
     let active_root = ScopeContainer::build_root(
         &active.components,
         vec![BoxedComponent {
@@ -946,10 +1028,16 @@ async fn raw_manual_singleton_requires_restart() {
             value: Box::new(8u8),
         }],
         ResolverSet::new(),
-        scope_registry(&active.components, Vec::new()),
+        Arc::clone(&active_scopes),
     )
     .await
     .expect("active root builds");
+    let active = runtime_view(
+        Arc::clone(&active_root),
+        active_scopes,
+        active.components.clone(),
+        active_graph,
+    );
 
     let mut candidate = AppRegistry::default();
     candidate
@@ -959,7 +1047,7 @@ async fn raw_manual_singleton_requires_restart() {
         .expect("candidate graph validates");
     let resolved = candidate
         .resolve_transition(
-            &active_graph,
+            active.effective_graph(),
             [ComponentTransitionDecision {
                 component: "replaceable",
                 strategy: ComponentTransitionStrategy::Reconstruct,
@@ -968,7 +1056,7 @@ async fn raw_manual_singleton_requires_restart() {
         .expect("the unchanged manual component receives a retain disposition");
 
     let Err(error) = resolved
-        .build_candidate_root_from_active(&candidate, &active_root, ResolverSet::new())
+        .build_candidate_root_from_active(&candidate, &active, ResolverSet::new())
         .await
     else {
         panic!("a raw manual singleton has no transition contract");
