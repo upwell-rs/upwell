@@ -130,6 +130,7 @@ static DIAGNOSTIC_CONSUMER: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: diagnostic_consumer_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 static DIAGNOSTIC_DEPENDENCY: ComponentDescriptor = ComponentDescriptor {
@@ -140,6 +141,7 @@ static DIAGNOSTIC_DEPENDENCY: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 static DIAGNOSTIC_PROVIDER_CONSUMER: ComponentDescriptor = ComponentDescriptor {
@@ -150,6 +152,7 @@ static DIAGNOSTIC_PROVIDER_CONSUMER: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: diagnostic_provider_consumer_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 static DIAGNOSTIC_PROVIDER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
@@ -160,6 +163,7 @@ static DIAGNOSTIC_PROVIDER_COMPONENT: ComponentDescriptor = ComponentDescriptor 
     condition: None,
     factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 fn erase_diagnostic_provider(_: &BoxedComponent) -> BoxedComponent {
@@ -841,6 +845,7 @@ static COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 static SNAPSHOT_COMPONENT: ComponentDescriptor = ComponentDescriptor {
@@ -851,6 +856,7 @@ static SNAPSHOT_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: snapshot_factories,
     hooks: snapshot_hooks,
+    generation_snapshot: None,
 };
 
 static ALTERNATE_COMPONENT: ComponentDescriptor = ComponentDescriptor::manual(
@@ -946,6 +952,7 @@ static RELOAD_HOOK_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: no_component_factories,
     hooks: reload_hooks,
+    generation_snapshot: None,
 };
 
 static AMBIGUOUS_CONFIG_HOOKS: [upwell_hooks::HookDescriptor; 1] =
@@ -984,6 +991,7 @@ static AMBIGUOUS_CONFIG_HOOK_COMPONENT: ComponentDescriptor = ComponentDescripto
     condition: None,
     factories: no_component_factories,
     hooks: ambiguous_config_hooks,
+    generation_snapshot: None,
 };
 
 static MISSING_CONFIG_HOOK_COMPONENT: ComponentDescriptor = ComponentDescriptor {
@@ -994,6 +1002,7 @@ static MISSING_CONFIG_HOOK_COMPONENT: ComponentDescriptor = ComponentDescriptor 
     condition: None,
     factories: no_component_factories,
     hooks: missing_config_hooks,
+    generation_snapshot: None,
 };
 
 static CONFIG_CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
@@ -1004,6 +1013,7 @@ static CONFIG_CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: config_consumer_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 fn erase_first_provider(component: &BoxedComponent) -> BoxedComponent {
@@ -1115,6 +1125,7 @@ static PROVIDER_CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: provider_consumer_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 static DISPLACED_COMPONENT: ComponentDescriptor = ComponentDescriptor::manual(
     "protocol-projected-component",

@@ -76,6 +76,7 @@ fn component<T: 'static>(
         condition,
         factories: factory,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 

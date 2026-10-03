@@ -252,6 +252,7 @@ fn replaceable(factories: fn() -> &'static [ComponentFactoryDescriptor]) -> Comp
         condition: None,
         factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 
@@ -488,6 +489,7 @@ fn unchanged_root_resolver_consumers_require_reconstruction() {
         condition: None,
         factories: root_bound_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     };
     let mut active = AppRegistry::default();
     active.components.extend([
@@ -629,6 +631,7 @@ fn fresh_holder(factories: fn() -> &'static [ComponentFactoryDescriptor]) -> Com
         condition: None,
         factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 
@@ -641,6 +644,7 @@ fn transient_seed() -> ComponentDescriptor {
         condition: None,
         factories: transient_seed_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 

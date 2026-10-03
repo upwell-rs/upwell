@@ -84,6 +84,7 @@ static BOUNDARY_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: boundary_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 /// Protocol definition recording preparation calls.

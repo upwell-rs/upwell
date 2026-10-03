@@ -387,6 +387,7 @@ mod tests {
             condition: None,
             factories: config_factories,
             hooks: upwell_hooks::no_hooks,
+            generation_snapshot: None,
         }
     }
 

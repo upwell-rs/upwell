@@ -180,6 +180,7 @@ pub fn topic_bus_descriptor<P: PubSubProtocol>() -> ComponentDescriptor {
         condition: None,
         factories: topic_bus_factories::<P>,
         hooks: no_hooks,
+        generation_snapshot: ComponentDescriptor::typed_snapshot::<TopicBus<P>>(),
     }
 }
 

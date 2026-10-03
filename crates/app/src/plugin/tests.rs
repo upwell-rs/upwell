@@ -127,6 +127,7 @@ static PROTOCOL_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: protocol_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 static APPLICATION_COMPONENT: ComponentDescriptor = ComponentDescriptor {
@@ -137,6 +138,7 @@ static APPLICATION_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: application_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 impl upwell_core::Descriptor<ComponentDescriptor> for ApplicationComponent {
