@@ -19,7 +19,7 @@ use upwell_hooks::{HookKind, HookManager, HookParam};
 
 use crate::ConfigValue;
 
-use super::{Cfg, CfgNext, ConfigError, ConfigManager, ConfigProperties};
+use super::{Cfg, CfgNext, ConfigError, ConfigManager, ConfigProperties, ConfigStore};
 
 /// The config-reload hook kind: a `#[hook(ConfigReload)]` method runs when a config it
 /// targets is reloaded, receiving the proposed value(s) as [`CfgNext<T>`] and returning a
@@ -52,12 +52,20 @@ pub struct ReloadProposal {
     staged: Vec<StagedConfig>,
 }
 
-/// One binding's value staged into a [`ReloadProposal`] — its type, path, and erased value.
+/// One binding's value staged into a [`ReloadProposal`] — its type, path, erased value,
+/// and an internal factory seeding the binding's generation-local candidate `Cfg`.
 #[derive(Clone)]
 pub struct StagedConfig {
     type_id: TypeId,
     path: Arc<str>,
     value: Arc<dyn Any + Send + Sync>,
+    /// Type-erased candidate seed, built where the binding's type is known: each call
+    /// creates a fresh live cell (never aliasing an active one) holding the staged
+    /// value with the snapshot the binding would hold after commit. Carried here rather
+    /// than on [`ReloadableConfig`] because `StagedConfig` cannot be constructed
+    /// downstream, so a trait method taking or returning it would be unimplementable
+    /// for external implementers.
+    seed: Arc<dyn Fn() -> BoxedComponent + Send + Sync>,
 }
 
 impl StagedConfig {
@@ -76,6 +84,13 @@ impl StagedConfig {
     /// bindings.
     pub fn value(&self) -> &dyn Any {
         self.value.as_ref()
+    }
+
+    /// Seeds a fresh, generation-local candidate `Cfg` for this binding. Crate-internal:
+    /// the typed factory is created by the reloadable slot (which knows the binding's
+    /// type) and travels with the staged entry.
+    pub(crate) fn candidate_seed(&self) -> BoxedComponent {
+        (self.seed)()
     }
 }
 
@@ -198,13 +213,12 @@ pub struct ConfigReloadReport {
     pub hooks: Vec<ComponentHookReport>,
 }
 
-/// A re-deserialized value ready to publish into its slot, plus the staged proposal entry
-/// it contributes. Produced in the reload's prepare step; committed only after every hook
-/// accepts.
+/// A re-deserialized value ready to publish into its slot, plus the complete staged
+/// proposal entry it contributes — carrying the binding's candidate seed — and the
+/// committable swap. Produced in the reload's prepare step; committed only after every
+/// hook accepts.
 pub struct PreparedSwap {
-    type_id: TypeId,
-    path: Arc<str>,
-    staged: Arc<dyn Any + Send + Sync>,
+    staged: StagedConfig,
     commit: Box<dyn FnOnce() + Send>,
 }
 
@@ -288,12 +302,26 @@ impl<T: ConfigProperties> ReloadableConfig for ConfigSlot<T> {
         let replacement = Arc::new(value);
         let staged: Arc<dyn Any + Send + Sync> = replacement.clone();
         let committed = replacement.clone();
+        let path: Arc<str> = Arc::from(self.path.as_str());
+        let seed_snapshot = next_snapshot.clone();
         let cfg = self.cfg.clone();
 
-        Ok(Some(PreparedSwap {
+        let staged_config = StagedConfig {
             type_id: TypeId::of::<T>(),
-            path: Arc::from(self.path.as_str()),
-            staged,
+            path: path.clone(),
+            value: staged,
+            seed: Arc::new(move || BoxedComponent {
+                ty: TypeDescriptor::of::<T>(T::NAME),
+                value: Box::new(Cfg::from_shared(
+                    replacement.clone(),
+                    path.clone(),
+                    seed_snapshot.clone(),
+                )),
+            }),
+        };
+
+        Ok(Some(PreparedSwap {
+            staged: staged_config,
             commit: Box::new(move || {
                 cfg.replace(committed);
                 cfg.replace_snapshot(next_snapshot);
@@ -302,10 +330,22 @@ impl<T: ConfigProperties> ReloadableConfig for ConfigSlot<T> {
     }
 
     fn stage_current(&self) -> StagedConfig {
+        let value = self.cfg.snapshot();
+        let path: Arc<str> = Arc::from(self.path.as_str());
+        let snapshot = self.cfg.committed_snapshot();
+
         StagedConfig {
             type_id: TypeId::of::<T>(),
-            path: Arc::from(self.path.as_str()),
-            value: self.cfg.snapshot(),
+            path: path.clone(),
+            value: value.clone(),
+            seed: Arc::new(move || BoxedComponent {
+                ty: TypeDescriptor::of::<T>(T::NAME),
+                value: Box::new(Cfg::from_shared(
+                    value.clone(),
+                    path.clone(),
+                    snapshot.clone(),
+                )),
+            }),
         }
     }
 }
@@ -461,9 +501,10 @@ impl ConfigReloader {
     ///
     /// The returned [`StagedReload`] is inert until [`StagedReload::commit`] is called,
     /// so a caller can run its own validation, hooks, or graph preparation between the
-    /// two. The caller is responsible for serializing stage → commit against
-    /// [`reload`](Self::reload) (e.g. by holding [`lock_reload`](Self::lock_reload)
-    /// across the whole transaction).
+    /// two — over [`StagedReload::candidate_store`], which re-seeds every binding into
+    /// fresh cells without touching the active ones. The caller is responsible for
+    /// serializing stage → commit against [`reload`](Self::reload) (e.g. by holding
+    /// [`lock_reload`](Self::lock_reload) across the whole transaction).
     #[allow(clippy::result_large_err)]
     #[allow(clippy::result_large_err)]
     pub fn stage(&self) -> Result<StagedReload, ConfigReloadError> {
@@ -490,6 +531,7 @@ impl ConfigReloader {
             let mut prepared = Vec::new();
             let mut changed = Vec::new();
             let mut staged = Vec::new();
+            let mut candidate = ConfigStore::default();
 
             for slot in &self.inner.slots {
                 let swap = slot.prepare(&manager, &new_root).map_err(|source| {
@@ -501,20 +543,22 @@ impl ConfigReloader {
                 })?;
 
                 let Some(swap) = swap else {
+                    let staged_entry = slot.stage_current();
+
+                    candidate.insert(slot.path().to_string(), staged_entry.candidate_seed());
+
                     if stage_unchanged {
-                        staged.push(slot.stage_current());
+                        staged.push(staged_entry);
                     }
 
                     continue;
                 };
 
                 if stage_unchanged {
-                    staged.push(StagedConfig {
-                        type_id: swap.type_id,
-                        path: swap.path.clone(),
-                        value: swap.staged.clone(),
-                    });
+                    staged.push(swap.staged.clone());
                 }
+
+                candidate.insert(slot.path().to_string(), swap.staged.candidate_seed());
 
                 changed.push(ChangedBinding {
                     path: slot.path().to_string(),
@@ -527,6 +571,7 @@ impl ConfigReloader {
                 changed,
                 staged,
                 prepared,
+                candidate: Arc::new(candidate),
                 new_root,
                 reloader: self.clone(),
             })
@@ -537,12 +582,14 @@ impl ConfigReloader {
 }
 
 /// A prepared-but-uncommitted reload: the changed bindings, the staged proposal values,
-/// and the committable swaps. Produced by [`ConfigReloader::stage`]; nothing is published
-/// until [`commit`](Self::commit) is called.
+/// the committable swaps, and the generation-local candidate store. Produced by
+/// [`ConfigReloader::stage`]; nothing is published until [`commit`](Self::commit) is
+/// called.
 pub struct StagedReload {
     changed: Vec<ChangedBinding>,
     staged: Vec<StagedConfig>,
     prepared: Vec<PreparedSwap>,
+    candidate: Arc<ConfigStore>,
     new_root: ConfigValue,
     reloader: ConfigReloader,
 }
@@ -558,6 +605,14 @@ impl StagedReload {
     /// extraction.
     pub fn staged(&self) -> &[StagedConfig] {
         &self.staged
+    }
+
+    /// The generation-local candidate store: every binding — changed and unchanged —
+    /// re-seeded into fresh `Cfg` cells that do not alias the active ones, holding the
+    /// values [`commit`](Self::commit) would publish. Built during
+    /// [`stage`](ConfigReloader::stage), so creation is infallible here.
+    pub fn candidate_store(&self) -> Arc<ConfigStore> {
+        Arc::clone(&self.candidate)
     }
 
     /// Whether no binding changed. An empty staged reload has nothing to commit.

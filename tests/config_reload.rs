@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use tempfile::TempDir;
+use upwell::ContainerConfigExt;
 use upwell::config::Toml;
 use upwell::dirs::{Config, DirectoriesManager};
 use upwell::{App, Cfg, ConfigManager, component, config};
@@ -206,5 +207,85 @@ async fn staged_reload_commits_only_when_explicitly_committed() {
         consumer.other().get().value,
         100,
         "the unchanged binding keeps its value after the commit"
+    );
+}
+
+/// A staged reload exposes a generation-local candidate store: every binding — changed
+/// and unchanged — is re-seeded into fresh `Cfg` cells holding the values the reload
+/// would publish, while the active handles and the active store keep the old values
+/// until an explicit commit. Dropping the staged reload publishes nothing.
+#[tokio::test]
+async fn staged_candidate_store_resolves_proposed_values_without_touching_active_handles() {
+    let root = temp_config_dir();
+    let dirs = DirectoriesManager::from_path(root.path().to_path_buf());
+    let config_dir = dirs.dir::<Config>();
+    let config_file = config_dir.path().join("application.toml");
+
+    fs::create_dir_all(config_dir.path()).expect("create config subdir");
+    fs::write(&config_file, "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n").expect("write config");
+
+    let manager =
+        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
+            .expect("load config");
+
+    let daemon = App::<()>::builder("config-candidate-store-test")
+        .config_source(manager)
+        .auto_discover()
+        .build()
+        .await
+        .expect("daemon builds");
+
+    let consumer = daemon
+        .container()
+        .get::<Consumer>()
+        .expect("Consumer constructed");
+    let reloader = daemon.config_reloader();
+
+    fs::write(&config_file, "[svc]\nvalue = 2\n\n[other]\nvalue = 100\n").expect("rewrite config");
+
+    let staged = reloader.stage().expect("staging after the source change");
+    let candidate = staged.candidate_store();
+
+    assert_eq!(
+        candidate
+            .resolve_path::<Cfg<SvcCfg>>("svc")
+            .expect("candidate store resolves the changed binding")
+            .get()
+            .value,
+        2,
+        "the candidate store resolves the proposed value for the changed binding"
+    );
+    assert_eq!(
+        candidate
+            .resolve_path::<Cfg<OtherCfg>>("other")
+            .expect("candidate store resolves the unchanged binding")
+            .get()
+            .value,
+        100,
+        "the candidate store contains the unchanged binding at its current value"
+    );
+
+    assert_eq!(
+        consumer.svc().get().value,
+        1,
+        "the active handle keeps the old value while staged"
+    );
+    assert_eq!(
+        daemon
+            .container()
+            .config::<SvcCfg>("svc")
+            .expect("active store resolves svc")
+            .get()
+            .value,
+        1,
+        "the active store still resolves the old value while staged"
+    );
+
+    drop(staged);
+
+    assert_eq!(
+        consumer.svc().get().value,
+        1,
+        "dropping the staged reload publishes nothing"
     );
 }

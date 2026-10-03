@@ -52,8 +52,9 @@ impl ConfigStore {
         Ok((store, slots))
     }
 
-    /// Records one bound value under its type and path.
-    fn insert(&mut self, path: String, seed: BoxedComponent) {
+    /// Records one bound value under its type and path. Also how the reload layer
+    /// assembles a generation-local candidate store from freshly seeded `Cfg` cells.
+    pub(crate) fn insert(&mut self, path: String, seed: BoxedComponent) {
         let type_id = seed.ty.type_id;
 
         self.by_type.entry(type_id).or_default().insert(path, seed);

@@ -114,8 +114,19 @@ impl<T: Send + Sync + 'static> Cfg<T> {
         path: impl Into<Arc<str>>,
         committed_snapshot: source::ConfigSnapshot,
     ) -> Self {
+        Self::from_shared(Arc::new(value), path, committed_snapshot)
+    }
+
+    /// Wraps an already-shared value with the property path it was bound at — the seam
+    /// for seeding a generation-local candidate handle from a staged snapshot without
+    /// re-serializing. Each call creates an independent live cell.
+    pub(crate) fn from_shared(
+        value: Arc<T>,
+        path: impl Into<Arc<str>>,
+        committed_snapshot: source::ConfigSnapshot,
+    ) -> Self {
         Self {
-            live: Live::new(Arc::new(value)),
+            live: Live::new(value),
             path: path.into(),
             committed_snapshot: Arc::new(Mutex::new(committed_snapshot)),
         }
