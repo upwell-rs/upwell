@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use upwell_core::{ResolverSet, Scope, ScopeId, StaticScope, TypeDescriptor};
-use upwell_di::{BoxedComponent, ScopeContainer, ScopeRegistry};
+use upwell_di::{BoxedComponent, EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
 use super::*;
@@ -65,6 +65,18 @@ impl Scope for TestScope {
     }
 }
 
+fn empty_condition() -> Arc<AppConditionState> {
+    let registry = crate::AppRegistry::default();
+    let evaluation = registry
+        .evaluate_conditions(
+            [],
+            &upwell_di::ConditionFactSnapshot::new([]).expect("empty snapshot validates"),
+        )
+        .expect("empty evaluation succeeds");
+
+    Arc::new(AppConditionState::new(Arc::new(registry), evaluation))
+}
+
 async fn build_runtime(
     seed_destinations: HashMap<TypeId, SeedDestination>,
 ) -> (AppRuntime, Arc<ScopeRegistry>) {
@@ -85,8 +97,7 @@ async fn build_runtime(
         |_, _| true,
     )
     .expect("empty graph validates");
-    let runtime = AppRuntime::new(
-        Arc::from("test"),
+    let generation = PreparedRuntimeGeneration::new(
         root,
         Arc::clone(&registry),
         RuntimeScopePlan::new(
@@ -99,8 +110,9 @@ async fn build_runtime(
         ),
         Arc::from([]),
         graph,
-        HookManager::new(Vec::new()),
+        empty_condition(),
     );
+    let runtime = AppRuntime::new(Arc::from("test"), generation, HookManager::new(Vec::new()));
 
     (runtime, registry)
 }
@@ -298,6 +310,7 @@ async fn nested_opening_inherits_its_parent_generation_after_publication() {
         candidate_view.scope_plan().clone(),
         Arc::clone(candidate_view.resolved_components()),
         candidate_graph,
+        Arc::clone(candidate_view.condition()),
     );
 
     let committed = transition.publish(prepared).expect("candidate publishes");
