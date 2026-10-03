@@ -11,7 +11,7 @@
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use upwell_core::{Cardinality, DependencyDescriptor, TypeDescriptor};
 use upwell_di::{BoxedComponent, Injectable};
@@ -364,7 +364,11 @@ pub struct ConfigReloader {
 struct ReloaderInner {
     manager: Mutex<ConfigManager>,
     slots: Vec<Box<dyn ReloadableConfig>>,
-    hooks: HookManager,
+    /// The hook manager legacy reloads run against: the startup generation's manager,
+    /// replaced with the just-published generation's manager at every transactional
+    /// commit. Cloned out per reload under the serialization lease; the lock is never
+    /// held across an await.
+    hooks: RwLock<HookManager>,
     generation: AtomicU64,
     /// Serializes whole reloads. The prepare and commit phases each take the `manager`
     /// lock briefly (and release it so hooks can `await`), so without this two concurrent
@@ -374,7 +378,9 @@ struct ReloaderInner {
 
 impl ConfigReloader {
     /// Builds a reloader over the manager, the reloadable slots of every bound config
-    /// (sharing their live cells), and the hook manager that fires reload hooks.
+    /// (sharing their live cells), and the initial hook manager that fires reload
+    /// hooks. A transactional commit replaces the manager with its generation's (see
+    /// [`install_hook_manager`](Self::install_hook_manager)).
     pub fn new(
         manager: ConfigManager,
         slots: Vec<Box<dyn ReloadableConfig>>,
@@ -384,7 +390,7 @@ impl ConfigReloader {
             inner: Arc::new(ReloaderInner {
                 manager: Mutex::new(manager),
                 slots,
-                hooks,
+                hooks: RwLock::new(hooks),
                 generation: AtomicU64::new(0),
                 in_progress: tokio::sync::Mutex::new(()),
             }),
@@ -399,6 +405,33 @@ impl ConfigReloader {
     /// Advances the reload generation, returning the new value.
     fn advance_generation(&self) -> u64 {
         self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Snapshots the current hook manager. Cheap (an `Arc` clone) and synchronous, so
+    /// the internal lock is never held across an await; callers take the snapshot under
+    /// the reload serialization lease, which excludes a concurrent transactional commit
+    /// replacing the manager mid-reload.
+    fn current_hook_manager(&self) -> HookManager {
+        self.inner
+            .hooks
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Replaces the hook manager legacy reloads run against. Synchronous and infallible.
+    ///
+    /// Framework-internal seam: the app runtime's terminal commit installs the
+    /// just-published generation's manager while both of its serializers are held, so
+    /// direct reloads and watch/signal triggers run the current generation's hooks
+    /// against the current root.
+    #[doc(hidden)]
+    pub fn install_hook_manager(&self, hooks: HookManager) {
+        *self
+            .inner
+            .hooks
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = hooks;
     }
 
     /// A snapshot of the config source files, in merge order — the inputs a file watcher
@@ -426,6 +459,10 @@ impl ConfigReloader {
     /// affected `#[hook(ConfigReload)]` hooks, and — if every binding re-binds and every
     /// hook accepts — commits the new values into their shared slots. On any failure
     /// nothing is published and the live values are untouched.
+    ///
+    /// Hooks run against a snapshot of the current hook manager taken under the reload
+    /// serialization lease — the manager the last transactional commit installed — so a
+    /// newly activated generation's hooks run and removed generations' hooks do not.
     #[allow(clippy::result_large_err)]
     pub async fn reload(&self) -> Result<ConfigReloadReport, ConfigReloadError> {
         // Serialize whole reloads so the prepare → hooks → commit phases are atomic with
@@ -433,8 +470,11 @@ impl ConfigReloader {
         // one's prepare and commit and have it overwritten by this one's stale `adopt`.
         let _in_progress = self.inner.in_progress.lock().await;
 
-        // If nothing listens for config_reload, skip building proposals entirely (O(1)).
-        let run_hooks = self.inner.hooks.has::<ConfigReload>();
+        // Snapshot the current manager under the lease, then release the internal lock
+        // before any await. If nothing listens for config_reload, skip building proposals
+        // entirely (O(1)).
+        let hook_manager = self.current_hook_manager();
+        let run_hooks = hook_manager.has::<ConfigReload>();
 
         let staged = self.stage_with(run_hooks)?;
         let changed = staged.changed.clone();
@@ -453,7 +493,7 @@ impl ConfigReloader {
 
         // Phase 2 (hooks): run every config_reload hook that targets a changed path. Any
         // hook error aborts — the staged swaps are dropped, so nothing is committed.
-        let hooks = staged.run_config_reload_hooks(&self.inner.hooks).await?;
+        let hooks = staged.run_config_reload_hooks(&hook_manager).await?;
 
         // Phase 3 (commit): every binding re-bound and every hook accepted. The commit
         // publishes the swaps, adopts the re-read tree, and advances (and returns) the

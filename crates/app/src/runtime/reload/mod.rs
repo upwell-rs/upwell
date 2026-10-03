@@ -17,17 +17,19 @@
 //!
 //! At the terminal commit, the validated candidate becomes the authoritative runtime
 //! generation first, then the legacy live config slots synchronously commit while both
-//! leases remain held. An unchanged source is a no-op: it moves neither generation nor
-//! root. A pinned [`RuntimeView`](crate::RuntimeView) consistently pins one generation's
-//! root, graph, scopes, condition state, and hook catalog, but it does not freeze
-//! separately held legacy live [`Cfg<T>`] cells. Those cells remain per-slot atomic at
-//! commit; no atomicity across handles is promised.
+//! leases remain held, and the config reloader's compatibility hook manager is replaced
+//! with the published generation's. An unchanged source is a no-op: it moves neither
+//! generation nor root. A pinned [`RuntimeView`](crate::RuntimeView) consistently pins
+//! one generation's root, graph, scopes, condition state, and hook catalog, but it does
+//! not freeze separately held legacy live [`Cfg<T>`] cells. Those cells remain per-slot
+//! atomic at commit; no atomicity across handles is promised.
 //!
 //! [`Cfg<T>`]: upwell_config::Cfg
 //!
-//! [`ConfigReloader::reload`] remains a config-only compatibility operation. Watch and
-//! signal triggers also continue to call it until #211; application graph transitions
-//! must use [`AppRuntime::reload_config`].
+//! [`ConfigReloader::reload`] remains a config-only compatibility operation: it runs the
+//! current generation's hooks against the current root, but does not transition the
+//! graph. Watch and signal triggers also continue to call it until #211; application
+//! graph transitions must use [`AppRuntime::reload_config`].
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -73,10 +75,12 @@ impl AppRuntime {
     /// including configuration values.
     ///
     /// The terminal commit publishes the authoritative runtime generation first, then
-    /// synchronously commits legacy live config slots while both leases remain held.
-    /// Unlike [`ConfigReloader::reload`], which is config-only compatibility behavior,
-    /// this method is required for application graph transitions. Watch and signal
-    /// triggers continue to use `ConfigReloader::reload` until #211.
+    /// synchronously commits legacy live config slots and installs the published
+    /// generation's hook manager into the [`ConfigReloader`] while both leases remain
+    /// held — so legacy reloads run the current generation's hooks against the current
+    /// root. Unlike [`ConfigReloader::reload`], which is config-only compatibility
+    /// behavior, this method is required for application graph transitions. Watch and
+    /// signal triggers continue to use `ConfigReloader::reload` until #211.
     ///
     /// An unchanged source is a true no-op: no evaluation, construction, hooks, runtime
     /// or config generation movement, or root replacement.
@@ -181,6 +185,12 @@ impl AppRuntime {
         let config_generation = Cell::new(0);
         let view = commit.commit_with(|| {
             let generation = staged.commit();
+
+            // Install the just-published generation's hook manager — the same manager
+            // seeded in the candidate root — while both serializers remain held, so
+            // legacy reloads (direct calls and watch/signal triggers) run the current
+            // generation's hooks against the current root.
+            self.reloader.install_hook_manager(hook_manager);
 
             config_generation.set(generation);
         });

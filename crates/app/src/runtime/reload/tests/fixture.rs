@@ -1,6 +1,8 @@
 //! Shared fixture for the transactional reload tests: a file-backed app with one
 //! condition-gated probe component whose factory injects `Cfg<T>` and whose
-//! `ConfigReload` hook records the proposed value.
+//! `ConfigReload` hook resolves its `&self` receiver through the resolver context (as
+//! the `#[hook]` macro generates) and records the proposed value plus the receiver it
+//! resolved.
 //!
 //! The factory and hook honor shared controls so a test can inject a failure or a
 //! cancellation point at a specific stage of the transaction. Cross-await controls are
@@ -24,11 +26,12 @@ use upwell_config::{
 };
 use upwell_core::{
     ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
-    ConfigFactDescriptor, ConfigFactId, DependencyDescriptor, ResolverCtx, TypeDescriptor,
+    ConfigFactDescriptor, ConfigFactId, DependencyDescriptor, ResolverCtx, ResolverCtxExt,
+    TypeDescriptor,
 };
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, FromContainer, Injectable, Singleton,
+    ComponentFactoryDescriptor, ComponentSource, FromContainer, Injectable, Singleton,
 };
 use upwell_hooks::{HookDescriptor, HookKind, HookParam};
 
@@ -47,6 +50,9 @@ static HOOK_CALLS: AtomicUsize = AtomicUsize::new(0);
 static STAGE_ENTRIES: AtomicUsize = AtomicUsize::new(0);
 
 static PROPOSED_TOKENS: tokio::sync::Mutex<Vec<i64>> = tokio::sync::Mutex::const_new(Vec::new());
+/// The `observed` token of the receiver each hook run resolved from its manager's
+/// resolver context — the generation whose root the run resolved through.
+static RECEIVER_TOKENS: tokio::sync::Mutex<Vec<i64>> = tokio::sync::Mutex::const_new(Vec::new());
 static FACTORY_TOKENS: tokio::sync::Mutex<Vec<i64>> = tokio::sync::Mutex::const_new(Vec::new());
 static STAGED_TOKENS: std::sync::Mutex<Vec<i64>> = std::sync::Mutex::new(Vec::new());
 
@@ -84,6 +90,7 @@ pub(super) async fn reset_controls() {
     STAGE_ENTRIES.store(0, Ordering::SeqCst);
 
     *PROPOSED_TOKENS.lock().await = Vec::new();
+    *RECEIVER_TOKENS.lock().await = Vec::new();
     *FACTORY_TOKENS.lock().await = Vec::new();
     STAGED_TOKENS
         .lock()
@@ -109,6 +116,11 @@ pub(super) fn hook_calls() -> usize {
 
 pub(super) async fn proposed_tokens() -> Vec<i64> {
     PROPOSED_TOKENS.lock().await.clone()
+}
+
+/// The receiver token each hook run resolved, in run order.
+pub(super) async fn receiver_tokens() -> Vec<i64> {
+    RECEIVER_TOKENS.lock().await.clone()
 }
 
 pub(super) async fn factory_tokens() -> Vec<i64> {
@@ -274,7 +286,7 @@ type ProbeHookFuture<'a> =
     Pin<Box<dyn Future<Output = upwell_hooks::Result<Box<dyn Any + Send>>> + Send + 'a>>;
 
 fn probe_reload_call<'a>(
-    _ctx: &'a (dyn ResolverCtx + Send + Sync),
+    ctx: &'a (dyn ResolverCtx + Send + Sync),
     cx: &'a (dyn Any + Send + Sync),
 ) -> ProbeHookFuture<'a> {
     Box::pin(async move {
@@ -282,9 +294,19 @@ fn probe_reload_call<'a>(
             .downcast_ref::<ReloadProposal>()
             .expect("config reload hook context");
 
+        // Resolve the `&self` receiver through the resolver context, exactly as the
+        // `#[hook]` macro generates: the receiver comes from the root the manager is
+        // attached to, so a run against a stale manager cannot resolve the current
+        // instance.
+        let receiver = ctx
+            .get_resolver::<ComponentSource>()
+            .and_then(|source| source.component::<ProbeComponent>())
+            .ok_or(upwell_hooks::Error::MissingReceiver(ProbeComponent::NAME))?;
+
         let next = <CfgNext<ProbeConfig> as HookParam<ConfigReload>>::extract(proposal, None)?;
 
         PROPOSED_TOKENS.lock().await.push(next.token);
+        RECEIVER_TOKENS.lock().await.push(receiver.observed);
         HOOK_CALLS.fetch_add(1, Ordering::SeqCst);
 
         if *HOOK_REJECT_TOKEN.lock().await == Some(next.token) {
