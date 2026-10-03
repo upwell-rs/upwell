@@ -11,6 +11,7 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use upwell_config::ConfigReloader;
 use upwell_core::{RuntimeGenerationId, Scope, ScopeId};
 use upwell_di::{BoxedComponent, ComponentDescriptor, ScopeContainer};
 use upwell_hooks::HookManager;
@@ -18,10 +19,12 @@ use upwell_hooks::HookManager;
 use crate::scope::{PreparedScopeTopology, ScopeParent, SeedDestination};
 
 mod generation;
+mod reload;
 
 pub(crate) use generation::PreparedRuntimeGeneration;
 pub use generation::{AppConditionState, RuntimeView};
 use generation::{RuntimeGeneration, RuntimeTransitionCoordinator};
+pub use reload::RuntimeReloadReport;
 
 /// Everything a protocol needs to drive requests through DI, cheaply cloneable.
 ///
@@ -34,6 +37,9 @@ use generation::{RuntimeGeneration, RuntimeTransitionCoordinator};
 pub struct AppRuntime {
     name: Arc<str>,
     transitions: RuntimeTransitionCoordinator,
+    /// The config reloader this runtime's transactional reload drives. Shared with the
+    /// app handle, so its serialization lock covers both pipelines.
+    reloader: ConfigReloader,
 }
 
 /// Prepared scope state shared by every clone of an application runtime.
@@ -59,10 +65,15 @@ impl RuntimeScopePlan {
 }
 
 impl AppRuntime {
-    pub(crate) fn new(name: Arc<str>, generation: PreparedRuntimeGeneration) -> Self {
+    pub(crate) fn new(
+        name: Arc<str>,
+        generation: PreparedRuntimeGeneration,
+        reloader: ConfigReloader,
+    ) -> Self {
         Self {
             name,
             transitions: RuntimeTransitionCoordinator::new(generation),
+            reloader,
         }
     }
 
@@ -112,10 +123,6 @@ impl AppRuntime {
         self.view().id()
     }
 
-    #[allow(
-        dead_code,
-        reason = "reserved for the next transition-strategy integration"
-    )]
     pub(crate) async fn begin_transition(&self) -> generation::RuntimeTransition {
         self.transitions.begin().await
     }

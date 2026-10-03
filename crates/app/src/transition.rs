@@ -9,6 +9,7 @@ use upwell_di::{
     PlannedNode, ProviderSelectionModel, ScopeContainer, ScopeRegistry, TransitionPlan,
 };
 
+use crate::runtime::RuntimeScopePlan;
 use crate::scope::{PreparedScopeTopology, ScopePlan, SeedDestination};
 use crate::{AppConditionEvaluation, AppRegistry};
 
@@ -400,6 +401,29 @@ impl CandidateGraph {
             .map(|destination| (destination.scope, destination.type_name))
     }
 
+    /// Consumes the candidate into the runtime-generation parts: the resolved descriptor
+    /// set, the future-scope plan over `topology`, and the effective graph.
+    /// Crate-internal: the transactional reload assembles a
+    /// `PreparedRuntimeGeneration` from these without exposing the candidate's fields
+    /// broadly.
+    pub(crate) fn into_runtime_parts(
+        self,
+        topology: &Arc<PreparedScopeTopology>,
+    ) -> (Arc<[ComponentDescriptor]>, RuntimeScopePlan, EffectiveGraph) {
+        let scope_plan = RuntimeScopePlan::new(
+            Arc::clone(topology),
+            Arc::new(
+                self.scope_orders
+                    .into_iter()
+                    .map(|(scope, order)| (scope, order.into_vec()))
+                    .collect(),
+            ),
+            Arc::new(self.seed_destinations),
+        );
+
+        (Arc::from(self.components), scope_plan, self.graph)
+    }
+
     /// Validates explicit component choices against the planner's minimum structural work.
     #[doc(hidden)]
     pub fn resolve_transition(
@@ -410,17 +434,57 @@ impl CandidateGraph {
         let requested = requested.into_iter().collect::<Vec<_>>();
 
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.resolve_transition_inner(active, requested)
+            let structural = active.plan_transition(&self.graph)?;
+
+            self.resolve_transition_plan(active, structural, requested, false)
         }))
         .map_err(|_| crate::Error::CandidatePreparationPanicked)?
     }
 
-    fn resolve_transition_inner(
+    /// Resolves the deterministic v1 transition defaults used only by the transactional
+    /// config reload: structural Retain nodes retain, Add/Replace/RebindLive nodes
+    /// reconstruct (factory availability is validated by the shared decision checks),
+    /// and Remove nodes retire safely by absence from the candidate root — they carry no
+    /// decision and require no candidate seed.
+    pub(crate) fn resolve_runtime_transition(
         &self,
         active: &EffectiveGraph,
-        requested: Vec<ComponentTransitionDecision>,
     ) -> crate::Result<ResolvedTransitionPlan> {
-        let structural = active.plan_transition(&self.graph)?;
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let structural = active.plan_transition(&self.graph)?;
+            let requested = structural
+                .nodes
+                .iter()
+                .filter(|node| node.action != NodeAction::Remove)
+                .map(|node| ComponentTransitionDecision {
+                    component: node.component,
+                    strategy: match node.action {
+                        NodeAction::Retain => ComponentTransitionStrategy::Retain,
+
+                        _ => ComponentTransitionStrategy::Reconstruct,
+                    },
+                })
+                .collect::<Vec<_>>();
+
+            self.resolve_transition_plan(active, structural, requested, true)
+        }))
+        .map_err(|_| crate::Error::CandidatePreparationPanicked)?
+    }
+
+    /// Completes a resolved plan from an already computed structural plan and explicit
+    /// decisions.
+    ///
+    /// `retire_removed_by_absence` selects the runtime reload's default policy: a Remove
+    /// node with no decision is a safe retirement (the component is simply absent from
+    /// the candidate root) instead of a restart requirement. The explicit
+    /// [`resolve_transition`](Self::resolve_transition) path keeps rejecting removals.
+    fn resolve_transition_plan(
+        &self,
+        active: &EffectiveGraph,
+        structural: TransitionPlan,
+        requested: Vec<ComponentTransitionDecision>,
+        retire_removed_by_absence: bool,
+    ) -> crate::Result<ResolvedTransitionPlan> {
         let mut decisions = BTreeMap::new();
 
         for decision in requested {
@@ -462,6 +526,11 @@ impl CandidateGraph {
 
         for node in &structural.nodes {
             let strategy = decisions.get(node.component).copied();
+
+            if retire_removed_by_absence && strategy.is_none() && node.action == NodeAction::Remove
+            {
+                continue;
+            }
 
             validate_decision(self, node, strategy)?;
 

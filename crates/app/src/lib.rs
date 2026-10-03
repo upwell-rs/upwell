@@ -67,7 +67,7 @@ pub use protocol::{
     ValidationContext,
 };
 pub use registry::{AppConditionEvaluation, AppRegistry};
-pub use runtime::{AppConditionState, AppRuntime, RuntimeView};
+pub use runtime::{AppConditionState, AppRuntime, RuntimeReloadReport, RuntimeView};
 pub use scope::{
     PreparedScopeTopology, ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError,
 };

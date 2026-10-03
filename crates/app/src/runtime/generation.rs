@@ -161,9 +161,7 @@ impl RuntimePublication {
 pub(crate) struct RuntimeTransitionCoordinator {
     owner: Arc<()>,
     publication: RuntimePublication,
-    #[allow(dead_code, reason = "used by the reserved transition entry point")]
     writer: Arc<Mutex<()>>,
-    #[allow(dead_code, reason = "used by the reserved transition entry point")]
     next_attempt: Arc<AtomicU64>,
 }
 
@@ -191,10 +189,6 @@ impl RuntimeTransitionCoordinator {
     }
 
     /// Starts one serialized transition attempt against the exact current generation.
-    #[allow(
-        dead_code,
-        reason = "reserved for the next transition-strategy integration"
-    )]
     pub(crate) async fn begin(&self) -> RuntimeTransition {
         let writer = Arc::clone(&self.writer).lock_owned().await;
         let attempt = TransitionAttemptId(self.next_attempt.fetch_add(1, Ordering::Relaxed));
@@ -225,19 +219,11 @@ impl RuntimeTransition {
     }
 
     /// The exact committed generation against which preparation must run.
-    #[allow(
-        dead_code,
-        reason = "reserved for the next transition-strategy integration"
-    )]
     pub(crate) fn base(&self) -> &RuntimeView {
         &self.base
     }
 
     /// Completes a semantic no-op without allocating or publishing a generation.
-    #[allow(
-        dead_code,
-        reason = "reserved for the next transition-strategy integration"
-    )]
     pub(crate) fn finish_noop(self) -> RuntimeView {
         self.base
     }
@@ -248,10 +234,6 @@ impl RuntimeTransition {
     /// All stale/wrong-base rejection happens here, before any caller side effect. The
     /// returned token owns the sole-writer lease, the attempt identity, the exact base
     /// generation, and the fully committed candidate; from here publication is infallible.
-    #[allow(
-        dead_code,
-        reason = "used by the next transactional-config integration"
-    )]
     pub(crate) fn prepare_commit(
         self,
         candidate: PreparedRuntimeGeneration,
@@ -326,10 +308,6 @@ impl PreparedRuntimeCommit {
     /// the writer lease end. Publication cannot fail after `prepare_commit` accepted the
     /// candidate: the writer is the sole publication serializer, so a compare-and-swap
     /// failure would be an internal invariant violation, not a recoverable error.
-    #[allow(
-        dead_code,
-        reason = "used by the next transactional-config integration"
-    )]
     pub(crate) fn commit_with(self, commit_compat: impl FnOnce()) -> RuntimeView {
         let PreparedRuntimeCommit {
             coordinator,
@@ -405,10 +383,6 @@ impl RuntimeView {
     }
 
     /// The committed condition state pinned by this generation.
-    #[allow(
-        dead_code,
-        reason = "used by the next transactional reload integration"
-    )]
     pub(crate) fn condition(&self) -> &Arc<AppConditionState> {
         &self.generation.condition
     }

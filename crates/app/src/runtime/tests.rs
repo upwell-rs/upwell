@@ -2,6 +2,7 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use upwell_config::{ConfigManager, ConfigReloader};
 use upwell_core::{ResolverSet, Scope, ScopeId, StaticScope, TypeDescriptor};
 use upwell_di::{BoxedComponent, EffectiveGraph, Injectable, ScopeContainer, ScopeRegistry};
 use upwell_hooks::{HOOK_MANAGER_NAME, HookManager};
@@ -123,7 +124,12 @@ async fn build_runtime(
         graph,
         empty_condition(),
     );
-    let runtime = AppRuntime::new(Arc::from("test"), generation);
+    let reloader = ConfigReloader::new(
+        ConfigManager::empty(),
+        Vec::new(),
+        HookManager::new(Vec::new()),
+    );
+    let runtime = AppRuntime::new(Arc::from("test"), generation, reloader);
 
     (runtime, registry)
 }

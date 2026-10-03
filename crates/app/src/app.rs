@@ -726,7 +726,7 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             effective_graph,
             condition,
         );
-        let runtime = AppRuntime::new(Arc::from(name.as_str()), generation);
+        let runtime = AppRuntime::new(Arc::from(name.as_str()), generation, reloader.clone());
 
         // Hand off to the prepared protocol: it constructs the served runtime.
         let protocol = protocol.build(&runtime)?;
