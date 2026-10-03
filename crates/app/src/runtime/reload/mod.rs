@@ -1,26 +1,33 @@
 //! The transactional config-and-graph reload entry point.
 //!
 //! [`AppRuntime::reload_config`] re-reads configuration and republishes changed
-//! bindings and the derived component graph as one serialized transaction: stage the
-//! config, re-evaluate conditions from the staged values, prepare and validate a
-//! candidate graph, construct the candidate root, run the affected config-reload hooks
-//! against the candidate generation, and only then publish the runtime generation and
-//! commit the config slots together. Any failure before that terminal commit leaves the
-//! complete previous generation — config values included — active.
+//! bindings and the derived component graph as one serialized transaction. It stages
+//! configuration, evaluates conditions, plans and builds a candidate graph and root over
+//! the candidate [`ConfigStore`], and creates a generation-local [`HookManager`]. The
+//! affected config-reload hooks run against that candidate generation before commit. Any
+//! recoverable error, hook rejection, or cancellation before the terminal commit preserves
+//! the complete active state, including configuration values.
+//!
+//! [`ConfigStore`]: upwell_config::ConfigStore
 //!
 //! Lock order is fixed: the config reloader's serialization lock is acquired first,
 //! then the runtime transition writer. A legacy [`ConfigReloader::reload`] holds only
 //! the first lock, so it can never interleave with this transaction, and the writer is
 //! never held while waiting on the reloader.
 //!
-//! Commit ordering: the validated candidate generation becomes current first, then the
-//! staged config slots commit while the writer lease is still held. A pinned
-//! [`RuntimeView`](crate::RuntimeView) is the consistent read of one generation — its
-//! root, graph, scopes, condition state, and hook catalog all belong to that
-//! generation. Legacy externally-held and live `Cfg<T>` compatibility handles remain
-//! per-slot: each slot swaps atomically at commit, but atomicity across handles is not
-//! promised, and a pinned view does not freeze the live cells such handles share with
-//! the active slots.
+//! At the terminal commit, the validated candidate becomes the authoritative runtime
+//! generation first, then the legacy live config slots synchronously commit while both
+//! leases remain held. An unchanged source is a no-op: it moves neither generation nor
+//! root. A pinned [`RuntimeView`](crate::RuntimeView) consistently pins one generation's
+//! root, graph, scopes, condition state, and hook catalog, but it does not freeze
+//! separately held legacy live [`Cfg<T>`] cells. Those cells remain per-slot atomic at
+//! commit; no atomicity across handles is promised.
+//!
+//! [`Cfg<T>`]: upwell_config::Cfg
+//!
+//! [`ConfigReloader::reload`] remains a config-only compatibility operation. Watch and
+//! signal triggers also continue to call it until #211; application graph transitions
+//! must use [`AppRuntime::reload_config`].
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -56,18 +63,23 @@ impl AppRuntime {
     /// Re-reads configuration and republishes changed bindings and the derived
     /// component graph as one serialized transaction.
     ///
-    /// The transaction stages a reload, re-evaluates component conditions from the
-    /// staged values against the current generation's catalog, prepares and validates a
-    /// candidate graph, constructs an isolated candidate root over the staged candidate
-    /// config store, and runs the affected config-reload hooks against the candidate
-    /// generation's own hook manager. Only when every step has succeeded does the
-    /// candidate generation publish and the staged config slots commit — atomically
-    /// with respect to every other transition. Any failure, hook rejection, or
-    /// cancellation before that terminal commit preserves the complete previous
-    /// generation, config values included.
+    /// It first acquires the [`ConfigReloader`] reload lock, then the runtime transition
+    /// writer. While both leases are held, it stages configuration; evaluates conditions;
+    /// plans and builds a candidate graph and root over a candidate
+    /// [`ConfigStore`](upwell_config::ConfigStore); and
+    /// creates a generation-local [`HookManager`]. Affected config-reload hooks run
+    /// against that candidate before commit. Any recoverable error, hook rejection, or
+    /// cancellation before the terminal commit preserves the complete active state,
+    /// including configuration values.
     ///
-    /// An unchanged source is a true no-op: no evaluation, no construction, no hooks,
-    /// and no generation movement.
+    /// The terminal commit publishes the authoritative runtime generation first, then
+    /// synchronously commits legacy live config slots while both leases remain held.
+    /// Unlike [`ConfigReloader::reload`], which is config-only compatibility behavior,
+    /// this method is required for application graph transitions. Watch and signal
+    /// triggers continue to use `ConfigReloader::reload` until #211.
+    ///
+    /// An unchanged source is a true no-op: no evaluation, construction, hooks, runtime
+    /// or config generation movement, or root replacement.
     pub async fn reload_config(&self) -> crate::Result<RuntimeReloadReport> {
         // Fixed lock order: the config reloader's serialization lock first, then the
         // runtime transition writer.

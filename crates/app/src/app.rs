@@ -882,7 +882,11 @@ impl<D: ProtocolDefinition> App<D> {
         self.shutdown.handle()
     }
 
-    /// A handle that re-reads configuration and re-publishes the changed bindings.
+    /// A config-only compatibility handle that re-reads configuration and re-publishes changed
+    /// bindings through [`ConfigReloader::reload`].
+    ///
+    /// Watch and signal triggers also use this handle until #211. It does not transition the
+    /// application graph; graph-affecting reloads must use [`AppRuntime::reload_config`].
     pub fn config_reloader(&self) -> ConfigReloader {
         self.reloader.clone()
     }
