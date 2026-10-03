@@ -60,6 +60,24 @@ pub struct StagedConfig {
     value: Arc<dyn Any + Send + Sync>,
 }
 
+impl StagedConfig {
+    /// The staged binding's type.
+    pub fn type_id(&self) -> TypeId {
+        self.type_id
+    }
+
+    /// The staged binding's property path.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// The erased staged value: the plain value for a changed binding, an `Arc` of it
+    /// for an unchanged binding.
+    pub fn value(&self) -> &dyn Any {
+        self.value.as_ref()
+    }
+}
+
 impl ReloadProposal {
     /// Builds a proposal from staged values. Public so the transactional config-and-graph
     /// reload can run hooks over a proposal it staged outside [`ConfigReloader::reload`].
