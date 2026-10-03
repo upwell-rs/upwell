@@ -41,26 +41,25 @@ use crate::runtime::{AppRuntime, RuntimeScopePlan};
 use crate::scope::{PreparedScopeTopology, ScopePlan, SeedDestination};
 
 /// The framework-provided singleton injectable for triggering graceful shutdown.
-static SHUTDOWN_HANDLE_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
-    crate::builtins::shutdown::SHUTDOWN_HANDLE_ID,
-    crate::builtins::shutdown::SHUTDOWN_HANDLE_NAME,
-    TypeDescriptor::of::<ShutdownHandle>(crate::builtins::shutdown::SHUTDOWN_HANDLE_NAME),
-    &SingletonScope,
-);
+static SHUTDOWN_HANDLE_DESCRIPTOR: ComponentDescriptor =
+    ComponentDescriptor::manual_of::<ShutdownHandle>(
+        crate::builtins::shutdown::SHUTDOWN_HANDLE_ID,
+        crate::builtins::shutdown::SHUTDOWN_HANDLE_NAME,
+        &SingletonScope,
+    );
 
 /// The framework-provided singleton injectable for triggering a config reload.
-static CONFIG_RELOADER_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
-    CONFIG_RELOADER_ID,
-    CONFIG_RELOADER_NAME,
-    TypeDescriptor::of::<ConfigReloader>(CONFIG_RELOADER_NAME),
-    &SingletonScope,
-);
+static CONFIG_RELOADER_DESCRIPTOR: ComponentDescriptor =
+    ComponentDescriptor::manual_of::<ConfigReloader>(
+        CONFIG_RELOADER_ID,
+        CONFIG_RELOADER_NAME,
+        &SingletonScope,
+    );
 
 /// The framework-provided singleton injectable that runs lifecycle/event hooks.
-static HOOK_MANAGER_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
+static HOOK_MANAGER_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual_of::<HookManager>(
     HOOK_MANAGER_ID,
     HOOK_MANAGER_NAME,
-    TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
     &SingletonScope,
 );
 
@@ -212,10 +211,17 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
     }
 
     /// Registers a pre-built singleton instance, holding it until the container is built.
+    ///
+    /// The instance is seeded with a raw manual descriptor: it carries no
+    /// generation-snapshot adapter, so a runtime transition that would retain it
+    /// requires a process restart instead of sharing the instance.
     pub fn with_component<T: Component>(mut self, value: T) -> Self {
-        self.registry
-            .components
-            .push(ComponentDescriptor::of::<T>());
+        self.registry.components.push(ComponentDescriptor::manual(
+            T::ID,
+            T::NAME,
+            TypeDescriptor::of::<T>(T::NAME),
+            &SingletonScope,
+        ));
 
         self.instances.push(BoxedComponent {
             ty: TypeDescriptor::of::<T>(T::NAME),

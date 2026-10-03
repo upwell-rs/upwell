@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use upwell_config::{ConfigBinding, ConfigProperties};
 use upwell_core::{
@@ -8,8 +10,10 @@ use upwell_core::{
     Transient, TypeDescriptor,
 };
 use upwell_di::{
-    BoxedComponent, ComponentConstructionContext, ComponentDescriptor, ComponentFactoryDescriptor,
-    EffectiveGraph, Fresh, FromContainer, Injectable, Singleton,
+    BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
+    ComponentFactoryDescriptor, EffectiveGraph, Fresh, FromContainer, Injectable, Live, NodeAction,
+    ProviderDescriptor, RootResolver, ScopeContainer, ScopeRegistry, Singleton,
+    root_resolver_descriptor,
 };
 
 use super::{
@@ -178,18 +182,34 @@ fn incremental_app_evaluation_remains_accepted_by_candidate_preparation() {
     .expect("incremental evaluation retains application identity");
 }
 
-struct Replaceable;
+struct Replaceable {
+    label: &'static str,
+}
+
 struct RootBoundConsumer;
 
-fn construct_replaceable(
+fn construct_active_replaceable(
     _: &mut ComponentConstructionContext,
 ) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
     Box::pin(async {
         Ok(BoxedComponent {
             ty: TypeDescriptor::of::<Replaceable>("Replaceable"),
-            value: Box::new(upwell_di::Injectable::into_stored(std::sync::Arc::new(
-                Replaceable,
-            ))),
+            value: Box::new(Injectable::into_stored(Arc::new(Replaceable {
+                label: "active",
+            }))),
+        })
+    })
+}
+
+fn construct_candidate_replaceable(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<Replaceable>("Replaceable"),
+            value: Box::new(Injectable::into_stored(Arc::new(Replaceable {
+                label: "candidate",
+            }))),
         })
     })
 }
@@ -214,19 +234,19 @@ fn root_resolver_dependencies() -> Vec<DependencyDescriptor> {
 
 static ACTIVE_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "active",
-    construct: construct_replaceable,
+    construct: construct_active_replaceable,
     dependencies: no_dependencies,
     default: false,
 }];
 static CANDIDATE_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "candidate",
-    construct: construct_replaceable,
+    construct: construct_candidate_replaceable,
     dependencies: no_dependencies,
     default: false,
 }];
 static ROOT_BOUND_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "root-bound",
-    construct: construct_replaceable,
+    construct: construct_active_replaceable,
     dependencies: root_resolver_dependencies,
     default: false,
 }];
@@ -470,13 +490,16 @@ async fn retained_values_must_match_complete_plan_dispositions() {
         panic!("missing retained value is rejected");
     };
 
-    assert!(matches!(
-        error,
-        Error::RestartRequired(super::RestartRequired {
-            reason: RestartReason::RetainedInstancePreparationUnsupported,
-            ..
-        })
-    ));
+    assert!(
+        matches!(
+            error,
+            Error::RestartRequired(super::RestartRequired {
+                reason: RestartReason::MissingDecision,
+                ..
+            })
+        ),
+        "the low-level seam must still enforce complete plan dispositions"
+    );
 }
 
 #[test]
@@ -691,4 +714,272 @@ async fn candidate_registry_keeps_factory_backed_transients_fresh_resolvable() {
         .create()
         .await
         .expect("factory-backed transient stays Fresh-resolvable after the transition");
+}
+
+// ---------------------------------------------------------------------------
+// Retained candidate preparation from the pinned active root.
+// ---------------------------------------------------------------------------
+
+trait Svc: Send + Sync {
+    fn label(&self) -> &'static str;
+}
+
+struct Retainable {
+    label: &'static str,
+}
+
+impl Svc for Retainable {
+    fn label(&self) -> &'static str {
+        self.label
+    }
+}
+
+impl Component for Retainable {
+    type Handle = Arc<Self>;
+
+    const ID: &'static str = "retainable";
+    const NAME: &'static str = "Retainable";
+
+    fn into_handle(self) -> Arc<Self> {
+        Arc::new(self)
+    }
+}
+
+/// A framework-style seed descriptor: typed identity, no factory, snapshot adapter.
+fn retainable_descriptor() -> ComponentDescriptor {
+    ComponentDescriptor::manual_of::<Retainable>("retainable", "Retainable", &Singleton)
+}
+
+fn erase_retainable_as_svc(boxed: &BoxedComponent) -> BoxedComponent {
+    let live = boxed
+        .value
+        .downcast_ref::<Live<Retainable>>()
+        .expect("retained slot holds a Live cell");
+    let as_trait: Arc<dyn Svc> = live.snapshot();
+
+    BoxedComponent {
+        ty: TypeDescriptor::of::<dyn Svc>("dyn Svc"),
+        value: Box::new(Injectable::into_stored(as_trait)),
+    }
+}
+
+fn svc_provider() -> ProviderDescriptor {
+    ProviderDescriptor {
+        trait_ty: TypeDescriptor::of::<dyn Svc>("dyn Svc"),
+        concrete_ty: TypeDescriptor::of::<Retainable>(Retainable::NAME),
+        qualifier: "svc",
+        primary: false,
+        priority: 0,
+        ordering: &[],
+        erase: erase_retainable_as_svc,
+    }
+}
+
+fn scope_registry(
+    descriptors: &[ComponentDescriptor],
+    providers: Vec<ProviderDescriptor>,
+) -> Arc<ScopeRegistry> {
+    let components = descriptors
+        .iter()
+        .map(|descriptor| (descriptor.ty.type_id, *descriptor))
+        .collect();
+
+    Arc::new(
+        ScopeRegistry::new(HashMap::new(), components, providers, HashMap::new())
+            .expect("scope registry validates"),
+    )
+}
+
+fn seed_retainable(instance: &Arc<Retainable>) -> BoxedComponent {
+    BoxedComponent {
+        ty: TypeDescriptor::of::<Retainable>(Retainable::NAME),
+        value: Box::new(Injectable::into_stored(Arc::clone(instance))),
+    }
+}
+
+fn seed_root_resolver() -> BoxedComponent {
+    BoxedComponent {
+        ty: TypeDescriptor::of::<RootResolver>(RootResolver::NAME),
+        value: Box::new(Injectable::into_stored(RootResolver::new())),
+    }
+}
+
+#[tokio::test]
+async fn mixed_retain_and_reconstruct_builds_a_complete_candidate_root() {
+    let mut active = AppRegistry::default();
+    active.components.extend([
+        retainable_descriptor(),
+        replaceable(active_factories),
+        root_resolver_descriptor(),
+    ]);
+    active.providers.push(svc_provider());
+    let active_graph = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &active.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+
+    let active_instance = Arc::new(Retainable {
+        label: "active-instance",
+    });
+    let active_root = ScopeContainer::build_root(
+        &active.components,
+        vec![seed_retainable(&active_instance), seed_root_resolver()],
+        ResolverSet::new(),
+        scope_registry(&active.components, active.providers.clone()),
+    )
+    .await
+    .expect("active root builds");
+    active_root
+        .get::<RootResolver>()
+        .expect("active resolver is seeded")
+        .attach(&active_root);
+
+    let mut candidate = AppRegistry::default();
+    candidate.components.extend([
+        retainable_descriptor(),
+        replaceable(candidate_factories),
+        root_resolver_descriptor(),
+    ]);
+    candidate.providers.push(svc_provider());
+    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &candidate, &topology())
+        .expect("candidate graph validates");
+    let resolved = candidate
+        .resolve_transition(
+            &active_graph,
+            [ComponentTransitionDecision {
+                component: "replaceable",
+                strategy: ComponentTransitionStrategy::Reconstruct,
+            }],
+        )
+        .expect("mixed retain and reconstruct resolves");
+
+    let (root, scopes) = resolved
+        .build_candidate_root_from_active(&candidate, &active_root, ResolverSet::new())
+        .await
+        .expect("retained candidate root builds");
+
+    assert!(root.belongs_to_registry(&scopes));
+
+    let retained = root
+        .resolve::<Arc<Retainable>>()
+        .await
+        .expect("candidate root resolves")
+        .expect("retained component is present");
+
+    assert!(
+        Arc::ptr_eq(&retained, &active_instance),
+        "the retained singleton must share the active Arc instance"
+    );
+
+    let aliased = root
+        .resolve::<Arc<dyn Svc>>()
+        .await
+        .expect("candidate root resolves the provider")
+        .expect("candidate provider alias is present");
+
+    assert_eq!(aliased.label(), "active-instance");
+    assert_eq!(
+        Arc::as_ptr(&aliased) as *const u8,
+        Arc::as_ptr(&active_instance) as *const u8,
+        "the candidate provider alias must be rebuilt from the retained concrete"
+    );
+
+    let reconstructed = root
+        .resolve::<Arc<Replaceable>>()
+        .await
+        .expect("candidate root resolves")
+        .expect("reconstructed component is present");
+
+    assert_eq!(reconstructed.label, "candidate");
+
+    let resolver = root
+        .get::<RootResolver>()
+        .expect("candidate resolver is recreated");
+    let resolved_from_candidate = resolver
+        .extract::<Arc<Replaceable>>()
+        .await
+        .expect("candidate resolver resolves the candidate root");
+
+    assert_eq!(
+        resolved_from_candidate.label, "candidate",
+        "the root resolver must be recreated for the candidate generation"
+    );
+
+    let active_replaceable = active_root
+        .resolve::<Arc<Replaceable>>()
+        .await
+        .expect("active root resolves")
+        .expect("active replaceable is present");
+
+    assert_eq!(
+        active_replaceable.label, "active",
+        "the active root is untouched by candidate preparation"
+    );
+}
+
+#[tokio::test]
+async fn raw_manual_singleton_requires_restart() {
+    let user_provided = || {
+        ComponentDescriptor::manual(
+            "user-provided",
+            "UserProvided",
+            TypeDescriptor::of::<u8>("UserProvided"),
+            &Singleton,
+        )
+    };
+    let mut active = AppRegistry::default();
+    active
+        .components
+        .extend([replaceable(active_factories), user_provided()]);
+    let active_graph = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &active.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+    let active_root = ScopeContainer::build_root(
+        &active.components,
+        vec![BoxedComponent {
+            ty: TypeDescriptor::of::<u8>("UserProvided"),
+            value: Box::new(8u8),
+        }],
+        ResolverSet::new(),
+        scope_registry(&active.components, Vec::new()),
+    )
+    .await
+    .expect("active root builds");
+
+    let mut candidate = AppRegistry::default();
+    candidate
+        .components
+        .extend([replaceable(candidate_factories), user_provided()]);
+    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &candidate, &topology())
+        .expect("candidate graph validates");
+    let resolved = candidate
+        .resolve_transition(
+            &active_graph,
+            [ComponentTransitionDecision {
+                component: "replaceable",
+                strategy: ComponentTransitionStrategy::Reconstruct,
+            }],
+        )
+        .expect("the unchanged manual component receives a retain disposition");
+
+    let Err(error) = resolved
+        .build_candidate_root_from_active(&candidate, &active_root, ResolverSet::new())
+        .await
+    else {
+        panic!("a raw manual singleton has no transition contract");
+    };
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            component: "user-provided",
+            required: Some(NodeAction::Retain),
+            reason: RestartReason::ManualInstanceUnsupported,
+        })
+    ));
 }
