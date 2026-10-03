@@ -1,9 +1,12 @@
-//! Tests for the transactional config-and-graph reload entry point.
+//! Shared fixture for the transactional reload tests: a file-backed app with one
+//! condition-gated probe component whose factory injects `Cfg<T>` and whose
+//! `ConfigReload` hook records the proposed value.
 //!
-//! Each test drives [`AppRuntime::reload_config`] over a file-backed app with one
-//! condition-gated component whose factory injects `Cfg<T>` and whose `ConfigReload`
-//! hook records the proposed value, so the tests can prove which store each stage of
-//! the transaction resolved through.
+//! The factory and hook honor shared controls so a test can inject a failure or a
+//! cancellation point at a specific stage of the transaction. Every control is
+//! tokio-guarded, so tests mutate them across awaits without blocking, and the
+//! [`TEST_GUARD`] serializes the tests themselves under the default `cargo test`
+//! parallelism (they share the counters and controls).
 
 use std::any::{Any, TypeId};
 use std::fs;
@@ -11,7 +14,6 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::Deserialize;
@@ -31,6 +33,7 @@ use upwell_di::{
 use upwell_hooks::{HookDescriptor, HookKind, HookParam};
 
 use crate::App;
+
 const PROBE_ENABLED: ConfigFactId = ConfigFactId::new("test::ProbeConfig", "probe", "enabled");
 
 static PROBE_CONDITION: ConditionDescriptor = ConditionDescriptor {
@@ -41,46 +44,91 @@ static PROBE_CONDITION: ConditionDescriptor = ConditionDescriptor {
 
 static FACTORY_CALLS: AtomicUsize = AtomicUsize::new(0);
 static HOOK_CALLS: AtomicUsize = AtomicUsize::new(0);
-static PROPOSED_TOKENS: Mutex<Vec<i64>> = Mutex::new(Vec::new());
 
-/// Serializes the reload tests: they share the factory/hook/proposal counters, so
-/// concurrent runs under the default `cargo test` parallelism must not interleave.
-/// Held for the entire body of each async test; await-safe, so no std guard ever
-/// crosses an await and no sleeps are needed.
+static PROPOSED_TOKENS: tokio::sync::Mutex<Vec<i64>> = tokio::sync::Mutex::const_new(Vec::new());
+static FACTORY_TOKENS: tokio::sync::Mutex<Vec<i64>> = tokio::sync::Mutex::const_new(Vec::new());
+
+/// The proposed token the config-reload hook rejects. `None` accepts every proposal.
+static HOOK_REJECT_TOKEN: tokio::sync::Mutex<Option<i64>> = tokio::sync::Mutex::const_new(None);
+
+/// Whether the candidate factory returns a DI error after resolving the staged value.
+static FACTORY_FAILS: tokio::sync::Mutex<bool> = tokio::sync::Mutex::const_new(false);
+
+/// Whether the candidate factory parks on [`FACTORY_RELEASE`] after resolving the
+/// staged value, so a test can cancel the reload mid-transaction.
+static FACTORY_WAITS: tokio::sync::Mutex<bool> = tokio::sync::Mutex::const_new(false);
+
+/// Signaled by the factory once it is about to park on [`FACTORY_RELEASE`].
+static FACTORY_PARKED: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// The gate the factory parks on while the test decides whether to cancel the reload.
+static FACTORY_RELEASE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Serializes the reload tests: they share the factory/hook counters and the failure
+/// controls, so concurrent runs under the default `cargo test` parallelism must not
+/// interleave. Held for the entire body of each async test; await-safe, so no std
+/// guard ever crosses an await and no sleeps are needed.
 static TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-async fn lock_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+pub(super) async fn lock_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
     TEST_GUARD.lock().await
 }
 
-fn reset_counters() {
+/// Resets every counter and failure control. Call at the start of each test while
+/// holding [`lock_test_guard`].
+pub(super) async fn reset_controls() {
     FACTORY_CALLS.store(0, Ordering::SeqCst);
     HOOK_CALLS.store(0, Ordering::SeqCst);
-    PROPOSED_TOKENS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clear();
+
+    *PROPOSED_TOKENS.lock().await = Vec::new();
+    *FACTORY_TOKENS.lock().await = Vec::new();
+    *HOOK_REJECT_TOKEN.lock().await = None;
+    *FACTORY_FAILS.lock().await = false;
+    *FACTORY_WAITS.lock().await = false;
 }
 
-fn factory_calls() -> usize {
+pub(super) fn factory_calls() -> usize {
     FACTORY_CALLS.load(Ordering::SeqCst)
 }
 
-fn hook_calls() -> usize {
+pub(super) fn hook_calls() -> usize {
     HOOK_CALLS.load(Ordering::SeqCst)
 }
 
-fn proposed_tokens() -> Vec<i64> {
-    PROPOSED_TOKENS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone()
+pub(super) async fn proposed_tokens() -> Vec<i64> {
+    PROPOSED_TOKENS.lock().await.clone()
+}
+
+pub(super) async fn factory_tokens() -> Vec<i64> {
+    FACTORY_TOKENS.lock().await.clone()
+}
+
+/// Makes the config-reload hook reject the proposal whose token is `token`.
+pub(super) async fn reject_hook_token(token: i64) {
+    *HOOK_REJECT_TOKEN.lock().await = Some(token);
+}
+
+/// Makes the candidate factory fail with a DI error after resolving the staged value.
+pub(super) async fn fail_factory_after_staging(fails: bool) {
+    *FACTORY_FAILS.lock().await = fails;
+}
+
+/// Makes the candidate factory park after resolving the staged value, until the reload
+/// task is cancelled.
+pub(super) async fn park_factory_after_staging(waits: bool) {
+    *FACTORY_WAITS.lock().await = waits;
+}
+
+/// Waits until the factory is parked inside candidate construction.
+pub(super) async fn factory_parked() {
+    FACTORY_PARKED.notified().await;
 }
 
 #[derive(Deserialize)]
-struct ProbeConfig {
+pub(super) struct ProbeConfig {
+    #[allow(dead_code, reason = "the condition fact reads the enabled field")]
     enabled: bool,
-    token: i64,
+    pub(super) token: i64,
 }
 
 impl ConfigProperties for ProbeConfig {
@@ -104,8 +152,8 @@ impl ConditionFacts for ProbeConfig {
 /// Factory-backed singleton whose availability keys on the `probe.enabled` fact. The
 /// factory records the config token it resolved from its generation's store, so a test
 /// can tell whether construction saw the staged proposal or the active value.
-struct ProbeComponent {
-    observed: i64,
+pub(super) struct ProbeComponent {
+    pub(super) observed: i64,
 }
 
 impl Component for ProbeComponent {
@@ -131,6 +179,19 @@ fn construct_probe_component(
 
         let cfg = <Cfg<ProbeConfig> as FromContainer>::from_container(context).await?;
         let observed = cfg.snapshot().token;
+
+        FACTORY_TOKENS.lock().await.push(observed);
+
+        if *FACTORY_FAILS.lock().await {
+            return Err(upwell_di::Error::Other(
+                "probe candidate factory failed after resolving the staged config".into(),
+            ));
+        }
+
+        if *FACTORY_WAITS.lock().await {
+            FACTORY_PARKED.notify_one();
+            FACTORY_RELEASE.notified().await;
+        }
 
         Ok(BoxedComponent {
             ty: TypeDescriptor::of::<ProbeComponent>(ProbeComponent::NAME),
@@ -173,11 +234,14 @@ fn probe_reload_call<'a>(
 
         let next = <CfgNext<ProbeConfig> as HookParam<ConfigReload>>::extract(proposal, None)?;
 
-        PROPOSED_TOKENS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(next.token);
+        PROPOSED_TOKENS.lock().await.push(next.token);
         HOOK_CALLS.fetch_add(1, Ordering::SeqCst);
+
+        if *HOOK_REJECT_TOKEN.lock().await == Some(next.token) {
+            return Err(upwell_hooks::Error::Other(
+                format!("rejecting the proposed token {}", next.token).into(),
+            ));
+        }
 
         Ok(Box::new(HookOutcome::Unchanged) as Box<dyn Any + Send>)
     })
@@ -212,7 +276,7 @@ static PROBE_COMPONENT: ComponentDescriptor = ComponentDescriptor {
 /// Builds a file-backed app with the probe component registered, its config bound at
 /// `probe`, and its availability fact sourced from the same binding. The temp dir is
 /// returned so the source file outlives the app and can be rewritten by the test.
-async fn build_probe_app(enabled: bool, token: i64) -> (TempDir, App<()>) {
+pub(super) async fn build_probe_app(enabled: bool, token: i64) -> (TempDir, App<()>) {
     let dir = tempfile::Builder::new()
         .prefix("upwell-runtime-reload-")
         .tempdir()
@@ -237,7 +301,7 @@ async fn build_probe_app(enabled: bool, token: i64) -> (TempDir, App<()>) {
     (dir, app)
 }
 
-fn config_dir_of(dir: &TempDir) -> PathBuf {
+pub(super) fn config_dir_of(dir: &TempDir) -> PathBuf {
     let config_dir = dir.path().join("config");
 
     fs::create_dir_all(&config_dir).expect("create config dir");
@@ -245,120 +309,10 @@ fn config_dir_of(dir: &TempDir) -> PathBuf {
     config_dir
 }
 
-fn write_probe_config(config_dir: &Path, enabled: bool, token: i64) {
+pub(super) fn write_probe_config(config_dir: &Path, enabled: bool, token: i64) {
     fs::write(
         config_dir.join("application.toml"),
         format!("[probe]\nenabled = {enabled}\ntoken = {token}\n"),
     )
     .expect("write probe config");
-}
-
-#[tokio::test]
-async fn candidate_factory_resolves_proposed_config_before_publication() {
-    let _guard = lock_test_guard().await;
-
-    reset_counters();
-
-    let (dir, app) = build_probe_app(false, 1).await;
-    let runtime = app.runtime();
-
-    // Initially disabled: the component is absent from the active generation and the
-    // factory has never run.
-    let old_root = runtime.root();
-    let old_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
-
-    assert!(old_root.get::<ProbeComponent>().is_none());
-    assert_eq!(factory_calls(), 0);
-
-    write_probe_config(&config_dir_of(&dir), true, 7);
-
-    let report = runtime.reload_config().await.expect("reload succeeds");
-
-    assert!(report.published, "a changed source publishes a generation");
-    assert_eq!(report.changed.len(), 1, "only the probe binding changed");
-    assert_eq!(report.changed[0].path, "probe");
-    assert_eq!(
-        runtime.generation().get(),
-        old_generation.get() + 1,
-        "the runtime generation advances exactly once"
-    );
-    assert_eq!(
-        app.config_reloader().generation(),
-        old_config_generation + 1,
-        "the config generation advances once, at the terminal commit"
-    );
-
-    // The new root resolves the activated component, and its factory resolved the
-    // staged proposed value through the candidate store: at construction time the
-    // terminal commit had not run, so the active store still held the old token.
-    let probe = runtime
-        .root()
-        .get::<ProbeComponent>()
-        .expect("the activated component resolves from the new root");
-
-    assert_eq!(
-        probe.observed, 7,
-        "the factory saw the staged proposed value"
-    );
-    assert_eq!(factory_calls(), 1, "the candidate factory ran exactly once");
-
-    // The old generation's root is untouched by the transaction.
-    assert!(old_root.get::<ProbeComponent>().is_none());
-
-    // The reload hook ran against the candidate manager over the staged proposal.
-    assert_eq!(report.hooks.len(), 1, "the config-reload hook ran");
-    assert_eq!(
-        proposed_tokens(),
-        vec![7],
-        "the hook observed the proposed value, not the active value"
-    );
-}
-
-#[tokio::test]
-async fn unchanged_reload_skips_candidate_work() {
-    let _guard = lock_test_guard().await;
-
-    reset_counters();
-
-    let (_dir, app) = build_probe_app(true, 1).await;
-    let runtime = app.runtime();
-
-    let old_root = runtime.root();
-    let old_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
-    let factories_before = factory_calls();
-    let hooks_before = hook_calls();
-
-    assert!(
-        runtime.hooks().has::<ConfigReload>(),
-        "the probe hook is registered, so a zero hook count is meaningful"
-    );
-
-    // No source edit: the reload must be a true no-op.
-    let report = runtime.reload_config().await.expect("reload succeeds");
-
-    assert!(!report.published, "an unchanged source publishes nothing");
-    assert!(report.changed.is_empty());
-    assert!(report.hooks.is_empty());
-    assert_eq!(
-        runtime.generation(),
-        old_generation,
-        "the runtime generation is unchanged"
-    );
-    assert_eq!(
-        app.config_reloader().generation(),
-        old_config_generation,
-        "the config generation is unchanged"
-    );
-    assert!(
-        Arc::ptr_eq(&old_root, &runtime.root()),
-        "the root identity is unchanged"
-    );
-    assert_eq!(
-        factory_calls(),
-        factories_before,
-        "no candidate construction ran"
-    );
-    assert_eq!(hook_calls(), hooks_before, "no config-reload hook ran");
 }
