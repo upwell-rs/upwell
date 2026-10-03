@@ -51,7 +51,7 @@ pub enum RestartReason {
     UnknownDecision,
     StaleRetention,
     GenerationBoundDependency,
-    RetainedInstancePreparationUnsupported,
+    ManualInstanceUnsupported,
     RemovalUnsupported,
     NonSingleton,
     FactoryUnavailable,
@@ -67,9 +67,7 @@ impl fmt::Display for RestartReason {
             Self::GenerationBoundDependency => {
                 "the component depends on generation-bound runtime state"
             }
-            Self::RetainedInstancePreparationUnsupported => {
-                "retained instance provenance is not integrated yet"
-            }
+            Self::ManualInstanceUnsupported => "the pre-built component has no transition contract",
             Self::RemovalUnsupported => "component removal is not integrated yet",
             Self::NonSingleton => "runtime transitions are singleton-only",
             Self::FactoryUnavailable => "the candidate component has no ordinary factory",
@@ -112,6 +110,10 @@ impl ResolvedTransitionPlan {
     }
 
     /// Constructs the isolated candidate singleton root selected by this resolved plan.
+    ///
+    /// Retained instances must be supplied explicitly; prefer
+    /// [`build_candidate_root_from_active`](Self::build_candidate_root_from_active),
+    /// which derives them from the pinned active root.
     #[doc(hidden)]
     pub async fn build_candidate_root(
         &self,
@@ -123,19 +125,6 @@ impl ResolvedTransitionPlan {
             return Err(upwell_di::StaleGraphCandidate {
                 active: self.structural.base_generation,
                 candidate: candidate.graph.generation(),
-            }
-            .into());
-        }
-
-        if let Some(decision) = self
-            .decisions
-            .iter()
-            .find(|decision| decision.strategy == ComponentTransitionStrategy::Retain)
-        {
-            return Err(RestartRequired {
-                component: decision.component,
-                required: Some(NodeAction::Retain),
-                reason: RestartReason::RetainedInstancePreparationUnsupported,
             }
             .into());
         }
@@ -172,6 +161,65 @@ impl ResolvedTransitionPlan {
         .catch_unwind()
         .await
         .map_err(|_| crate::Error::CandidatePreparationPanicked)?
+    }
+
+    /// Constructs the isolated candidate singleton root, deriving every retained
+    /// instance directly from the pinned active root.
+    ///
+    /// Each `Retain` decision is satisfied by snapshotting the component out of the
+    /// active root's local store through its typed generation-snapshot adapter. A raw
+    /// manual descriptor carries no adapter, so retaining it is rejected with
+    /// [`RestartReason::ManualInstanceUnsupported`]; every other snapshot failure
+    /// (missing storage, panic, type mismatch) surfaces as its DI error.
+    #[doc(hidden)]
+    pub async fn build_candidate_root_from_active(
+        &self,
+        candidate: &CandidateGraph,
+        active_root: &ScopeContainer,
+        externals: ResolverSet,
+    ) -> crate::Result<(Arc<ScopeContainer>, Arc<ScopeRegistry>)> {
+        let retained = self.derive_retained_from_active(candidate, active_root)?;
+
+        self.build_candidate_root(candidate, retained, externals)
+            .await
+    }
+
+    /// Snapshots one stored representation per `Retain` decision out of the active root.
+    fn derive_retained_from_active(
+        &self,
+        candidate: &CandidateGraph,
+        active_root: &ScopeContainer,
+    ) -> crate::Result<Vec<BoxedComponent>> {
+        let mut retained = Vec::new();
+
+        for decision in self
+            .decisions
+            .iter()
+            .filter(|decision| decision.strategy == ComponentTransitionStrategy::Retain)
+        {
+            let Some(descriptor) = candidate
+                .components
+                .iter()
+                .find(|component| component.id == decision.component)
+            else {
+                continue;
+            };
+
+            match active_root.snapshot_singleton(*descriptor) {
+                Ok(component) => retained.push(component),
+                Err(upwell_di::Error::SnapshotUnavailable { .. }) => {
+                    return Err(RestartRequired {
+                        component: decision.component,
+                        required: Some(NodeAction::Retain),
+                        reason: RestartReason::ManualInstanceUnsupported,
+                    }
+                    .into());
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+
+        Ok(retained)
     }
 }
 

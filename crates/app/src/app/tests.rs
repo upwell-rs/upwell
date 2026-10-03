@@ -1,19 +1,23 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use upwell_config::{ConfigManager, Toml};
-use upwell_core::TypeDescriptor;
+use upwell_config::{ConfigManager, ConfigReloader, Toml};
+use upwell_core::{ResolverSet, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, Injectable, Singleton,
+    ComponentFactoryDescriptor, Injectable, ScopeContainer, ScopeRegistry, Singleton,
+    root_resolver_descriptor,
 };
+use upwell_dirs::{Config as ConfigDir, Dir, DirectoriesManager};
+use upwell_hooks::HookManager;
 
 use super::App;
 use crate::{
     AppRegistry, AppRuntime, LoggingConfig, PreBuildContext, PreparedProtocol, ProtocolDefinition,
-    ProtocolRuntime, ScopeTopology, ValidationContext,
+    ProtocolRuntime, ScopeTopology, ShutdownSignal, ValidationContext,
 };
 
 static FACTORY_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -43,7 +47,21 @@ impl Component for SeededComponent {
     const ID: &'static str = "seeded_component";
     const NAME: &'static str = "SeededComponent";
 
-    fn into_handle(self) -> Self::Handle {
+    fn into_handle(self) -> Arc<Self> {
+        Arc::new(self)
+    }
+}
+
+/// A user-supplied pre-built component registered through `with_component`.
+struct UserProvided;
+
+impl Component for UserProvided {
+    type Handle = Arc<Self>;
+
+    const ID: &'static str = "user_provided";
+    const NAME: &'static str = "UserProvided";
+
+    fn into_handle(self) -> Arc<Self> {
         Arc::new(self)
     }
 }
@@ -242,4 +260,130 @@ fn retained_tooling_construction_plan_equals_the_runtime_build_plan() {
         .collect::<Vec<_>>();
 
     assert_eq!(tooling, runtime);
+}
+
+#[test]
+fn framework_singletons_are_snapshot_capable_and_user_prebuilts_are_not() {
+    assert!(
+        super::SHUTDOWN_HANDLE_DESCRIPTOR
+            .generation_snapshot
+            .is_some(),
+        "the shutdown handle must be retainable across generations"
+    );
+    assert!(
+        super::CONFIG_RELOADER_DESCRIPTOR
+            .generation_snapshot
+            .is_some(),
+        "the config reloader must be retainable across generations"
+    );
+    assert!(
+        super::HOOK_MANAGER_DESCRIPTOR.generation_snapshot.is_some(),
+        "the hook manager must be retainable across generations"
+    );
+    assert!(
+        root_resolver_descriptor().generation_snapshot.is_none(),
+        "the root resolver stays generation-local"
+    );
+
+    let mut registry = AppRegistry::default();
+    let mut instances = Vec::new();
+    let dirs =
+        DirectoriesManager::from_path(std::env::temp_dir().join("upwell-app-descriptor-policy"));
+
+    super::seed_directories(&dirs, &mut registry, &mut instances);
+
+    for descriptor in &registry.components {
+        assert!(
+            descriptor.generation_snapshot.is_some(),
+            "directories descriptor '{}' must be snapshot-capable",
+            descriptor.id
+        );
+    }
+
+    let builder =
+        App::<BoundaryProtocol>::builder("descriptor-policy").with_component(UserProvided);
+    let seeded = builder
+        .registry
+        .components
+        .last()
+        .expect("with_component registers a descriptor");
+
+    assert_eq!(seeded.id, UserProvided::ID);
+    assert!(
+        seeded.generation_snapshot.is_none(),
+        "user pre-built instances have no transition contract"
+    );
+}
+
+#[tokio::test]
+async fn framework_singletons_snapshot_out_of_a_built_root() {
+    let shutdown = ShutdownSignal::new();
+    let hooks = HookManager::new(Vec::new());
+    let manager = ConfigManager::<Toml>::from_str(
+        r#"
+            [logging]
+            level = "debug"
+            format = "compact"
+            ansi = false
+        "#,
+    )
+    .expect("test config parses")
+    .into_dynamic();
+    let reloader = ConfigReloader::new(manager, Vec::new(), hooks.clone());
+    let dirs = DirectoriesManager::from_path(std::env::temp_dir().join("upwell-app-snapshot-test"));
+
+    let descriptors = [
+        super::SHUTDOWN_HANDLE_DESCRIPTOR,
+        super::CONFIG_RELOADER_DESCRIPTOR,
+        super::HOOK_MANAGER_DESCRIPTOR,
+        ComponentDescriptor::of::<DirectoriesManager>(),
+        ComponentDescriptor::of::<Dir<ConfigDir>>(),
+    ];
+    let seeds = vec![
+        BoxedComponent {
+            ty: descriptors[0].ty,
+            value: Box::new(shutdown.handle()),
+        },
+        BoxedComponent {
+            ty: descriptors[1].ty,
+            value: Box::new(Injectable::into_stored(reloader.clone())),
+        },
+        BoxedComponent {
+            ty: descriptors[2].ty,
+            value: Box::new(Injectable::into_stored(hooks.clone())),
+        },
+        BoxedComponent {
+            ty: descriptors[3].ty,
+            value: Box::new(dirs.clone()),
+        },
+        BoxedComponent {
+            ty: descriptors[4].ty,
+            value: Box::new(dirs.dir::<ConfigDir>()),
+        },
+    ];
+    let components = descriptors
+        .iter()
+        .map(|descriptor| (descriptor.ty.type_id, *descriptor))
+        .collect();
+    let registry = Arc::new(
+        ScopeRegistry::new(HashMap::new(), components, Vec::new(), HashMap::new())
+            .expect("framework registry validates"),
+    );
+    let root = ScopeContainer::build_root(&descriptors, seeds, ResolverSet::new(), registry)
+        .await
+        .expect("framework root builds");
+
+    for descriptor in descriptors {
+        root.snapshot_singleton(descriptor)
+            .expect("framework singletons are snapshot-capable");
+    }
+
+    let error = root
+        .snapshot_singleton(root_resolver_descriptor())
+        .expect_err("the root resolver is not snapshot-capable");
+
+    assert!(matches!(
+        error,
+        upwell_di::Error::SnapshotUnavailable { .. }
+    ));
 }
