@@ -104,6 +104,7 @@ impl<T: ConfigProperties> HookParam<ConfigReload> for CfgNext<T> {
             qualifier: path,
             config: true,
             resolution: upwell_core::ResolutionMode::Eager,
+            observation: upwell_core::DependencyObservation::Snapshot,
         }
     }
 
@@ -354,6 +355,7 @@ impl ConfigReloader {
     /// affected `#[hook(ConfigReload)]` hooks, and — if every binding re-binds and every
     /// hook accepts — commits the new values into their shared slots. On any failure
     /// nothing is published and the live values are untouched.
+    #[allow(clippy::result_large_err)]
     pub async fn reload(&self) -> Result<ConfigReloadReport, ConfigReloadError> {
         // Serialize whole reloads so the prepare → hooks → commit phases are atomic with
         // respect to each other: a concurrent reload cannot commit a newer tree between this
@@ -561,6 +563,10 @@ impl Injectable for ConfigReloader {
 
     fn from_stored(stored: &Self) -> Self {
         stored.clone()
+    }
+
+    fn snapshot_stored(stored: &Self) -> Option<Self> {
+        Some(stored.clone())
     }
 }
 

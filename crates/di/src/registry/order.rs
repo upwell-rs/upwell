@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use crate::descriptors::{ComponentDescriptor, ProviderDescriptor, ProviderOrderDirection};
 use crate::error::Error;
 
-mod cycle;
+pub(crate) mod cycle;
 
 pub(super) fn build(
     components: &[ComponentDescriptor],

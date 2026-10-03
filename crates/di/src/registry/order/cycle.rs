@@ -11,14 +11,25 @@ struct Search<'a> {
     lowlinks: HashMap<TypeId, usize>,
     stack: Vec<TypeId>,
     on_stack: HashSet<TypeId>,
-    cyclic: Vec<TypeId>,
+    cyclic: Vec<Vec<TypeId>>,
 }
 
-pub(super) fn members(
+pub(crate) fn members(
     nodes: &[TypeId],
     edges: &HashMap<TypeId, HashSet<TypeId>>,
     keys: &HashMap<TypeId, String>,
 ) -> Vec<TypeId> {
+    components(nodes, edges, keys)
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+pub(crate) fn components(
+    nodes: &[TypeId],
+    edges: &HashMap<TypeId, HashSet<TypeId>>,
+    keys: &HashMap<TypeId, String>,
+) -> Vec<Vec<TypeId>> {
     let mut ordered = nodes.to_vec();
     let mut search = Search {
         edges,
@@ -40,9 +51,15 @@ pub(super) fn members(
         }
     }
 
-    search
-        .cyclic
-        .sort_by(|left, right| keys[left].cmp(&keys[right]));
+    for component in &mut search.cyclic {
+        component.sort_by(|left, right| keys[left].cmp(&keys[right]));
+    }
+
+    search.cyclic.sort_by(|left, right| {
+        keys[&left[0]]
+            .cmp(&keys[&right[0]])
+            .then_with(|| left.len().cmp(&right.len()))
+    });
 
     search.cyclic
 }
@@ -109,7 +126,7 @@ impl Search<'_> {
                 .is_some_and(|successors| successors.contains(&component[0]));
 
         if component.len() > 1 || self_cycle {
-            self.cyclic.extend(component);
+            self.cyclic.push(component);
         }
     }
 }

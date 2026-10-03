@@ -30,6 +30,9 @@ pub use reload::{
 pub use store::{ConfigStore, ContainerConfigExt};
 pub use trigger::{spawn_reload_triggers, stop_reload_triggers};
 
+#[cfg(test)]
+mod tests;
+
 use crate::DefaultSpec;
 
 /// Link-time registry of every auto-registered config binding (a `#[config(path = "..")]`

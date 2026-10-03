@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, ResolutionMode, Singleton, StaticScope, Transient,
+    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, Singleton,
+    StaticScope, Transient,
 };
 use upwell_di::{DependencyTarget, ProviderDescriptor};
 use upwell_tooling_schema::{RelationshipKind, ResourceKind};
@@ -326,11 +327,16 @@ fn dependency_labels(dependency: &DependencyDescriptor) -> BTreeMap<String, Stri
         ResolutionMode::Lazy => "lazy",
         ResolutionMode::Fresh => "fresh",
     };
+    let observation = match dependency.observation {
+        DependencyObservation::Snapshot => "snapshot",
+        DependencyObservation::Live => "live",
+    };
     let mut labels = BTreeMap::from([
         (String::from("cardinality"), cardinality.to_string()),
         (String::from("dynamic"), dependency.dynamic.to_string()),
         (String::from("name"), dependency.name.to_string()),
         (String::from("optional"), dependency.optional.to_string()),
+        (String::from("observation"), observation.to_string()),
         (String::from("resolution"), resolution.to_string()),
     ]);
 

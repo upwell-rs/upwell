@@ -434,6 +434,7 @@ fn scheduler_deps() -> Vec<DependencyDescriptor> {
 }
 
 static SCHEDULER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: scheduler_construct,
     dependencies: scheduler_deps,
     default: false,
@@ -498,8 +499,10 @@ impl upwell_core::Descriptor<ComponentDescriptor> for JobScheduler {
         name: SCHEDULER_NAME,
         ty: TypeDescriptor::of::<JobScheduler>(SCHEDULER_NAME),
         scope: &Singleton,
+        condition: None,
         factories: scheduler_factories,
         hooks: scheduler_hooks,
+        generation_snapshot: ComponentDescriptor::typed_snapshot::<JobScheduler>(),
     };
 }
 

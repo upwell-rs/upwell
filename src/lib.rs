@@ -37,12 +37,15 @@ pub mod scope {
 pub use upwell_di::{
     BoxedComponent, COMPONENTS, Component, ComponentConstructionContext, ComponentContainer,
     ComponentDescriptor, ComponentFactories, ComponentFactory, ComponentFactoryDescriptor,
-    ComponentRegistry, ComponentSource, Deferred, Dep, DescriptorFor, Dynamic, Factory,
-    FactoryOutput, Fresh, FreshFromContainer, FromContainer, Injectable, Lazy, Live, LiveRef,
-    PROVIDERS, Provide, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
+    ComponentRegistry, ComponentSource, ConditionCatalog, ConditionDecision, ConditionDependency,
+    ConditionError, ConditionEvaluation, ConditionFactSnapshot, Deferred, Dep, DescriptorFor,
+    Dynamic, EffectiveGraph, Factory, FactoryIdentity, FactoryOutput, Fresh, FreshFromContainer,
+    FromContainer, Injectable, Lazy, Live, LiveRef, NodeAction, PROVIDERS, PlannedNode, Provide,
+    ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection, ReasonKind,
     Registration, RegistryFor, RootResolver, ScopeContainer, ScopeRegistry, ServiceComponent,
-    UpwellDescriptor, Wired, Wiring, dispatch_factory, factory_dependencies, from_boxed,
-    topological_sort,
+    StaleGraphCandidate, TransitionPlan, TransitionReason, UpwellDescriptor,
+    ValidatedConditionEvaluation, Wired, Wiring, dependency_of, dependency_of_observed,
+    dispatch_factory, factory_dependencies, from_boxed, topological_sort,
 };
 /// The DI layer's own error/result, exposed under distinct names so macro-generated
 /// **factory** code can name them without colliding with the root [`Error`]/[`Result`].
@@ -93,22 +96,23 @@ pub use upwell_app::HostLifecycleCapabilities;
 pub use upwell_app::contribute;
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_app::{
-    App, AppBuilder, AppHost, AppRegistry, AppRuntime, AppStage, ApplicationPluginRegistrar,
-    BootstrapContext, Built, CompositionDiagnostic, CompositionDiagnostics, CompositionDirective,
-    CompositionEdge, CompositionPhase, CompositionTarget, ContributionId, ContributionProvenance,
-    Contributor, EarlyPluginCatalog, EarlyPluginPlan, EffectivePluginPlan, ExecutionMode,
-    HostError, IdErrorKind, Initial, InstallationOrigin, InstallationProvenance,
-    InvalidCompositionId, LifecyclePhase, LogFormat, LoggingConfig, PhaseError, Plugin,
-    PluginContribution, PluginContributionKind, PluginContributions, PluginDeclaration, PluginId,
-    PluginPlanError, PluginRelation, PluginResolutionPlan, PluginSlotId, PluginWithOptions,
-    PreBuild, PreBuildContext, PreparedApp, PreparedProtocol, ProtocolDefinition, ProtocolId,
-    ProtocolPluginRegistrar, ProtocolRuntime, RelationKind, RelationTarget, ReplacementDecision,
-    ResolvedPlugin, ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError, Serve,
-    ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents,
-    SuppressionDecision, ValidationContext, build_host, build_host_context, build_prepared_host,
-    extend_late_plugins, prepare_host, prepare_host_context, prepare_setup_host_context,
-    resolve_early_plugins, resolve_host_dependency, resolve_host_plugin_catalog,
-    retain_host_plugin_catalog, serve_host, setup_host, setup_host_context,
+    App, AppBuilder, AppConditionEvaluation, AppHost, AppRegistry, AppRuntime, AppStage,
+    ApplicationPluginRegistrar, BootstrapContext, Built, CandidateGraph, CompositionDiagnostic,
+    CompositionDiagnostics, CompositionDirective, CompositionEdge, CompositionPhase,
+    CompositionTarget, ContributionId, ContributionProvenance, Contributor, EarlyPluginCatalog,
+    EarlyPluginPlan, EffectivePluginPlan, ExecutionMode, HostError, IdErrorKind, Initial,
+    InstallationOrigin, InstallationProvenance, InvalidCompositionId, LifecyclePhase, LogFormat,
+    LoggingConfig, PhaseError, Plugin, PluginContribution, PluginContributionKind,
+    PluginContributions, PluginDeclaration, PluginId, PluginPlanError, PluginRelation,
+    PluginResolutionPlan, PluginSlotId, PluginWithOptions, PreBuild, PreBuildContext, PreparedApp,
+    PreparedProtocol, ProtocolDefinition, ProtocolId, ProtocolPluginRegistrar, ProtocolRuntime,
+    RelationKind, RelationTarget, ReplacementDecision, ResolvedPlugin, RuntimeView, ScopeBoundary,
+    ScopeParent, ScopeTopology, ScopeTopologyError, Serve, ServerConfig, Setup, ShutdownHandle,
+    ShutdownSignal, SlotPolicy, SpanEvents, SuppressionDecision, ValidationContext, build_host,
+    build_host_context, build_prepared_host, extend_late_plugins, prepare_host,
+    prepare_host_context, prepare_setup_host_context, resolve_early_plugins,
+    resolve_host_dependency, resolve_host_plugin_catalog, retain_host_plugin_catalog, serve_host,
+    setup_host, setup_host_context,
 };
 
 /// Versioned protocol-neutral developer-tooling schema and prepared-state projection types.

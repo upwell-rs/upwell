@@ -41,6 +41,7 @@ fn aggregate_dependencies() -> Vec<DependencyDescriptor> {
             qualifier: Some("shared"),
             config: false,
             resolution: ResolutionMode::Eager,
+            observation: upwell_core::DependencyObservation::Snapshot,
         },
         DependencyDescriptor {
             name: "FreshAggregateTraits",
@@ -51,17 +52,20 @@ fn aggregate_dependencies() -> Vec<DependencyDescriptor> {
             qualifier: None,
             config: false,
             resolution: ResolutionMode::Fresh,
+            observation: upwell_core::DependencyObservation::Snapshot,
         },
     ]
 }
 
 static PROVIDER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: fake_factory,
     dependencies: no_dependencies,
     default: false,
 }];
 
 static CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: fake_factory,
     dependencies: aggregate_dependencies,
     default: false,
@@ -84,8 +88,10 @@ static PROVIDER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     name: "AggregateProvider",
     ty: TypeDescriptor::of::<AggregateProvider>("AggregateProvider"),
     scope: &Singleton,
+    condition: None,
     factories: provider_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 static CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
@@ -93,8 +99,10 @@ static CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     name: "AggregateConsumer",
     ty: TypeDescriptor::of::<AggregateConsumer>("AggregateConsumer"),
     scope: &Singleton,
+    condition: None,
     factories: consumer_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 static PROVIDER: ProviderDescriptor = ProviderDescriptor {

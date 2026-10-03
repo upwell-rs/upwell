@@ -24,6 +24,7 @@ const COMPONENT_KEYS: &[&str] = &[
     "qualifier",
     "primary",
     "by_value",
+    "retainable",
     "scope",
     "factory_slice",
     "factory",
@@ -78,6 +79,9 @@ fn parse_scope_path(input: ParseStream) -> syn::Result<syn::Path> {
 /// - `before` / `after` — order every trait shared with the target component; use `as dyn Trait`
 ///   to require and restrict the relationship to a specific trait;
 /// - `by_value` — store/inject this component as `Self` rather than `Arc<Self>`;
+/// - `retainable` — with a singleton `by_value` component, explicitly asserts that cloning
+///   the handle does not share generation-local mutable slots, allowing unchanged instances
+///   to be retained;
 /// - `scope = <ScopePath>` — the instance lifetime, named by a [`Scope`] marker type in scope
 ///   (e.g. `Request` from a protocol's prelude, or a custom scope); omitted means singleton;
 /// - `factory_slice` / `factory` / `default_factory` — factory overrides.
@@ -95,6 +99,9 @@ pub struct ComponentArgs<Ext: ParseKeyed = NoExt> {
     pub qualifier: Option<LitStr>,
     pub primary: bool,
     pub by_value: bool,
+    /// Explicitly opts a by-value handle into cross-generation retention. The author
+    /// guarantees that cloning the component does not share generation-local mutable slots.
+    pub retainable: bool,
     /// The [`Scope`] marker-type **path** parsed from `scope = ..`, emitted as written so it
     /// resolves in the caller's scope (a protocol's `Request`/`Connection` arrives through its
     /// prelude; a custom scope works the same way). The lowercase keywords
@@ -146,6 +153,7 @@ impl<Ext: ParseKeyed> Parse for ComponentArgs<Ext> {
                     args.priority = Some(input.parse()?);
                 }
                 "by_value" => args.by_value = true,
+                "retainable" => args.retainable = true,
                 "factory_slice" => {
                     input.parse::<Token![=]>()?;
                     args.factory_slice = Some(input.parse()?);
@@ -197,6 +205,20 @@ impl<Ext: ParseKeyed> Parse for ComponentArgs<Ext> {
                 &args.provide[0],
                 "`by_value` cannot be combined with `provide`: trait providers share the \
                  component through an `Arc`, while a by-value component is stored as `Self`",
+            ));
+        }
+
+        if args.retainable && !args.by_value {
+            return Err(syn::Error::new(
+                Span::call_site(),
+                "`retainable` is only valid with `by_value`; Arc-backed components are already generation-safe",
+            ));
+        }
+
+        if args.retainable && args.scope.is_some() {
+            return Err(syn::Error::new(
+                Span::call_site(),
+                "`retainable` is singleton-only and cannot be combined with an explicit `scope`",
             ));
         }
 
@@ -450,6 +472,11 @@ pub fn deferred_inner(ty: &Type) -> Option<Type> {
 /// The config type `T` of a `Cfg<T>` field (a property-path-bound config value).
 pub fn cfg_inner(ty: &Type) -> Option<Type> {
     first_type_arg(ty, "Cfg")
+}
+
+/// The target type `T` of a live `Dep<T>` field.
+pub fn dep_inner(ty: &Type) -> Option<Type> {
+    first_type_arg(ty, "Dep")
 }
 
 /// The request body type `T` of a `Payload<T>` parameter.

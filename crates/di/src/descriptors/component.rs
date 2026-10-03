@@ -11,8 +11,8 @@ use std::{
 };
 
 use upwell_core::{
-    DependencyDescriptor, ResolutionMode, ResolverCtx, ResolverSet, Scope, Singleton,
-    TypeDescriptor, UpwellDescriptor,
+    ConditionDescriptor, DependencyDescriptor, ProviderMappingId, ResolutionMode, ResolverCtx,
+    ResolverSet, Scope, Singleton, TypeDescriptor, UpwellDescriptor,
 };
 use upwell_hooks::{HookDescriptor, no_hooks};
 
@@ -75,6 +75,17 @@ pub trait Injectable: Clone + Send + Sync + 'static {
     /// Derives this handle from a stored slot. Called on every resolution — a
     /// snapshot for `Arc<T>`, a shared clone for `Dep<T>`, a plain clone otherwise.
     fn from_stored(stored: &Self::Stored) -> Self;
+
+    /// Creates storage for the same component instance in another runtime generation.
+    ///
+    /// The default rejects retention. Handles opt in only when they can guarantee that
+    /// the returned storage does not share generation-local mutable binding state with
+    /// `stored`. `Arc<T>` creates a fresh [`Live<T>`] cell around the current snapshot;
+    /// `Dep<T>` deliberately keeps the default because cloning it would share the cell.
+    #[doc(hidden)]
+    fn snapshot_stored(_: &Self::Stored) -> Option<Self::Stored> {
+        None
+    }
 }
 
 /// A shared, swappable cell holding the current `Arc<T>` instance — the interior
@@ -184,6 +195,10 @@ impl<T: ?Sized + Send + Sync + 'static> Injectable for Arc<T> {
 
     fn from_stored(stored: &Live<T>) -> Self {
         stored.snapshot()
+    }
+
+    fn snapshot_stored(stored: &Live<T>) -> Option<Live<T>> {
+        Some(Live::new(stored.snapshot()))
     }
 }
 
@@ -300,6 +315,17 @@ impl fmt::Debug for ProviderDescriptor {
     }
 }
 
+impl ProviderDescriptor {
+    /// Returns the stable mapping identity relative to its validated concrete component.
+    pub fn mapping_id(&self, component: &ComponentDescriptor) -> ProviderMappingId {
+        ProviderMappingId {
+            component: component.id,
+            trait_type: self.trait_ty.type_name,
+            qualifier: self.qualifier,
+        }
+    }
+}
+
 /// A type-erased instantiated component.
 ///
 /// `value` stores `Arc<T>` inside a `Box<dyn Any + Send + Sync>`, which
@@ -361,6 +387,61 @@ pub(crate) struct ScopeStore {
 /// seed they hold without re-implementing the downcast.
 pub fn from_boxed<H: Injectable>(boxed: &BoxedComponent) -> Option<H> {
     boxed.value.downcast_ref::<H::Stored>().map(H::from_stored)
+}
+
+/// Hidden typed generation-snapshot adapter and payload validator.
+#[derive(Clone, Copy)]
+#[doc(hidden)]
+pub struct GenerationSnapshot {
+    snapshot: fn(&BoxedComponent) -> crate::Result<BoxedComponent>,
+    validate: fn(&BoxedComponent) -> bool,
+}
+
+impl GenerationSnapshot {
+    pub(crate) fn snapshot(self, active: &BoxedComponent) -> crate::Result<BoxedComponent> {
+        (self.snapshot)(active)
+    }
+
+    pub(crate) fn validates(self, candidate: &BoxedComponent) -> bool {
+        (self.validate)(candidate)
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn for_test(
+        snapshot: fn(&BoxedComponent) -> crate::Result<BoxedComponent>,
+        validate: fn(&BoxedComponent) -> bool,
+    ) -> Self {
+        Self { snapshot, validate }
+    }
+}
+
+/// The generic generation-snapshot adapter for a typed component: recovers the
+/// handle from the active stored slot and boxes a *new* stored representation.
+/// For an `Arc<T>` handle this shares the same `Arc` instance but creates an
+/// independent [`Live<T>`] cell. By-value handles work only when their `Injectable`
+/// implementation explicitly opts in (the component macro's `retainable` flag).
+pub(crate) fn generation_snapshot_adapter<T: Component>(
+    active: &BoxedComponent,
+) -> crate::Result<BoxedComponent> {
+    let stored = active
+        .value
+        .downcast_ref::<<T::Handle as Injectable>::Stored>()
+        .ok_or(crate::Error::SnapshotStorageMismatch { component: T::ID })?;
+
+    let candidate_stored = <T::Handle as Injectable>::snapshot_stored(stored)
+        .ok_or(crate::Error::SnapshotHandleUnsupported { component: T::ID })?;
+
+    Ok(BoxedComponent {
+        ty: active.ty,
+        value: Box::new(candidate_stored),
+    })
+}
+
+fn generation_snapshot_validates<T: Component>(candidate: &BoxedComponent) -> bool {
+    candidate
+        .value
+        .downcast_ref::<<T::Handle as Injectable>::Stored>()
+        .is_some()
 }
 
 impl ScopeStore {
@@ -838,6 +919,11 @@ pub type ComponentFactory =
 /// [`ComponentDescriptor::effective_factory`].
 #[derive(Clone, Copy)]
 pub struct ComponentFactoryDescriptor {
+    /// Stable identity of this construction recipe within its owning component.
+    ///
+    /// This identity is part of graph transition comparison. Change it whenever the recipe's
+    /// construction semantics change. IDs must be non-empty and unique within a component.
+    pub id: &'static str,
     pub construct: ComponentFactory,
     /// The factory's dependency edges, reported at runtime. Read only at build.
     pub dependencies: fn() -> Vec<DependencyDescriptor>,
@@ -848,6 +934,7 @@ pub struct ComponentFactoryDescriptor {
 impl fmt::Debug for ComponentFactoryDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ComponentFactoryDescriptor")
+            .field("id", &self.id)
             .field("dependencies", &(self.dependencies)())
             .field("default", &self.default)
             .finish_non_exhaustive()
@@ -918,16 +1005,31 @@ pub trait ComponentFactories {
 /// `Copy` so the registry can own a flat `Vec<ComponentDescriptor>` holding both
 /// link-time-collected descriptors and ones synthesized at runtime for
 /// manually-provided instances.
+///
+/// # Pre-1.0 descriptor migration
+///
+/// Handwritten literals must set [`generation_snapshot`](Self::generation_snapshot) to
+/// [`ComponentDescriptor::typed_snapshot::<T>()`] for a typed, retainable component or
+/// `None` for a raw/manual descriptor. Prefer [`of`](Self::of), [`manual`](Self::manual),
+/// or [`manual_of`](Self::manual_of); generated descriptors are updated automatically.
 #[derive(Clone, Copy)]
 pub struct ComponentDescriptor {
     pub id: &'static str,
     pub name: &'static str,
     pub ty: TypeDescriptor,
     pub scope: &'static dyn Scope,
+    /// Optional root condition. Provider mappings inherit this component's eligibility.
+    pub condition: Option<&'static ConditionDescriptor>,
     pub factories: fn() -> &'static [ComponentFactoryDescriptor],
     /// The component's `{Type}Hooks` slice (its `#[hook]` methods). Empty for a type
     /// that declares none — and for every manually-seeded instance.
     pub hooks: fn() -> &'static [HookDescriptor],
+    /// Hidden typed generation-snapshot adapter. Set for generated/typed descriptors
+    /// ([`of`](Self::of), [`manual_of`](Self::manual_of), macro-generated literals);
+    /// `None` for raw [`manual`](Self::manual) descriptors, which are never
+    /// retainable.
+    #[doc(hidden)]
+    pub generation_snapshot: Option<GenerationSnapshot>,
 }
 
 /// The empty factory slice for a manually-provided instance: nothing to construct,
@@ -943,8 +1045,10 @@ impl ComponentDescriptor {
             name: T::NAME,
             ty: TypeDescriptor::of::<T>(T::NAME),
             scope: &Singleton,
+            condition: None,
             factories: no_factories,
             hooks: no_hooks,
+            generation_snapshot: Self::typed_snapshot::<T>(),
         }
     }
 
@@ -963,9 +1067,43 @@ impl ComponentDescriptor {
             name,
             ty,
             scope,
+            condition: None,
             factories: no_factories,
             hooks: no_hooks,
+            generation_snapshot: None,
         }
+    }
+
+    /// A descriptor for a framework-seeded typed instance (no factory) that carries
+    /// the typed generation-snapshot adapter, so the instance can be retained across
+    /// generations. Raw [`manual`](Self::manual) descriptors stay non-retainable.
+    #[doc(hidden)]
+    pub const fn manual_of<T: Component>(
+        id: &'static str,
+        name: &'static str,
+        scope: &'static dyn Scope,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            ty: TypeDescriptor::of::<T>(name),
+            scope,
+            condition: None,
+            factories: no_factories,
+            hooks: no_hooks,
+            generation_snapshot: Self::typed_snapshot::<T>(),
+        }
+    }
+
+    /// The typed generation-snapshot adapter for `T`, for descriptor literals that
+    /// cannot go through [`of`](Self::of) — macro-generated descriptors and
+    /// handwritten literals with custom identity or factory slices.
+    #[doc(hidden)]
+    pub const fn typed_snapshot<T: Component>() -> Option<GenerationSnapshot> {
+        Some(GenerationSnapshot {
+            snapshot: generation_snapshot_adapter::<T>,
+            validate: generation_snapshot_validates::<T>,
+        })
     }
 
     /// The factory the container should use: an explicit one if present (the default
@@ -992,6 +1130,25 @@ impl ComponentDescriptor {
         }
     }
 
+    pub(crate) fn validate_factory_ids(&self) -> crate::Result<()> {
+        let mut ids = std::collections::HashSet::new();
+
+        for factory in (self.factories)() {
+            if factory.id.is_empty() {
+                return Err(crate::Error::EmptyFactoryId(self.name.to_string()));
+            }
+
+            if !ids.insert(factory.id) {
+                return Err(crate::Error::DuplicateFactoryId {
+                    component: self.name.to_string(),
+                    factory: factory.id.to_string(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     /// The dependencies of the effective factory (empty for a manual instance, or if
     /// the factory choice is ambiguous — that is surfaced separately during validation).
     pub fn dependencies(&self) -> Vec<DependencyDescriptor> {
@@ -1010,7 +1167,11 @@ impl fmt::Debug for ComponentDescriptor {
             .field("name", &self.name)
             .field("ty", &self.ty)
             .field("scope", &self.scope.name())
+            .field("condition", &self.condition)
             .field("dependencies", &self.dependencies())
             .finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+mod tests;

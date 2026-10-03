@@ -284,6 +284,7 @@ fn generate_init(
 
     let factory_literal = quote! {
         #component_factory_descriptor {
+            id: concat!("init:", stringify!(#marked)),
             construct: __upwell_init_factory,
             dependencies: __upwell_init_deps,
             default: false,

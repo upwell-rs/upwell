@@ -141,6 +141,10 @@ impl<P: PubSubProtocol> Injectable for TopicBus<P> {
     fn from_stored(stored: &Self) -> Self {
         stored.clone()
     }
+
+    fn snapshot_stored(stored: &Self) -> Option<Self> {
+        Some(stored.clone())
+    }
 }
 
 fn topic_bus_dependencies() -> Vec<DependencyDescriptor> {
@@ -160,6 +164,7 @@ fn construct_topic_bus<P: PubSubProtocol>(
 
 fn topic_bus_factories<P: PubSubProtocol>() -> &'static [ComponentFactoryDescriptor] {
     &[ComponentFactoryDescriptor {
+        id: "static",
         construct: construct_topic_bus::<P>,
         dependencies: topic_bus_dependencies,
         default: true,
@@ -176,8 +181,10 @@ pub fn topic_bus_descriptor<P: PubSubProtocol>() -> ComponentDescriptor {
         name,
         ty: TypeDescriptor::of::<TopicBus<P>>(name),
         scope: &Singleton,
+        condition: None,
         factories: topic_bus_factories::<P>,
         hooks: no_hooks,
+        generation_snapshot: ComponentDescriptor::typed_snapshot::<TopicBus<P>>(),
     }
 }
 

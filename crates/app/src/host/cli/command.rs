@@ -208,7 +208,7 @@ impl<H: AppHost> CommandContext<H, Built> {
     where
         T: upwell_di::Injectable,
     {
-        let container = std::sync::Arc::clone(self.state.container());
+        let container = self.state.container().clone();
 
         async move {
             container

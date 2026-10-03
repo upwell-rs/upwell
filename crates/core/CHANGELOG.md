@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- *(core)* add runtime generation identities and conditional dependency observation metadata
+
 ## 0.20.0 - 2026-07-22
 
 ### Added

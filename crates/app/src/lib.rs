@@ -24,6 +24,7 @@ pub mod scope;
 mod test_support;
 #[cfg(feature = "tooling")]
 pub mod tooling;
+pub mod transition;
 
 #[doc(hidden)]
 pub use app::HostLifecycleCapabilities;
@@ -65,8 +66,8 @@ pub use protocol::{
     PreBuildContext, PreparedProtocol, ProtocolDefinition, ProtocolRuntime, Serve,
     ValidationContext,
 };
-pub use registry::AppRegistry;
-pub use runtime::AppRuntime;
+pub use registry::{AppConditionEvaluation, AppRegistry};
+pub use runtime::{AppRuntime, RuntimeView};
 pub use scope::{
     PreparedScopeTopology, ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError,
 };
@@ -76,6 +77,7 @@ pub use tooling::{
     ToolingProbeOutputError, ToolingProbeOutputTargetError, ToolingProbeTargetError,
     ToolingProjectionError, ToolingRelationshipKind,
 };
+pub use transition::{CandidateGraph, RestartReason, RestartRequired};
 pub use upwell_core::{Scope, ScopeId, StaticScope, namespaced_id};
 
 #[cfg(feature = "tooling")]

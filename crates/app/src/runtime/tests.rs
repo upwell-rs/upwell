@@ -79,6 +79,12 @@ async fn build_runtime(
     let topology = ScopeTopology::new(&BOUNDARIES)
         .prepare()
         .expect("test topology prepares");
+    let graph = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &upwell_di::ComponentRegistry::default(),
+        |_, _| true,
+    )
+    .expect("empty graph validates");
     let runtime = AppRuntime::new(
         Arc::from("test"),
         root,
@@ -92,6 +98,7 @@ async fn build_runtime(
             Arc::new(seed_destinations),
         ),
         Arc::from([]),
+        graph,
         HookManager::new(Vec::new()),
     );
 
@@ -117,14 +124,12 @@ async fn open_rejects_undeclared_and_wrong_parent_boundaries() {
     let (runtime, _) = build_runtime(HashMap::new()).await;
 
     let undeclared = expect_app_error(
-        runtime
-            .open_scope(&OTHER, Arc::clone(runtime.root()), Vec::new())
-            .await,
+        runtime.open_scope_from_root(&OTHER, Vec::new()).await,
         "undeclared boundary was accepted",
     );
     let wrong_parent = expect_app_error(
         runtime
-            .open_scope(&REQUEST, Arc::clone(runtime.root()), Vec::new())
+            .open_scope(&REQUEST, runtime.root(), Vec::new())
             .await,
         "request opened without its session parent",
     );
@@ -135,10 +140,9 @@ async fn open_rejects_undeclared_and_wrong_parent_boundaries() {
     ));
     assert!(matches!(
         wrong_parent,
-        Error::InvalidScopeParent {
+        Error::UnpinnedScopeParent {
             child: REQUEST_ID,
-            expected: SESSION_ID,
-            actual: <upwell_core::Singleton as StaticScope>::ID,
+            parent: <upwell_core::Singleton as StaticScope>::ID,
         }
     ));
 }
@@ -153,7 +157,7 @@ async fn open_rejects_foreign_runtime_and_noncanonical_root_parents() {
 
     let foreign_error = expect_app_error(
         runtime
-            .open_scope(&SESSION, Arc::clone(foreign.root()), Vec::new())
+            .open_scope(&SESSION, foreign.root(), Vec::new())
             .await,
         "foreign runtime root was accepted",
     );
@@ -173,10 +177,9 @@ async fn open_rejects_foreign_runtime_and_noncanonical_root_parents() {
     ));
     assert!(matches!(
         alternate_error,
-        Error::InvalidScopeParent {
+        Error::UnpinnedScopeParent {
             child: SESSION_ID,
-            expected: <upwell_core::Singleton as StaticScope>::ID,
-            actual: <upwell_core::Singleton as StaticScope>::ID,
+            parent: <upwell_core::Singleton as StaticScope>::ID,
         }
     ));
 }
@@ -185,7 +188,7 @@ async fn open_rejects_foreign_runtime_and_noncanonical_root_parents() {
 async fn open_uses_declared_scope_metadata_and_retains_empty_boundaries() {
     let (runtime, _) = build_runtime(HashMap::new()).await;
     let session = runtime
-        .open_scope(&SESSION, Arc::clone(runtime.root()), Vec::new())
+        .open_scope_from_root(&SESSION, Vec::new())
         .await
         .expect("session opens");
     let request = runtime
@@ -196,7 +199,7 @@ async fn open_uses_declared_scope_metadata_and_retains_empty_boundaries() {
     assert_eq!(request.scope().id(), REQUEST_ID);
     assert_eq!(request.scope().name(), REQUEST.name());
     assert_eq!(request.scope().rank(), REQUEST.rank());
-    assert!(!Arc::ptr_eq(&request, runtime.root()));
+    assert!(!Arc::ptr_eq(&request, &runtime.root()));
 }
 
 #[tokio::test]
@@ -228,31 +231,19 @@ async fn open_validates_seed_registration_destination_and_uniqueness() {
 
     let wrong_destination = expect_app_error(
         runtime
-            .open_scope(
-                &SESSION,
-                Arc::clone(runtime.root()),
-                vec![seed::<RequestSeed>()],
-            )
+            .open_scope_from_root(&SESSION, vec![seed::<RequestSeed>()])
             .await,
         "wrong-destination seed was accepted",
     );
     let unregistered = expect_app_error(
         runtime
-            .open_scope(
-                &SESSION,
-                Arc::clone(runtime.root()),
-                vec![seed::<UnknownSeed>()],
-            )
+            .open_scope_from_root(&SESSION, vec![seed::<UnknownSeed>()])
             .await,
         "unregistered seed was accepted",
     );
     let duplicate = expect_app_error(
         runtime
-            .open_scope(
-                &SESSION,
-                Arc::clone(runtime.root()),
-                vec![seed::<SessionSeed>(), seed::<SessionSeed>()],
-            )
+            .open_scope_from_root(&SESSION, vec![seed::<SessionSeed>(), seed::<SessionSeed>()])
             .await,
         "duplicate seed type was accepted",
     );
@@ -277,6 +268,78 @@ async fn open_validates_seed_registration_destination_and_uniqueness() {
         Error::DuplicateSeedType {
             scope: SESSION_ID,
             ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn nested_opening_inherits_its_parent_generation_after_publication() {
+    let (runtime, _) = build_runtime(HashMap::new()).await;
+    let old_session = runtime
+        .open_scope_from_root(&SESSION, Vec::new())
+        .await
+        .expect("old session opens");
+    let old_generation = old_session
+        .generation_lease::<RuntimeGeneration>()
+        .map(RuntimeView::from_generation)
+        .expect("session pins a runtime generation");
+    let transition = runtime.begin_transition().await;
+    let (candidate, _) = build_runtime(HashMap::new()).await;
+    let candidate_view = candidate.view();
+    let candidate_graph = EffectiveGraph::build(
+        transition.base().id(),
+        &upwell_di::ComponentRegistry::default(),
+        |_, _| true,
+    )
+    .expect("candidate graph validates");
+    let prepared = PreparedRuntimeGeneration::new(
+        Arc::clone(candidate_view.root()),
+        Arc::clone(candidate_view.scopes()),
+        candidate_view.scope_plan().clone(),
+        Arc::clone(candidate_view.resolved_components()),
+        candidate_graph,
+    );
+
+    let committed = transition.publish(prepared).expect("candidate publishes");
+    let old_request = runtime
+        .open_scope(&REQUEST, old_session, Vec::new())
+        .await
+        .expect("request opens under old session");
+    let old_request_generation = old_request
+        .generation_lease::<RuntimeGeneration>()
+        .map(RuntimeView::from_generation)
+        .expect("request inherits a runtime generation");
+    let new_session = runtime
+        .open_scope_from_root(&SESSION, Vec::new())
+        .await
+        .expect("new session opens");
+    let new_generation = new_session
+        .generation_lease::<RuntimeGeneration>()
+        .map(RuntimeView::from_generation)
+        .expect("new session pins a runtime generation");
+
+    assert_eq!(old_generation.id(), RuntimeGenerationId::INITIAL);
+    assert_eq!(old_request_generation.id(), RuntimeGenerationId::INITIAL);
+    assert_eq!(new_generation.id(), committed.id());
+    assert_eq!(new_generation.id(), RuntimeGenerationId::new(1));
+}
+
+#[tokio::test]
+async fn nested_opening_rejects_an_unpinned_root_parent() {
+    let (runtime, _) = build_runtime(HashMap::new()).await;
+
+    let error = expect_app_error(
+        runtime
+            .open_scope(&SESSION, runtime.root(), Vec::new())
+            .await,
+        "root parent was accepted by the nested-opening API",
+    );
+
+    assert!(matches!(
+        error,
+        Error::UnpinnedScopeParent {
+            child: SESSION_ID,
+            parent: <upwell_core::Singleton as StaticScope>::ID,
         }
     ));
 }

@@ -4,14 +4,32 @@ use std::fmt;
 use std::fmt::Write;
 
 use upwell_config::{CONFIG_BINDINGS, ConfigBinding};
-use upwell_core::DependencyDescriptor;
+use upwell_core::{ConfigFactDescriptor, DependencyDescriptor};
 use upwell_di::{
-    COMPONENTS, Component, ComponentDescriptor, ComponentRegistry, PROVIDERS, ProviderDescriptor,
+    COMPONENTS, Component, ComponentDescriptor, ComponentRegistry, ConditionCatalog,
+    ConditionEvaluation, ConditionFactSnapshot, PROVIDERS, ProviderDescriptor,
     ProviderSelectionModel,
 };
 
 use crate::error::Error;
 use crate::scope::PreparedScopeTopology;
+
+/// A condition evaluation bound to one application's DI and config catalogs.
+#[derive(Clone, Debug)]
+pub struct AppConditionEvaluation {
+    evaluation: ConditionEvaluation,
+    bindings: HashMap<(TypeId, String), usize>,
+}
+
+impl AppConditionEvaluation {
+    pub fn evaluation(&self) -> &ConditionEvaluation {
+        &self.evaluation
+    }
+
+    pub(crate) fn belongs_to(&self, registry: &AppRegistry) -> bool {
+        self.bindings == registry.condition_identity()
+    }
+}
 
 /// Holds the *agnostic* component, provider, and config-binding descriptors of an app —
 /// declarations only. Runtime instances live in the
@@ -72,6 +90,46 @@ impl AppRegistry {
     /// Collapses the registered descriptors to one per type (delegated to the DI engine).
     pub fn resolved_components(&self) -> crate::Result<Vec<ComponentDescriptor>> {
         Ok(self.component_registry().resolved_components()?)
+    }
+
+    /// Evaluates static eligibility from an already validated typed fact snapshot.
+    ///
+    /// This does not load configuration or construct ordinary components. The returned registry
+    /// contains eligible declarations and still requires ordinary scope-aware graph validation.
+    pub fn evaluate_conditions(
+        &self,
+        facts: impl IntoIterator<Item = ConfigFactDescriptor>,
+        snapshot: &ConditionFactSnapshot,
+    ) -> Result<AppConditionEvaluation, upwell_di::ConditionError> {
+        let evaluation =
+            ConditionCatalog::new(&self.component_registry(), facts)?.evaluate(snapshot)?;
+
+        Ok(AppConditionEvaluation {
+            evaluation,
+            bindings: self.condition_identity(),
+        })
+    }
+
+    /// Incrementally re-evaluates conditions while preserving this application's catalog identity.
+    pub fn evaluate_changed_conditions(
+        &self,
+        facts: impl IntoIterator<Item = ConfigFactDescriptor>,
+        previous: &AppConditionEvaluation,
+        snapshot: &ConditionFactSnapshot,
+    ) -> crate::Result<AppConditionEvaluation> {
+        let bindings = self.condition_identity();
+
+        if previous.bindings != bindings {
+            return Err(Error::ConditionEvaluationApplicationMismatch);
+        }
+
+        let evaluation = ConditionCatalog::new(&self.component_registry(), facts)?
+            .evaluate_changed(&previous.evaluation, snapshot)?;
+
+        Ok(AppConditionEvaluation {
+            evaluation,
+            bindings,
+        })
     }
 
     /// Returns the effective descriptor registered for component type `T`.
@@ -138,7 +196,7 @@ impl AppRegistry {
     /// Validates config edges against the registered bindings: a `#[config("path")]` edge
     /// must have a binding of its type at that path, and a `#[config]` shorthand edge must
     /// have exactly one binding of its type.
-    fn validate_configs(&self, components: &[ComponentDescriptor]) -> crate::Result<()> {
+    pub(crate) fn validate_configs(&self, components: &[ComponentDescriptor]) -> crate::Result<()> {
         let mut bound: HashMap<TypeId, Vec<&str>> = HashMap::new();
 
         for binding in &self.config_bindings {
@@ -195,6 +253,18 @@ impl AppRegistry {
         }
 
         Ok(())
+    }
+
+    fn condition_identity(&self) -> HashMap<(TypeId, String), usize> {
+        let mut identity = HashMap::new();
+
+        for binding in &self.config_bindings {
+            *identity
+                .entry((binding.ty.type_id, binding.path.clone()))
+                .or_default() += 1;
+        }
+
+        identity
     }
 
     fn write_components(&self, f: &mut impl Write) -> fmt::Result {
@@ -293,10 +363,12 @@ mod tests {
             qualifier: None,
             config: true,
             resolution: upwell_core::ResolutionMode::Eager,
+            observation: upwell_core::DependencyObservation::Live,
         }]
     }
 
     static CONFIG_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+        id: "static",
         construct: fake_factory,
         dependencies: config_deps,
         default: false,
@@ -312,8 +384,10 @@ mod tests {
             name: "NeedsConfig",
             ty: TypeDescriptor::of::<()>("NeedsConfig"),
             scope: &Singleton,
+            condition: None,
             factories: config_factories,
             hooks: upwell_hooks::no_hooks,
+            generation_snapshot: None,
         }
     }
 

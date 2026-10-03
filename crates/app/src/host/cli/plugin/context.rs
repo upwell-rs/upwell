@@ -221,7 +221,7 @@ fn built_plugin_context<D: ProtocolDefinition + Send>(
     app: App<D>,
 ) -> PluginCommandContext<Built> {
     let name = app.name().to_owned();
-    let container = std::sync::Arc::clone(app.container());
+    let container = app.container();
     let plugin_plan = app.plugin_plan().clone();
 
     PluginCommandContext {

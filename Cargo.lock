@@ -4342,6 +4342,7 @@ dependencies = [
 name = "upwell-app"
 version = "0.20.0"
 dependencies = [
+ "arc-swap",
  "clap",
  "futures",
  "serde",
@@ -4504,6 +4505,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "upwell-build",
  "upwell-core",
  "upwell-hooks",
