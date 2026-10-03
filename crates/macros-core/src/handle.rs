@@ -5,6 +5,8 @@
 //! case). `#[component(by_value)]` instead stores it as `Self` and emits the
 //! self-`Injectable` impl that makes `Self` a valid handle — for types that
 //! manage their own sharing (typically internally `Arc`, cheap to clone).
+//! `#[component(by_value, retainable)]` additionally asserts that cloning the
+//! handle does not share generation-local mutable slots.
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -21,9 +23,21 @@ pub struct HandleImpl {
     pub injectable: TokenStream,
 }
 
-pub fn handle_impl(self_ident: &Ident, by_value: bool, paths: &Paths) -> HandleImpl {
+pub fn handle_impl(
+    self_ident: &Ident,
+    by_value: bool,
+    retainable: bool,
+    paths: &Paths,
+) -> HandleImpl {
     if by_value {
         let injectable = paths.core("Injectable");
+        let snapshot = retainable.then(|| {
+            quote! {
+                fn snapshot_stored(stored: &Self) -> ::core::option::Option<Self> {
+                    ::core::option::Option::Some(::core::clone::Clone::clone(stored))
+                }
+            }
+        });
 
         HandleImpl {
             associated_type: quote! {
@@ -46,6 +60,8 @@ pub fn handle_impl(self_ident: &Ident, by_value: bool, paths: &Paths) -> HandleI
                     fn from_stored(stored: &Self) -> Self {
                         ::core::clone::Clone::clone(stored)
                     }
+
+                    #snapshot
 
                 }
             },

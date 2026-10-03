@@ -418,7 +418,8 @@ impl GenerationSnapshot {
 /// The generic generation-snapshot adapter for a typed component: recovers the
 /// handle from the active stored slot and boxes a *new* stored representation.
 /// For an `Arc<T>` handle this shares the same `Arc` instance but creates an
-/// independent [`Live<T>`] cell; a by-value handle is cloned into its own slot.
+/// independent [`Live<T>`] cell. By-value handles work only when their `Injectable`
+/// implementation explicitly opts in (the component macro's `retainable` flag).
 pub(crate) fn generation_snapshot_adapter<T: Component>(
     active: &BoxedComponent,
 ) -> crate::Result<BoxedComponent> {

@@ -178,8 +178,9 @@ impl ResolvedTransitionPlan {
     /// Each `Retain` decision is satisfied by snapshotting the component out of the
     /// active root's local store through its typed generation-snapshot adapter. A raw
     /// manual descriptor carries no adapter, so retaining it is rejected with
-    /// [`RestartReason::ManualInstanceUnsupported`]; every other snapshot failure
-    /// (missing storage, panic, type mismatch) surfaces as its DI error.
+    /// [`RestartReason::ManualInstanceUnsupported`]. A typed handle that declines
+    /// generation-local snapshots returns [`RestartReason::HandleRetentionUnsupported`];
+    /// missing storage, panic, and type mismatch surface as DI errors.
     #[doc(hidden)]
     pub async fn build_candidate_root_from_active(
         &self,

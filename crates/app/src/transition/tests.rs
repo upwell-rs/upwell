@@ -1071,3 +1071,101 @@ async fn raw_manual_singleton_requires_restart() {
         })
     ));
 }
+
+#[derive(Clone)]
+struct UnretainedByValue;
+
+impl Component for UnretainedByValue {
+    type Handle = Self;
+
+    const ID: &'static str = "unretained-by-value";
+    const NAME: &'static str = "UnretainedByValue";
+
+    fn into_handle(self) -> Self {
+        self
+    }
+}
+
+impl Injectable for UnretainedByValue {
+    type Target = Self;
+    type Stored = Self;
+
+    fn into_stored(self) -> Self {
+        self
+    }
+
+    fn from_stored(stored: &Self) -> Self {
+        stored.clone()
+    }
+}
+
+#[tokio::test]
+async fn typed_handle_without_snapshot_contract_requires_distinct_restart() {
+    let unretained = || {
+        ComponentDescriptor::manual_of::<UnretainedByValue>(
+            UnretainedByValue::ID,
+            UnretainedByValue::NAME,
+            &Singleton,
+        )
+    };
+    let mut active = AppRegistry::default();
+    active
+        .components
+        .extend([replaceable(active_factories), unretained()]);
+    let active_graph = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &active.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+    let active_scopes = scope_registry(&active.components, Vec::new());
+    let active_root = ScopeContainer::build_root(
+        &active.components,
+        vec![BoxedComponent {
+            ty: unretained().ty,
+            value: Box::new(UnretainedByValue),
+        }],
+        ResolverSet::new(),
+        Arc::clone(&active_scopes),
+    )
+    .await
+    .expect("active root builds");
+    let active = runtime_view(
+        active_root,
+        active_scopes,
+        active.components.clone(),
+        active_graph,
+    );
+
+    let mut candidate = AppRegistry::default();
+    candidate
+        .components
+        .extend([replaceable(candidate_factories), unretained()]);
+    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &candidate, &topology())
+        .expect("candidate graph validates");
+    let resolved = candidate
+        .resolve_transition(
+            active.effective_graph(),
+            [ComponentTransitionDecision {
+                component: "replaceable",
+                strategy: ComponentTransitionStrategy::Reconstruct,
+            }],
+        )
+        .expect("unchanged typed component receives a retain disposition");
+
+    let Err(error) = resolved
+        .build_candidate_root_from_active(&candidate, &active, ResolverSet::new())
+        .await
+    else {
+        panic!("a typed handle without a snapshot contract must restart");
+    };
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            component: "unretained-by-value",
+            required: Some(NodeAction::Retain),
+            reason: RestartReason::HandleRetentionUnsupported,
+        })
+    ));
+}
