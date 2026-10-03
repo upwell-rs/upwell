@@ -72,8 +72,8 @@ fn condition_fact_sources_capture_and_extract_facts() {
     assert_eq!(descriptors[0].id.property_path, "enabled");
     assert_eq!(descriptors[1].id.property_path, "level");
 
-    // Changed bindings stage the plain value; unchanged bindings stage an `Arc` of it.
-    // Both shapes must extract.
+    // Framework extension seams may supply either a plain value or an explicitly nested
+    // shared value; both shapes must extract.
     let plain = (source.facts.scalars)(&FeatureFlags {
         enabled: true,
         level: 7,

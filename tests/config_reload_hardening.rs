@@ -125,6 +125,71 @@ async fn resolver_changes_republish_a_binding_without_source_edits() {
     assert_eq!(consumer.config.get().value, "second");
 }
 
+#[config]
+#[derive(Deserialize)]
+struct ChangedHookConfig {
+    value: u32,
+}
+
+#[config]
+#[derive(Deserialize)]
+struct UnchangedHookConfig {
+    value: u32,
+}
+
+#[component]
+struct MultiConfigHook {
+    #[default]
+    unchanged_seen: AtomicUsize,
+}
+
+#[methods]
+impl MultiConfigHook {
+    #[hook(ConfigReload)]
+    async fn on_reload(
+        &self,
+        #[config("changed")] _changed: CfgNext<ChangedHookConfig>,
+        #[config("unchanged")] unchanged: CfgNext<UnchangedHookConfig>,
+    ) -> upwell::daemon::Result<HookOutcome> {
+        self.unchanged_seen
+            .store(unchanged.value as usize, Ordering::SeqCst);
+
+        Ok(HookOutcome::Reloaded)
+    }
+}
+
+#[tokio::test]
+async fn reload_hook_can_read_an_unchanged_staged_binding() {
+    let (root, file) = temp_config(
+        "unchanged-hook-param",
+        "[changed]\nvalue = 1\n[unchanged]\nvalue = 9\n",
+    );
+    let manager =
+        ConfigManager::<Toml>::load_in_with_resolvers(root.path(), &[], ResolverChain::empty())
+            .expect("load config");
+    let app = App::builder("unchanged-hook-param")
+        .config_source(manager)
+        .config::<ChangedHookConfig>("changed")
+        .config::<UnchangedHookConfig>("unchanged")
+        .component::<MultiConfigHook>()
+        .build()
+        .await
+        .expect("build app");
+    let hook = app
+        .container()
+        .get::<MultiConfigHook>()
+        .expect("resolve hook component");
+
+    fs::write(&file, "[changed]\nvalue = 2\n[unchanged]\nvalue = 9\n").expect("change one binding");
+
+    app.config_reloader()
+        .reload()
+        .await
+        .expect("unchanged CfgNext parameter remains available");
+
+    assert_eq!(hook.unchanged_seen.load(Ordering::SeqCst), 9);
+}
+
 struct AdvancingResolver(Arc<AtomicUsize>);
 
 impl Resolver for AdvancingResolver {
