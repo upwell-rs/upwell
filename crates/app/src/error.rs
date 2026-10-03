@@ -131,6 +131,20 @@ pub enum Error {
     #[error(transparent)]
     StaleGraphCandidate(#[from] upwell_di::StaleGraphCandidate),
 
+    /// The same type was supplied as a candidate generation override more than once.
+    #[error("generation override type '{type_name}' is supplied more than once")]
+    DuplicateGenerationOverride {
+        /// The duplicated Rust type name.
+        type_name: &'static str,
+    },
+
+    /// A candidate generation override does not replace a singleton the plan retains.
+    #[error("generation override type '{type_name}' does not replace a retained singleton")]
+    InvalidGenerationOverride {
+        /// The rejected Rust type name.
+        type_name: &'static str,
+    },
+
     /// Candidate preparation crossed a panicking extension boundary.
     #[error("candidate runtime preparation panicked")]
     CandidatePreparationPanicked,

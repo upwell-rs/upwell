@@ -188,6 +188,34 @@ impl ResolvedTransitionPlan {
         active: &crate::RuntimeView,
         externals: ResolverSet,
     ) -> crate::Result<(Arc<ScopeContainer>, Arc<ScopeRegistry>)> {
+        self.build_candidate_root_from_active_with_overrides(
+            candidate,
+            active,
+            externals,
+            Vec::new(),
+        )
+        .await
+    }
+
+    /// Constructs the isolated candidate singleton root like
+    /// [`build_candidate_root_from_active`](Self::build_candidate_root_from_active),
+    /// replacing select snapshot-derived seeds with caller-supplied generation
+    /// overrides.
+    ///
+    /// `generation_overrides` replaces the snapshot-derived seed for a retained
+    /// framework singleton that must be fresh in every generation (the
+    /// `HookManager`). Each override must be unique and must target a component this
+    /// plan retains; every other retained singleton still comes from the snapshot
+    /// path, and the merged seed set must still satisfy the plan's complete retain
+    /// dispositions.
+    #[doc(hidden)]
+    pub async fn build_candidate_root_from_active_with_overrides(
+        &self,
+        candidate: &CandidateGraph,
+        active: &crate::RuntimeView,
+        externals: ResolverSet,
+        generation_overrides: Vec<BoxedComponent>,
+    ) -> crate::Result<(Arc<ScopeContainer>, Arc<ScopeRegistry>)> {
         if !Arc::ptr_eq(&self.active_identity, active.effective_graph().identity()) {
             return Err(upwell_di::StaleGraphCandidate {
                 active: self.structural.base_generation,
@@ -196,17 +224,30 @@ impl ResolvedTransitionPlan {
             .into());
         }
 
-        let retained = self.derive_retained_from_active(candidate, active.root())?;
+        validate_generation_overrides(candidate, &self.decisions, &generation_overrides)?;
+
+        let overridden = generation_overrides
+            .iter()
+            .map(|seed| seed.ty.type_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut retained =
+            self.derive_retained_from_active(candidate, active.root(), &overridden)?;
+
+        retained.extend(generation_overrides);
 
         self.build_candidate_root(candidate, retained, externals)
             .await
     }
 
     /// Snapshots one stored representation per `Retain` decision out of the active root.
+    ///
+    /// Overridden types are skipped: their seed is supplied by the caller instead of
+    /// the snapshot adapter, so snapshot safety is never bypassed for them.
     fn derive_retained_from_active(
         &self,
         candidate: &CandidateGraph,
         active_root: &ScopeContainer,
+        overridden: &std::collections::BTreeSet<std::any::TypeId>,
     ) -> crate::Result<Vec<BoxedComponent>> {
         let mut retained = Vec::new();
 
@@ -222,6 +263,10 @@ impl ResolvedTransitionPlan {
             else {
                 continue;
             };
+
+            if overridden.contains(&descriptor.ty.type_id) {
+                continue;
+            }
 
             match active_root.snapshot_singleton(*descriptor) {
                 Ok(component) => retained.push(component),
@@ -539,6 +584,46 @@ fn restart<T>(node: &PlannedNode, reason: RestartReason) -> crate::Result<T> {
         reason,
     }
     .into())
+}
+
+/// Validates generation override seeds against the resolved plan's retain dispositions.
+///
+/// An override replaces the snapshot-derived retained instance for exactly one retained
+/// framework singleton. Overrides must be unique and must target a component the plan
+/// retains, so reconstruction and snapshot safety are never bypassed; the merged seed
+/// set is still completeness-checked by [`validate_retained`] and the DI candidate
+/// input validation.
+fn validate_generation_overrides(
+    candidate: &CandidateGraph,
+    decisions: &[ComponentTransitionDecision],
+    overrides: &[BoxedComponent],
+) -> crate::Result<()> {
+    let mut seen = std::collections::BTreeSet::new();
+
+    for seed in overrides {
+        let type_name = seed.ty.name;
+
+        if !seen.insert(seed.ty.type_id) {
+            return Err(crate::Error::DuplicateGenerationOverride { type_name });
+        }
+
+        let retained = decisions
+            .iter()
+            .filter(|decision| decision.strategy == ComponentTransitionStrategy::Retain)
+            .filter_map(|decision| {
+                candidate
+                    .components
+                    .iter()
+                    .find(|component| component.id == decision.component)
+            })
+            .any(|component| component.ty.type_id == seed.ty.type_id);
+
+        if !retained {
+            return Err(crate::Error::InvalidGenerationOverride { type_name });
+        }
+    }
+
+    Ok(())
 }
 
 fn depends_on_root_resolver(graph: &EffectiveGraph, component: &str) -> bool {

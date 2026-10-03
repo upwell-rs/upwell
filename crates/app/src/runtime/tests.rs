@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use upwell_core::{ResolverSet, Scope, ScopeId, StaticScope, TypeDescriptor};
-use upwell_di::{BoxedComponent, EffectiveGraph, ScopeContainer, ScopeRegistry};
-use upwell_hooks::HookManager;
+use upwell_di::{BoxedComponent, EffectiveGraph, Injectable, ScopeContainer, ScopeRegistry};
+use upwell_hooks::{HOOK_MANAGER_NAME, HookManager};
 
 use super::*;
 use crate::{Error, ScopeBoundary, ScopeParent, ScopeTopology};
@@ -77,6 +77,13 @@ fn empty_condition() -> Arc<AppConditionState> {
     Arc::new(AppConditionState::new(Arc::new(registry), evaluation))
 }
 
+fn seed_hook_manager() -> BoxedComponent {
+    BoxedComponent {
+        ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
+        value: Box::new(Injectable::into_stored(HookManager::new(Vec::new()))),
+    }
+}
+
 async fn build_runtime(
     seed_destinations: HashMap<TypeId, SeedDestination>,
 ) -> (AppRuntime, Arc<ScopeRegistry>) {
@@ -84,10 +91,14 @@ async fn build_runtime(
         ScopeRegistry::new(HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
             .expect("empty scope registry validates"),
     );
-    let root =
-        ScopeContainer::build_root(&[], Vec::new(), ResolverSet::new(), Arc::clone(&registry))
-            .await
-            .expect("test root builds");
+    let root = ScopeContainer::build_root(
+        &[],
+        vec![seed_hook_manager()],
+        ResolverSet::new(),
+        Arc::clone(&registry),
+    )
+    .await
+    .expect("test root builds");
     let topology = ScopeTopology::new(&BOUNDARIES)
         .prepare()
         .expect("test topology prepares");
@@ -112,7 +123,7 @@ async fn build_runtime(
         graph,
         empty_condition(),
     );
-    let runtime = AppRuntime::new(Arc::from("test"), generation, HookManager::new(Vec::new()));
+    let runtime = AppRuntime::new(Arc::from("test"), generation);
 
     (runtime, registry)
 }
