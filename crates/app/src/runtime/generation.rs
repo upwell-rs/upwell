@@ -136,7 +136,6 @@ impl RuntimePublication {
         RuntimeView::from_generation(self.current.load_full())
     }
 
-    #[allow(dead_code, reason = "used by the next component-strategy integration")]
     fn publish(
         &self,
         attempt: TransitionAttemptId,
@@ -213,10 +212,6 @@ impl RuntimeTransitionCoordinator {
 /// One serialized transition attempt bound to an exact base generation.
 pub(crate) struct RuntimeTransition {
     coordinator: RuntimeTransitionCoordinator,
-    #[allow(
-        dead_code,
-        reason = "retains the sole-writer lease until the attempt ends"
-    )]
     writer: OwnedMutexGuard<()>,
     attempt: TransitionAttemptId,
     base: RuntimeView,
@@ -247,15 +242,20 @@ impl RuntimeTransition {
         self.base
     }
 
-    /// Atomically publishes a fully prepared generation.
+    /// Validates a fully prepared candidate against this attempt's exact base and stamps
+    /// it for terminal publication.
     ///
-    /// All validation, hooks, and construction must finish before calling this method.
-    #[doc(hidden)]
-    #[allow(dead_code, reason = "used by the next component-strategy integration")]
-    pub(crate) fn publish(
+    /// All stale/wrong-base rejection happens here, before any caller side effect. The
+    /// returned token owns the sole-writer lease, the attempt identity, the exact base
+    /// generation, and the fully committed candidate; from here publication is infallible.
+    #[allow(
+        dead_code,
+        reason = "used by the next transactional-config integration"
+    )]
+    pub(crate) fn prepare_commit(
         self,
         candidate: PreparedRuntimeGeneration,
-    ) -> Result<RuntimeView, StaleRuntimeProposal> {
+    ) -> Result<PreparedRuntimeCommit, StaleRuntimeProposal> {
         if candidate.graph.generation() != self.base.id() {
             return Err(StaleRuntimeProposal {
                 attempt: self.attempt,
@@ -279,13 +279,76 @@ impl RuntimeTransition {
         } = self;
         let candidate = Arc::new(candidate.commit(Arc::clone(&coordinator.owner), next));
 
-        let result = coordinator
+        Ok(PreparedRuntimeCommit {
+            coordinator,
+            writer,
+            attempt,
+            base: base.generation,
+            candidate,
+        })
+    }
+
+    /// Atomically publishes a fully prepared generation.
+    ///
+    /// Compatibility wrapper around [`RuntimeTransition::prepare_commit`] and
+    /// [`PreparedRuntimeCommit::commit_with`] with an empty legacy-config callback.
+    ///
+    /// All validation, hooks, and construction must finish before calling this method.
+    #[doc(hidden)]
+    #[allow(dead_code, reason = "used by the next component-strategy integration")]
+    pub(crate) fn publish(
+        self,
+        candidate: PreparedRuntimeGeneration,
+    ) -> Result<RuntimeView, StaleRuntimeProposal> {
+        self.prepare_commit(candidate)
+            .map(|commit| commit.commit_with(|| ()))
+    }
+}
+
+/// A validated, stamped candidate generation awaiting terminal publication.
+///
+/// Prepared by [`RuntimeTransition::prepare_commit`]; owns the sole-writer lease, the
+/// attempt identity, the exact base generation, and the fully committed candidate.
+pub(crate) struct PreparedRuntimeCommit {
+    coordinator: RuntimeTransitionCoordinator,
+    writer: OwnedMutexGuard<()>,
+    attempt: TransitionAttemptId,
+    base: Arc<RuntimeGeneration>,
+    candidate: Arc<RuntimeGeneration>,
+}
+
+impl PreparedRuntimeCommit {
+    /// Publishes the validated candidate, runs the synchronous legacy-config
+    /// compatibility callback while still holding the writer, then releases the writer.
+    ///
+    /// Ordering: the already validated candidate generation becomes current first, the
+    /// callback observes the new generation through the coordinator, and only then does
+    /// the writer lease end. Publication cannot fail after `prepare_commit` accepted the
+    /// candidate: the writer is the sole publication serializer, so a compare-and-swap
+    /// failure would be an internal invariant violation, not a recoverable error.
+    #[allow(
+        dead_code,
+        reason = "used by the next transactional-config integration"
+    )]
+    pub(crate) fn commit_with(self, commit_compat: impl FnOnce()) -> RuntimeView {
+        let PreparedRuntimeCommit {
+            coordinator,
+            writer,
+            attempt,
+            base,
+            candidate,
+        } = self;
+
+        let view = coordinator
             .publication
-            .publish(attempt, &base.generation, candidate);
+            .publish(attempt, &base, candidate)
+            .expect("validated candidate must publish under the sole writer");
+
+        commit_compat();
 
         drop(writer);
 
-        result
+        view
     }
 }
 
