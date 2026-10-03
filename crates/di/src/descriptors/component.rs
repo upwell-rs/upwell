@@ -428,7 +428,7 @@ pub(crate) fn generation_snapshot_adapter<T: Component>(
         .ok_or(crate::Error::SnapshotStorageMismatch { component: T::ID })?;
 
     let candidate_stored = <T::Handle as Injectable>::snapshot_stored(stored)
-        .ok_or(crate::Error::SnapshotUnavailable { component: T::ID })?;
+        .ok_or(crate::Error::SnapshotHandleUnsupported { component: T::ID })?;
 
     Ok(BoxedComponent {
         ty: active.ty,

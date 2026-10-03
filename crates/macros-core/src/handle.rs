@@ -47,9 +47,6 @@ pub fn handle_impl(self_ident: &Ident, by_value: bool, paths: &Paths) -> HandleI
                         ::core::clone::Clone::clone(stored)
                     }
 
-                    fn snapshot_stored(stored: &Self) -> ::core::option::Option<Self> {
-                        ::core::option::Option::Some(::core::clone::Clone::clone(stored))
-                    }
                 }
             },
         }
