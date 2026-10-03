@@ -71,8 +71,9 @@ impl StagedConfig {
         &self.path
     }
 
-    /// The erased staged value: the plain value for a changed binding, an `Arc` of it
-    /// for an unchanged binding.
+    /// The erased staged value. Values stored in an `Arc<T>` are unsized into
+    /// `Arc<dyn Any>`, so the erased target remains `T` for both changed and unchanged
+    /// bindings.
     pub fn value(&self) -> &dyn Any {
         self.value.as_ref()
     }
