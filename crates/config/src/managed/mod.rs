@@ -330,8 +330,8 @@ impl ConditionFactSource {
     }
 }
 
-/// Captures `T`'s condition scalars from an erased staged value. Changed bindings stage
-/// the plain value; unchanged bindings stage an `Arc` of it — both shapes extract.
+/// Captures `T`'s condition scalars from an erased staged value. The `Arc<T>` fallback
+/// also accepts explicitly nested shared values supplied through framework extension seams.
 fn condition_scalars_erased<T: ConditionFacts>(
     value: &dyn std::any::Any,
 ) -> Vec<(ConfigFactId, ConditionScalar)> {

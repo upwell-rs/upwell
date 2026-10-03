@@ -98,7 +98,7 @@ async fn staged_reload_commits_only_when_explicitly_committed() {
 - Produces:
   - `pub trait ConditionFacts: ConfigProperties { fn condition_facts() -> Vec<ConfigFactDescriptor>; fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)>; }` with explicit per-type implementations. The trait is separate because `#[config]` already emits `ConfigProperties`, so macro config types cannot override methods on that impl.
   - `ConditionFactSource::of::<T: ConditionFacts>(path)` captures descriptors and an erased scalar thunk. `AppBuilder::condition_facts::<T>(path)` registers that source explicitly; macro registration remains deferred to #208.
-  - `AppRegistry::condition_snapshot(values)` extracts scalars from staged `(TypeId, path, value)` tuples. The thunk accepts both staging representations: plain `T` for changed bindings and `Arc<T>` for unchanged bindings.
+  - `AppRegistry::condition_snapshot(values)` extracts scalars from staged `(TypeId, path, value)` tuples. The thunk accepts the normal erased `T` target and explicitly nested `Arc<T>` values supplied through extension seams.
 - Consumes: `ConfigFactDescriptor`, `ConditionScalar`, `ConditionFactSnapshot` from `upwell-core`/`upwell-di`.
 
 - [ ] **Step 1: Write the failing test** (config crate):

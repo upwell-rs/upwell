@@ -466,8 +466,8 @@ fn registered_condition_facts_extract_from_staged_values() {
     assert_eq!(descriptors.len(), 1);
     assert_eq!(descriptors[0].id.property_path, "enabled");
 
-    // Unchanged bindings stage an `Arc` of the value; changed ones stage the plain
-    // value — both shapes must extract.
+    // Framework extension seams may supply either a plain value or an explicitly nested
+    // shared value; both shapes must extract.
     let value: FlagCfg = manager.get_config::<FlagCfg>("flags").unwrap();
     let shared = (source.facts.scalars)(&Arc::new(value.clone()));
     let plain = (source.facts.scalars)(&value);
