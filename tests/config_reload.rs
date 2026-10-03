@@ -134,3 +134,77 @@ async fn reload_swaps_only_the_changed_binding() {
         "re-reading identical sources changes nothing"
     );
 }
+
+/// A staged reload is inert until explicitly committed: staging reports the changed
+/// bindings and staged values without touching any live slot, and only `commit()`
+/// publishes them. This is the primitive the transactional config-and-graph commit
+/// builds on.
+#[tokio::test]
+async fn staged_reload_commits_only_when_explicitly_committed() {
+    let root = temp_config_dir();
+    let dirs = DirectoriesManager::from_path(root.path().to_path_buf());
+    let config_dir = dirs.dir::<Config>();
+    let config_file = config_dir.path().join("application.toml");
+
+    fs::create_dir_all(config_dir.path()).expect("create config subdir");
+    fs::write(&config_file, "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n").expect("write config");
+
+    let manager =
+        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
+            .expect("load config");
+
+    let daemon = App::<()>::builder("config-staged-reload-test")
+        .config_source(manager)
+        .auto_discover()
+        .build()
+        .await
+        .expect("daemon builds");
+
+    let consumer = daemon
+        .container()
+        .get::<Consumer>()
+        .expect("Consumer constructed");
+    let reloader = daemon.config_reloader();
+
+    let unchanged = reloader.stage().expect("staging identical sources");
+
+    assert!(
+        unchanged.changed().is_empty(),
+        "staging identical sources changes nothing"
+    );
+
+    fs::write(&config_file, "[svc]\nvalue = 2\n\n[other]\nvalue = 100\n").expect("rewrite config");
+
+    let staged = reloader.stage().expect("staging after the source change");
+
+    assert_eq!(staged.changed().len(), 1, "only one binding changed");
+    assert_eq!(
+        staged.changed()[0].path,
+        "svc",
+        "the changed binding is svc"
+    );
+
+    assert_eq!(
+        consumer.svc().get().value,
+        1,
+        "the live value is untouched while the reload is only staged"
+    );
+    assert_eq!(
+        consumer.other().get().value,
+        100,
+        "the unchanged binding keeps its value while staged"
+    );
+
+    staged.commit();
+
+    assert_eq!(
+        consumer.svc().get().value,
+        2,
+        "an explicit commit publishes the staged value"
+    );
+    assert_eq!(
+        consumer.other().get().value,
+        100,
+        "the unchanged binding keeps its value after the commit"
+    );
+}

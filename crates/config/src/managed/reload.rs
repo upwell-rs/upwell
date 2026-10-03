@@ -53,13 +53,39 @@ pub struct ReloadProposal {
 }
 
 /// One binding's value staged into a [`ReloadProposal`] — its type, path, and erased value.
+#[derive(Clone)]
 pub struct StagedConfig {
     type_id: TypeId,
     path: Arc<str>,
     value: Arc<dyn Any + Send + Sync>,
 }
 
+impl StagedConfig {
+    /// The staged binding's type.
+    pub fn type_id(&self) -> TypeId {
+        self.type_id
+    }
+
+    /// The staged binding's property path.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// The erased staged value. Values stored in an `Arc<T>` are unsized into
+    /// `Arc<dyn Any>`, so the erased target remains `T` for both changed and unchanged
+    /// bindings.
+    pub fn value(&self) -> &dyn Any {
+        self.value.as_ref()
+    }
+}
+
 impl ReloadProposal {
+    /// Builds a proposal from staged values. Public so the transactional config-and-graph
+    /// reload can run hooks over a proposal it staged outside [`ConfigReloader::reload`].
+    pub fn new(staged: Vec<StagedConfig>) -> Self {
+        Self { staged }
+    }
+
     /// The proposed value of type `T` at `path` (or its sole binding when `path` is
     /// `None`), as a [`CfgNext<T>`]. `None` if no such binding is staged or the by-type
     /// lookup is ambiguous.
@@ -365,72 +391,8 @@ impl ConfigReloader {
         // If nothing listens for config_reload, skip building proposals entirely (O(1)).
         let run_hooks = self.inner.hooks.has::<ConfigReload>();
 
-        // Phase 1 (prepare): re-read, diff, and deserialize changed bindings — all under
-        // the manager lock, with no await, so the lock is released before hooks run. User
-        // deserializers execute in this boundary; convert their panics to a failed reload.
-        let phase_one = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let manager = self.lock_manager();
-            let new_root = manager
-                .reread()
-                .map_err(|error| Box::new(ConfigReloadError::Load(error)))?;
-            let bindings_by_type = if run_hooks {
-                bindings_by_type_index(&manager)
-            } else {
-                HashMap::new()
-            };
-            let mut prepared = Vec::new();
-            let mut changed = Vec::new();
-            let mut staged = Vec::new();
-            let mut changed_paths: HashSet<String> = HashSet::new();
-
-            for slot in &self.inner.slots {
-                let swap = slot.prepare(&manager, &new_root).map_err(|source| {
-                    Box::new(ConfigReloadError::Bind {
-                        path: slot.path().to_string(),
-                        type_name: slot.type_name(),
-                        source,
-                    })
-                })?;
-
-                let Some(swap) = swap else {
-                    if run_hooks {
-                        staged.push(slot.stage_current());
-                    }
-
-                    continue;
-                };
-
-                if run_hooks {
-                    staged.push(StagedConfig {
-                        type_id: swap.type_id,
-                        path: swap.path.clone(),
-                        value: swap.staged.clone(),
-                    });
-                    changed_paths.insert(slot.path().to_string());
-                }
-
-                changed.push(ChangedBinding {
-                    path: slot.path().to_string(),
-                    type_name: slot.type_name(),
-                });
-                prepared.push(swap);
-            }
-
-            Ok::<_, Box<ConfigReloadError>>((
-                new_root,
-                prepared,
-                changed,
-                staged,
-                changed_paths,
-                bindings_by_type,
-            ))
-        }));
-
-        let (new_root, prepared, changed, staged, changed_paths, bindings_by_type) = match phase_one
-        {
-            Ok(result) => result.map_err(|error| *error)?,
-            Err(_) => return Err(ConfigReloadError::Panicked),
-        };
+        let staged = self.stage_with(run_hooks)?;
+        let changed = staged.changed.clone();
 
         // Nothing changed: no commit, no hooks — but a successful reload still advances the
         // generation so observers can tell a reload ran.
@@ -445,11 +407,16 @@ impl ConfigReloader {
         }
 
         // Phase 2 (hooks): run every config_reload hook that targets a changed path. Any
-        // hook error aborts — `prepared` is dropped, so nothing is committed.
+        // hook error aborts — the staged swaps are dropped, so nothing is committed.
         let mut hooks = Vec::new();
 
         if run_hooks {
-            let proposal = ReloadProposal { staged };
+            let changed_paths = changed
+                .iter()
+                .map(|binding| binding.path.clone())
+                .collect::<HashSet<String>>();
+            let bindings_by_type = bindings_by_type_index(&self.lock_manager());
+            let proposal = ReloadProposal::new(staged.staged.clone());
             let outcomes = self
                 .inner
                 .hooks
@@ -478,15 +445,7 @@ impl ConfigReloader {
         }
 
         // Phase 3 (commit): every binding re-bound and every hook accepted.
-        {
-            let mut manager = self.lock_manager();
-
-            for swap in prepared {
-                (swap.commit)();
-            }
-
-            manager.adopt(new_root);
-        }
+        staged.commit();
 
         let generation = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
 
@@ -495,6 +454,126 @@ impl ConfigReloader {
             changed,
             hooks,
         })
+    }
+
+    /// Stages a reload without committing anything: re-reads the sources, diffs each
+    /// binding's subtree, and deserializes changed bindings into committable swaps.
+    ///
+    /// The returned [`StagedReload`] is inert until [`StagedReload::commit`] is called,
+    /// so a caller can run its own validation, hooks, or graph preparation between the
+    /// two. The caller is responsible for serializing stage → commit against
+    /// [`reload`](Self::reload) (e.g. by holding [`lock_reload`](Self::lock_reload)
+    /// across the whole transaction).
+    #[allow(clippy::result_large_err)]
+    #[allow(clippy::result_large_err)]
+    pub fn stage(&self) -> Result<StagedReload, ConfigReloadError> {
+        self.stage_with(true)
+    }
+
+    /// Acquires the reload serialization lock. Hold it across an external
+    /// stage → validate → commit transaction so a concurrent [`reload`](Self::reload)
+    /// cannot interleave and commit a newer tree in between.
+    pub async fn lock_reload(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.inner.in_progress.lock().await
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn stage_with(&self, stage_unchanged: bool) -> Result<StagedReload, ConfigReloadError> {
+        // Phase 1 (prepare): re-read, diff, and deserialize changed bindings — all under
+        // the manager lock, with no await, so the lock is released before hooks run. User
+        // deserializers execute in this boundary; convert their panics to a failed reload.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let manager = self.lock_manager();
+            let new_root = manager
+                .reread()
+                .map_err(|error| Box::new(ConfigReloadError::Load(error)))?;
+            let mut prepared = Vec::new();
+            let mut changed = Vec::new();
+            let mut staged = Vec::new();
+
+            for slot in &self.inner.slots {
+                let swap = slot.prepare(&manager, &new_root).map_err(|source| {
+                    Box::new(ConfigReloadError::Bind {
+                        path: slot.path().to_string(),
+                        type_name: slot.type_name(),
+                        source,
+                    })
+                })?;
+
+                let Some(swap) = swap else {
+                    if stage_unchanged {
+                        staged.push(slot.stage_current());
+                    }
+
+                    continue;
+                };
+
+                if stage_unchanged {
+                    staged.push(StagedConfig {
+                        type_id: swap.type_id,
+                        path: swap.path.clone(),
+                        value: swap.staged.clone(),
+                    });
+                }
+
+                changed.push(ChangedBinding {
+                    path: slot.path().to_string(),
+                    type_name: slot.type_name(),
+                });
+                prepared.push(swap);
+            }
+
+            Ok::<_, Box<ConfigReloadError>>(StagedReload {
+                changed,
+                staged,
+                prepared,
+                new_root,
+                reloader: self.clone(),
+            })
+        }))
+        .map_err(|_| ConfigReloadError::Panicked)?
+        .map_err(|error| *error)
+    }
+}
+
+/// A prepared-but-uncommitted reload: the changed bindings, the staged proposal values,
+/// and the committable swaps. Produced by [`ConfigReloader::stage`]; nothing is published
+/// until [`commit`](Self::commit) is called.
+pub struct StagedReload {
+    changed: Vec<ChangedBinding>,
+    staged: Vec<StagedConfig>,
+    prepared: Vec<PreparedSwap>,
+    new_root: ConfigValue,
+    reloader: ConfigReloader,
+}
+
+impl StagedReload {
+    /// The bindings whose source changed and are ready to re-publish.
+    pub fn changed(&self) -> &[ChangedBinding] {
+        &self.changed
+    }
+
+    /// The staged value of every binding (changed bindings hold their newly-deserialized
+    /// value, unchanged bindings hold their current value), for hooks and condition-fact
+    /// extraction.
+    pub fn staged(&self) -> &[StagedConfig] {
+        &self.staged
+    }
+
+    /// Whether no binding changed. An empty staged reload has nothing to commit.
+    pub fn is_empty(&self) -> bool {
+        self.changed.is_empty()
+    }
+
+    /// Publishes every staged swap into its live slot and adopts the re-read tree.
+    pub fn commit(self) {
+        let mut manager = self.reloader.lock_manager();
+
+        for swap in self.prepared {
+            (swap.commit)();
+        }
+
+        manager.adopt(self.new_root);
     }
 }
 

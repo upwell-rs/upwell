@@ -11,8 +11,9 @@ use std::path::PathBuf;
 use futures::FutureExt;
 use tracing::{debug, error, info};
 use upwell_config::{
-    CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ConfigBinding, ConfigManager, ConfigProperties,
-    ConfigReloader, ConfigStore, ReloadTriggers, spawn_reload_triggers, stop_reload_triggers,
+    CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ConditionFactSource, ConditionFacts, ConfigBinding,
+    ConfigManager, ConfigProperties, ConfigReloader, ConfigStore, ReloadTriggers,
+    spawn_reload_triggers, stop_reload_triggers,
 };
 use upwell_core::{
     Descriptor, ResolverCtx, ResolverSet, RuntimeGenerationId, Singleton as SingletonScope,
@@ -37,7 +38,7 @@ use crate::protocol::{
     ValidationContext,
 };
 use crate::registry::AppRegistry;
-use crate::runtime::{AppRuntime, RuntimeScopePlan};
+use crate::runtime::{AppConditionState, AppRuntime, PreparedRuntimeGeneration, RuntimeScopePlan};
 use crate::scope::{PreparedScopeTopology, ScopePlan, SeedDestination};
 
 /// The framework-provided singleton injectable for triggering graceful shutdown.
@@ -101,6 +102,7 @@ pub struct PreparedApp<D: ProtocolDefinition> {
     resolved: Arc<[ComponentDescriptor]>,
     root_order: Arc<[ComponentDescriptor]>,
     effective_graph: EffectiveGraph,
+    condition: Arc<AppConditionState>,
     #[cfg(feature = "tooling")]
     host_lifecycle: Option<HostLifecycleCapabilities>,
     #[cfg(feature = "tooling")]
@@ -207,6 +209,17 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         self.registry
             .config_bindings
             .push(ConfigBinding::of::<T>(path));
+
+        self
+    }
+
+    /// Registers the condition facts of config type `T` at `path`, so conditional
+    /// components can key their availability on `T`'s values. The transactional reload
+    /// extracts the scalars from every staged binding of the type.
+    pub fn condition_facts<T: ConditionFacts>(mut self, path: impl Into<String>) -> Self {
+        self.registry
+            .condition_facts
+            .push(ConditionFactSource::of::<T>(path));
 
         self
     }
@@ -367,9 +380,59 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
 
         let scope_topology = Arc::new(D::SCOPE_TOPOLOGY.prepare().map_err(Error::from)?);
 
-        // Collapse to the effective component set (explicit factories override defaults).
-        let resolved = registry.resolved_components()?;
-        registry.components = resolved.clone();
+        // Collapse to the full component catalog (explicit factories override defaults).
+        // The catalog keeps conditionally disabled descriptors so a later reload can
+        // re-include them; the effective set is selected by the evaluation below.
+        let catalog = registry.resolved_components()?;
+        registry
+            .component_registry()
+            .provider_selection_model(&catalog)
+            .map_err(Error::from)?;
+        registry.components = catalog.clone();
+
+        // Build the config store before graph planning — the initial condition evaluation
+        // reads the staged binding values.
+        let (config_store, reload_slots) = ConfigStore::build(&tree).map_err(Error::from)?;
+        let config_store = Arc::new(config_store);
+
+        // Evaluate the startup conditions from the staged config values, with the same
+        // evaluator the transactional reload uses. An app with no condition facts gets an
+        // empty-facts evaluation, which leaves every unconditional component eligible.
+        let staged: Vec<_> = reload_slots
+            .iter()
+            .map(|slot| slot.stage_current())
+            .collect();
+        let snapshot = registry
+            .condition_snapshot(
+                staged
+                    .iter()
+                    .map(|entry| (entry.type_id(), entry.path(), entry.value())),
+            )
+            .map_err(Error::from)?;
+        let facts = registry
+            .condition_facts
+            .iter()
+            .flat_map(|source| (source.facts.descriptors)());
+        let evaluation = registry
+            .evaluate_conditions(facts, &snapshot)
+            .map_err(Error::from)?;
+
+        // Retain the full catalog with the evaluation for this and future generations.
+        let condition = Arc::new(AppConditionState::new(
+            Arc::new(registry.clone()),
+            evaluation,
+        ));
+
+        // Narrow to the effective registry: eligible components and providers only.
+        let eligible = condition
+            .evaluation()
+            .evaluation()
+            .eligible_registry()
+            .clone();
+        let resolved = eligible.resolved_components().map_err(Error::from)?;
+        registry.components = eligible.components.clone();
+        registry.providers = eligible.providers.clone();
+
         #[cfg(feature = "tooling")]
         plugin_plan.reconcile(&registry);
 
@@ -384,24 +447,19 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             value: Box::new(Injectable::into_stored(hook_manager.clone())),
         });
 
-        let component_registry = registry.component_registry();
-        let provider_selection = Arc::new(
-            component_registry
-                .provider_selection_model(&resolved)
-                .map_err(Error::from)?,
-        );
+        let effective_graph = EffectiveGraph::build(
+            RuntimeGenerationId::INITIAL,
+            &eligible,
+            |consumer, dependency| scope_topology.is_reachable(&consumer, &dependency),
+        )
+        .map_err(Error::from)?;
+        let provider_selection = Arc::clone(effective_graph.provider_selection());
         registry.validate_effective_with_scope_topology(
             &resolved,
             &provider_selection,
             &scope_topology,
         )?;
         let scopes = ScopePlan::partition(&resolved, &provider_selection, &scope_topology)?;
-        let effective_graph = EffectiveGraph::build(
-            RuntimeGenerationId::INITIAL,
-            &component_registry,
-            |consumer, dependency| scope_topology.is_reachable(&consumer, &dependency),
-        )
-        .map_err(Error::from)?;
         let prebuilt: HashSet<_> = instances
             .iter()
             .map(|instance| instance.ty.type_id)
@@ -416,10 +474,6 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         .into_iter()
         .copied()
         .collect();
-
-        // Build the config store — every bound `Cfg<T>` value, plus the reload slots.
-        let (config_store, reload_slots) = ConfigStore::build(&tree).map_err(Error::from)?;
-        let config_store = Arc::new(config_store);
 
         let protocol = protocol.prepare(&ValidationContext::new(
             &self.name,
@@ -506,6 +560,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             resolved: Arc::from(resolved),
             root_order: Arc::from(root_order),
             effective_graph,
+            condition,
             #[cfg(feature = "tooling")]
             host_lifecycle: None,
             #[cfg(feature = "tooling")]
@@ -628,6 +683,7 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             resolved,
             root_order,
             effective_graph,
+            condition,
             #[cfg(feature = "tooling")]
                 host_lifecycle: _,
             #[cfg(feature = "tooling")]
@@ -668,15 +724,15 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             "app built"
         );
 
-        let runtime = AppRuntime::new(
-            Arc::from(name.as_str()),
+        let generation = PreparedRuntimeGeneration::new(
             root,
             scope_registry,
             RuntimeScopePlan::new(scope_topology, scope_orders, seed_destinations),
             resolved,
             effective_graph,
-            hook_manager,
+            condition,
         );
+        let runtime = AppRuntime::new(Arc::from(name.as_str()), generation, hook_manager);
 
         // Hand off to the prepared protocol: it constructs the served runtime.
         let protocol = protocol.build(&runtime)?;

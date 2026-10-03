@@ -4,10 +4,15 @@
 //! resolution -> typed value.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::Deserialize;
 use upwell::config::Toml;
-use upwell::{ConfigManager, DirectoriesManager, config};
+use upwell::{
+    ConditionFactSource, ConditionFacts, ConditionScalar, ConditionScalarKind,
+    ConfigFactDescriptor, ConfigFactId, ConfigManager, DescriptorSource, DirectoriesManager,
+    config,
+};
 use upwell_config::ResolverChain;
 
 /// Resolves directory placeholders against a fixed root, so `${@runtime}` becomes
@@ -423,4 +428,56 @@ fn cfg_attr_default_variant_selected_on_its_platform() {
             socket: PathBuf::from("/run/d.sock"),
         }
     );
+}
+
+/// A config type declaring condition facts, registered against the auto-discovered
+/// binding path, to prove the staged-value extraction path works end to end.
+#[config(path = "flags")]
+#[derive(Debug, Clone, Deserialize)]
+struct FlagCfg {
+    #[default = "false"]
+    enabled: bool,
+}
+
+impl ConditionFacts for FlagCfg {
+    fn condition_facts() -> Vec<ConfigFactDescriptor> {
+        vec![ConfigFactDescriptor {
+            id: ConfigFactId::new("FlagCfg", "flags", "enabled"),
+            kind: ConditionScalarKind::Bool,
+            source: DescriptorSource::UNKNOWN,
+        }]
+    }
+
+    fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)> {
+        vec![(
+            ConfigFactId::new("FlagCfg", "flags", "enabled"),
+            ConditionScalar::Bool(self.enabled),
+        )]
+    }
+}
+
+#[test]
+fn registered_condition_facts_extract_from_staged_values() {
+    let manager = seeded_manager("[flags]\nenabled = true\n");
+    let source = ConditionFactSource::of::<FlagCfg>("flags");
+
+    let descriptors = (source.facts.descriptors)();
+
+    assert_eq!(descriptors.len(), 1);
+    assert_eq!(descriptors[0].id.property_path, "enabled");
+
+    // Framework extension seams may supply either a plain value or an explicitly nested
+    // shared value; both shapes must extract.
+    let value: FlagCfg = manager.get_config::<FlagCfg>("flags").unwrap();
+    let shared = (source.facts.scalars)(&Arc::new(value.clone()));
+    let plain = (source.facts.scalars)(&value);
+
+    assert_eq!(
+        shared,
+        vec![(
+            ConfigFactId::new("FlagCfg", "flags", "enabled"),
+            ConditionScalar::Bool(true)
+        )]
+    );
+    assert_eq!(plain, shared);
 }
