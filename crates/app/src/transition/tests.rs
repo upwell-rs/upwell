@@ -20,7 +20,7 @@ use upwell_hooks::HookManager;
 use super::{
     CandidateGraph, ComponentTransitionDecision, ComponentTransitionStrategy, RestartReason,
 };
-use crate::runtime::{AppRuntime, RuntimeScopePlan};
+use crate::runtime::{AppConditionState, AppRuntime, PreparedRuntimeGeneration, RuntimeScopePlan};
 use crate::{AppRegistry, Error, RuntimeView, ScopeTopology};
 
 const ENABLED: ConfigFactId = ConfigFactId::new("test::Settings", "settings", "enabled");
@@ -87,8 +87,14 @@ fn runtime_view(
     resolved: Vec<ComponentDescriptor>,
     graph: EffectiveGraph,
 ) -> RuntimeView {
-    AppRuntime::new(
-        Arc::from("transition-test"),
+    let catalog = Arc::new(AppRegistry::default());
+    let condition = Arc::new(AppConditionState::new(
+        Arc::clone(&catalog),
+        catalog
+            .evaluate_conditions([], &upwell_di::ConditionFactSnapshot::default())
+            .expect("empty condition state validates"),
+    ));
+    let generation = PreparedRuntimeGeneration::new(
         root,
         scopes,
         RuntimeScopePlan::new(
@@ -98,6 +104,12 @@ fn runtime_view(
         ),
         Arc::from(resolved),
         graph,
+        condition,
+    );
+
+    AppRuntime::new(
+        Arc::from("transition-test"),
+        generation,
         HookManager::new(Vec::new()),
     )
     .view()
