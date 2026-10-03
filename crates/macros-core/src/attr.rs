@@ -79,8 +79,9 @@ fn parse_scope_path(input: ParseStream) -> syn::Result<syn::Path> {
 /// - `before` / `after` — order every trait shared with the target component; use `as dyn Trait`
 ///   to require and restrict the relationship to a specific trait;
 /// - `by_value` — store/inject this component as `Self` rather than `Arc<Self>`;
-/// - `retainable` — with `by_value`, explicitly asserts that cloning the handle does not
-///   share generation-local mutable slots, allowing unchanged instances to be retained;
+/// - `retainable` — with a singleton `by_value` component, explicitly asserts that cloning
+///   the handle does not share generation-local mutable slots, allowing unchanged instances
+///   to be retained;
 /// - `scope = <ScopePath>` — the instance lifetime, named by a [`Scope`] marker type in scope
 ///   (e.g. `Request` from a protocol's prelude, or a custom scope); omitted means singleton;
 /// - `factory_slice` / `factory` / `default_factory` — factory overrides.
@@ -211,6 +212,13 @@ impl<Ext: ParseKeyed> Parse for ComponentArgs<Ext> {
             return Err(syn::Error::new(
                 Span::call_site(),
                 "`retainable` is only valid with `by_value`; Arc-backed components are already generation-safe",
+            ));
+        }
+
+        if args.retainable && args.scope.is_some() {
+            return Err(syn::Error::new(
+                Span::call_site(),
+                "`retainable` is singleton-only and cannot be combined with an explicit `scope`",
             ));
         }
 

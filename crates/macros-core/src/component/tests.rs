@@ -92,3 +92,24 @@ fn generated_dependency_observation_matches_handle_semantics() {
     );
     assert!(tokens.contains("condition : :: core :: option :: Option :: None"));
 }
+
+#[test]
+fn retainable_by_value_component_rejects_live_backed_fields() {
+    let args = ComponentArgs::<NoExt> {
+        by_value: true,
+        retainable: true,
+        ..ComponentArgs::default()
+    };
+    let error = expand(
+        args,
+        syn::parse_quote! {
+            struct UnsafeRetention {
+                dependency: Option<Dep<LiveService>>,
+            }
+        },
+        &Paths::upwell(),
+    )
+    .expect_err("known live-backed fields cannot opt into retained cloning");
+
+    assert!(error.to_string().contains("cannot contain Dep<T>"));
+}

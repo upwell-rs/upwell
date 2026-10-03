@@ -20,6 +20,10 @@ fn retainable_requires_a_by_value_handle() {
 
     assert!(args.by_value);
     assert!(args.retainable);
+
+    let scope_error = parse_error("by_value, retainable, scope = Request");
+
+    assert!(scope_error.to_string().contains("singleton-only"));
 }
 
 #[test]
