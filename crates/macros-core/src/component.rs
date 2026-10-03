@@ -26,7 +26,7 @@ pub fn expand<Ext: ComponentExt>(
 ) -> syn::Result<TokenStream> {
     let self_ident = item.ident.clone();
     let providers = provide::generate_providers(&self_ident, &args, paths);
-    let handle = handle::handle_impl(&self_ident, args.by_value, paths);
+    let handle = handle::handle_impl(&self_ident, args.by_value, args.retainable, paths);
     let handle_associated_type = &handle.associated_type;
     let handle_method = &handle.method;
     let injectable = &handle.injectable;
