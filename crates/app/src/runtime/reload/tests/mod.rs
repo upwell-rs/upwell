@@ -13,4 +13,5 @@ mod concurrency;
 mod fixture;
 mod hook_rejection;
 mod noop;
+mod provider_switch;
 mod publication;
