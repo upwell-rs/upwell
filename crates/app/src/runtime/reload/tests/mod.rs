@@ -9,6 +9,7 @@
 
 mod cancellation;
 mod candidate_failure;
+mod concurrency;
 mod fixture;
 mod hook_rejection;
 mod noop;
