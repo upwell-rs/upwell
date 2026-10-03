@@ -374,6 +374,31 @@ pub fn from_boxed<H: Injectable>(boxed: &BoxedComponent) -> Option<H> {
     boxed.value.downcast_ref::<H::Stored>().map(H::from_stored)
 }
 
+/// Hidden typed generation-snapshot adapter: reboxes an active component's stored
+/// representation into a fresh generation-local slot.
+#[doc(hidden)]
+pub type GenerationSnapshot = fn(&BoxedComponent) -> crate::Result<BoxedComponent>;
+
+/// The generic generation-snapshot adapter for a typed component: recovers the
+/// handle from the active stored slot and boxes a *new* stored representation.
+/// For an `Arc<T>` handle this shares the same `Arc` instance but creates an
+/// independent [`Live<T>`] cell; a by-value handle is cloned into its own slot.
+pub(crate) fn generation_snapshot_adapter<T: Component>(
+    active: &BoxedComponent,
+) -> crate::Result<BoxedComponent> {
+    let stored = active
+        .value
+        .downcast_ref::<<T::Handle as Injectable>::Stored>()
+        .ok_or(crate::Error::SnapshotStorageMismatch { component: T::ID })?;
+
+    let handle = <T::Handle as Injectable>::from_stored(stored);
+
+    Ok(BoxedComponent {
+        ty: active.ty,
+        value: Box::new(<T::Handle as Injectable>::into_stored(handle)),
+    })
+}
+
 impl ScopeStore {
     /// Single concrete-or-primary-provider lookup, scope-local. `None` if absent or
     /// ambiguous.
@@ -947,6 +972,12 @@ pub struct ComponentDescriptor {
     /// The component's `{Type}Hooks` slice (its `#[hook]` methods). Empty for a type
     /// that declares none — and for every manually-seeded instance.
     pub hooks: fn() -> &'static [HookDescriptor],
+    /// Hidden typed generation-snapshot adapter. Set for generated/typed descriptors
+    /// ([`of`](Self::of), [`manual_of`](Self::manual_of), macro-generated literals);
+    /// `None` for raw [`manual`](Self::manual) descriptors, which are never
+    /// retainable.
+    #[doc(hidden)]
+    pub generation_snapshot: Option<GenerationSnapshot>,
 }
 
 /// The empty factory slice for a manually-provided instance: nothing to construct,
@@ -965,6 +996,7 @@ impl ComponentDescriptor {
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
+            generation_snapshot: Some(generation_snapshot_adapter::<T>),
         }
     }
 
@@ -986,7 +1018,37 @@ impl ComponentDescriptor {
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
+            generation_snapshot: None,
         }
+    }
+
+    /// A descriptor for a framework-seeded typed instance (no factory) that carries
+    /// the typed generation-snapshot adapter, so the instance can be retained across
+    /// generations. Raw [`manual`](Self::manual) descriptors stay non-retainable.
+    #[doc(hidden)]
+    pub const fn manual_of<T: Component>(
+        id: &'static str,
+        name: &'static str,
+        scope: &'static dyn Scope,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            ty: TypeDescriptor::of::<T>(name),
+            scope,
+            condition: None,
+            factories: no_factories,
+            hooks: no_hooks,
+            generation_snapshot: Some(generation_snapshot_adapter::<T>),
+        }
+    }
+
+    /// The typed generation-snapshot adapter for `T`, for descriptor literals that
+    /// cannot go through [`of`](Self::of) — macro-generated descriptors and
+    /// handwritten literals with custom identity or factory slices.
+    #[doc(hidden)]
+    pub const fn typed_snapshot<T: Component>() -> Option<GenerationSnapshot> {
+        Some(generation_snapshot_adapter::<T>)
     }
 
     /// The factory the container should use: an explicit one if present (the default
@@ -1055,3 +1117,6 @@ impl fmt::Debug for ComponentDescriptor {
             .finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+mod tests;

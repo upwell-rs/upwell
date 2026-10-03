@@ -328,6 +328,7 @@ pub fn field_injection_component(
                 condition: ::core::option::Option::None,
                 factories: <#self_ident as #component_factories>::factories,
                 hooks: <#self_ident as #component_hooks>::hooks,
+                generation_snapshot: #component_descriptor::typed_snapshot::<#self_ident>(),
             };
 
         impl #descriptor_trait<#component_descriptor> for #self_ident {

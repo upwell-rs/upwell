@@ -155,6 +155,7 @@ fn visible_descriptor() -> ComponentDescriptor {
         condition: None,
         factories: visible_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 
@@ -167,6 +168,7 @@ fn sibling_descriptor() -> ComponentDescriptor {
         condition: None,
         factories: sibling_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 
@@ -179,6 +181,7 @@ fn transient_descriptor() -> ComponentDescriptor {
         condition: None,
         factories: transient_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 

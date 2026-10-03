@@ -126,6 +126,7 @@ fn component(
         condition: None,
         factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 

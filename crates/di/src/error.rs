@@ -317,6 +317,22 @@ pub enum Error {
     #[error("candidate root cannot retain generation-bound component '{component}'")]
     CandidateRuntimeBoundComponent { component: &'static str },
 
+    #[error("component '{component}' does not support generation snapshots")]
+    SnapshotUnavailable { component: &'static str },
+
+    #[error("generation snapshot for component '{component}' panicked")]
+    SnapshotPanicked { component: &'static str },
+
+    #[error(
+        "generation snapshot for component '{component}' found active storage of an incompatible type"
+    )]
+    SnapshotStorageMismatch { component: &'static str },
+
+    #[error(
+        "generation snapshot for component '{component}' produced storage of an incompatible type"
+    )]
+    SnapshotOutputMismatch { component: &'static str },
+
     #[error(
         "the root resolver is unavailable: the root container was never attached or has been dropped"
     )]

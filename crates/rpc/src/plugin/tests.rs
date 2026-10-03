@@ -69,6 +69,7 @@ static SENTINEL_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: sentinel_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 struct EmptyService;

@@ -502,6 +502,7 @@ impl upwell_core::Descriptor<ComponentDescriptor> for JobScheduler {
         condition: None,
         factories: scheduler_factories,
         hooks: scheduler_hooks,
+        generation_snapshot: ComponentDescriptor::typed_snapshot::<JobScheduler>(),
     };
 }
 

@@ -822,6 +822,7 @@ mod tests {
             condition: None,
             factories,
             hooks: upwell_hooks::no_hooks,
+            generation_snapshot: None,
         }
     }
 
@@ -940,6 +941,7 @@ mod tests {
                 condition: None,
                 factories,
                 hooks: ::upwell_hooks::no_hooks,
+                generation_snapshot: None,
             }
         }};
     }
@@ -967,6 +969,7 @@ mod tests {
         condition: None,
         factories: pg_pool_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     };
 
     fn backup_repo_deps() -> Vec<DependencyDescriptor> {
@@ -1002,6 +1005,7 @@ mod tests {
         condition: None,
         factories: backup_repo_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     };
 
     #[test]

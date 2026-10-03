@@ -20,6 +20,7 @@ use crate::{
 };
 
 mod candidate;
+mod snapshot;
 
 /// Shared, immutable data a [`ScopeContainer`] needs to resolve beyond its own
 /// store: the `Transient` components it may construct on demand and the trait
