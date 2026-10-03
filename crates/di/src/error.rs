@@ -320,6 +320,9 @@ pub enum Error {
     #[error("component '{component}' does not support generation snapshots")]
     SnapshotUnavailable { component: &'static str },
 
+    #[error("component '{component}' handle does not support generation-local snapshots")]
+    SnapshotHandleUnsupported { component: &'static str },
+
     #[error("generation snapshot for component '{component}' panicked")]
     SnapshotPanicked { component: &'static str },
 

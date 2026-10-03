@@ -281,7 +281,7 @@ async fn live_component_handle_cannot_share_its_slot_across_generations() {
         .snapshot_singleton(descriptor)
         .expect_err("a Dep component handle cannot share its Live slot");
 
-    assert!(matches!(error, Error::SnapshotUnavailable { .. }));
+    assert!(matches!(error, Error::SnapshotHandleUnsupported { .. }));
 }
 
 #[tokio::test]

@@ -62,8 +62,10 @@ impl ComponentRegistry {
 
     /// Collapses the registered descriptors to one per type. A manually-provided
     /// instance (an empty-factory descriptor) **overrides** an auto-constructed one
-    /// for the same type. The per-type factory ambiguity check runs here via
-    /// [`ComponentDescriptor::effective_factory`].
+    /// for the same type. When factoryless descriptors share the same identity, a raw
+    /// non-snapshot-capable descriptor overrides a typed catalog descriptor so active
+    /// seed provenance cannot be upgraded by later candidate metadata. The per-type
+    /// factory ambiguity check runs here via [`ComponentDescriptor::effective_factory`].
     pub fn resolved_components(&self) -> crate::Result<Vec<ComponentDescriptor>> {
         let mut chosen = Vec::new();
         let mut positions: HashMap<TypeId, usize> = HashMap::new();

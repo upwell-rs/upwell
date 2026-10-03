@@ -52,6 +52,7 @@ pub enum RestartReason {
     StaleRetention,
     GenerationBoundDependency,
     ManualInstanceUnsupported,
+    HandleRetentionUnsupported,
     LiveRebindUnsupported,
     RemovalUnsupported,
     NonSingleton,
@@ -69,6 +70,9 @@ impl fmt::Display for RestartReason {
                 "the component depends on generation-bound runtime state"
             }
             Self::ManualInstanceUnsupported => "the pre-built component has no transition contract",
+            Self::HandleRetentionUnsupported => {
+                "the component handle cannot be isolated across runtime generations"
+            }
             Self::LiveRebindUnsupported => {
                 "retained live dependency rebinding is not integrated yet"
             }
@@ -225,6 +229,14 @@ impl ResolvedTransitionPlan {
                         component: decision.component,
                         required: Some(NodeAction::Retain),
                         reason: RestartReason::ManualInstanceUnsupported,
+                    }
+                    .into());
+                }
+                Err(upwell_di::Error::SnapshotHandleUnsupported { .. }) => {
+                    return Err(RestartRequired {
+                        component: decision.component,
+                        required: Some(NodeAction::Retain),
+                        reason: RestartReason::HandleRetentionUnsupported,
                     }
                     .into());
                 }
