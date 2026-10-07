@@ -188,10 +188,16 @@ impl HookManager {
         }
     }
 
-    /// Attaches the resolver context owned by the active runtime generation.
+    /// Attaches the resolver context hook receivers resolve through.
     ///
-    /// The manager retains only this weak reference so a component storing its own manager cannot
-    /// create a root-container cycle. A later runtime generation replaces the previous context.
+    /// Attaching replaces any previously attached provider, so a second attach retargets
+    /// the manager. The manager retains only a weak reference, so a component storing its
+    /// own manager cannot create a root-container cycle; once the attached context is
+    /// dropped, runs report [`Error::ResolverUnavailable`] instead of resolving.
+    ///
+    /// Upwell's runtime never retargets: each runtime generation builds a fresh
+    /// generation-local manager and attaches it once to the root scope that seeded it,
+    /// so a manager stays bound to its own generation's root.
     pub fn attach(&self, ctx: Weak<dyn ResolverCtx + Send + Sync>) {
         self.attach_resolver_provider(move || ctx.upgrade());
     }

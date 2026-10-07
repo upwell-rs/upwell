@@ -2,12 +2,16 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use upwell_config::{ConditionFacts, ConfigManager, ConfigProperties, ConfigReloader, Toml};
+use upwell_config::{
+    ConditionFactSource, ConditionFacts, ConfigBinding, ConfigManager, ConfigProperties,
+    ConfigReloader, ConfigStore, Toml,
+};
 use upwell_core::{
     ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
-    ConfigFactDescriptor, ConfigFactId, ResolverSet, TypeDescriptor,
+    ConfigConditionCallback, ConfigConditionContext, ConfigFactDescriptor, ConfigFactId,
+    ResolverSet, TypeDescriptor,
 };
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
@@ -26,6 +30,12 @@ use crate::{
 static FACTORY_CALLS: AtomicUsize = AtomicUsize::new(0);
 static PRE_BUILD_CALLS: AtomicUsize = AtomicUsize::new(0);
 static PROTOCOL_BUILD_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+/// Serializes the tests sharing the boundary counters: `BoundaryProtocol`'s preparation
+/// and runtime construction assert exact process-global counts, so concurrent runs
+/// under the default `cargo test` parallelism must not interleave. Await-safe, so no
+/// std guard ever crosses an await.
+static BOUNDARY_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Component whose factory records the construction boundary.
 struct BoundaryComponent;
@@ -196,6 +206,8 @@ impl PreparedProtocol for PreparedBoundaryProtocol {
 
 #[tokio::test]
 async fn prepare_validates_without_constructing_components_or_protocol() {
+    let _boundary_guard = BOUNDARY_GUARD.lock().await;
+
     FACTORY_CALLS.store(0, Ordering::SeqCst);
     PRE_BUILD_CALLS.store(0, Ordering::SeqCst);
     PROTOCOL_BUILD_CALLS.store(0, Ordering::SeqCst);
@@ -238,6 +250,8 @@ async fn prepare_validates_without_constructing_components_or_protocol() {
 #[test]
 #[cfg(feature = "tooling")]
 fn retained_tooling_construction_plan_equals_the_runtime_build_plan() {
+    let _boundary_guard = BOUNDARY_GUARD.blocking_lock();
+
     let prepared = App::<BoundaryProtocol>::builder("prepare-boundary-test")
         .config_source(
             ConfigManager::<Toml>::from_str(
@@ -322,6 +336,14 @@ fn framework_singletons_are_snapshot_capable_and_user_prebuilts_are_not() {
 
 #[tokio::test]
 async fn candidate_metadata_cannot_upgrade_user_prebuilt_provenance() {
+    let _boundary_guard = BOUNDARY_GUARD.lock().await;
+
+    // The protocol runtime asserts the absolute construction count, so the shared
+    // counters must start from zero even when another boundary test ran first.
+    FACTORY_CALLS.store(0, Ordering::SeqCst);
+    PRE_BUILD_CALLS.store(0, Ordering::SeqCst);
+    PROTOCOL_BUILD_CALLS.store(0, Ordering::SeqCst);
+
     let app = App::<BoundaryProtocol>::builder("prepare-boundary-test")
         .config_source(
             ConfigManager::<Toml>::from_str(
@@ -581,5 +603,287 @@ async fn initial_build_includes_components_whose_config_fact_is_true() {
             .evaluation()
             .component_eligible(FlagComponent::ID),
         Some(true)
+    );
+}
+
+// Startup condition preparation runs application extension points — fact-scalar
+// extraction, fact-descriptor callbacks, and config condition callbacks — so each
+// panic site under test owns its config type and control static, and drives
+// `evaluate_startup_conditions` directly over an isolated registry and config slots.
+// No control is read by more than one test, so concurrent runs cannot arm another
+// test's panic path.
+
+/// Whether the scalar fixture's fact extraction panics when invoked. Read only by
+/// [`PanicScalarsConfig::condition_scalars`] and armed only by the scalar test.
+static SCALARS_PANIC: AtomicBool = AtomicBool::new(false);
+
+#[derive(serde::Deserialize)]
+struct PanicScalarsConfig {
+    enabled: bool,
+}
+
+impl ConfigProperties for PanicScalarsConfig {
+    const NAME: &'static str = "PanicScalarsConfig";
+}
+
+impl ConditionFacts for PanicScalarsConfig {
+    fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
+        vec![ConfigFactDescriptor {
+            id: ConfigFactId::new("test::PanicScalarsConfig", binding_path, "enabled"),
+            kind: ConditionScalarKind::Bool,
+            source: upwell_core::descriptor_source!(),
+        }]
+    }
+
+    fn condition_scalars(
+        &self,
+        binding_path: &'static str,
+    ) -> Vec<(ConfigFactId, ConditionScalar)> {
+        if SCALARS_PANIC.load(Ordering::SeqCst) {
+            panic!("startup condition fact extraction panicked");
+        }
+
+        vec![(
+            ConfigFactId::new("test::PanicScalarsConfig", binding_path, "enabled"),
+            ConditionScalar::Bool(self.enabled),
+        )]
+    }
+}
+
+/// Whether the descriptor fixture's fact-descriptor callback panics when invoked. Read
+/// only by [`PanicDescriptorsConfig::condition_facts`] and armed only by the
+/// descriptor test.
+static DESCRIPTORS_PANIC: AtomicBool = AtomicBool::new(false);
+
+#[derive(serde::Deserialize)]
+struct PanicDescriptorsConfig {
+    enabled: bool,
+}
+
+impl ConfigProperties for PanicDescriptorsConfig {
+    const NAME: &'static str = "PanicDescriptorsConfig";
+}
+
+impl ConditionFacts for PanicDescriptorsConfig {
+    fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
+        if DESCRIPTORS_PANIC.load(Ordering::SeqCst) {
+            panic!("startup condition fact descriptor callback panicked");
+        }
+
+        vec![ConfigFactDescriptor {
+            id: ConfigFactId::new("test::PanicDescriptorsConfig", binding_path, "enabled"),
+            kind: ConditionScalarKind::Bool,
+            source: upwell_core::descriptor_source!(),
+        }]
+    }
+
+    fn condition_scalars(
+        &self,
+        binding_path: &'static str,
+    ) -> Vec<(ConfigFactId, ConditionScalar)> {
+        vec![(
+            ConfigFactId::new("test::PanicDescriptorsConfig", binding_path, "enabled"),
+            ConditionScalar::Bool(self.enabled),
+        )]
+    }
+}
+
+const CALLBACK_FLAG: ConfigFactId =
+    ConfigFactId::new("test::PanicCallbackConfig", "flags", "enabled");
+
+/// Whether the callback fixture's config condition callback panics when evaluated. Read
+/// only by [`panic_callback_evaluate`] and armed only by the callback test.
+static CALLBACK_PANIC: AtomicBool = AtomicBool::new(false);
+
+fn panic_callback_evaluate(context: ConfigConditionContext<'_>) -> bool {
+    if CALLBACK_PANIC.load(Ordering::SeqCst) {
+        panic!("startup config condition callback panicked");
+    }
+
+    context
+        .get(CALLBACK_FLAG)
+        .and_then(ConditionScalar::as_bool)
+        .unwrap_or(false)
+}
+
+static PANIC_CONDITION_CALLBACK: ConfigConditionCallback = ConfigConditionCallback {
+    kind: "test/panic-callback-enabled",
+    inputs: &[CALLBACK_FLAG],
+    evaluate: panic_callback_evaluate,
+};
+
+static PANIC_CALLBACK_CONDITION: ConditionDescriptor = ConditionDescriptor {
+    id: "panic-callback-enabled",
+    source: upwell_core::descriptor_source!(),
+    predicate: ConditionPredicate::ConfigCallback(&PANIC_CONDITION_CALLBACK),
+};
+
+#[derive(serde::Deserialize)]
+struct PanicCallbackConfig {
+    enabled: bool,
+}
+
+impl ConfigProperties for PanicCallbackConfig {
+    const NAME: &'static str = "PanicCallbackConfig";
+}
+
+impl ConditionFacts for PanicCallbackConfig {
+    fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
+        vec![ConfigFactDescriptor {
+            id: ConfigFactId::new("test::PanicCallbackConfig", binding_path, "enabled"),
+            kind: ConditionScalarKind::Bool,
+            source: upwell_core::descriptor_source!(),
+        }]
+    }
+
+    fn condition_scalars(
+        &self,
+        binding_path: &'static str,
+    ) -> Vec<(ConfigFactId, ConditionScalar)> {
+        vec![(
+            ConfigFactId::new("test::PanicCallbackConfig", binding_path, "enabled"),
+            ConditionScalar::Bool(self.enabled),
+        )]
+    }
+}
+
+struct PanicCallbackComponent;
+
+impl Component for PanicCallbackComponent {
+    type Handle = Arc<Self>;
+
+    const ID: &'static str = "panic_callback_component";
+    const NAME: &'static str = "PanicCallbackComponent";
+
+    fn into_handle(self) -> Arc<Self> {
+        Arc::new(self)
+    }
+}
+
+fn construct_panic_callback_component(
+    _context: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<PanicCallbackComponent>(PanicCallbackComponent::NAME),
+            value: Box::new(Injectable::into_stored(Arc::new(PanicCallbackComponent))),
+        })
+    })
+}
+
+static PANIC_CALLBACK_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
+    construct: construct_panic_callback_component,
+    dependencies: no_dependencies,
+    default: true,
+}];
+
+fn panic_callback_factories() -> &'static [ComponentFactoryDescriptor] {
+    &PANIC_CALLBACK_FACTORIES
+}
+
+static PANIC_CALLBACK_COMPONENT: ComponentDescriptor = ComponentDescriptor {
+    id: PanicCallbackComponent::ID,
+    name: PanicCallbackComponent::NAME,
+    ty: TypeDescriptor::of::<PanicCallbackComponent>(PanicCallbackComponent::NAME),
+    scope: &Singleton,
+    condition: Some(&PANIC_CALLBACK_CONDITION),
+    factories: panic_callback_factories,
+    hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
+};
+
+#[test]
+fn panicking_condition_scalar_extraction_returns_the_redacted_preparation_error() {
+    SCALARS_PANIC.store(true, Ordering::SeqCst);
+
+    let mut manager = ConfigManager::<Toml>::from_str("[flags]\nenabled = true\n")
+        .expect("test config parses")
+        .into_dynamic();
+    manager.register_binding(ConfigBinding::of::<PanicScalarsConfig>("flags"));
+
+    let (_store, slots) = ConfigStore::build(&manager).expect("config store builds");
+    let mut registry = AppRegistry::default();
+    registry
+        .condition_facts
+        .push(ConditionFactSource::of::<PanicScalarsConfig>("flags"));
+
+    let error = super::evaluate_startup_conditions(&registry, &slots)
+        .expect_err("the armed fact extraction must abort the condition stage");
+
+    assert!(
+        matches!(error, crate::Error::CandidatePreparationPanicked),
+        "expected the redacted preparation panic error, got {error:?}"
+    );
+}
+
+#[test]
+fn panicking_condition_fact_descriptors_return_the_redacted_preparation_error() {
+    DESCRIPTORS_PANIC.store(true, Ordering::SeqCst);
+
+    let mut manager = ConfigManager::<Toml>::from_str("[flags]\nenabled = true\n")
+        .expect("test config parses")
+        .into_dynamic();
+    manager.register_binding(ConfigBinding::of::<PanicDescriptorsConfig>("flags"));
+
+    let (_store, slots) = ConfigStore::build(&manager).expect("config store builds");
+    let mut registry = AppRegistry::default();
+    registry
+        .condition_facts
+        .push(ConditionFactSource::of::<PanicDescriptorsConfig>("flags"));
+
+    let error = super::evaluate_startup_conditions(&registry, &slots)
+        .expect_err("the armed descriptor callback must abort the condition stage");
+
+    assert!(
+        matches!(error, crate::Error::CandidatePreparationPanicked),
+        "expected the redacted preparation panic error, got {error:?}"
+    );
+}
+
+#[test]
+fn panicking_config_condition_callback_returns_the_redacted_preparation_error() {
+    CALLBACK_PANIC.store(true, Ordering::SeqCst);
+
+    let mut manager = ConfigManager::<Toml>::from_str("[flags]\nenabled = true\n")
+        .expect("test config parses")
+        .into_dynamic();
+    manager.register_binding(ConfigBinding::of::<PanicCallbackConfig>("flags"));
+
+    let (_store, slots) = ConfigStore::build(&manager).expect("config store builds");
+    let mut registry = AppRegistry::default();
+    registry.components.push(PANIC_CALLBACK_COMPONENT);
+    registry
+        .condition_facts
+        .push(ConditionFactSource::of::<PanicCallbackConfig>("flags"));
+
+    let error = super::evaluate_startup_conditions(&registry, &slots)
+        .expect_err("the armed condition callback must abort the condition stage");
+
+    assert!(
+        matches!(error, crate::Error::CandidatePreparationPanicked),
+        "expected the redacted preparation panic error, got {error:?}"
+    );
+}
+
+#[test]
+fn ordinary_condition_errors_are_preserved_not_redacted_as_preparation_panics() {
+    // The component's condition references the `flags.enabled` fact, but no
+    // condition-fact source supplies it: an ordinary condition error, not a panic.
+    let mut manager = ConfigManager::<Toml>::from_str("[flags]\nenabled = true\n")
+        .expect("test config parses")
+        .into_dynamic();
+    manager.register_binding(ConfigBinding::of::<FlagConfig>("flags"));
+
+    let (_store, slots) = ConfigStore::build(&manager).expect("config store builds");
+    let mut registry = AppRegistry::default();
+    registry.components.push(FLAG_COMPONENT);
+
+    let error = super::evaluate_startup_conditions(&registry, &slots)
+        .expect_err("the unsupplied condition fact must fail the condition stage");
+
+    assert!(
+        matches!(error, crate::Error::Condition(_)),
+        "expected the ordinary condition error, got {error:?}"
     );
 }

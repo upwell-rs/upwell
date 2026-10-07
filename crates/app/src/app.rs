@@ -12,7 +12,7 @@ use futures::FutureExt;
 use tracing::{debug, error, info};
 use upwell_config::{
     CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ConditionFactSource, ConditionFacts, ConfigBinding,
-    ConfigManager, ConfigProperties, ConfigReloader, ConfigStore, ReloadTriggers,
+    ConfigManager, ConfigProperties, ConfigReloader, ConfigStore, ReloadTriggers, ReloadableConfig,
     spawn_reload_triggers, stop_reload_triggers,
 };
 use upwell_core::{
@@ -36,7 +36,7 @@ use crate::protocol::{
     PreBuildContext, PreparedProtocol, ProtocolDefinition, ProtocolRuntime, Serve,
     ValidationContext,
 };
-use crate::registry::AppRegistry;
+use crate::registry::{AppConditionEvaluation, AppRegistry};
 use crate::runtime::{AppConditionState, AppRuntime, PreparedRuntimeGeneration, RuntimeScopePlan};
 use crate::scope::{PreparedScopeTopology, ScopePlan, SeedDestination};
 
@@ -398,24 +398,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         // Evaluate the startup conditions from the staged config values, with the same
         // evaluator the transactional reload uses. An app with no condition facts gets an
         // empty-facts evaluation, which leaves every unconditional component eligible.
-        let staged: Vec<_> = reload_slots
-            .iter()
-            .map(|slot| slot.stage_current())
-            .collect();
-        let snapshot = registry
-            .condition_snapshot(
-                staged
-                    .iter()
-                    .map(|entry| (entry.type_id(), entry.path(), entry.value())),
-            )
-            .map_err(Error::from)?;
-        let facts = registry
-            .condition_facts
-            .iter()
-            .flat_map(|source| (source.facts.descriptors)(source.path));
-        let evaluation = registry
-            .evaluate_conditions(facts, &snapshot)
-            .map_err(Error::from)?;
+        let evaluation = evaluate_startup_conditions(&registry, &reload_slots)?;
 
         // Retain the full catalog with the evaluation for this and future generations.
         let condition = Arc::new(AppConditionState::new(
@@ -806,6 +789,42 @@ fn seed_dir<K: DirKind>(
         ty: TypeDescriptor::of::<Dir<K>>(<Dir<K> as Component>::NAME),
         value: Box::new(dirs.dir::<K>()),
     });
+}
+
+/// Evaluates the startup conditions from the staged config values, with the same
+/// evaluator the transactional reload uses. An app with no condition facts gets an
+/// empty-facts evaluation, which leaves every unconditional component eligible.
+///
+/// Staging, fact extraction, descriptor callbacks, and evaluation are application
+/// extension points, so — like the reload's condition stage — the whole stage runs
+/// inside a panic boundary: a panic returns the redacted preparation panic error,
+/// while ordinary errors pass through unchanged.
+fn evaluate_startup_conditions(
+    registry: &AppRegistry,
+    reload_slots: &[Box<dyn ReloadableConfig>],
+) -> crate::Result<AppConditionEvaluation> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let staged: Vec<_> = reload_slots
+            .iter()
+            .map(|slot| slot.stage_current())
+            .collect();
+        let snapshot = registry
+            .condition_snapshot(
+                staged
+                    .iter()
+                    .map(|entry| (entry.type_id(), entry.path(), entry.value())),
+            )
+            .map_err(Error::from)?;
+        let facts = registry
+            .condition_facts
+            .iter()
+            .flat_map(|source| (source.facts.descriptors)(source.path));
+
+        registry
+            .evaluate_conditions(facts, &snapshot)
+            .map_err(Error::from)
+    }))
+    .map_err(|_| Error::CandidatePreparationPanicked)?
 }
 
 /// A fully assembled app, ready to serve its protocol.
