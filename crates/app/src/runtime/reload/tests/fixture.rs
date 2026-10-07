@@ -2,7 +2,9 @@
 //! condition-gated probe component whose factory injects `Cfg<T>` and whose
 //! `ConfigReload` hook resolves its `&self` receiver through the resolver context (as
 //! the `#[hook]` macro generates) and records the proposed value plus the receiver it
-//! resolved.
+//! resolved — its observed token and process-local identity. The hook can also be told
+//! to mutate its resolved receiver before returning, so a test can prove a rejected
+//! candidate run never touches the active receiver.
 //!
 //! The factory and hook honor shared controls so a test can inject a failure or a
 //! cancellation point at a specific stage of the transaction. Cross-await controls are
@@ -16,7 +18,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use serde::Deserialize;
 use tempfile::TempDir;
@@ -53,11 +55,23 @@ static PROPOSED_TOKENS: tokio::sync::Mutex<Vec<i64>> = tokio::sync::Mutex::const
 /// The `observed` token of the receiver each hook run resolved from its manager's
 /// resolver context — the generation whose root the run resolved through.
 static RECEIVER_TOKENS: tokio::sync::Mutex<Vec<i64>> = tokio::sync::Mutex::const_new(Vec::new());
+/// The process-local identity (`Arc::as_ptr`) of the receiver each hook run resolved
+/// from its manager's resolver context, in run order.
+static RECEIVER_IDS: tokio::sync::Mutex<Vec<usize>> = tokio::sync::Mutex::const_new(Vec::new());
 static FACTORY_TOKENS: tokio::sync::Mutex<Vec<i64>> = tokio::sync::Mutex::const_new(Vec::new());
 static STAGED_TOKENS: std::sync::Mutex<Vec<i64>> = std::sync::Mutex::new(Vec::new());
 
 /// The proposed token the config-reload hook rejects. `None` accepts every proposal.
 static HOOK_REJECT_TOKEN: tokio::sync::Mutex<Option<i64>> = tokio::sync::Mutex::const_new(None);
+
+/// Whether the config-reload hook mutates its resolved receiver before returning, so a
+/// test can prove a rejected candidate run leaves the active receiver untouched.
+static HOOK_MUTATES_RECEIVER: tokio::sync::Mutex<bool> = tokio::sync::Mutex::const_new(false);
+
+/// The identity and token of the receiver each hook run actually mutated, recorded only
+/// after the mutation is applied, in run order.
+static MUTATED_RECEIVERS: tokio::sync::Mutex<Vec<(usize, i64)>> =
+    tokio::sync::Mutex::const_new(Vec::new());
 
 /// Whether the candidate factory returns a DI error after resolving the staged value.
 static FACTORY_FAILS: tokio::sync::Mutex<bool> = tokio::sync::Mutex::const_new(false);
@@ -91,12 +105,15 @@ pub(super) async fn reset_controls() {
 
     *PROPOSED_TOKENS.lock().await = Vec::new();
     *RECEIVER_TOKENS.lock().await = Vec::new();
+    *RECEIVER_IDS.lock().await = Vec::new();
     *FACTORY_TOKENS.lock().await = Vec::new();
     STAGED_TOKENS
         .lock()
         .expect("staged token log is available")
         .clear();
     *HOOK_REJECT_TOKEN.lock().await = None;
+    *HOOK_MUTATES_RECEIVER.lock().await = false;
+    MUTATED_RECEIVERS.lock().await.clear();
     *FACTORY_FAILS.lock().await = false;
     *FACTORY_WAITS.lock().await = false;
 }
@@ -123,6 +140,11 @@ pub(super) async fn receiver_tokens() -> Vec<i64> {
     RECEIVER_TOKENS.lock().await.clone()
 }
 
+/// The process-local identity of the receiver each hook run resolved, in run order.
+pub(super) async fn receiver_ids() -> Vec<usize> {
+    RECEIVER_IDS.lock().await.clone()
+}
+
 pub(super) async fn factory_tokens() -> Vec<i64> {
     FACTORY_TOKENS.lock().await.clone()
 }
@@ -138,6 +160,16 @@ pub(super) fn staged_tokens() -> Vec<i64> {
 /// Makes the config-reload hook reject the proposal whose token is `token`.
 pub(super) async fn reject_hook_token(token: i64) {
     *HOOK_REJECT_TOKEN.lock().await = Some(token);
+}
+
+/// Makes the config-reload hook mutate its resolved receiver before returning.
+pub(super) async fn set_hook_mutates_receiver(mutates: bool) {
+    *HOOK_MUTATES_RECEIVER.lock().await = mutates;
+}
+
+/// The identity and token of the receiver each hook run mutated, in run order.
+pub(super) async fn mutated_receivers() -> Vec<(usize, i64)> {
+    MUTATED_RECEIVERS.lock().await.clone()
 }
 
 /// Makes the candidate factory fail with a DI error after resolving the staged value.
@@ -222,6 +254,12 @@ impl ConditionFacts for ProbeConfig {
 /// can tell whether construction saw the staged proposal or the active value.
 pub(super) struct ProbeComponent {
     pub(super) observed: i64,
+    /// The config handle the factory resolved, stored so a test can read through the
+    /// consumer's own generation-local cell after a reload.
+    pub(super) cfg: Cfg<ProbeConfig>,
+    /// Receiver-local marker a hook run may mutate. The active instance must never
+    /// observe a candidate hook run's mutation.
+    pub(super) mutated: AtomicBool,
 }
 
 impl Component for ProbeComponent {
@@ -265,6 +303,8 @@ fn construct_probe_component(
             ty: TypeDescriptor::of::<ProbeComponent>(ProbeComponent::NAME),
             value: Box::new(Injectable::into_stored(Arc::new(ProbeComponent {
                 observed,
+                cfg,
+                mutated: AtomicBool::new(false),
             }))),
         })
     })
@@ -313,7 +353,22 @@ fn probe_reload_call<'a>(
 
         PROPOSED_TOKENS.lock().await.push(next.token);
         RECEIVER_TOKENS.lock().await.push(receiver.observed);
+        RECEIVER_IDS
+            .lock()
+            .await
+            .push(Arc::as_ptr(&receiver) as usize);
         HOOK_CALLS.fetch_add(1, Ordering::SeqCst);
+
+        if *HOOK_MUTATES_RECEIVER.lock().await {
+            receiver.mutated.store(true, Ordering::SeqCst);
+
+            // Recorded only after the mutation is applied, so an entry proves the
+            // receiver at this identity and token was actually mutated.
+            MUTATED_RECEIVERS
+                .lock()
+                .await
+                .push((Arc::as_ptr(&receiver) as usize, receiver.observed));
+        }
 
         if *HOOK_REJECT_TOKEN.lock().await == Some(next.token) {
             return Err(upwell_hooks::Error::Other(
