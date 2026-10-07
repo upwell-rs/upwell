@@ -115,10 +115,19 @@ struct Requirement {
     reasons: BTreeSet<(ReasonKind, Vec<DependencyDemandId>)>,
 }
 
+/// Plans the transition requirements between two validated graphs.
+///
+/// `propagate_live_consumers` selects the planning mode. Runtime planning targets
+/// the reconstruction runtime, where every `RebindLive` node is reconstructed; such
+/// a consumer's own dependents must therefore propagate exactly like replaced
+/// instances — even when `invalidated_roots` is empty, because a pure
+/// provider/factory change can start the closure on its own. Ordinary planning
+/// keeps live rebinding local to the rebind itself.
 pub(super) fn plan_with_invalidations(
     active: &EffectiveGraph,
     candidate: &EffectiveGraph,
     invalidated_roots: &BTreeSet<&'static str>,
+    propagate_live_consumers: bool,
 ) -> Result<TransitionPlan, StaleGraphCandidate> {
     if active.generation != candidate.generation {
         return Err(StaleGraphCandidate {
@@ -131,12 +140,6 @@ pub(super) fn plan_with_invalidations(
     let mut requirements = BTreeMap::new();
     let mut bindings = BTreeSet::new();
     let mut changed_instances = VecDeque::new();
-
-    // Runtime-invalidated planning targets the reconstruction runtime, where every
-    // RebindLive node is reconstructed; such a consumer's own dependents must
-    // therefore propagate exactly like replaced instances. Ordinary planning keeps
-    // live rebinding local to the rebind itself.
-    let propagate_live_consumers = !invalidated_roots.is_empty();
 
     for change in &diff.nodes {
         let kinds = change.kinds.as_ref();
@@ -201,6 +204,7 @@ pub(super) fn plan_with_invalidations(
             &mut requirements,
             &mut bindings,
             &mut changed_instances,
+            propagate_live_consumers,
         );
     }
 
@@ -466,6 +470,7 @@ fn compare_demands(
     requirements: &mut BTreeMap<&'static str, Requirement>,
     bindings: &mut BTreeSet<BindingTransition>,
     changed_instances: &mut VecDeque<(&'static str, Vec<DependencyDemandId>)>,
+    propagate_live_consumers: bool,
 ) {
     let count = before.len().max(after.len());
 
@@ -506,11 +511,15 @@ fn compare_demands(
                     after.id.consumer,
                     NodeAction::RebindLive,
                     ReasonKind::LiveTargetChanged,
-                    path,
+                    path.clone(),
                 );
                 bindings.insert(BindingTransition {
                     dependency: after.id,
                 });
+
+                if propagate_live_consumers {
+                    changed_instances.push_back((after.id.consumer, path));
+                }
             } else {
                 require(
                     requirements,

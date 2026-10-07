@@ -555,8 +555,9 @@ impl ConfigReloader {
                 let Some(swap) = swap else {
                     // An unchanged binding joins the proposal only for callers that
                     // read it (the public `stage`); the legacy reload skips the work
-                    // entirely. The candidate store seeds lazily from `staged`, so no
-                    // seed is built here either way.
+                    // entirely. `stage_current` builds the staged metadata and its
+                    // type-erased seed closure here, but the candidate `Cfg` seed
+                    // value itself is only instantiated lazily by `candidate_store`.
                     if stage_unchanged {
                         staged.push(slot.stage_current());
                     }

@@ -1418,6 +1418,395 @@ fn runtime_resolver_omits_removed_components_by_absence() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Runtime propagation of live retarget closures under an empty invalidation set.
+// ---------------------------------------------------------------------------
+
+struct RetargetDependent;
+
+struct RetargetChainConsumer;
+
+struct RetargetChainDependent;
+
+struct RetargetClosureTransient;
+
+static RETARGET_CLOSURE_TRANSIENT_CONSTRUCTIONS: AtomicUsize = AtomicUsize::new(0);
+
+fn construct_retarget_dependent(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<RetargetDependent>("RetargetDependent"),
+            value: Box::new(Injectable::into_stored(Arc::new(RetargetDependent))),
+        })
+    })
+}
+
+fn construct_retarget_chain_consumer(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<RetargetChainConsumer>("RetargetChainConsumer"),
+            value: Box::new(Injectable::into_stored(Arc::new(RetargetChainConsumer))),
+        })
+    })
+}
+
+fn construct_retarget_chain_dependent(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<RetargetChainDependent>("RetargetChainDependent"),
+            value: Box::new(Injectable::into_stored(Arc::new(RetargetChainDependent))),
+        })
+    })
+}
+
+fn construct_retarget_closure_transient(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        RETARGET_CLOSURE_TRANSIENT_CONSTRUCTIONS.fetch_add(1, Ordering::SeqCst);
+
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<RetargetClosureTransient>("RetargetClosureTransient"),
+            value: Box::new(Injectable::into_stored(Arc::new(RetargetClosureTransient))),
+        })
+    })
+}
+
+fn retarget_dependent_dependencies() -> Vec<DependencyDescriptor> {
+    vec![DependencyDescriptor {
+        name: "LiveConsumer",
+        ty: TypeDescriptor::of::<LiveConsumer>("LiveConsumer"),
+        cardinality: Cardinality::One,
+        optional: false,
+        dynamic: false,
+        qualifier: None,
+        config: false,
+        resolution: ResolutionMode::Eager,
+        observation: DependencyObservation::Snapshot,
+    }]
+}
+
+fn retarget_chain_consumer_dependencies() -> Vec<DependencyDescriptor> {
+    vec![DependencyDescriptor {
+        name: "RetargetDependent",
+        ty: TypeDescriptor::of::<RetargetDependent>("RetargetDependent"),
+        cardinality: Cardinality::One,
+        optional: false,
+        dynamic: false,
+        qualifier: None,
+        config: false,
+        resolution: ResolutionMode::Eager,
+        observation: DependencyObservation::Live,
+    }]
+}
+
+fn retarget_chain_dependent_dependencies() -> Vec<DependencyDescriptor> {
+    vec![DependencyDescriptor {
+        name: "RetargetChainConsumer",
+        ty: TypeDescriptor::of::<RetargetChainConsumer>("RetargetChainConsumer"),
+        cardinality: Cardinality::One,
+        optional: false,
+        dynamic: false,
+        qualifier: None,
+        config: false,
+        resolution: ResolutionMode::Eager,
+        observation: DependencyObservation::Snapshot,
+    }]
+}
+
+fn retarget_closure_transient_dependencies() -> Vec<DependencyDescriptor> {
+    vec![DependencyDescriptor {
+        name: "LiveConsumer",
+        ty: TypeDescriptor::of::<LiveConsumer>("LiveConsumer"),
+        cardinality: Cardinality::One,
+        optional: false,
+        dynamic: false,
+        qualifier: None,
+        config: false,
+        resolution: ResolutionMode::Eager,
+        observation: DependencyObservation::Snapshot,
+    }]
+}
+
+static RETARGET_DEPENDENT_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "retarget-dependent",
+    construct: construct_retarget_dependent,
+    dependencies: retarget_dependent_dependencies,
+    default: false,
+}];
+static RETARGET_CHAIN_CONSUMER_FACTORY: [ComponentFactoryDescriptor; 1] =
+    [ComponentFactoryDescriptor {
+        id: "retarget-chain-consumer",
+        construct: construct_retarget_chain_consumer,
+        dependencies: retarget_chain_consumer_dependencies,
+        default: false,
+    }];
+static RETARGET_CHAIN_DEPENDENT_FACTORY: [ComponentFactoryDescriptor; 1] =
+    [ComponentFactoryDescriptor {
+        id: "retarget-chain-dependent",
+        construct: construct_retarget_chain_dependent,
+        dependencies: retarget_chain_dependent_dependencies,
+        default: false,
+    }];
+static RETARGET_CLOSURE_TRANSIENT_FACTORY: [ComponentFactoryDescriptor; 1] =
+    [ComponentFactoryDescriptor {
+        id: "retarget-closure-transient",
+        construct: construct_retarget_closure_transient,
+        dependencies: retarget_closure_transient_dependencies,
+        default: false,
+    }];
+
+fn retarget_dependent_factories() -> &'static [ComponentFactoryDescriptor] {
+    &RETARGET_DEPENDENT_FACTORY
+}
+
+fn retarget_chain_consumer_factories() -> &'static [ComponentFactoryDescriptor] {
+    &RETARGET_CHAIN_CONSUMER_FACTORY
+}
+
+fn retarget_chain_dependent_factories() -> &'static [ComponentFactoryDescriptor] {
+    &RETARGET_CHAIN_DEPENDENT_FACTORY
+}
+
+fn retarget_closure_transient_factories() -> &'static [ComponentFactoryDescriptor] {
+    &RETARGET_CLOSURE_TRANSIENT_FACTORY
+}
+
+fn retarget_dependent() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "retarget-dependent",
+        name: "RetargetDependent",
+        ty: TypeDescriptor::of::<RetargetDependent>("RetargetDependent"),
+        scope: &Singleton,
+        condition: None,
+        factories: retarget_dependent_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+fn retarget_chain_consumer() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "retarget-chain-consumer",
+        name: "RetargetChainConsumer",
+        ty: TypeDescriptor::of::<RetargetChainConsumer>("RetargetChainConsumer"),
+        scope: &Singleton,
+        condition: None,
+        factories: retarget_chain_consumer_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+fn retarget_chain_dependent() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "retarget-chain-dependent",
+        name: "RetargetChainDependent",
+        ty: TypeDescriptor::of::<RetargetChainDependent>("RetargetChainDependent"),
+        scope: &Singleton,
+        condition: None,
+        factories: retarget_chain_dependent_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+fn retarget_closure_transient() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "retarget-closure-transient",
+        name: "RetargetClosureTransient",
+        ty: TypeDescriptor::of::<RetargetClosureTransient>("RetargetClosureTransient"),
+        scope: &Transient,
+        condition: None,
+        factories: retarget_closure_transient_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+/// Active serves the live dependency through provider A; the candidate retargets the
+/// identical live dependency to provider B. The live consumer's snapshot dependent and
+/// the live chain behind it are structurally untouched, so only runtime propagation
+/// can pull them into the reconstruction closure.
+fn live_retarget_closure_fixture() -> (EffectiveGraph, CandidateGraph) {
+    let mut active_registry = AppRegistry::default();
+    active_registry.components.extend([
+        live_provider_a(),
+        live_consumer(),
+        retarget_dependent(),
+        retarget_chain_consumer(),
+        retarget_chain_dependent(),
+    ]);
+    active_registry.providers.push(live_service_provider(
+        TypeDescriptor::of::<LiveProviderA>("LiveProviderA"),
+        |_| panic!("transition planning must not erase components"),
+    ));
+    let active = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &active_registry.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+
+    let mut candidate_registry = AppRegistry::default();
+    candidate_registry.components.extend([
+        live_provider_b(),
+        live_consumer(),
+        retarget_dependent(),
+        retarget_chain_consumer(),
+        retarget_chain_dependent(),
+    ]);
+    candidate_registry.providers.push(live_service_provider(
+        TypeDescriptor::of::<LiveProviderB>("LiveProviderB"),
+        |_| panic!("transition planning must not erase components"),
+    ));
+    let candidate = CandidateGraph::prepare(
+        RuntimeGenerationId::INITIAL,
+        &candidate_registry,
+        &topology(),
+    )
+    .expect("candidate graph validates");
+
+    (active, candidate)
+}
+
+#[test]
+fn runtime_resolver_propagates_the_live_retarget_closure_with_empty_invalidations() {
+    let (active, candidate) = live_retarget_closure_fixture();
+
+    let resolved = candidate
+        .resolve_runtime_transition(&active, &BTreeSet::new())
+        .expect("the live retarget closure resolves without restart");
+    let decisions = resolved.decisions();
+
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "live-consumer",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+    assert!(
+        decisions.contains(&ComponentTransitionDecision {
+            component: "retarget-dependent",
+            strategy: ComponentTransitionStrategy::Reconstruct,
+        }),
+        "the snapshot dependent of the reconstructed live consumer must reconstruct, \
+         not retain an instance snapshotted from the retired active root"
+    );
+
+    let structural = resolved.structural();
+
+    assert!(matches!(
+        structural
+            .nodes
+            .iter()
+            .find(|node| node.component == "live-consumer"),
+        Some(PlannedNode {
+            action: NodeAction::RebindLive,
+            ..
+        })
+    ));
+    assert!(matches!(
+        structural
+            .nodes
+            .iter()
+            .find(|node| node.component == "retarget-dependent"),
+        Some(PlannedNode {
+            action: NodeAction::Replace,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn runtime_resolver_propagates_repeated_live_chains_with_empty_invalidations() {
+    let (active, candidate) = live_retarget_closure_fixture();
+
+    let resolved = candidate
+        .resolve_runtime_transition(&active, &BTreeSet::new())
+        .expect("the repeated live chain resolves without restart");
+    let decisions = resolved.decisions();
+
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "retarget-chain-consumer",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "retarget-chain-dependent",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+    assert_eq!(
+        resolved.construction_order(),
+        [
+            "live-provider-b",
+            "live-consumer",
+            "retarget-dependent",
+            "retarget-chain-consumer",
+            "retarget-chain-dependent",
+        ],
+        "the propagated closure reconstructs in dependency order"
+    );
+}
+
+#[test]
+fn runtime_resolver_preflights_non_reconstructible_live_retarget_closure() {
+    let mut active_registry = AppRegistry::default();
+    active_registry.components.extend([
+        live_provider_a(),
+        live_consumer(),
+        retarget_closure_transient(),
+    ]);
+    active_registry.providers.push(live_service_provider(
+        TypeDescriptor::of::<LiveProviderA>("LiveProviderA"),
+        |_| panic!("transition planning must not erase components"),
+    ));
+    let active = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &active_registry.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+
+    let mut candidate_registry = AppRegistry::default();
+    candidate_registry.components.extend([
+        live_provider_b(),
+        live_consumer(),
+        retarget_closure_transient(),
+    ]);
+    candidate_registry.providers.push(live_service_provider(
+        TypeDescriptor::of::<LiveProviderB>("LiveProviderB"),
+        |_| panic!("transition planning must not erase components"),
+    ));
+    let candidate = CandidateGraph::prepare(
+        RuntimeGenerationId::INITIAL,
+        &candidate_registry,
+        &topology(),
+    )
+    .expect("candidate graph validates");
+
+    let error = candidate
+        .resolve_runtime_transition(&active, &BTreeSet::new())
+        .expect_err("a non-singleton closure dependent cannot join a runtime transition");
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            component: "retarget-closure-transient",
+            required: Some(NodeAction::Replace),
+            reason: RestartReason::NonSingleton,
+        })
+    ));
+    assert_eq!(
+        RETARGET_CLOSURE_TRANSIENT_CONSTRUCTIONS.load(Ordering::SeqCst),
+        0,
+        "resolution must reject before any factory callback runs"
+    );
+}
+
 #[derive(Clone)]
 struct TransientSeed;
 
