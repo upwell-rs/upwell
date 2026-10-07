@@ -12,6 +12,7 @@ mod candidate_failure;
 mod concurrency;
 mod fixture;
 mod hook_rejection;
+mod invalidation;
 mod noop;
 mod provider_switch;
 mod publication;

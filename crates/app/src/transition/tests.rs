@@ -780,7 +780,7 @@ fn runtime_invalidations_reconstruct_invalidated_root_and_fixed_dependent() {
     let invalidated = BTreeSet::from(["invalidated-root"]);
 
     let resolved = candidate
-        .resolve_runtime_transition_with_invalidations(&active, &invalidated)
+        .resolve_runtime_transition(&active, &invalidated)
         .expect("runtime invalidations resolve without restart");
     let decisions = resolved.decisions();
 
@@ -823,7 +823,7 @@ fn runtime_invalidated_factoryless_singleton_requires_restart() {
     let invalidated = BTreeSet::from(["manual-root"]);
 
     let error = candidate
-        .resolve_runtime_transition_with_invalidations(&active, &invalidated)
+        .resolve_runtime_transition(&active, &invalidated)
         .expect_err("a factoryless invalidated singleton cannot reconstruct");
 
     assert!(matches!(
@@ -892,7 +892,7 @@ fn runtime_invalidated_non_singleton_requires_restart_before_construction() {
     let invalidated = BTreeSet::from(["counted-transient"]);
 
     let error = candidate
-        .resolve_runtime_transition_with_invalidations(&active, &invalidated)
+        .resolve_runtime_transition(&active, &invalidated)
         .expect_err("an invalidated non-singleton cannot join a runtime transition");
 
     assert!(matches!(
@@ -1116,7 +1116,7 @@ fn runtime_resolver_maps_structural_add_to_reconstruct() {
     .expect("candidate graph validates");
 
     let resolved = candidate
-        .resolve_runtime_transition_with_invalidations(&active, &BTreeSet::new())
+        .resolve_runtime_transition(&active, &BTreeSet::new())
         .expect("a structural add resolves without restart");
     let decisions = resolved.decisions();
 
@@ -1136,7 +1136,7 @@ fn runtime_resolver_maps_rebind_live_to_reconstruct() {
     let (active, candidate) = live_retarget_fixture();
 
     let resolved = candidate
-        .resolve_runtime_transition_with_invalidations(&active, &BTreeSet::new())
+        .resolve_runtime_transition(&active, &BTreeSet::new())
         .expect("a live retarget resolves without restart");
     let decisions = resolved.decisions();
 
@@ -1156,7 +1156,7 @@ fn runtime_resolver_omits_removed_components_by_absence() {
     let (active, candidate) = live_retarget_fixture();
 
     let resolved = candidate
-        .resolve_runtime_transition_with_invalidations(&active, &BTreeSet::new())
+        .resolve_runtime_transition(&active, &BTreeSet::new())
         .expect("a removal retires by absence without a restart");
 
     assert!(matches!(

@@ -3,6 +3,7 @@
 //! the changed binding — the unchanged one keeps its exact `Arc` (no spurious swap),
 //! and a snapshot taken before the reload stays pinned to the old value.
 
+use std::any::TypeId;
 use std::fs;
 use std::sync::Arc;
 
@@ -173,6 +174,11 @@ async fn staged_reload_commits_only_when_explicitly_committed() {
         unchanged.changed().is_empty(),
         "staging identical sources changes nothing"
     );
+    assert_eq!(
+        unchanged.changed_staged().count(),
+        0,
+        "an unchanged source exposes no changed staged entries"
+    );
 
     fs::write(&config_file, "[svc]\nvalue = 2\n\n[other]\nvalue = 100\n").expect("rewrite config");
 
@@ -183,6 +189,24 @@ async fn staged_reload_commits_only_when_explicitly_committed() {
         staged.changed()[0].path,
         "svc",
         "the changed binding is svc"
+    );
+
+    let changed_staged: Vec<_> = staged.changed_staged().collect();
+
+    assert_eq!(
+        changed_staged.len(),
+        1,
+        "only the changed binding is exposed as a staged entry"
+    );
+    assert_eq!(
+        changed_staged[0].type_id(),
+        TypeId::of::<SvcCfg>(),
+        "the changed staged entry carries the bound type's exact identity"
+    );
+    assert_eq!(
+        changed_staged[0].path(),
+        "svc",
+        "the changed staged entry carries the changed binding's path"
     );
 
     assert_eq!(

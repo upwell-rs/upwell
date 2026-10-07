@@ -611,6 +611,16 @@ impl StagedReload {
         &self.changed
     }
 
+    /// The staged typed entries of exactly the changed bindings, in binding order.
+    ///
+    /// Unlike [`changed`](Self::changed), each entry carries the binding's exact
+    /// [`TypeId`], so consumers can match config types by identity rather than display
+    /// name. Derived from the changed swaps; empty for an unchanged source.
+    #[doc(hidden)]
+    pub fn changed_staged(&self) -> impl ExactSizeIterator<Item = &StagedConfig> + '_ {
+        self.prepared.iter().map(|swap| &swap.staged)
+    }
+
     /// The staged value of every binding (changed bindings hold their newly-deserialized
     /// value, unchanged bindings hold their current value), for hooks and condition-fact
     /// extraction.

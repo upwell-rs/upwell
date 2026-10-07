@@ -31,13 +31,15 @@
 //! graph. Watch and signal triggers also continue to call it until #211; application
 //! graph transitions must use [`AppRuntime::reload_config`].
 
+use std::any::TypeId;
 use std::cell::Cell;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use upwell_config::{ChangedBinding, ComponentHookReport};
+use upwell_config::{ChangedBinding, ComponentHookReport, ConfigReload};
 use upwell_core::{ResolverSet, RuntimeGenerationId, TypeDescriptor};
-use upwell_di::{BoxedComponent, Injectable};
-use upwell_hooks::{HOOK_MANAGER_NAME, HookDescriptor, HookManager};
+use upwell_di::{BoxedComponent, EffectiveTarget, Injectable};
+use upwell_hooks::{HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookDescriptor, HookManager};
 
 use super::{AppConditionState, AppRuntime, PreparedRuntimeGeneration};
 use crate::transition::CandidateGraph;
@@ -131,7 +133,21 @@ impl AppRuntime {
         let topology = Arc::clone(&base.scope_plan().topology);
         let candidate =
             CandidateGraph::prepare_evaluation(base.id(), catalog, &evaluation, &topology)?;
-        let resolved_plan = candidate.resolve_runtime_transition(base.effective_graph())?;
+
+        // Exact (TypeId, path) invalidation inputs, derived from the changed staged
+        // entries while the reload still holds them: config types match by identity,
+        // not display name.
+        let changed_typed = staged
+            .changed_staged()
+            .map(|entry| (entry.type_id(), entry.path()))
+            .collect::<Vec<_>>();
+
+        // Compute the deterministic invalidation roots before resolving the transition:
+        // changed config bindings, config-reload hook owners, and HookManager consumers
+        // must reconstruct instead of retaining stale state.
+        let invalidated = invalidated_component_roots(&candidate, &changed_typed);
+        let resolved_plan =
+            candidate.resolve_runtime_transition(base.effective_graph(), &invalidated)?;
 
         // A generation-local hook manager built from the candidate descriptors. The
         // candidate root seeds it through the generation override below, so candidate
@@ -203,6 +219,83 @@ impl AppRuntime {
             published: true,
         })
     }
+}
+
+/// Computes the deterministic set of candidate component roots a non-empty staged
+/// reload must force to reconstruct.
+///
+/// A root is invalidated when any of the following holds:
+///
+/// 1. One of its config dependency targets matches a changed binding input — an exact
+///    `(TypeId, path)` pair derived from the changed staged entries — by type identity
+///    and, when the dependency is qualified, by exactly that path. An unqualified
+///    dependency matches by type identity alone.
+/// 2. It owns a `ConfigReload` hook — conservatively invalidated on any changed reload,
+///    regardless of which binding changed.
+/// 3. It depends on the `HookManager` singleton, which is generation-local and therefore
+///    always fresh in the candidate root.
+///
+/// The result is a `BTreeSet`, so overlapping criteria deduplicate and iteration order
+/// is deterministic.
+fn invalidated_component_roots(
+    candidate: &CandidateGraph,
+    changed: &[(TypeId, &str)],
+) -> BTreeSet<&'static str> {
+    let mut invalidated = BTreeSet::new();
+
+    for node in candidate.graph().nodes() {
+        let binding_changed = node.dependencies.iter().any(|dependency| {
+            dependency
+                .targets
+                .iter()
+                .any(|target| config_target_matches(target, changed))
+        });
+
+        let consumes_hook_manager = node.dependencies.iter().any(|dependency| {
+            dependency
+                .targets
+                .iter()
+                .any(|target| target.component_id() == Some(HOOK_MANAGER_ID))
+        });
+
+        if binding_changed || consumes_hook_manager {
+            invalidated.insert(node.id);
+        }
+    }
+
+    for component in candidate.components() {
+        let owns_config_reload_hook = (component.hooks)()
+            .iter()
+            .any(|hook| (hook.kind_ty)() == TypeId::of::<ConfigReload>());
+
+        if owns_config_reload_hook {
+            invalidated.insert(component.id);
+        }
+    }
+
+    invalidated
+}
+
+/// Whether one effective dependency target matches any changed binding input.
+///
+/// Only config targets can match, and only on exact type identity: the target carries
+/// the dependency type's `TypeId` and each changed input carries the staged binding's
+/// `TypeId`. A qualified target matches only its exact binding path; an unqualified
+/// target matches by type identity alone.
+fn config_target_matches(target: &EffectiveTarget, changed: &[(TypeId, &str)]) -> bool {
+    let EffectiveTarget::Config {
+        config_type_id,
+        binding_path,
+        ..
+    } = *target
+    else {
+        return false;
+    };
+
+    changed.iter().any(|(changed_type_id, changed_path)| {
+        config_type_id == *changed_type_id
+            && binding_path.is_none_or(|binding_path| binding_path == *changed_path)
+    })
 }
 
 #[cfg(test)]
