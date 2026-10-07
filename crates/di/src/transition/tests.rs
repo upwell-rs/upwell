@@ -344,6 +344,196 @@ fn changed_recipe_identity_replaces_the_component() {
     }));
 }
 
+#[test]
+fn invalidated_root_replaces_root_and_fixed_dependents_on_identical_graphs() {
+    let active = graph(false);
+    let candidate = graph(false);
+    let roots = BTreeSet::from(["default-authenticator", "ghost"]);
+
+    let plan = active
+        .plan_transition_with_invalidations(&candidate, &roots)
+        .expect("candidate uses active base generation");
+
+    assert_eq!(
+        action(&plan, "default-authenticator"),
+        Some(NodeAction::Replace)
+    );
+    assert_eq!(action(&plan, "fixed-consumer"), Some(NodeAction::Replace));
+    assert_eq!(action(&plan, "fixed-dependent"), Some(NodeAction::Replace));
+    assert_eq!(action(&plan, "unrelated"), None);
+    assert_eq!(action(&plan, "ghost"), None);
+
+    let root = plan
+        .nodes
+        .iter()
+        .find(|node| node.component == "default-authenticator")
+        .expect("invalidated root is planned");
+
+    assert!(
+        root.reasons
+            .iter()
+            .any(|reason| reason.kind == ReasonKind::RuntimeInvalidated && reason.path.is_empty())
+    );
+    assert!(plan.construction_order.contains(&"default-authenticator"));
+
+    let dependent = plan
+        .retirement_order
+        .iter()
+        .position(|component| *component == "fixed-dependent")
+        .expect("fixed dependent retires");
+    let consumer = plan
+        .retirement_order
+        .iter()
+        .position(|component| *component == "fixed-consumer")
+        .expect("fixed consumer retires");
+    let root = plan
+        .retirement_order
+        .iter()
+        .position(|component| *component == "default-authenticator")
+        .expect("invalidated root retires");
+
+    assert!(dependent < consumer && consumer < root);
+}
+
+#[test]
+fn invalidated_root_rebinds_live_dependents_through_existing_propagation() {
+    let active = graph(false);
+    let candidate = graph(false);
+    let roots = BTreeSet::from(["default-authenticator"]);
+
+    let plan = active
+        .plan_transition_with_invalidations(&candidate, &roots)
+        .expect("candidate uses active base generation");
+
+    assert_eq!(action(&plan, "live-consumer"), Some(NodeAction::RebindLive));
+    assert!(
+        plan.bindings
+            .iter()
+            .any(|binding| binding.dependency.consumer == "live-consumer")
+    );
+}
+
+#[test]
+fn empty_invalidation_set_exactly_equals_the_ordinary_plan() {
+    let active = graph(false);
+    let identical = graph(false);
+    let switched = graph(true);
+
+    let identical_plan = active
+        .plan_transition_with_invalidations(&identical, &BTreeSet::new())
+        .expect("candidate uses active base generation");
+    let switched_plan = active
+        .plan_transition_with_invalidations(&switched, &BTreeSet::new())
+        .expect("candidate uses active base generation");
+
+    assert!(identical_plan.is_noop());
+    assert_eq!(
+        identical_plan,
+        active
+            .plan_transition(&identical)
+            .expect("candidate uses active base generation")
+    );
+    assert_eq!(
+        switched_plan,
+        active
+            .plan_transition(&switched)
+            .expect("candidate uses active base generation")
+    );
+}
+
+#[test]
+fn repeated_invalidated_planning_is_deterministic() {
+    let active = graph(false);
+    let candidate = graph(false);
+    let roots = BTreeSet::from(["default-authenticator"]);
+
+    assert_eq!(
+        active.plan_transition_with_invalidations(&candidate, &roots),
+        active.plan_transition_with_invalidations(&candidate, &roots)
+    );
+}
+
+#[test]
+fn invalidations_leave_the_structural_diff_unchanged() {
+    let active = graph(false);
+    let candidate = graph(true);
+    let roots = BTreeSet::from(["default-authenticator"]);
+
+    let ordinary = active
+        .plan_transition(&candidate)
+        .expect("candidate uses active base generation");
+    let invalidated = active
+        .plan_transition_with_invalidations(&candidate, &roots)
+        .expect("candidate uses active base generation");
+
+    assert_eq!(invalidated.diff, ordinary.diff);
+    assert!(
+        ordinary
+            .diff
+            .nodes
+            .iter()
+            .any(|change| change.component == "custom-authenticator")
+    );
+}
+
+#[test]
+fn one_sided_invalidations_preserve_structural_add_and_remove() {
+    let active = graph(false);
+    let mut candidate_registry = registry(true);
+    candidate_registry
+        .components
+        .retain(|component| component.id != "unrelated");
+    let candidate =
+        EffectiveGraph::build(RuntimeGenerationId::INITIAL, &candidate_registry, |_, _| {
+            true
+        })
+        .expect("candidate validates");
+    let roots = BTreeSet::from(["unrelated", "custom-authenticator"]);
+
+    let plan = active
+        .plan_transition_with_invalidations(&candidate, &roots)
+        .expect("candidate uses active base generation");
+
+    assert_eq!(action(&plan, "unrelated"), Some(NodeAction::Remove));
+    assert_eq!(action(&plan, "custom-authenticator"), Some(NodeAction::Add));
+
+    let removed = plan
+        .nodes
+        .iter()
+        .find(|node| node.component == "unrelated")
+        .expect("removed component is planned");
+    let added = plan
+        .nodes
+        .iter()
+        .find(|node| node.component == "custom-authenticator")
+        .expect("added component is planned");
+
+    assert!(
+        removed
+            .reasons
+            .iter()
+            .any(|reason| reason.kind == ReasonKind::Removed && reason.path.is_empty())
+    );
+    assert!(
+        added
+            .reasons
+            .iter()
+            .any(|reason| reason.kind == ReasonKind::Added && reason.path.is_empty())
+    );
+    assert!(
+        removed
+            .reasons
+            .iter()
+            .all(|reason| reason.kind != ReasonKind::RuntimeInvalidated)
+    );
+    assert!(
+        added
+            .reasons
+            .iter()
+            .all(|reason| reason.kind != ReasonKind::RuntimeInvalidated)
+    );
+}
+
 fn action(plan: &TransitionPlan, component: &str) -> Option<NodeAction> {
     plan.nodes
         .iter()
