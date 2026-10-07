@@ -13,6 +13,7 @@ mod concurrency;
 mod fixture;
 mod hook_rejection;
 mod invalidation;
+mod manager_consumer;
 mod noop;
 mod provider_switch;
 mod publication;
