@@ -95,16 +95,20 @@ impl AppRuntime {
     /// The hook manager of the currently committed runtime generation, for running
     /// lifecycle/event hooks by kind.
     ///
-    /// Cloned from a pinned current view, so the handle is cheap and stays bound to the
-    /// generation that was current when it was taken.
+    /// Cloned from a pinned current view, so the handle is cheap and stays associated
+    /// with the generation that was current when it was taken.
     ///
     /// The manager is generation-bound: after
     /// [`reload_config`](Self::reload_config) publishes a new generation, refetch this
-    /// method to run the new generation's hooks. Handles taken earlier — and pinned
-    /// [`RuntimeView`]s — keep invoking through their original generation's root.
-    /// Components that inject [`HookManager`] are manager consumers, so the reload
-    /// invalidation policy reconstructs them instead of letting them retain a stale
-    /// manager.
+    /// method to run the new generation's hooks. A handle can invoke only while its
+    /// original generation's root is still pinned or owned — by a held [`RuntimeView`],
+    /// the runtime's current generation, or another root/scope/component owner. A
+    /// standalone old handle whose root has since been released returns
+    /// [`ResolverUnavailable`](upwell_hooks::Error::ResolverUnavailable) outcomes
+    /// instead of invoking: hold a [`RuntimeView`] across invocations that must pin one
+    /// generation, and refetch this method for current hooks. Components that inject
+    /// [`HookManager`] are manager consumers, so the reload invalidation policy
+    /// reconstructs them instead of letting them retain a stale manager.
     pub fn hooks(&self) -> HookManager {
         self.view().hooks().clone()
     }

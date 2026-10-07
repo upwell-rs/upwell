@@ -34,9 +34,14 @@
 //!
 //! Every generation owns its hook manager, and hook receivers resolve through their own
 //! generation's root only. Refetch [`AppRuntime::hooks`] after a published reload to run
-//! the new generation's hooks: handles taken earlier — and pinned
-//! [`RuntimeView`](crate::RuntimeView)s — remain bound to their original generation's
-//! root. Components that inject [`HookManager`] are manager consumers and reconstruct
+//! the new generation's hooks. A handle stays associated with its original generation's
+//! hook catalog, but it can invoke only while that generation's root is still pinned or
+//! owned — by a held [`RuntimeView`](crate::RuntimeView), the runtime's current
+//! generation, or another root/scope/component owner. A standalone old handle whose root
+//! has since been released returns
+//! [`ResolverUnavailable`](upwell_hooks::Error::ResolverUnavailable) outcomes instead of
+//! invoking, so hold a pinned view across invocations that must pin one generation.
+//! Components that inject [`HookManager`] are manager consumers and reconstruct
 //! under the invalidation policy above.
 //!
 //! [`ConfigStore`]: upwell_config::ConfigStore
@@ -137,9 +142,13 @@ impl AppRuntime {
     /// `ConfigReloader::reload` until #211.
     ///
     /// Hook managers are generation-bound: refetch [`hooks`](Self::hooks) after a
-    /// published reload to run the new generation's hooks. Handles and pinned views
-    /// taken earlier remain bound to their original generation's root, and components
-    /// that inject [`HookManager`] reconstruct under the invalidation policy above.
+    /// published reload to run the new generation's hooks. A handle stays associated
+    /// with its original generation but invokes only while that generation's root is
+    /// still pinned or owned — a [`RuntimeView`](crate::RuntimeView) held across the
+    /// invocation keeps it alive, while a standalone old handle may return
+    /// [`ResolverUnavailable`](upwell_hooks::Error::ResolverUnavailable) after the root
+    /// is released. Components that inject [`HookManager`] reconstruct under the
+    /// invalidation policy above.
     ///
     /// An unchanged source is a true no-op: no evaluation, construction, hooks, runtime
     /// or config generation movement, or root replacement.
