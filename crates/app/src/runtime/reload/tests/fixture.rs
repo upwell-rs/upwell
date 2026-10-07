@@ -34,8 +34,8 @@ use upwell_config::{
 };
 use upwell_core::{
     ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
-    ConfigFactDescriptor, ConfigFactId, DependencyDescriptor, ResolverCtx, ResolverCtxExt,
-    TypeDescriptor,
+    ConfigConditionCallback, ConfigConditionContext, ConfigFactDescriptor, ConfigFactId,
+    DependencyDescriptor, ResolverCtx, ResolverCtxExt, TypeDescriptor,
 };
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
@@ -47,10 +47,31 @@ use crate::{App, AppBuilder};
 
 const PROBE_ENABLED: ConfigFactId = ConfigFactId::new("test::ProbeConfig", "probe", "enabled");
 
+/// The probe's availability callback: its only declared input is the `probe.enabled`
+/// fact, and its default outcome matches the `ConfigBool` predicate it replaces — the
+/// fact must be present and true. Under test control it panics instead, so a test can
+/// prove the reload's incremental evaluation is panic-contained.
+fn probe_condition_evaluate(context: ConfigConditionContext<'_>) -> bool {
+    if CONDITION_PANIC.load(Ordering::SeqCst) {
+        panic!("config condition callback panicked");
+    }
+
+    context
+        .get(PROBE_ENABLED)
+        .and_then(ConditionScalar::as_bool)
+        .unwrap_or(false)
+}
+
+static PROBE_CONDITION_CALLBACK: ConfigConditionCallback = ConfigConditionCallback {
+    kind: "test/probe-enabled",
+    inputs: &[PROBE_ENABLED],
+    evaluate: probe_condition_evaluate,
+};
+
 static PROBE_CONDITION: ConditionDescriptor = ConditionDescriptor {
     id: "probe-enabled",
     source: upwell_core::descriptor_source!(),
-    predicate: ConditionPredicate::ConfigBool(PROBE_ENABLED),
+    predicate: ConditionPredicate::ConfigCallback(&PROBE_CONDITION_CALLBACK),
 };
 
 static FACTORY_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -88,6 +109,21 @@ static MANAGER_PROBE_TOKENS: tokio::sync::Mutex<Vec<i64>> =
 /// [`ManagerProbeKind`] run resolved, in run order.
 static MANAGER_PROBE_IDS: tokio::sync::Mutex<Vec<usize>> =
     tokio::sync::Mutex::const_new(Vec::new());
+
+/// Whether the condition-fact scalar extraction panics when invoked, so a test can
+/// prove the reload's condition stage is panic-contained before any candidate work.
+/// Read synchronously inside the extraction callback, so it is a plain atomic.
+static SCALARS_PANIC: AtomicBool = AtomicBool::new(false);
+
+/// Whether the condition-fact descriptor callback panics when invoked, so a test can
+/// prove the reload's fact-descriptor collection is panic-contained. Read
+/// synchronously inside the descriptor callback, so it is a plain atomic.
+static DESCRIPTORS_PANIC: AtomicBool = AtomicBool::new(false);
+
+/// Whether the probe's config condition callback panics when evaluated, so a test can
+/// prove the reload's incremental condition evaluation is panic-contained. Read
+/// synchronously inside the callback, so it is a plain atomic.
+static CONDITION_PANIC: AtomicBool = AtomicBool::new(false);
 
 /// Whether the candidate factory returns a DI error after resolving the staged value.
 static FACTORY_FAILS: tokio::sync::Mutex<bool> = tokio::sync::Mutex::const_new(false);
@@ -132,6 +168,9 @@ pub(super) async fn reset_controls() {
     MUTATED_RECEIVERS.lock().await.clear();
     *MANAGER_PROBE_TOKENS.lock().await = Vec::new();
     *MANAGER_PROBE_IDS.lock().await = Vec::new();
+    SCALARS_PANIC.store(false, Ordering::SeqCst);
+    DESCRIPTORS_PANIC.store(false, Ordering::SeqCst);
+    CONDITION_PANIC.store(false, Ordering::SeqCst);
     *FACTORY_FAILS.lock().await = false;
     *FACTORY_WAITS.lock().await = false;
 }
@@ -201,6 +240,21 @@ pub(super) async fn manager_probe_ids() -> Vec<usize> {
     MANAGER_PROBE_IDS.lock().await.clone()
 }
 
+/// Makes the condition-fact scalar extraction panic when invoked.
+pub(super) fn panic_condition_scalars(panics: bool) {
+    SCALARS_PANIC.store(panics, Ordering::SeqCst);
+}
+
+/// Makes the condition-fact descriptor callback panic when invoked.
+pub(super) fn panic_condition_descriptors(panics: bool) {
+    DESCRIPTORS_PANIC.store(panics, Ordering::SeqCst);
+}
+
+/// Makes the probe's config condition callback panic when evaluated.
+pub(super) fn panic_condition_evaluation(panics: bool) {
+    CONDITION_PANIC.store(panics, Ordering::SeqCst);
+}
+
 /// Makes the candidate factory fail with a DI error after resolving the staged value.
 pub(super) async fn fail_factory_after_staging(fails: bool) {
     *FACTORY_FAILS.lock().await = fails;
@@ -260,6 +314,10 @@ impl ConfigProperties for ProbeConfig {
 
 impl ConditionFacts for ProbeConfig {
     fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
+        if DESCRIPTORS_PANIC.load(Ordering::SeqCst) {
+            panic!("condition fact descriptor callback panicked");
+        }
+
         vec![ConfigFactDescriptor {
             id: ConfigFactId::new("test::ProbeConfig", binding_path, "enabled"),
             kind: ConditionScalarKind::Bool,
@@ -271,6 +329,10 @@ impl ConditionFacts for ProbeConfig {
         &self,
         binding_path: &'static str,
     ) -> Vec<(ConfigFactId, ConditionScalar)> {
+        if SCALARS_PANIC.load(Ordering::SeqCst) {
+            panic!("condition fact extraction panicked");
+        }
+
         vec![(
             ConfigFactId::new("test::ProbeConfig", binding_path, "enabled"),
             ConditionScalar::Bool(self.enabled),
