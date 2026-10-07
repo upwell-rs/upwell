@@ -409,7 +409,7 @@ fn invalidated_root_replaces_root_and_fixed_dependents_on_identical_graphs() {
     let roots = BTreeSet::from(["default-authenticator", "ghost"]);
 
     let plan = active
-        .plan_transition_with_invalidations(&candidate, &roots)
+        .plan_runtime_transition(&candidate, &roots)
         .expect("candidate uses active base generation");
 
     assert_eq!(
@@ -460,7 +460,7 @@ fn invalidated_root_rebinds_live_dependents_through_existing_propagation() {
     let roots = BTreeSet::from(["default-authenticator"]);
 
     let plan = active
-        .plan_transition_with_invalidations(&candidate, &roots)
+        .plan_runtime_transition(&candidate, &roots)
         .expect("candidate uses active base generation");
 
     assert_eq!(action(&plan, "live-consumer"), Some(NodeAction::RebindLive));
@@ -478,7 +478,7 @@ fn invalidated_root_replaces_the_fixed_dependent_of_a_reconstructed_live_consume
     let roots = BTreeSet::from(["default-authenticator"]);
 
     let plan = active
-        .plan_transition_with_invalidations(&candidate, &roots)
+        .plan_runtime_transition(&candidate, &roots)
         .expect("candidate uses active base generation");
 
     assert_eq!(action(&plan, "live-consumer"), Some(NodeAction::RebindLive));
@@ -510,7 +510,7 @@ fn invalidated_root_propagates_through_repeated_live_and_fixed_links() {
     let roots = BTreeSet::from(["default-authenticator"]);
 
     let plan = active
-        .plan_transition_with_invalidations(&candidate, &roots)
+        .plan_runtime_transition(&candidate, &roots)
         .expect("candidate uses active base generation");
 
     assert_eq!(action(&plan, "live-consumer"), Some(NodeAction::RebindLive));
@@ -572,30 +572,42 @@ fn ordinary_planning_leaves_the_fixed_closure_of_live_rebinds_untouched() {
 }
 
 #[test]
-fn empty_invalidation_set_exactly_equals_the_ordinary_plan() {
+fn runtime_planning_with_an_empty_invalidation_set_propagates_live_closures() {
     let active = graph(false);
     let identical = graph(false);
     let switched = graph(true);
 
     let identical_plan = active
-        .plan_transition_with_invalidations(&identical, &BTreeSet::new())
-        .expect("candidate uses active base generation");
-    let switched_plan = active
-        .plan_transition_with_invalidations(&switched, &BTreeSet::new())
+        .plan_runtime_transition(&identical, &BTreeSet::new())
         .expect("candidate uses active base generation");
 
     assert!(identical_plan.is_noop());
+
+    let plan = active
+        .plan_runtime_transition(&switched, &BTreeSet::new())
+        .expect("candidate uses active base generation");
+
+    assert_eq!(action(&plan, "custom-authenticator"), Some(NodeAction::Add));
+    assert_eq!(action(&plan, "live-consumer"), Some(NodeAction::RebindLive));
     assert_eq!(
-        identical_plan,
-        active
-            .plan_transition(&identical)
-            .expect("candidate uses active base generation")
+        action(&plan, "live-consumer-dependent"),
+        Some(NodeAction::Replace)
     );
     assert_eq!(
-        switched_plan,
-        active
-            .plan_transition(&switched)
-            .expect("candidate uses active base generation")
+        action(&plan, "live-chain-consumer"),
+        Some(NodeAction::RebindLive)
+    );
+    assert_eq!(
+        action(&plan, "live-chain-dependent"),
+        Some(NodeAction::Replace)
+    );
+    assert_eq!(action(&plan, "fixed-consumer"), Some(NodeAction::Replace));
+    assert_eq!(action(&plan, "fixed-dependent"), Some(NodeAction::Replace));
+    assert_eq!(action(&plan, "unrelated"), None);
+    assert_eq!(
+        plan.bindings.len(),
+        2,
+        "both live consumers in the propagated closure rebind"
     );
 }
 
@@ -606,8 +618,8 @@ fn repeated_invalidated_planning_is_deterministic() {
     let roots = BTreeSet::from(["default-authenticator"]);
 
     assert_eq!(
-        active.plan_transition_with_invalidations(&candidate, &roots),
-        active.plan_transition_with_invalidations(&candidate, &roots)
+        active.plan_runtime_transition(&candidate, &roots),
+        active.plan_runtime_transition(&candidate, &roots)
     );
 }
 
@@ -621,7 +633,7 @@ fn invalidations_leave_the_structural_diff_unchanged() {
         .plan_transition(&candidate)
         .expect("candidate uses active base generation");
     let invalidated = active
-        .plan_transition_with_invalidations(&candidate, &roots)
+        .plan_runtime_transition(&candidate, &roots)
         .expect("candidate uses active base generation");
 
     assert_eq!(invalidated.diff, ordinary.diff);
@@ -649,7 +661,7 @@ fn one_sided_invalidations_preserve_structural_add_and_remove() {
     let roots = BTreeSet::from(["unrelated", "custom-authenticator"]);
 
     let plan = active
-        .plan_transition_with_invalidations(&candidate, &roots)
+        .plan_runtime_transition(&candidate, &roots)
         .expect("candidate uses active base generation");
 
     assert_eq!(action(&plan, "unrelated"), Some(NodeAction::Remove));

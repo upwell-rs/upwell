@@ -454,8 +454,7 @@ impl CandidateGraph {
         invalidated_roots: &BTreeSet<&'static str>,
     ) -> crate::Result<ResolvedTransitionPlan> {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let structural =
-                active.plan_transition_with_invalidations(&self.graph, invalidated_roots)?;
+            let structural = active.plan_runtime_transition(&self.graph, invalidated_roots)?;
 
             let requested = structural
                 .nodes

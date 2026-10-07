@@ -3,7 +3,9 @@
 //! later reload completes — and the aborted attempt leaves no state behind.
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use tokio::time::timeout;
 use upwell_config::ContainerConfigExt;
 
 use super::fixture::{
@@ -37,7 +39,9 @@ async fn cancelled_precommit_attempt_releases_serializers() {
     let task_runtime = runtime.clone();
     let task = tokio::spawn(async move { task_runtime.reload_config().await });
 
-    factory_parked().await;
+    timeout(Duration::from_secs(5), factory_parked())
+        .await
+        .expect("the reload parks inside candidate construction after staging");
 
     task.abort();
 
@@ -91,9 +95,9 @@ async fn cancelled_precommit_attempt_releases_serializers() {
 
     write_probe_config(&config_dir_of(&dir), true, 9);
 
-    let report = runtime
-        .reload_config()
+    let report = timeout(Duration::from_secs(5), runtime.reload_config())
         .await
+        .expect("the later reload completes after the aborted attempt released both serializers")
         .expect("the later reload completes");
 
     assert!(report.published, "the later reload publishes a generation");

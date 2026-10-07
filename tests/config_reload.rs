@@ -479,3 +479,59 @@ async fn facade_root_exposes_runtime_reload_report() {
         "the first commit advances the config generation to 1"
     );
 }
+
+/// The facade root re-exports the reload failure payload and runtime-state types:
+/// `RestartRequired`/`RestartReason` — the documented failure mode of
+/// `AppRuntime::reload_config` — plus `AppConditionState` and `PreparedScopeTopology`
+/// (the type behind `AppRuntime::scope_topology`), so facade-only users can name and
+/// match them without depending on `upwell-app` directly.
+#[tokio::test]
+async fn facade_root_names_reload_failure_and_runtime_state_types() {
+    let root = temp_config_dir();
+    let dirs = DirectoriesManager::from_path(root.path().to_path_buf());
+    let config_dir = dirs.dir::<Config>();
+    let config_file = config_dir.path().join("application.toml");
+
+    fs::create_dir_all(config_dir.path()).expect("create config subdir");
+    fs::write(&config_file, "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n").expect("write config");
+
+    let manager =
+        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
+            .expect("load config");
+
+    let daemon = App::<()>::builder("config-facade-reload-state-types-test")
+        .config_source(manager)
+        .auto_discover()
+        .build()
+        .await
+        .expect("daemon builds");
+
+    let topology: Arc<upwell::PreparedScopeTopology> = daemon.runtime().scope_topology();
+
+    assert!(
+        topology.boundaries().is_empty(),
+        "the prepared scope topology is consumable through the facade"
+    );
+
+    fn restart_payload(error: &upwell::AppError) -> Option<(&'static str, upwell::RestartReason)> {
+        match error {
+            upwell::AppError::RestartRequired(required) => {
+                Some((required.component, required.reason))
+            }
+            _ => None,
+        }
+    }
+
+    let _restart_required: Option<&upwell::RestartRequired> = None;
+
+    assert_eq!(
+        restart_payload(&upwell::AppError::CandidatePreparationPanicked),
+        None,
+        "a non-restart error carries no restart payload through the facade"
+    );
+
+    // `AppConditionState` has no public constructor — it is carried by committed
+    // generations — so naming coverage spells it in a signature instead.
+    let _condition_catalog: fn(&upwell::AppConditionState) -> &Arc<upwell::AppRegistry> =
+        upwell::AppConditionState::catalog;
+}

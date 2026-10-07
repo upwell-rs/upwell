@@ -30,6 +30,18 @@
 //! cannot reconstruct in place (no ordinary factory, non-singleton, …) fails the reload
 //! with [`RestartRequired`](crate::RestartRequired) before any construction runs.
 //!
+//! # Reentrancy
+//!
+//! Config-reload hooks and candidate factories run to completion while both
+//! serialization leases — the config reloader's reload lock and the runtime
+//! transition writer — are held, and neither lock is reentrant. A hook or factory
+//! body must therefore never call
+//! [`ConfigReloader::reload`](upwell_config::ConfigReloader::reload) or
+//! [`AppRuntime::reload_config`] (or otherwise await the reload lease): doing so
+//! waits on the very transaction that is running the hook and deadlocks the reload
+//! forever, with no error, panic, or diagnostic. Defer such work outside the
+//! transaction instead.
+//!
 //! # Generation-bound hook managers
 //!
 //! Every generation owns its hook manager, and hook receivers resolve through their own
@@ -152,6 +164,16 @@ impl AppRuntime {
     ///
     /// An unchanged source is a true no-op: no evaluation, construction, hooks, runtime
     /// or config generation movement, or root replacement.
+    ///
+    /// # Reentrancy
+    ///
+    /// Config-reload hooks and candidate factories run while both serialization
+    /// leases are held, and neither lock is reentrant: a hook or factory body must
+    /// not call [`ConfigReloader::reload`](upwell_config::ConfigReloader::reload) or
+    /// this method (or otherwise await the reload lease) — doing so waits on the
+    /// transaction that is running the hook and deadlocks the reload forever, with
+    /// no error, panic, or diagnostic. Defer such work outside the transaction
+    /// instead.
     pub async fn reload_config(&self) -> crate::Result<RuntimeReloadReport> {
         // Fixed lock order: the config reloader's serialization lock first, then the
         // runtime transition writer.
