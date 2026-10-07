@@ -4,32 +4,66 @@
 //! bindings and the derived component graph as one serialized transaction. It stages
 //! configuration, evaluates conditions, plans and builds a candidate graph and root over
 //! the candidate [`ConfigStore`], and creates a generation-local [`HookManager`]. The
-//! affected config-reload hooks run against that candidate generation before commit. Any
-//! recoverable error, hook rejection, or cancellation before the terminal commit preserves
-//! the complete active state, including configuration values.
+//! affected config-reload hooks run against that candidate generation before commit.
+//!
+//! # Rollback boundary
+//!
+//! Before the terminal commit, every recoverable error, hook rejection, failed candidate
+//! factory, or cancellation leaves the framework-owned publication state unchanged: the
+//! active runtime generation, the managed config tree and its live slots, the config
+//! generation, and the compatibility hook manager installed in the config reloader. The
+//! candidate — its root, its hook manager, and every newly constructed component
+//! instance — is dropped, so mutations held exclusively by those candidate instances
+//! disappear with it. Retained dependencies may alias the active generation's
+//! instances, so mutations a candidate factory or hook makes through them reach live
+//! components and are not rolled back. Arbitrary external, global, or I/O side effects
+//! (external systems, emitted messages, files) are likewise not rolled back and are the
+//! application's responsibility.
+//!
+//! # Invalidation policy
+//!
+//! A non-empty reload reconstructs exactly the affected singletons in the candidate
+//! root: consumers of changed config bindings, owners of [`ConfigReload`] hooks, and
+//! consumers of the generation-local [`HookManager`], plus the singletons that depend on
+//! them — the planner propagates each invalidation through reverse reachability.
+//! Unaffected singletons retain their active instances. An affected component that
+//! cannot reconstruct in place (no ordinary factory, non-singleton, …) fails the reload
+//! with [`RestartRequired`](crate::RestartRequired) before any construction runs.
+//!
+//! # Generation-bound hook managers
+//!
+//! Every generation owns its hook manager, and hook receivers resolve through their own
+//! generation's root only. Refetch [`AppRuntime::hooks`] after a published reload to run
+//! the new generation's hooks: handles taken earlier — and pinned
+//! [`RuntimeView`](crate::RuntimeView)s — remain bound to their original generation's
+//! root. Components that inject [`HookManager`] are manager consumers and reconstruct
+//! under the invalidation policy above.
 //!
 //! [`ConfigStore`]: upwell_config::ConfigStore
 //!
 //! Lock order is fixed: the config reloader's serialization lock is acquired first,
-//! then the runtime transition writer. A legacy [`ConfigReloader::reload`] holds only
-//! the first lock, so it can never interleave with this transaction, and the writer is
-//! never held while waiting on the reloader.
+//! then the runtime transition writer. A legacy
+//! [`ConfigReloader::reload`](upwell_config::ConfigReloader::reload) holds only the
+//! first lock, so it can never interleave with this transaction, and the writer is never
+//! held while waiting on the reloader.
 //!
 //! At the terminal commit, the validated candidate becomes the authoritative runtime
 //! generation first, then the legacy live config slots synchronously commit while both
 //! leases remain held, and the config reloader's compatibility hook manager is replaced
-//! with the published generation's. An unchanged source is a no-op: it moves neither
-//! generation nor root. A pinned [`RuntimeView`](crate::RuntimeView) consistently pins
-//! one generation's root, graph, scopes, condition state, and hook catalog, but it does
-//! not freeze separately held legacy live [`Cfg<T>`] cells. Those cells remain per-slot
+//! with the published generation's. The staged commit advances the config generation
+//! exactly once per reload. An unchanged source is a no-op: it moves neither generation
+//! nor root. A pinned [`RuntimeView`](crate::RuntimeView) consistently pins one
+//! generation's root, graph, scopes, condition state, and hook catalog, but it does not
+//! freeze separately held legacy live [`Cfg<T>`] cells. Those cells remain per-slot
 //! atomic at commit; no atomicity across handles is promised.
 //!
 //! [`Cfg<T>`]: upwell_config::Cfg
 //!
-//! [`ConfigReloader::reload`] remains a config-only compatibility operation: it runs the
-//! current generation's hooks against the current root, but does not transition the
-//! graph. Watch and signal triggers also continue to call it until #211; application
-//! graph transitions must use [`AppRuntime::reload_config`].
+//! [`ConfigReloader::reload`](upwell_config::ConfigReloader::reload) remains a
+//! config-only compatibility operation: it runs the current generation's hooks against
+//! the current root, but does not transition the graph. Watch and signal triggers also
+//! continue to call it until #211; application graph transitions must use
+//! [`AppRuntime::reload_config`].
 
 use std::any::TypeId;
 use std::cell::Cell;
@@ -67,22 +101,45 @@ impl AppRuntime {
     /// Re-reads configuration and republishes changed bindings and the derived
     /// component graph as one serialized transaction.
     ///
-    /// It first acquires the [`ConfigReloader`] reload lock, then the runtime transition
-    /// writer. While both leases are held, it stages configuration; evaluates conditions;
-    /// plans and builds a candidate graph and root over a candidate
-    /// [`ConfigStore`](upwell_config::ConfigStore); and
+    /// It first acquires the [`ConfigReloader`](upwell_config::ConfigReloader) reload
+    /// lock, then the runtime transition writer. While both leases are held, it stages
+    /// configuration; evaluates conditions; plans and builds a candidate graph and root
+    /// over a candidate [`ConfigStore`](upwell_config::ConfigStore); and
     /// creates a generation-local [`HookManager`]. Affected config-reload hooks run
-    /// against that candidate before commit. Any recoverable error, hook rejection, or
-    /// cancellation before the terminal commit preserves the complete active state,
-    /// including configuration values.
+    /// against that candidate before commit.
+    ///
+    /// Before the terminal commit, every recoverable error, hook rejection, failed
+    /// candidate factory, or cancellation leaves the framework-owned publication state
+    /// unchanged — the active runtime generation, the managed config tree and its live
+    /// slots, the config generation, and the compatibility hook manager installed in
+    /// the [`ConfigReloader`](upwell_config::ConfigReloader) — and drops the candidate
+    /// wholesale. Mutations held exclusively by newly constructed candidate instances
+    /// disappear with that drop. Retained dependencies may alias the active
+    /// generation's instances, so mutations made through them are not rolled back;
+    /// arbitrary external, global, or I/O side effects are likewise not rolled back.
+    ///
+    /// Affected singletons reconstruct in the candidate root: consumers of changed
+    /// config bindings, [`ConfigReload`] hook owners, and [`HookManager`] consumers,
+    /// plus the singletons that depend on them through the planner's reverse
+    /// propagation. Unaffected singletons retain their active instances. An affected
+    /// component that cannot reconstruct in place fails with
+    /// [`RestartRequired`](crate::RestartRequired) before any construction runs.
     ///
     /// The terminal commit publishes the authoritative runtime generation first, then
     /// synchronously commits legacy live config slots and installs the published
-    /// generation's hook manager into the [`ConfigReloader`] while both leases remain
+    /// generation's hook manager into the
+    /// [`ConfigReloader`](upwell_config::ConfigReloader) while both leases remain
     /// held — so legacy reloads run the current generation's hooks against the current
-    /// root. Unlike [`ConfigReloader::reload`], which is config-only compatibility
-    /// behavior, this method is required for application graph transitions. Watch and
-    /// signal triggers continue to use `ConfigReloader::reload` until #211.
+    /// root. The staged commit advances the config generation exactly once. Unlike
+    /// [`ConfigReloader::reload`](upwell_config::ConfigReloader::reload), which is
+    /// config-only compatibility behavior, this method is required for application
+    /// graph transitions. Watch and signal triggers continue to use
+    /// `ConfigReloader::reload` until #211.
+    ///
+    /// Hook managers are generation-bound: refetch [`hooks`](Self::hooks) after a
+    /// published reload to run the new generation's hooks. Handles and pinned views
+    /// taken earlier remain bound to their original generation's root, and components
+    /// that inject [`HookManager`] reconstruct under the invalidation policy above.
     ///
     /// An unchanged source is a true no-op: no evaluation, construction, hooks, runtime
     /// or config generation movement, or root replacement.
@@ -144,7 +201,10 @@ impl AppRuntime {
 
         // Compute the deterministic invalidation roots before resolving the transition:
         // changed config bindings, config-reload hook owners, and HookManager consumers
-        // must reconstruct instead of retaining stale state.
+        // must reconstruct instead of retaining stale state. The planner propagates each
+        // invalidation to dependent singletons; an affected component that cannot
+        // reconstruct in place fails resolution with `RestartRequired` before any
+        // construction runs.
         let invalidated = invalidated_component_roots(&candidate, &changed_typed);
         let resolved_plan =
             candidate.resolve_runtime_transition(base.effective_graph(), &invalidated)?;
@@ -196,8 +256,9 @@ impl AppRuntime {
             .expect("candidate prepared under the sole writer cannot be stale");
 
         // Terminal publication: the validated candidate becomes current first, then the
-        // staged config slots commit while the writer lease is still held. From the
-        // commit token on, every step is infallible.
+        // staged config slots commit while the writer lease is still held. The staged
+        // commit advances the config generation exactly once. From the commit token on,
+        // every step is infallible.
         let config_generation = Cell::new(0);
         let view = commit.commit_with(|| {
             let generation = staged.commit();
