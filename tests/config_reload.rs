@@ -12,7 +12,7 @@ use tempfile::TempDir;
 use upwell::ContainerConfigExt;
 use upwell::config::Toml;
 use upwell::dirs::{Config, DirectoriesManager};
-use upwell::{App, Cfg, ConfigManager, component, config};
+use upwell::{App, Cfg, ConfigManager, StagedConfig, StagedReload, component, config};
 use upwell_config::ResolverChain;
 
 #[config(path = "svc")]
@@ -311,5 +311,49 @@ async fn staged_candidate_store_resolves_proposed_values_without_touching_active
         consumer.svc().get().value,
         1,
         "dropping the staged reload publishes nothing"
+    );
+}
+
+/// The facade root re-exports the staged reload API: `ConfigReloader::stage`'s return
+/// type is nameable as `StagedReload` and the staged/proposal input type as
+/// `StagedConfig`, both through `upwell::` — so facade-only users can stage a reload
+/// and inspect staged entries without depending on `upwell-config` directly.
+#[tokio::test]
+async fn facade_root_exposes_staged_reload_and_staged_config() {
+    let root = temp_config_dir();
+    let dirs = DirectoriesManager::from_path(root.path().to_path_buf());
+    let config_dir = dirs.dir::<Config>();
+    let config_file = config_dir.path().join("application.toml");
+
+    fs::create_dir_all(config_dir.path()).expect("create config subdir");
+    fs::write(&config_file, "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n").expect("write config");
+
+    let manager =
+        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
+            .expect("load config");
+
+    let daemon = App::<()>::builder("config-facade-staged-types-test")
+        .config_source(manager)
+        .auto_discover()
+        .build()
+        .await
+        .expect("daemon builds");
+
+    let reloader = daemon.config_reloader();
+
+    fs::write(&config_file, "[svc]\nvalue = 2\n\n[other]\nvalue = 100\n").expect("rewrite config");
+
+    let staged: StagedReload = reloader.stage().expect("staging after the source change");
+
+    let staged_entries: &[StagedConfig] = staged.staged();
+
+    assert_eq!(staged_entries.len(), 2, "every binding is staged");
+    assert_eq!(
+        staged_entries
+            .iter()
+            .find(|entry| entry.path() == "svc")
+            .map(|entry| entry.type_id()),
+        Some(TypeId::of::<SvcCfg>()),
+        "the staged entry carries the bound type's exact identity through the facade"
     );
 }
