@@ -1,8 +1,9 @@
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use upwell_config::{ConfigBinding, ConfigManager, ConfigProperties, ConfigReloader};
 use upwell_core::{
@@ -623,6 +624,559 @@ fn unchanged_root_resolver_consumers_require_reconstruction() {
             ..
         })
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Runtime invalidation defaults for the transactional config reload.
+// ---------------------------------------------------------------------------
+
+struct InvalidatedRoot;
+
+struct FixedDependent;
+
+struct UnrelatedSingleton;
+
+struct ManualRoot;
+
+fn construct_invalidated_root(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<InvalidatedRoot>("InvalidatedRoot"),
+            value: Box::new(Injectable::into_stored(Arc::new(InvalidatedRoot))),
+        })
+    })
+}
+
+fn construct_fixed_dependent(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<FixedDependent>("FixedDependent"),
+            value: Box::new(Injectable::into_stored(Arc::new(FixedDependent))),
+        })
+    })
+}
+
+fn construct_unrelated_singleton(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<UnrelatedSingleton>("UnrelatedSingleton"),
+            value: Box::new(Injectable::into_stored(Arc::new(UnrelatedSingleton))),
+        })
+    })
+}
+
+fn invalidated_root_dependency() -> Vec<DependencyDescriptor> {
+    vec![DependencyDescriptor {
+        name: "InvalidatedRoot",
+        ty: TypeDescriptor::of::<InvalidatedRoot>("InvalidatedRoot"),
+        cardinality: Cardinality::One,
+        optional: false,
+        dynamic: false,
+        qualifier: None,
+        config: false,
+        resolution: ResolutionMode::Eager,
+        observation: DependencyObservation::Snapshot,
+    }]
+}
+
+static INVALIDATED_ROOT_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "invalidated-root",
+    construct: construct_invalidated_root,
+    dependencies: no_dependencies,
+    default: false,
+}];
+static FIXED_DEPENDENT_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "fixed-dependent",
+    construct: construct_fixed_dependent,
+    dependencies: invalidated_root_dependency,
+    default: false,
+}];
+static UNRELATED_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "unrelated",
+    construct: construct_unrelated_singleton,
+    dependencies: no_dependencies,
+    default: false,
+}];
+
+fn invalidated_root_factories() -> &'static [ComponentFactoryDescriptor] {
+    &INVALIDATED_ROOT_FACTORY
+}
+
+fn fixed_dependent_factories() -> &'static [ComponentFactoryDescriptor] {
+    &FIXED_DEPENDENT_FACTORY
+}
+
+fn unrelated_factories() -> &'static [ComponentFactoryDescriptor] {
+    &UNRELATED_FACTORY
+}
+
+fn invalidated_root() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "invalidated-root",
+        name: "InvalidatedRoot",
+        ty: TypeDescriptor::of::<InvalidatedRoot>("InvalidatedRoot"),
+        scope: &Singleton,
+        condition: None,
+        factories: invalidated_root_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+fn fixed_dependent() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "fixed-dependent",
+        name: "FixedDependent",
+        ty: TypeDescriptor::of::<FixedDependent>("FixedDependent"),
+        scope: &Singleton,
+        condition: None,
+        factories: fixed_dependent_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+fn unrelated_singleton() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "unrelated",
+        name: "UnrelatedSingleton",
+        ty: TypeDescriptor::of::<UnrelatedSingleton>("UnrelatedSingleton"),
+        scope: &Singleton,
+        condition: None,
+        factories: unrelated_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+/// Identical active and candidate graphs, so only runtime invalidations can force
+/// transition work.
+fn invalidation_fixture() -> (EffectiveGraph, CandidateGraph) {
+    let mut registry = AppRegistry::default();
+    registry
+        .components
+        .extend([invalidated_root(), fixed_dependent(), unrelated_singleton()]);
+    let active = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &registry.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &registry, &topology())
+        .expect("candidate graph validates");
+
+    (active, candidate)
+}
+
+#[test]
+fn runtime_invalidations_reconstruct_invalidated_root_and_fixed_dependent() {
+    let (active, candidate) = invalidation_fixture();
+    let invalidated = BTreeSet::from(["invalidated-root"]);
+
+    let resolved = candidate
+        .resolve_runtime_transition_with_invalidations(&active, &invalidated)
+        .expect("runtime invalidations resolve without restart");
+    let decisions = resolved.decisions();
+
+    assert_eq!(decisions.len(), 3);
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "invalidated-root",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "fixed-dependent",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "unrelated",
+        strategy: ComponentTransitionStrategy::Retain,
+    }));
+    assert_eq!(
+        resolved.construction_order(),
+        ["invalidated-root", "fixed-dependent"]
+    );
+}
+
+#[test]
+fn runtime_invalidated_factoryless_singleton_requires_restart() {
+    let mut registry = AppRegistry::default();
+    registry.components.push(ComponentDescriptor::manual(
+        "manual-root",
+        "ManualRoot",
+        TypeDescriptor::of::<ManualRoot>("ManualRoot"),
+        &Singleton,
+    ));
+    let active = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &registry.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &registry, &topology())
+        .expect("candidate graph validates");
+    let invalidated = BTreeSet::from(["manual-root"]);
+
+    let error = candidate
+        .resolve_runtime_transition_with_invalidations(&active, &invalidated)
+        .expect_err("a factoryless invalidated singleton cannot reconstruct");
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            component: "manual-root",
+            required: Some(NodeAction::Replace),
+            reason: RestartReason::FactoryUnavailable,
+        })
+    ));
+}
+
+struct CountedTransient;
+
+static TRANSIENT_CONSTRUCTIONS: AtomicUsize = AtomicUsize::new(0);
+
+fn construct_counted_transient(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        TRANSIENT_CONSTRUCTIONS.fetch_add(1, Ordering::SeqCst);
+
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<CountedTransient>("CountedTransient"),
+            value: Box::new(Injectable::into_stored(Arc::new(CountedTransient))),
+        })
+    })
+}
+
+static COUNTED_TRANSIENT_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "counted-transient",
+    construct: construct_counted_transient,
+    dependencies: no_dependencies,
+    default: false,
+}];
+
+fn counted_transient_factories() -> &'static [ComponentFactoryDescriptor] {
+    &COUNTED_TRANSIENT_FACTORY
+}
+
+fn counted_transient() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "counted-transient",
+        name: "CountedTransient",
+        ty: TypeDescriptor::of::<CountedTransient>("CountedTransient"),
+        scope: &Transient,
+        condition: None,
+        factories: counted_transient_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+#[test]
+fn runtime_invalidated_non_singleton_requires_restart_before_construction() {
+    let mut registry = AppRegistry::default();
+    registry.components.push(counted_transient());
+    let active = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &registry.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &registry, &topology())
+        .expect("candidate graph validates");
+    let invalidated = BTreeSet::from(["counted-transient"]);
+
+    let error = candidate
+        .resolve_runtime_transition_with_invalidations(&active, &invalidated)
+        .expect_err("an invalidated non-singleton cannot join a runtime transition");
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            component: "counted-transient",
+            required: Some(NodeAction::Replace),
+            reason: RestartReason::NonSingleton,
+        })
+    ));
+    assert_eq!(
+        TRANSIENT_CONSTRUCTIONS.load(Ordering::SeqCst),
+        0,
+        "resolution must reject before any factory callback runs"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Runtime resolver mapping of structural Add, RebindLive, and Remove actions.
+// ---------------------------------------------------------------------------
+
+trait LiveService: Send + Sync {}
+
+struct LiveProviderA;
+
+struct LiveProviderB;
+
+struct LiveConsumer;
+
+fn construct_live_provider_a(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<LiveProviderA>("LiveProviderA"),
+            value: Box::new(Injectable::into_stored(Arc::new(LiveProviderA))),
+        })
+    })
+}
+
+fn construct_live_provider_b(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<LiveProviderB>("LiveProviderB"),
+            value: Box::new(Injectable::into_stored(Arc::new(LiveProviderB))),
+        })
+    })
+}
+
+fn construct_live_consumer(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<LiveConsumer>("LiveConsumer"),
+            value: Box::new(Injectable::into_stored(Arc::new(LiveConsumer))),
+        })
+    })
+}
+
+fn live_service_dependency() -> Vec<DependencyDescriptor> {
+    vec![DependencyDescriptor {
+        name: "LiveService",
+        ty: TypeDescriptor::of::<dyn LiveService>("dyn LiveService"),
+        cardinality: Cardinality::One,
+        optional: false,
+        dynamic: false,
+        qualifier: None,
+        config: false,
+        resolution: ResolutionMode::Eager,
+        observation: DependencyObservation::Live,
+    }]
+}
+
+static LIVE_PROVIDER_A_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "live-provider-a",
+    construct: construct_live_provider_a,
+    dependencies: no_dependencies,
+    default: false,
+}];
+static LIVE_PROVIDER_B_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "live-provider-b",
+    construct: construct_live_provider_b,
+    dependencies: no_dependencies,
+    default: false,
+}];
+static LIVE_CONSUMER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "live-consumer",
+    construct: construct_live_consumer,
+    dependencies: live_service_dependency,
+    default: false,
+}];
+
+fn live_provider_a_factories() -> &'static [ComponentFactoryDescriptor] {
+    &LIVE_PROVIDER_A_FACTORY
+}
+
+fn live_provider_b_factories() -> &'static [ComponentFactoryDescriptor] {
+    &LIVE_PROVIDER_B_FACTORY
+}
+
+fn live_consumer_factories() -> &'static [ComponentFactoryDescriptor] {
+    &LIVE_CONSUMER_FACTORY
+}
+
+fn live_provider_a() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "live-provider-a",
+        name: "LiveProviderA",
+        ty: TypeDescriptor::of::<LiveProviderA>("LiveProviderA"),
+        scope: &Singleton,
+        condition: None,
+        factories: live_provider_a_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+fn live_provider_b() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "live-provider-b",
+        name: "LiveProviderB",
+        ty: TypeDescriptor::of::<LiveProviderB>("LiveProviderB"),
+        scope: &Singleton,
+        condition: None,
+        factories: live_provider_b_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+fn live_consumer() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "live-consumer",
+        name: "LiveConsumer",
+        ty: TypeDescriptor::of::<LiveConsumer>("LiveConsumer"),
+        scope: &Singleton,
+        condition: None,
+        factories: live_consumer_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+fn live_service_provider(
+    concrete_ty: TypeDescriptor,
+    erase: fn(&BoxedComponent) -> BoxedComponent,
+) -> ProviderDescriptor {
+    ProviderDescriptor {
+        trait_ty: TypeDescriptor::of::<dyn LiveService>("dyn LiveService"),
+        concrete_ty,
+        qualifier: "live",
+        primary: false,
+        priority: 0,
+        ordering: &[],
+        erase,
+    }
+}
+
+/// Active serves the live dependency through provider A; the candidate retargets the
+/// identical live dependency to provider B, so the structural plan removes A, adds B,
+/// and rebinds the consumer live.
+fn live_retarget_fixture() -> (EffectiveGraph, CandidateGraph) {
+    let mut active_registry = AppRegistry::default();
+    active_registry
+        .components
+        .extend([live_provider_a(), live_consumer()]);
+    active_registry.providers.push(live_service_provider(
+        TypeDescriptor::of::<LiveProviderA>("LiveProviderA"),
+        |_| panic!("transition planning must not erase components"),
+    ));
+    let active = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &active_registry.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+
+    let mut candidate_registry = AppRegistry::default();
+    candidate_registry
+        .components
+        .extend([live_provider_b(), live_consumer()]);
+    candidate_registry.providers.push(live_service_provider(
+        TypeDescriptor::of::<LiveProviderB>("LiveProviderB"),
+        |_| panic!("transition planning must not erase components"),
+    ));
+    let candidate = CandidateGraph::prepare(
+        RuntimeGenerationId::INITIAL,
+        &candidate_registry,
+        &topology(),
+    )
+    .expect("candidate graph validates");
+
+    (active, candidate)
+}
+
+#[test]
+fn runtime_resolver_maps_structural_add_to_reconstruct() {
+    let mut active_registry = AppRegistry::default();
+    active_registry
+        .components
+        .push(replaceable(active_factories));
+    let active = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &active_registry.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+
+    let mut candidate_registry = AppRegistry::default();
+    candidate_registry
+        .components
+        .extend([replaceable(candidate_factories), unrelated_singleton()]);
+    let candidate = CandidateGraph::prepare(
+        RuntimeGenerationId::INITIAL,
+        &candidate_registry,
+        &topology(),
+    )
+    .expect("candidate graph validates");
+
+    let resolved = candidate
+        .resolve_runtime_transition_with_invalidations(&active, &BTreeSet::new())
+        .expect("a structural add resolves without restart");
+    let decisions = resolved.decisions();
+
+    assert_eq!(decisions.len(), 2);
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "unrelated",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "replaceable",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+}
+
+#[test]
+fn runtime_resolver_maps_rebind_live_to_reconstruct() {
+    let (active, candidate) = live_retarget_fixture();
+
+    let resolved = candidate
+        .resolve_runtime_transition_with_invalidations(&active, &BTreeSet::new())
+        .expect("a live retarget resolves without restart");
+    let decisions = resolved.decisions();
+
+    assert_eq!(decisions.len(), 2);
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "live-consumer",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "live-provider-b",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+}
+
+#[test]
+fn runtime_resolver_omits_removed_components_by_absence() {
+    let (active, candidate) = live_retarget_fixture();
+
+    let resolved = candidate
+        .resolve_runtime_transition_with_invalidations(&active, &BTreeSet::new())
+        .expect("a removal retires by absence without a restart");
+
+    assert!(matches!(
+        resolved
+            .structural()
+            .nodes
+            .iter()
+            .find(|node| node.component == "live-provider-a"),
+        Some(PlannedNode {
+            action: NodeAction::Remove,
+            ..
+        })
+    ));
+    assert!(
+        !resolved
+            .decisions()
+            .iter()
+            .any(|decision| decision.component == "live-provider-a"),
+        "a removed component carries no decision and requires no candidate seed"
+    );
 }
 
 #[derive(Clone)]
