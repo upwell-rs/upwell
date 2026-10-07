@@ -180,21 +180,31 @@ impl AppRuntime {
         }
 
         // Condition snapshot and incremental re-evaluation from the staged values
-        // against the base generation's catalog.
+        // against the base generation's catalog. The fact-extraction, descriptor, and
+        // condition callbacks are application extension points, so the whole stage
+        // runs inside a panic boundary: a panic returns the redacted preparation
+        // panic error and aborts the reload before any candidate graph, root, hook,
+        // or publication work. Both serialization leases are held outside the
+        // closure, so they release normally with the early return.
         let condition = base.condition();
         let catalog = condition.catalog();
-        let snapshot = catalog.condition_snapshot(
-            staged
-                .staged()
+
+        let evaluation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let snapshot = catalog.condition_snapshot(
+                staged
+                    .staged()
+                    .iter()
+                    .map(|entry| (entry.type_id(), entry.path(), entry.value())),
+            )?;
+
+            let facts = catalog
+                .condition_facts
                 .iter()
-                .map(|entry| (entry.type_id(), entry.path(), entry.value())),
-        )?;
-        let facts = catalog
-            .condition_facts
-            .iter()
-            .flat_map(|source| (source.facts.descriptors)(source.path));
-        let evaluation =
-            catalog.evaluate_changed_conditions(facts, condition.evaluation(), &snapshot)?;
+                .flat_map(|source| (source.facts.descriptors)(source.path));
+
+            catalog.evaluate_changed_conditions(facts, condition.evaluation(), &snapshot)
+        }))
+        .map_err(|_| crate::Error::CandidatePreparationPanicked)??;
 
         // Prepare and validate the candidate graph from the re-evaluated eligibility.
         let topology = Arc::clone(&base.scope_plan().topology);

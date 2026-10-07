@@ -10,6 +10,7 @@
 mod cancellation;
 mod candidate_failure;
 mod concurrency;
+mod condition_panic;
 mod fixture;
 mod hook_rejection;
 mod invalidation;
