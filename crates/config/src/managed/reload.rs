@@ -517,7 +517,6 @@ impl ConfigReloader {
     /// serializing stage → commit against [`reload`](Self::reload) (e.g. by holding
     /// [`lock_reload`](Self::lock_reload) across the whole transaction).
     #[allow(clippy::result_large_err)]
-    #[allow(clippy::result_large_err)]
     pub fn stage(&self) -> Result<StagedReload, ConfigReloadError> {
         self.stage_with(true)
     }

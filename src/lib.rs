@@ -81,7 +81,7 @@ pub use upwell_config::{
     ConfigError, ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError,
     ConfigReloadReport, ConfigReloader, ConfigStore, ContainerConfigExt, DefaultSpec,
     DirectoriesResolver, EnumTag, HookOutcome, ReloadProposal, ReloadTriggers, ReloadableConfig,
-    spawn_reload_triggers, stop_reload_triggers,
+    StagedConfig, StagedReload, spawn_reload_triggers, stop_reload_triggers,
 };
 
 // ---------------------------------------------------------------------------
