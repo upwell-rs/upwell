@@ -150,8 +150,9 @@ impl AppRuntime {
         let transition = self.begin_transition().await;
         let base = transition.base().clone();
 
-        // Stage: re-read, diff, and deserialize changed bindings into committable swaps
-        // plus a generation-local candidate store. Nothing is published yet.
+        // Stage: re-read, diff, and deserialize changed bindings into committable
+        // swaps. Nothing is published yet; the generation-local candidate store is
+        // seeded lazily when the transaction resolves components over it below.
         let staged = self.reloader.stage()?;
         let changed = staged.changed().to_vec();
 

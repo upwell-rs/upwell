@@ -11,7 +11,7 @@
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use upwell_core::{Cardinality, DependencyDescriptor, TypeDescriptor};
 use upwell_di::{BoxedComponent, Injectable};
@@ -512,10 +512,11 @@ impl ConfigReloader {
     ///
     /// The returned [`StagedReload`] is inert until [`StagedReload::commit`] is called,
     /// so a caller can run its own validation, hooks, or graph preparation between the
-    /// two — over [`StagedReload::candidate_store`], which re-seeds every binding into
-    /// fresh cells without touching the active ones. The caller is responsible for
-    /// serializing stage → commit against [`reload`](Self::reload) (e.g. by holding
-    /// [`lock_reload`](Self::lock_reload) across the whole transaction).
+    /// two — over [`StagedReload::candidate_store`], which lazily re-seeds every
+    /// binding into fresh cells without touching the active ones. The caller is
+    /// responsible for serializing stage → commit against [`reload`](Self::reload)
+    /// (e.g. by holding [`lock_reload`](Self::lock_reload) across the whole
+    /// transaction).
     #[allow(clippy::result_large_err)]
     pub fn stage(&self) -> Result<StagedReload, ConfigReloadError> {
         self.stage_with(true)
@@ -541,7 +542,6 @@ impl ConfigReloader {
             let mut prepared = Vec::new();
             let mut changed = Vec::new();
             let mut staged = Vec::new();
-            let mut candidate = ConfigStore::default();
 
             for slot in &self.inner.slots {
                 let swap = slot.prepare(&manager, &new_root).map_err(|source| {
@@ -553,12 +553,12 @@ impl ConfigReloader {
                 })?;
 
                 let Some(swap) = swap else {
-                    let staged_entry = slot.stage_current();
-
-                    candidate.insert(slot.path().to_string(), staged_entry.candidate_seed());
-
+                    // An unchanged binding joins the proposal only for callers that
+                    // read it (the public `stage`); the legacy reload skips the work
+                    // entirely. The candidate store seeds lazily from `staged`, so no
+                    // seed is built here either way.
                     if stage_unchanged {
-                        staged.push(staged_entry);
+                        staged.push(slot.stage_current());
                     }
 
                     continue;
@@ -567,8 +567,6 @@ impl ConfigReloader {
                 if stage_unchanged {
                     staged.push(swap.staged.clone());
                 }
-
-                candidate.insert(slot.path().to_string(), swap.staged.candidate_seed());
 
                 changed.push(ChangedBinding {
                     path: slot.path().to_string(),
@@ -581,7 +579,7 @@ impl ConfigReloader {
                 changed,
                 staged,
                 prepared,
-                candidate: Arc::new(candidate),
+                candidate: OnceLock::new(),
                 new_root,
                 reloader: self.clone(),
             })
@@ -599,7 +597,10 @@ pub struct StagedReload {
     changed: Vec<ChangedBinding>,
     staged: Vec<StagedConfig>,
     prepared: Vec<PreparedSwap>,
-    candidate: Arc<ConfigStore>,
+    /// The generation-local candidate store, seeded on the first
+    /// [`candidate_store`](Self::candidate_store) call from `staged` — never during
+    /// staging itself, so a reload that never reads the proposal never seeds it.
+    candidate: OnceLock<Arc<ConfigStore>>,
     new_root: ConfigValue,
     reloader: ConfigReloader,
 }
@@ -629,10 +630,29 @@ impl StagedReload {
 
     /// The generation-local candidate store: every binding — changed and unchanged —
     /// re-seeded into fresh `Cfg` cells that do not alias the active ones, holding the
-    /// values [`commit`](Self::commit) would publish. Built during
-    /// [`stage`](ConfigReloader::stage), so creation is infallible here.
+    /// values [`commit`](Self::commit) would publish. Seeded lazily on the first call,
+    /// exactly once from the staged entries, so creation stays infallible and repeated
+    /// calls return the same store.
     pub fn candidate_store(&self) -> Arc<ConfigStore> {
-        Arc::clone(&self.candidate)
+        self.candidate
+            .get_or_init(|| {
+                let mut candidate = ConfigStore::default();
+
+                for entry in &self.staged {
+                    candidate.insert(entry.path().to_string(), entry.candidate_seed());
+                }
+
+                Arc::new(candidate)
+            })
+            .clone()
+    }
+
+    /// Whether the candidate store has been built. Test-only seam: lets the crate's
+    /// unit tests pin that construction is lazy (never during staging) and
+    /// exactly-once.
+    #[cfg(test)]
+    fn candidate_is_built(&self) -> bool {
+        self.candidate.get().is_some()
     }
 
     /// Whether no binding changed. An empty staged reload has nothing to commit.
@@ -784,3 +804,6 @@ impl Injectable for ConfigReloader {
 /// Under `di-check`, the reloader is framework-seeded, so it is always provided.
 #[cfg(feature = "di-check")]
 impl upwell_di::Provide<ConfigReloader> for upwell_di::Wiring {}
+
+#[cfg(test)]
+mod tests;

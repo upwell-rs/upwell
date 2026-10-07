@@ -270,6 +270,11 @@ async fn staged_candidate_store_resolves_proposed_values_without_touching_active
     let staged = reloader.stage().expect("staging after the source change");
     let candidate = staged.candidate_store();
 
+    assert!(
+        Arc::ptr_eq(&candidate, &staged.candidate_store()),
+        "repeated candidate_store calls return the same built store"
+    );
+
     assert_eq!(
         candidate
             .resolve_path::<Cfg<SvcCfg>>("svc")
@@ -311,6 +316,72 @@ async fn staged_candidate_store_resolves_proposed_values_without_touching_active
         consumer.svc().get().value,
         1,
         "dropping the staged reload publishes nothing"
+    );
+}
+
+/// A no-op stage stays valid: nothing changed, every binding is staged, and the
+/// candidate store still builds on demand — resolving every binding at its current
+/// value while the active handles keep their state.
+#[tokio::test]
+async fn noop_stage_candidate_store_resolves_current_values() {
+    let root = temp_config_dir();
+    let dirs = DirectoriesManager::from_path(root.path().to_path_buf());
+    let config_dir = dirs.dir::<Config>();
+    let config_file = config_dir.path().join("application.toml");
+
+    fs::create_dir_all(config_dir.path()).expect("create config subdir");
+    fs::write(&config_file, "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n").expect("write config");
+
+    let manager =
+        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
+            .expect("load config");
+
+    let daemon = App::<()>::builder("config-noop-candidate-test")
+        .config_source(manager)
+        .auto_discover()
+        .build()
+        .await
+        .expect("daemon builds");
+
+    let consumer = daemon
+        .container()
+        .get::<Consumer>()
+        .expect("Consumer constructed");
+    let reloader = daemon.config_reloader();
+
+    let staged = reloader.stage().expect("staging identical sources");
+
+    assert!(
+        staged.changed().is_empty(),
+        "an unchanged source changes nothing"
+    );
+    assert_eq!(staged.staged().len(), 2, "every binding is staged");
+
+    let candidate = staged.candidate_store();
+
+    assert_eq!(
+        candidate
+            .resolve_path::<Cfg<SvcCfg>>("svc")
+            .expect("candidate store resolves svc")
+            .get()
+            .value,
+        1,
+        "the candidate store holds the unchanged binding's current value"
+    );
+    assert_eq!(
+        candidate
+            .resolve_path::<Cfg<OtherCfg>>("other")
+            .expect("candidate store resolves other")
+            .get()
+            .value,
+        100,
+        "the candidate store holds the unchanged binding's current value"
+    );
+
+    assert_eq!(
+        consumer.svc().get().value,
+        1,
+        "the active handle is untouched by staging and candidate resolution"
     );
 }
 
