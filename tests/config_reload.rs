@@ -12,7 +12,9 @@ use tempfile::TempDir;
 use upwell::ContainerConfigExt;
 use upwell::config::Toml;
 use upwell::dirs::{Config, DirectoriesManager};
-use upwell::{App, Cfg, ConfigManager, StagedConfig, StagedReload, component, config};
+use upwell::{
+    App, Cfg, ConfigManager, RuntimeReloadReport, StagedConfig, StagedReload, component, config,
+};
 use upwell_config::ResolverChain;
 
 #[config(path = "svc")]
@@ -426,5 +428,54 @@ async fn facade_root_exposes_staged_reload_and_staged_config() {
             .map(|entry| entry.type_id()),
         Some(TypeId::of::<SvcCfg>()),
         "the staged entry carries the bound type's exact identity through the facade"
+    );
+}
+
+/// The facade root re-exports the transactional reload report: `AppRuntime::reload_config`'s
+/// return type is nameable as `RuntimeReloadReport` through `upwell::` — so facade-only
+/// users can run a graph-transitioning reload and inspect its report without depending on
+/// `upwell-app` directly.
+#[tokio::test]
+async fn facade_root_exposes_runtime_reload_report() {
+    let root = temp_config_dir();
+    let dirs = DirectoriesManager::from_path(root.path().to_path_buf());
+    let config_dir = dirs.dir::<Config>();
+    let config_file = config_dir.path().join("application.toml");
+
+    fs::create_dir_all(config_dir.path()).expect("create config subdir");
+    fs::write(&config_file, "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n").expect("write config");
+
+    let manager =
+        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
+            .expect("load config");
+
+    let daemon = App::<()>::builder("config-facade-reload-report-test")
+        .config_source(manager)
+        .auto_discover()
+        .build()
+        .await
+        .expect("daemon builds");
+
+    fs::write(&config_file, "[svc]\nvalue = 2\n\n[other]\nvalue = 100\n").expect("rewrite config");
+
+    let report: RuntimeReloadReport = daemon
+        .runtime()
+        .reload_config()
+        .await
+        .expect("reload succeeds");
+
+    assert!(
+        report.published,
+        "a changed source publishes a new runtime generation"
+    );
+    assert_eq!(report.changed.len(), 1, "only one binding changed");
+    assert_eq!(report.changed[0].path, "svc", "the changed binding is svc");
+    assert!(
+        report.hooks.is_empty(),
+        "no config-reload hooks are registered in this app"
+    );
+    assert_eq!(
+        report.config_generation, 1,
+        "the first commit advances the config generation to 1"
     );
 }

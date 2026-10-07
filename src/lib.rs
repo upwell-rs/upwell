@@ -107,13 +107,13 @@ pub use upwell_app::{
     PluginContributions, PluginDeclaration, PluginId, PluginPlanError, PluginRelation,
     PluginResolutionPlan, PluginSlotId, PluginWithOptions, PreBuild, PreBuildContext, PreparedApp,
     PreparedProtocol, ProtocolDefinition, ProtocolId, ProtocolPluginRegistrar, ProtocolRuntime,
-    RelationKind, RelationTarget, ReplacementDecision, ResolvedPlugin, RuntimeView, ScopeBoundary,
-    ScopeParent, ScopeTopology, ScopeTopologyError, Serve, ServerConfig, Setup, ShutdownHandle,
-    ShutdownSignal, SlotPolicy, SpanEvents, SuppressionDecision, ValidationContext, build_host,
-    build_host_context, build_prepared_host, extend_late_plugins, prepare_host,
-    prepare_host_context, prepare_setup_host_context, resolve_early_plugins,
-    resolve_host_dependency, resolve_host_plugin_catalog, retain_host_plugin_catalog, serve_host,
-    setup_host, setup_host_context,
+    RelationKind, RelationTarget, ReplacementDecision, ResolvedPlugin, RuntimeReloadReport,
+    RuntimeView, ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError, Serve,
+    ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents,
+    SuppressionDecision, ValidationContext, build_host, build_host_context, build_prepared_host,
+    extend_late_plugins, prepare_host, prepare_host_context, prepare_setup_host_context,
+    resolve_early_plugins, resolve_host_dependency, resolve_host_plugin_catalog,
+    retain_host_plugin_catalog, serve_host, setup_host, setup_host_context,
 };
 
 /// Versioned protocol-neutral developer-tooling schema and prepared-state projection types.
