@@ -276,7 +276,23 @@ impl EffectiveGraph {
     }
 
     pub fn plan_transition(&self, candidate: &Self) -> Result<TransitionPlan, StaleGraphCandidate> {
-        plan::plan(self, candidate)
+        plan::plan_with_invalidations(self, candidate, &BTreeSet::new())
+    }
+
+    /// Plans a transition while forcing runtime-invalidated component roots to replace
+    /// their active instances and propagate to dependents through the same reverse
+    /// propagation as structural changes.
+    ///
+    /// Roots missing from either graph create no node, and structural Add and Remove
+    /// actions keep their precedence over forced replaces. The graph diff stays purely
+    /// structural.
+    #[doc(hidden)]
+    pub fn plan_transition_with_invalidations(
+        &self,
+        candidate: &Self,
+        invalidated_roots: &BTreeSet<&'static str>,
+    ) -> Result<TransitionPlan, StaleGraphCandidate> {
+        plan::plan_with_invalidations(self, candidate, invalidated_roots)
     }
 }
 

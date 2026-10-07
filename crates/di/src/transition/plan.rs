@@ -51,6 +51,7 @@ pub enum ReasonKind {
     LiveTargetChanged,
     FixedDependent,
     LiveDependent,
+    RuntimeInvalidated,
 }
 
 /// Canonical shortest reason path from a direct change to an affected consumer.
@@ -114,9 +115,10 @@ struct Requirement {
     reasons: BTreeSet<(ReasonKind, Vec<DependencyDemandId>)>,
 }
 
-pub(super) fn plan(
+pub(super) fn plan_with_invalidations(
     active: &EffectiveGraph,
     candidate: &EffectiveGraph,
+    invalidated_roots: &BTreeSet<&'static str>,
 ) -> Result<TransitionPlan, StaleGraphCandidate> {
     if active.generation != candidate.generation {
         return Err(StaleGraphCandidate {
@@ -194,6 +196,19 @@ pub(super) fn plan(
             &mut bindings,
             &mut changed_instances,
         );
+    }
+
+    for &root in invalidated_roots {
+        if active.nodes.contains_key(root) && candidate.nodes.contains_key(root) {
+            require(
+                &mut requirements,
+                root,
+                NodeAction::Replace,
+                ReasonKind::RuntimeInvalidated,
+                Vec::new(),
+            );
+            changed_instances.push_back((root, Vec::new()));
+        }
     }
 
     let mut propagated = BTreeSet::new();
