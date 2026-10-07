@@ -12,15 +12,17 @@
 
 ## Completed Contract
 
-- `ConfigReloader::stage()` prepares `StagedReload` without changing active state. It produces changed bindings, staged values, committable live-slot swaps, the re-read config tree, and a fresh candidate `ConfigStore` containing every bound configuration value.
+- `ConfigReloader::stage()` prepares `StagedReload` without publishing anything: no live-slot swaps, no tree adoption, no generation advance. It produces changed bindings, staged values, committable live-slot swaps, the re-read config tree, and a fresh candidate `ConfigStore` containing every bound configuration value.
 - Candidate construction resolves configuration from that generation-local store. Its `Cfg` cells do not alias the active generation's cells, so factories and hooks observe only candidate values before publication.
 - `ConditionFacts` remains a standalone trait extending `ConfigProperties`; configuration types explicitly implement it. `ConditionFactSource` stores the descriptors and erased scalar extraction, and explicit builder registration supplies sources to the application catalog. The abandoned approach of adding condition-fact methods to `ConfigProperties` is not part of the implementation.
 - Every `RuntimeGeneration` carries `AppConditionState`: the immutable application catalog and the evaluation used to build that generation. Reload incrementally evaluates staged facts against the base generation's condition state.
 - Each runtime generation owns a generation-local `HookManager`. Reload derives its descriptors from the candidate graph and seeds that manager into the candidate root; it does not reuse the active generation's manager.
 - The config-reload and runtime-transition serializers are both held for the transaction. Lock order is config-reload serialization first, then the runtime-transition writer; a legacy config-only reload cannot interleave with a transactional reload.
 - `PreparedRuntimeCommit` validates the candidate against the exact pinned base while the sole writer is held. It owns the stamped candidate and commit token, leaving no recoverable terminal publication failure.
-- Terminal order is fixed: publish the authoritative candidate runtime generation first; then synchronously commit the legacy live config slots while both locks remain held; then release the locks. Runtime generation state is authoritative. Compatibility `Cfg<T>` slots are atomic per slot only, not atomically consistent across separately held handles.
-- Before the commit token is consumed, every recoverable error, hook rejection, failed candidate factory, and cancellation leaves the active runtime generation and live configuration unchanged. A callback panic after publication is outside this rollback guarantee and is an internal-contract failure, not a recoverable transaction rejection.
+- Terminal order is fixed: publish the authoritative candidate runtime generation first; then synchronously commit the legacy live config slots while both locks remain held; then release the locks. Runtime generation state is authoritative. Compatibility `Cfg<T>` slots are atomic per slot only, not atomically consistent across separately held handles. The generation advance lives in `StagedReload::commit`, so one transactional reload advances the config generation exactly once.
+- Before the commit token is consumed, every recoverable error, hook rejection, failed candidate factory, and cancellation leaves the framework-owned publication state unchanged — the active runtime generation, the managed config tree and live slots, the config generation, and the compatibility hook manager installed in the reloader — and drops the candidate wholesale. Mutations held exclusively by newly constructed candidate instances disappear with that drop. Retained dependencies may alias the active generation's instances, so mutations candidate factories or hooks make through them are not rolled back; arbitrary external, global, or I/O side effects from candidate factories or hooks are likewise not rolled back. A callback panic after publication is outside this rollback guarantee and is an internal-contract failure, not a recoverable transaction rejection.
+- Invalidation is deterministic and scoped to the declared component graph: consumers of changed config bindings, `ConfigReload` hook owners, and `HookManager` consumers reconstruct, the planner propagates each invalidation to dependent singletons, and unaffected singletons retain their active instances. An affected component that cannot reconstruct in place fails the reload with `RestartRequired` before any construction runs.
+- Hook managers are generation-bound: `AppRuntime::hooks()` results should be refetched after a published reload; handles and pinned views taken earlier remain bound to their original generation's root; components that inject `HookManager` reconstruct under the invalidation policy.
 - An unchanged source is a true no-op: no condition evaluation, graph planning, candidate construction, hook execution, root replacement, config-generation advance, or runtime-generation publication occurs.
 - `RuntimeReloadReport` records `runtime_generation`, `config_generation`, `changed`, `hooks`, and `published`.
 - Direct `ConfigReloader::reload()` remains config-only compatibility behavior. Its reload, watch, and signal trigger migration to transactional graph reload is explicitly deferred to #211.
@@ -28,7 +30,7 @@
 ## File Layout
 
 - Transactional entry point: `crates/app/src/runtime/reload/mod.rs`.
-- Reload tests: sibling directory `crates/app/src/runtime/reload/tests/`, rooted by `tests/mod.rs` with focused modules for no-op, publication, hook rejection, candidate failure, cancellation, concurrency, and provider switching.
+- Reload tests: sibling directory `crates/app/src/runtime/reload/tests/`, rooted by `tests/mod.rs` with focused modules for no-op, publication, hook rejection, candidate failure, cancellation, concurrency, provider switching, invalidation, manager consumers, and reloader manager installation.
 - Runtime generation and commit token: `crates/app/src/runtime/generation.rs` with tests in `crates/app/src/runtime/generation/tests.rs`.
 - Staged config reload and candidate store: `crates/config/src/managed/reload.rs`.
 - Condition-fact trait and registration support: `crates/config/src/managed/mod.rs` and the application registry/builder integration.
@@ -89,12 +91,14 @@
 
 ### Task 6: Document compatibility and terminal semantics
 
-**Files:** `crates/app/src/runtime/reload/mod.rs` and this implementation record.
+**Files:** `crates/app/src/runtime/reload/mod.rs`, `crates/app/src/runtime/mod.rs` (`AppRuntime::hooks`), and this implementation record.
 
 - [x] Documented the two serializers and their lock order.
-- [x] Documented runtime-first terminal publication and synchronous compatibility-slot commit.
+- [x] Documented runtime-first terminal publication, synchronous compatibility-slot commit, and the single staged config-generation advance per reload.
 - [x] Documented generation-pinned consistency versus per-slot legacy `Cfg<T>` observation limits.
-- [x] Documented pre-publication rollback boundaries and the post-publication callback-panic internal contract.
+- [x] Documented pre-publication rollback boundaries — framework-owned publication state (runtime generation, managed config tree/live slots, config generation, installed compatibility hook manager) is unchanged pre-commit; mutations exclusively owned by newly constructed candidate instances disappear when the candidate drops; retained dependencies may alias active instances and mutations through them are not rolled back; arbitrary external/global/I/O effects are not rolled back — plus the post-publication callback-panic internal contract.
+- [x] Documented the deterministic invalidation policy: changed config consumers, `ConfigReload` hook owners, and `HookManager` consumers reconstruct with propagated dependents, or the reload preflights `RestartRequired`; unaffected singletons retain.
+- [x] Documented generation-bound hook managers on `AppRuntime::hooks`: refetch after a published reload, old handles/views stay bound to old roots, injected manager consumers reconstruct.
 - [x] Recorded direct `ConfigReloader` reload/watch/signal migration as #211 work.
 
 ## Pre-Implementation Notes Superseded by Completion

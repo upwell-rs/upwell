@@ -97,6 +97,14 @@ impl AppRuntime {
     ///
     /// Cloned from a pinned current view, so the handle is cheap and stays bound to the
     /// generation that was current when it was taken.
+    ///
+    /// The manager is generation-bound: after
+    /// [`reload_config`](Self::reload_config) publishes a new generation, refetch this
+    /// method to run the new generation's hooks. Handles taken earlier — and pinned
+    /// [`RuntimeView`]s — keep invoking through their original generation's root.
+    /// Components that inject [`HookManager`] are manager consumers, so the reload
+    /// invalidation policy reconstructs them instead of letting them retain a stale
+    /// manager.
     pub fn hooks(&self) -> HookManager {
         self.view().hooks().clone()
     }
