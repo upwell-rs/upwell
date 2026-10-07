@@ -132,6 +132,12 @@ pub(super) fn plan_with_invalidations(
     let mut bindings = BTreeSet::new();
     let mut changed_instances = VecDeque::new();
 
+    // Runtime-invalidated planning targets the reconstruction runtime, where every
+    // RebindLive node is reconstructed; such a consumer's own dependents must
+    // therefore propagate exactly like replaced instances. Ordinary planning keeps
+    // live rebinding local to the rebind itself.
+    let propagate_live_consumers = !invalidated_roots.is_empty();
+
     for change in &diff.nodes {
         let kinds = change.kinds.as_ref();
         let mut changed_directly = false;
@@ -249,11 +255,15 @@ pub(super) fn plan_with_invalidations(
                     demand_id.consumer,
                     NodeAction::RebindLive,
                     ReasonKind::LiveDependent,
-                    dependent_path,
+                    dependent_path.clone(),
                 );
                 bindings.insert(BindingTransition {
                     dependency: demand_id,
                 });
+
+                if propagate_live_consumers {
+                    changed_instances.push_back((demand_id.consumer, dependent_path));
+                }
             } else {
                 let changed_action = require(
                     &mut requirements,

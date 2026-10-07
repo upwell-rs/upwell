@@ -288,7 +288,11 @@ impl EffectiveGraph {
     ///
     /// Roots missing from either graph create no node, and structural Add and Remove
     /// actions keep their precedence over forced replaces. The graph diff stays purely
-    /// structural.
+    /// structural. With at least one invalidated root the plan targets the runtime
+    /// reconstruction path, where every `RebindLive` node is reconstructed, so live
+    /// consumers also propagate through the changed-instance queue to a fixed point
+    /// and their fixed dependents plan as `Replace`. With no invalidations the plan
+    /// is exactly the ordinary [`plan_transition`](Self::plan_transition) result.
     #[doc(hidden)]
     pub fn plan_transition_with_invalidations(
         &self,
