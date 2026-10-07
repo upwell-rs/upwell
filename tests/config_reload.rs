@@ -522,7 +522,17 @@ async fn facade_root_names_reload_failure_and_runtime_state_types() {
         }
     }
 
-    let _restart_required: Option<&upwell::RestartRequired> = None;
+    let restart = upwell::AppError::RestartRequired(upwell::RestartRequired {
+        component: "svc",
+        required: None,
+        reason: upwell::RestartReason::NonSingleton,
+    });
+
+    assert_eq!(
+        restart_payload(&restart),
+        Some(("svc", upwell::RestartReason::NonSingleton)),
+        "the facade exposes the complete restart-required payload"
+    );
 
     assert_eq!(
         restart_payload(&upwell::AppError::CandidatePreparationPanicked),
