@@ -86,7 +86,10 @@ pub enum EffectiveTarget {
         scope: ScopeId,
     },
     Config {
+        /// The dependency type's full `std::any::type_name` path, for diagnostics.
         config_type: &'static str,
+        /// The dependency type's exact identity, for type matching.
+        config_type_id: TypeId,
         binding_path: Option<&'static str>,
     },
     Dynamic {
@@ -307,6 +310,7 @@ fn capture_demand(
     let targets = if dependency.config {
         vec![EffectiveTarget::Config {
             config_type: (dependency.ty.type_name)(),
+            config_type_id: dependency.ty.type_id,
             binding_path: dependency.qualifier,
         }]
     } else if dependency.dynamic {

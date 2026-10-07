@@ -442,30 +442,13 @@ impl CandidateGraph {
     }
 
     /// Resolves the deterministic v1 transition defaults used only by the transactional
-    /// config reload: structural Retain nodes retain, Add/Replace/RebindLive nodes
-    /// reconstruct (factory availability is validated by the shared decision checks),
-    /// and Remove nodes retire safely by absence from the candidate root — they carry no
-    /// decision and require no candidate seed.
-    ///
-    /// Temporary pass-through for the reload call site, which does not supply runtime
-    /// invalidations yet: it delegates with an empty invalidation set and must be
-    /// removed once the reload path adopts
-    /// [`resolve_runtime_transition_with_invalidations`](Self::resolve_runtime_transition_with_invalidations).
-    pub(crate) fn resolve_runtime_transition(
-        &self,
-        active: &EffectiveGraph,
-    ) -> crate::Result<ResolvedTransitionPlan> {
-        self.resolve_runtime_transition_with_invalidations(active, &BTreeSet::new())
-    }
-
-    /// Resolves the deterministic v1 transition defaults used only by the transactional
     /// config reload while forcing runtime-invalidated component roots to reconstruct:
     /// structural Retain nodes retain, Add/Replace/RebindLive nodes reconstruct (factory
     /// availability is validated by the shared decision checks), and Remove nodes retire
     /// safely by absence from the candidate root — they carry no decision and require no
     /// candidate seed. An invalidated factoryless or non-singleton node fails resolution
     /// with [`RestartRequired`] before any construction runs.
-    pub(crate) fn resolve_runtime_transition_with_invalidations(
+    pub(crate) fn resolve_runtime_transition(
         &self,
         active: &EffectiveGraph,
         invalidated_roots: &BTreeSet<&'static str>,
