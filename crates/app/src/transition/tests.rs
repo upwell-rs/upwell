@@ -910,6 +910,245 @@ fn runtime_invalidated_non_singleton_requires_restart_before_construction() {
     );
 }
 
+struct LiveInvalidatedConsumer;
+
+struct LiveConsumerDependent;
+
+struct ClosureTransient;
+
+fn construct_live_invalidated_consumer(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<LiveInvalidatedConsumer>("LiveInvalidatedConsumer"),
+            value: Box::new(Injectable::into_stored(Arc::new(LiveInvalidatedConsumer))),
+        })
+    })
+}
+
+fn construct_live_consumer_dependent(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<LiveConsumerDependent>("LiveConsumerDependent"),
+            value: Box::new(Injectable::into_stored(Arc::new(LiveConsumerDependent))),
+        })
+    })
+}
+
+static CLOSURE_TRANSIENT_CONSTRUCTIONS: AtomicUsize = AtomicUsize::new(0);
+
+fn construct_closure_transient(
+    _: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async {
+        CLOSURE_TRANSIENT_CONSTRUCTIONS.fetch_add(1, Ordering::SeqCst);
+
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<ClosureTransient>("ClosureTransient"),
+            value: Box::new(Injectable::into_stored(Arc::new(ClosureTransient))),
+        })
+    })
+}
+
+fn invalidated_root_live_dependency() -> Vec<DependencyDescriptor> {
+    vec![DependencyDescriptor {
+        name: "InvalidatedRoot",
+        ty: TypeDescriptor::of::<InvalidatedRoot>("InvalidatedRoot"),
+        cardinality: Cardinality::One,
+        optional: false,
+        dynamic: false,
+        qualifier: None,
+        config: false,
+        resolution: ResolutionMode::Eager,
+        observation: DependencyObservation::Live,
+    }]
+}
+
+fn live_consumer_snapshot_dependency() -> Vec<DependencyDescriptor> {
+    vec![DependencyDescriptor {
+        name: "LiveInvalidatedConsumer",
+        ty: TypeDescriptor::of::<LiveInvalidatedConsumer>("LiveInvalidatedConsumer"),
+        cardinality: Cardinality::One,
+        optional: false,
+        dynamic: false,
+        qualifier: None,
+        config: false,
+        resolution: ResolutionMode::Eager,
+        observation: DependencyObservation::Snapshot,
+    }]
+}
+
+static LIVE_INVALIDATED_CONSUMER_FACTORY: [ComponentFactoryDescriptor; 1] =
+    [ComponentFactoryDescriptor {
+        id: "live-invalidated-consumer",
+        construct: construct_live_invalidated_consumer,
+        dependencies: invalidated_root_live_dependency,
+        default: false,
+    }];
+static LIVE_CONSUMER_DEPENDENT_FACTORY: [ComponentFactoryDescriptor; 1] =
+    [ComponentFactoryDescriptor {
+        id: "live-consumer-dependent",
+        construct: construct_live_consumer_dependent,
+        dependencies: live_consumer_snapshot_dependency,
+        default: false,
+    }];
+static CLOSURE_TRANSIENT_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "closure-transient",
+    construct: construct_closure_transient,
+    dependencies: live_consumer_snapshot_dependency,
+    default: false,
+}];
+
+fn live_invalidated_consumer_factories() -> &'static [ComponentFactoryDescriptor] {
+    &LIVE_INVALIDATED_CONSUMER_FACTORY
+}
+
+fn live_consumer_dependent_factories() -> &'static [ComponentFactoryDescriptor] {
+    &LIVE_CONSUMER_DEPENDENT_FACTORY
+}
+
+fn closure_transient_factories() -> &'static [ComponentFactoryDescriptor] {
+    &CLOSURE_TRANSIENT_FACTORY
+}
+
+fn live_invalidated_consumer() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "live-invalidated-consumer",
+        name: "LiveInvalidatedConsumer",
+        ty: TypeDescriptor::of::<LiveInvalidatedConsumer>("LiveInvalidatedConsumer"),
+        scope: &Singleton,
+        condition: None,
+        factories: live_invalidated_consumer_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+fn live_consumer_dependent() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "live-consumer-dependent",
+        name: "LiveConsumerDependent",
+        ty: TypeDescriptor::of::<LiveConsumerDependent>("LiveConsumerDependent"),
+        scope: &Singleton,
+        condition: None,
+        factories: live_consumer_dependent_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+fn closure_transient() -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: "closure-transient",
+        name: "ClosureTransient",
+        ty: TypeDescriptor::of::<ClosureTransient>("ClosureTransient"),
+        scope: &Transient,
+        condition: None,
+        factories: closure_transient_factories,
+        hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
+    }
+}
+
+/// Identical active and candidate graphs where the invalidated root feeds a live
+/// consumer whose own snapshot dependents must join the reconstruction closure.
+fn live_invalidation_fixture() -> (EffectiveGraph, CandidateGraph) {
+    let mut registry = AppRegistry::default();
+    registry.components.extend([
+        invalidated_root(),
+        live_invalidated_consumer(),
+        live_consumer_dependent(),
+        unrelated_singleton(),
+    ]);
+    let active = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &registry.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &registry, &topology())
+        .expect("candidate graph validates");
+
+    (active, candidate)
+}
+
+#[test]
+fn runtime_resolver_maps_the_invalidated_live_closure_to_reconstruct() {
+    let (active, candidate) = live_invalidation_fixture();
+    let invalidated = BTreeSet::from(["invalidated-root"]);
+
+    let resolved = candidate
+        .resolve_runtime_transition(&active, &invalidated)
+        .expect("the invalidated live closure resolves without restart");
+    let decisions = resolved.decisions();
+
+    assert_eq!(decisions.len(), 4);
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "invalidated-root",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "live-invalidated-consumer",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "live-consumer-dependent",
+        strategy: ComponentTransitionStrategy::Reconstruct,
+    }));
+    assert!(decisions.contains(&ComponentTransitionDecision {
+        component: "unrelated",
+        strategy: ComponentTransitionStrategy::Retain,
+    }));
+    assert_eq!(
+        resolved.construction_order(),
+        [
+            "invalidated-root",
+            "live-invalidated-consumer",
+            "live-consumer-dependent"
+        ]
+    );
+}
+
+#[test]
+fn runtime_invalidated_non_reconstructible_dependent_requires_restart_before_construction() {
+    let mut registry = AppRegistry::default();
+    registry.components.extend([
+        invalidated_root(),
+        live_invalidated_consumer(),
+        closure_transient(),
+    ]);
+    let active = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &registry.component_registry(),
+        |_, _| true,
+    )
+    .expect("active graph validates");
+    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &registry, &topology())
+        .expect("candidate graph validates");
+    let invalidated = BTreeSet::from(["invalidated-root"]);
+
+    let error = candidate
+        .resolve_runtime_transition(&active, &invalidated)
+        .expect_err("a non-singleton closure dependent cannot join a runtime transition");
+
+    assert!(matches!(
+        error,
+        Error::RestartRequired(super::RestartRequired {
+            component: "closure-transient",
+            required: Some(NodeAction::Replace),
+            reason: RestartReason::NonSingleton,
+        })
+    ));
+    assert_eq!(
+        CLOSURE_TRANSIENT_CONSTRUCTIONS.load(Ordering::SeqCst),
+        0,
+        "resolution must reject before any factory callback runs"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Runtime resolver mapping of structural Add, RebindLive, and Remove actions.
 // ---------------------------------------------------------------------------
