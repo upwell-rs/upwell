@@ -212,9 +212,11 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
     }
 
     /// Registers the condition facts of config type `T` at `path`, so conditional
-    /// components can key their availability on `T`'s values. The transactional reload
-    /// extracts the scalars from every staged binding of the type.
-    pub fn condition_facts<T: ConditionFacts>(mut self, path: impl Into<String>) -> Self {
+    /// components can key their availability on `T`'s values. The path is part of every
+    /// fact id the source emits, so the same type may be registered at several paths.
+    /// The transactional reload extracts the scalars from every staged binding of the
+    /// type.
+    pub fn condition_facts<T: ConditionFacts>(mut self, path: &'static str) -> Self {
         self.registry
             .condition_facts
             .push(ConditionFactSource::of::<T>(path));
@@ -410,7 +412,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         let facts = registry
             .condition_facts
             .iter()
-            .flat_map(|source| (source.facts.descriptors)());
+            .flat_map(|source| (source.facts.descriptors)(source.path));
         let evaluation = registry
             .evaluate_conditions(facts, &snapshot)
             .map_err(Error::from)?;

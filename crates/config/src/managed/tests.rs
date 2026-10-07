@@ -33,29 +33,32 @@ impl ConfigProperties for FeatureFlags {
 }
 
 impl ConditionFacts for FeatureFlags {
-    fn condition_facts() -> Vec<ConfigFactDescriptor> {
+    fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
         vec![
             ConfigFactDescriptor {
-                id: ConfigFactId::new("FeatureFlags", "flags", "enabled"),
+                id: ConfigFactId::new("FeatureFlags", binding_path, "enabled"),
                 kind: ConditionScalarKind::Bool,
                 source: DescriptorSource::UNKNOWN,
             },
             ConfigFactDescriptor {
-                id: ConfigFactId::new("FeatureFlags", "flags", "level"),
+                id: ConfigFactId::new("FeatureFlags", binding_path, "level"),
                 kind: ConditionScalarKind::Integer,
                 source: DescriptorSource::UNKNOWN,
             },
         ]
     }
 
-    fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)> {
+    fn condition_scalars(
+        &self,
+        binding_path: &'static str,
+    ) -> Vec<(ConfigFactId, ConditionScalar)> {
         vec![
             (
-                ConfigFactId::new("FeatureFlags", "flags", "enabled"),
+                ConfigFactId::new("FeatureFlags", binding_path, "enabled"),
                 ConditionScalar::Bool(self.enabled),
             ),
             (
-                ConfigFactId::new("FeatureFlags", "flags", "level"),
+                ConfigFactId::new("FeatureFlags", binding_path, "level"),
                 ConditionScalar::Integer(self.level as i128),
             ),
         ]
@@ -66,37 +69,56 @@ impl ConditionFacts for FeatureFlags {
 fn condition_fact_sources_capture_and_extract_facts() {
     let source = ConditionFactSource::of::<FeatureFlags>("flags");
 
-    let descriptors = (source.facts.descriptors)();
+    let descriptors = (source.facts.descriptors)(source.path);
 
     assert_eq!(descriptors.len(), 2);
     assert_eq!(descriptors[0].id.property_path, "enabled");
     assert_eq!(descriptors[1].id.property_path, "level");
 
-    // Framework extension seams may supply either a plain value or an explicitly nested
-    // shared value; both shapes must extract.
-    let plain = (source.facts.scalars)(&FeatureFlags {
-        enabled: true,
-        level: 7,
-    });
-    let shared = (source.facts.scalars)(&std::sync::Arc::new(FeatureFlags {
-        enabled: false,
-        level: 3,
-    }));
+    let scalars = (source.facts.scalars)(
+        source.path,
+        &FeatureFlags {
+            enabled: true,
+            level: 7,
+        },
+    );
 
-    assert!(plain.contains(&(
+    assert!(scalars.contains(&(
         ConfigFactId::new("FeatureFlags", "flags", "enabled"),
         ConditionScalar::Bool(true)
     )));
-    assert!(plain.contains(&(
+    assert!(scalars.contains(&(
         ConfigFactId::new("FeatureFlags", "flags", "level"),
         ConditionScalar::Integer(7)
     )));
-    assert!(shared.contains(&(
-        ConfigFactId::new("FeatureFlags", "flags", "enabled"),
-        ConditionScalar::Bool(false)
-    )));
-    assert!(shared.contains(&(
-        ConfigFactId::new("FeatureFlags", "flags", "level"),
-        ConditionScalar::Integer(3)
-    )));
+}
+
+#[test]
+fn condition_fact_sources_distinguish_bindings_of_one_type() {
+    let primary = ConditionFactSource::of::<FeatureFlags>("flags");
+    let shadow = ConditionFactSource::of::<FeatureFlags>("shadow");
+
+    let primary_scalars = (primary.facts.scalars)(
+        primary.path,
+        &FeatureFlags {
+            enabled: true,
+            level: 7,
+        },
+    );
+    let shadow_scalars = (shadow.facts.scalars)(
+        shadow.path,
+        &FeatureFlags {
+            enabled: false,
+            level: 3,
+        },
+    );
+
+    assert_ne!(
+        primary_scalars[0].0, shadow_scalars[0].0,
+        "the same fact at distinct binding paths must carry distinct ids"
+    );
+    assert_eq!(primary_scalars[0].0.binding_path, "flags");
+    assert_eq!(shadow_scalars[0].0.binding_path, "shadow");
+    assert_eq!(primary_scalars[0].1, ConditionScalar::Bool(true));
+    assert_eq!(shadow_scalars[0].1, ConditionScalar::Bool(false));
 }

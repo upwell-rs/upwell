@@ -79,16 +79,22 @@ impl ConfigProperties for AuthConfig {
 }
 
 impl ConditionFacts for AuthConfig {
-    fn condition_facts() -> Vec<ConfigFactDescriptor> {
+    fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
         vec![ConfigFactDescriptor {
-            id: AUTH_MODE,
+            id: ConfigFactId::new("AuthConfig", binding_path, "mode"),
             kind: ConditionScalarKind::String,
             source: upwell_core::descriptor_source!(),
         }]
     }
 
-    fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)> {
-        vec![(AUTH_MODE, ConditionScalar::string(self.mode.clone()))]
+    fn condition_scalars(
+        &self,
+        binding_path: &'static str,
+    ) -> Vec<(ConfigFactId, ConditionScalar)> {
+        vec![(
+            ConfigFactId::new("AuthConfig", binding_path, "mode"),
+            ConditionScalar::string(self.mode.clone()),
+        )]
     }
 }
 

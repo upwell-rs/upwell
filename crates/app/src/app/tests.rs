@@ -461,16 +461,22 @@ impl ConfigProperties for FlagConfig {
 }
 
 impl ConditionFacts for FlagConfig {
-    fn condition_facts() -> Vec<ConfigFactDescriptor> {
+    fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
         vec![ConfigFactDescriptor {
-            id: FLAG_ENABLED,
+            id: ConfigFactId::new("test::FlagConfig", binding_path, "enabled"),
             kind: ConditionScalarKind::Bool,
             source: upwell_core::descriptor_source!(),
         }]
     }
 
-    fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)> {
-        vec![(FLAG_ENABLED, ConditionScalar::Bool(self.enabled))]
+    fn condition_scalars(
+        &self,
+        binding_path: &'static str,
+    ) -> Vec<(ConfigFactId, ConditionScalar)> {
+        vec![(
+            ConfigFactId::new("test::FlagConfig", binding_path, "enabled"),
+            ConditionScalar::Bool(self.enabled),
+        )]
     }
 }
 

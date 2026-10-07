@@ -198,16 +198,22 @@ impl ConfigProperties for ProbeConfig {
 }
 
 impl ConditionFacts for ProbeConfig {
-    fn condition_facts() -> Vec<ConfigFactDescriptor> {
+    fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
         vec![ConfigFactDescriptor {
-            id: PROBE_ENABLED,
+            id: ConfigFactId::new("test::ProbeConfig", binding_path, "enabled"),
             kind: ConditionScalarKind::Bool,
             source: upwell_core::descriptor_source!(),
         }]
     }
 
-    fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)> {
-        vec![(PROBE_ENABLED, ConditionScalar::Bool(self.enabled))]
+    fn condition_scalars(
+        &self,
+        binding_path: &'static str,
+    ) -> Vec<(ConfigFactId, ConditionScalar)> {
+        vec![(
+            ConfigFactId::new("test::ProbeConfig", binding_path, "enabled"),
+            ConditionScalar::Bool(self.enabled),
+        )]
     }
 }
 

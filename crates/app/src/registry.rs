@@ -130,7 +130,7 @@ impl AppRegistry {
         for source in &self.condition_facts {
             for (type_id, path, value) in &staged {
                 if *type_id == source.ty.type_id && *path == source.path {
-                    scalars.extend((source.facts.scalars)(*value));
+                    scalars.extend((source.facts.scalars)(source.path, *value));
                 }
             }
         }
@@ -504,17 +504,20 @@ mod tests {
         }
 
         impl ConditionFacts for FlagConfig {
-            fn condition_facts() -> Vec<ConfigFactDescriptor> {
+            fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
                 vec![ConfigFactDescriptor {
-                    id: ConfigFactId::new("FlagConfig", "flags", "enabled"),
+                    id: ConfigFactId::new("FlagConfig", binding_path, "enabled"),
                     kind: ConditionScalarKind::Bool,
                     source: upwell_core::descriptor_source!(),
                 }]
             }
 
-            fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)> {
+            fn condition_scalars(
+                &self,
+                binding_path: &'static str,
+            ) -> Vec<(ConfigFactId, ConditionScalar)> {
                 vec![(
-                    ConfigFactId::new("FlagConfig", "flags", "enabled"),
+                    ConfigFactId::new("FlagConfig", binding_path, "enabled"),
                     ConditionScalar::Bool(self.enabled),
                 )]
             }
@@ -534,7 +537,7 @@ mod tests {
                 (
                     TypeId::of::<FlagConfig>(),
                     "flags",
-                    &std::sync::Arc::new(enabled) as &dyn std::any::Any,
+                    &enabled as &dyn std::any::Any,
                 ),
                 (
                     TypeId::of::<FlagConfig>(),
@@ -550,7 +553,77 @@ mod tests {
             .expect("snapshot validates");
 
         registry
-            .evaluate_conditions(<FlagConfig as ConditionFacts>::condition_facts(), &snapshot)
+            .evaluate_conditions(
+                <FlagConfig as ConditionFacts>::condition_facts("flags"),
+                &snapshot,
+            )
             .expect("the matching staged binding supplies the declared fact");
+    }
+
+    #[test]
+    fn condition_snapshot_distinguishes_two_bindings_of_one_type() {
+        #[derive(serde::Deserialize)]
+        struct FlagConfig {
+            enabled: bool,
+        }
+
+        impl ConfigProperties for FlagConfig {
+            const NAME: &'static str = "FlagConfig";
+        }
+
+        impl ConditionFacts for FlagConfig {
+            fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
+                vec![ConfigFactDescriptor {
+                    id: ConfigFactId::new("FlagConfig", binding_path, "enabled"),
+                    kind: ConditionScalarKind::Bool,
+                    source: upwell_core::descriptor_source!(),
+                }]
+            }
+
+            fn condition_scalars(
+                &self,
+                binding_path: &'static str,
+            ) -> Vec<(ConfigFactId, ConditionScalar)> {
+                vec![(
+                    ConfigFactId::new("FlagConfig", binding_path, "enabled"),
+                    ConditionScalar::Bool(self.enabled),
+                )]
+            }
+        }
+
+        let mut registry = AppRegistry::default();
+        registry
+            .condition_facts
+            .push(ConditionFactSource::of::<FlagConfig>("flags"));
+        registry
+            .condition_facts
+            .push(ConditionFactSource::of::<FlagConfig>("toggles"));
+
+        let primary = FlagConfig { enabled: true };
+        let shadow = FlagConfig { enabled: false };
+
+        let snapshot = registry
+            .condition_snapshot([
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "flags",
+                    &primary as &dyn std::any::Any,
+                ),
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "toggles",
+                    &shadow as &dyn std::any::Any,
+                ),
+            ])
+            .expect("each binding contributes its own fact");
+
+        let facts = registry
+            .condition_facts
+            .iter()
+            .flat_map(|source| (source.facts.descriptors)(source.path));
+
+        registry
+            .evaluate_conditions(facts, &snapshot)
+            .expect("both bindings evaluate without duplicate facts");
     }
 }
