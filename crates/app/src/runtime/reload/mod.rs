@@ -123,7 +123,7 @@ impl AppRuntime {
         let facts = catalog
             .condition_facts
             .iter()
-            .flat_map(|source| (source.facts.descriptors)());
+            .flat_map(|source| (source.facts.descriptors)(source.path));
         let evaluation =
             catalog.evaluate_changed_conditions(facts, condition.evaluation(), &snapshot)?;
 

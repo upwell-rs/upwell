@@ -288,33 +288,37 @@ pub trait ConfigProperties: DeserializeOwned + Send + Sync + 'static + Sized {
 pub type SlotThunk = fn(&ConfigManager, &BoxedComponent, &str) -> Option<Box<dyn ReloadableConfig>>;
 
 /// The condition-fact extraction thunks captured from a config type: its declared fact
-/// descriptors and an erased scalar extractor over a staged value.
+/// descriptors and an erased scalar extractor over a staged value. Both receive the
+/// registered binding path, so one type bound at several paths emits distinct fact ids.
 #[derive(Clone, Copy)]
 pub struct BindingFacts {
-    pub descriptors: fn() -> Vec<ConfigFactDescriptor>,
-    pub scalars: fn(&dyn std::any::Any) -> Vec<(ConfigFactId, ConditionScalar)>,
+    pub descriptors: fn(&'static str) -> Vec<ConfigFactDescriptor>,
+    pub scalars: fn(&'static str, &dyn std::any::Any) -> Vec<(ConfigFactId, ConditionScalar)>,
 }
 
 /// A config type whose values expose typed facts to component conditions.
 ///
 /// Implemented manually per type (macro support is deferred); registered per binding
 /// path through [`ConditionFactSource::of`] so the transactional reload can extract the
-/// scalars of every staged binding of the type.
+/// scalars of every staged binding of the type. The registered path is supplied to both
+/// methods, so the same type bound at several paths produces distinct
+/// [`ConfigFactId`]s per binding.
 pub trait ConditionFacts: ConfigProperties {
-    /// The typed facts this type exposes, identified by this type's name, the binding
-    /// path, and the property path within the value.
-    fn condition_facts() -> Vec<ConfigFactDescriptor>;
+    /// The typed facts this type exposes at `binding_path`, identified by this type's
+    /// name, the binding path, and the property path within the value.
+    fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor>;
 
-    /// The current scalar values of [`condition_facts`](Self::condition_facts), in the
-    /// same order.
-    fn condition_scalars(&self) -> Vec<(ConfigFactId, ConditionScalar)>;
+    /// The current scalar values of [`condition_facts`](Self::condition_facts) at
+    /// `binding_path`, in the same order.
+    fn condition_scalars(&self, binding_path: &'static str)
+    -> Vec<(ConfigFactId, ConditionScalar)>;
 }
 
 /// One registered condition-fact source: a config type's facts at one binding path.
 #[derive(Clone)]
 pub struct ConditionFactSource {
     pub ty: TypeDescriptor,
-    pub path: String,
+    pub path: &'static str,
     pub facts: BindingFacts,
 }
 
@@ -328,11 +332,13 @@ impl std::fmt::Debug for ConditionFactSource {
 }
 
 impl ConditionFactSource {
-    /// Registers the condition facts of type `T` at `path`.
-    pub fn of<T: ConditionFacts>(path: impl Into<String>) -> Self {
+    /// Registers the condition facts of type `T` at `path`. The path is part of every
+    /// fact id the source emits, so it must outlive the registration — hence
+    /// `&'static str`.
+    pub fn of<T: ConditionFacts>(path: &'static str) -> Self {
         Self {
             ty: TypeDescriptor::of::<T>(T::NAME),
-            path: path.into(),
+            path,
             facts: BindingFacts {
                 descriptors: T::condition_facts,
                 scalars: condition_scalars_erased::<T>,
@@ -341,20 +347,16 @@ impl ConditionFactSource {
     }
 }
 
-/// Captures `T`'s condition scalars from an erased staged value. The `Arc<T>` fallback
-/// also accepts explicitly nested shared values supplied through framework extension seams.
+/// Captures `T`'s condition scalars from an erased staged value. Staged binding values
+/// erase to `T` itself, so a plain downcast covers every production caller.
 fn condition_scalars_erased<T: ConditionFacts>(
+    binding_path: &'static str,
     value: &dyn std::any::Any,
 ) -> Vec<(ConfigFactId, ConditionScalar)> {
-    if let Some(value) = value.downcast_ref::<T>() {
-        return value.condition_scalars();
-    }
-
-    if let Some(value) = value.downcast_ref::<Arc<T>>() {
-        return value.condition_scalars();
-    }
-
-    Vec::new()
+    value
+        .downcast_ref::<T>()
+        .map(|value| value.condition_scalars(binding_path))
+        .unwrap_or_default()
 }
 
 #[derive(Clone)]
