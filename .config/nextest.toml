@@ -30,6 +30,7 @@ leak-timeout = { period = "500ms", result = "fail" }
 [[profile.default.overrides]]
 filter = '''
   binary_id(=cargo-upwell::command)
+  | binary_id(=cargo-upwell::init)
   | binary_id(=cargo-upwell::probe)
   | binary_id(=upwell::tooling_probe_process)
 '''
