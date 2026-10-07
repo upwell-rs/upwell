@@ -296,9 +296,9 @@ impl EffectiveGraph {
     ///
     /// Roots missing from either graph create no node, and structural Add and Remove
     /// actions keep their precedence over forced replaces. The graph diff stays purely
-    /// structural. Because the runtime maps every non-`Retain` action — including
-    /// `RebindLive` — to reconstruction, live consumers always propagate through the
-    /// changed-instance queue and their fixed (`Snapshot`) dependents plan as
+    /// structural. Because the runtime reconstructs `Add`, `Replace`, and `RebindLive`
+    /// nodes while retiring `Remove` nodes by absence, live consumers always propagate
+    /// through the changed-instance queue and their fixed (`Snapshot`) dependents plan as
     /// `Replace` rather than retaining instances snapshotted from the retired active
     /// root. This holds even when `invalidated_roots` is empty: a pure
     /// provider/factory change reconstructs its live consumers and therefore their
