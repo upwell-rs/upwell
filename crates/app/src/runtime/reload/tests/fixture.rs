@@ -6,6 +6,12 @@
 //! to mutate its resolved receiver before returning, so a test can prove a rejected
 //! candidate run never touches the active receiver.
 //!
+//! The probe also carries a test-only [`ManagerProbeKind`] hook: a test fires it
+//! explicitly through a manager of its choice — typically the [`HookManager`] a
+//! [`ManagerConsumer`] singleton stored at construction — and the run records which
+//! receiver (token and identity) that manager's own resolver context resolved, so a
+//! test can tell which generation's root a stored manager is still bound to.
+//!
 //! The factory and hook honor shared controls so a test can inject a failure or a
 //! cancellation point at a specific stage of the transaction. Cross-await controls are
 //! tokio-guarded; the synchronous config-deserialization log uses a `std::sync::Mutex`.
@@ -35,9 +41,9 @@ use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentSource, FromContainer, Injectable, Singleton,
 };
-use upwell_hooks::{HookDescriptor, HookKind, HookParam};
+use upwell_hooks::{HookDescriptor, HookKind, HookManager, HookParam};
 
-use crate::App;
+use crate::{App, AppBuilder};
 
 const PROBE_ENABLED: ConfigFactId = ConfigFactId::new("test::ProbeConfig", "probe", "enabled");
 
@@ -71,6 +77,16 @@ static HOOK_MUTATES_RECEIVER: tokio::sync::Mutex<bool> = tokio::sync::Mutex::con
 /// The identity and token of the receiver each hook run actually mutated, recorded only
 /// after the mutation is applied, in run order.
 static MUTATED_RECEIVERS: tokio::sync::Mutex<Vec<(usize, i64)>> =
+    tokio::sync::Mutex::const_new(Vec::new());
+
+/// The observed token of the receiver each [`ManagerProbeKind`] run resolved through
+/// the fired manager's own resolver context, in run order.
+static MANAGER_PROBE_TOKENS: tokio::sync::Mutex<Vec<i64>> =
+    tokio::sync::Mutex::const_new(Vec::new());
+
+/// The process-local identity (`Arc::as_ptr`) of the receiver each
+/// [`ManagerProbeKind`] run resolved, in run order.
+static MANAGER_PROBE_IDS: tokio::sync::Mutex<Vec<usize>> =
     tokio::sync::Mutex::const_new(Vec::new());
 
 /// Whether the candidate factory returns a DI error after resolving the staged value.
@@ -114,6 +130,8 @@ pub(super) async fn reset_controls() {
     *HOOK_REJECT_TOKEN.lock().await = None;
     *HOOK_MUTATES_RECEIVER.lock().await = false;
     MUTATED_RECEIVERS.lock().await.clear();
+    *MANAGER_PROBE_TOKENS.lock().await = Vec::new();
+    *MANAGER_PROBE_IDS.lock().await = Vec::new();
     *FACTORY_FAILS.lock().await = false;
     *FACTORY_WAITS.lock().await = false;
 }
@@ -170,6 +188,17 @@ pub(super) async fn set_hook_mutates_receiver(mutates: bool) {
 /// The identity and token of the receiver each hook run mutated, in run order.
 pub(super) async fn mutated_receivers() -> Vec<(usize, i64)> {
     MUTATED_RECEIVERS.lock().await.clone()
+}
+
+/// The receiver token each [`ManagerProbeKind`] run resolved, in run order.
+pub(super) async fn manager_probe_tokens() -> Vec<i64> {
+    MANAGER_PROBE_TOKENS.lock().await.clone()
+}
+
+/// The process-local identity of the receiver each [`ManagerProbeKind`] run resolved,
+/// in run order.
+pub(super) async fn manager_probe_ids() -> Vec<usize> {
+    MANAGER_PROBE_IDS.lock().await.clone()
 }
 
 /// Makes the candidate factory fail with a DI error after resolving the staged value.
@@ -389,10 +418,83 @@ static PROBE_RELOAD_HOOK: HookDescriptor = HookDescriptor::new(
     probe_reload_call,
 );
 
-static PROBE_HOOKS: [HookDescriptor; 1] = [PROBE_RELOAD_HOOK];
+/// A test-only hook kind a test fires explicitly through a manager of its choice —
+/// never by the reload pipeline — to show which receiver that manager's own resolver
+/// context resolves. The context carries nothing: the signal is the resolved receiver.
+pub(super) struct ManagerProbeKind;
+
+impl HookKind for ManagerProbeKind {
+    type Output = ();
+    type Cx = ();
+
+    const NAME: &'static str = "manager_probe";
+}
+
+fn probe_manager_probe_deps() -> Vec<DependencyDescriptor> {
+    Vec::new()
+}
+
+fn probe_manager_probe_kind_ty() -> TypeId {
+    TypeId::of::<ManagerProbeKind>()
+}
+
+fn probe_manager_probe_call<'a>(
+    ctx: &'a (dyn ResolverCtx + Send + Sync),
+    _cx: &'a (dyn Any + Send + Sync),
+) -> ProbeHookFuture<'a> {
+    Box::pin(async move {
+        // Resolve the `&self` receiver through the fired manager's own resolver
+        // context, exactly as the `#[hook]` macro generates: the receiver comes from
+        // the root the manager is attached to, so the run shows which generation's
+        // instance that manager still resolves.
+        let receiver = ctx
+            .get_resolver::<ComponentSource>()
+            .and_then(|source| source.component::<ProbeComponent>())
+            .ok_or(upwell_hooks::Error::MissingReceiver(ProbeComponent::NAME))?;
+
+        MANAGER_PROBE_TOKENS.lock().await.push(receiver.observed);
+        MANAGER_PROBE_IDS
+            .lock()
+            .await
+            .push(Arc::as_ptr(&receiver) as usize);
+
+        Ok(Box::new(()) as Box<dyn Any + Send>)
+    })
+}
+
+static PROBE_MANAGER_PROBE_HOOK: HookDescriptor = HookDescriptor::new(
+    2,
+    TypeDescriptor::of::<ProbeComponent>(ProbeComponent::NAME),
+    <ManagerProbeKind as HookKind>::NAME,
+    probe_manager_probe_kind_ty,
+    probe_manager_probe_deps,
+    probe_manager_probe_call,
+);
+
+static PROBE_HOOKS: [HookDescriptor; 2] = [PROBE_RELOAD_HOOK, PROBE_MANAGER_PROBE_HOOK];
 
 fn probe_hooks() -> &'static [HookDescriptor] {
     &PROBE_HOOKS
+}
+
+/// Fires the test-only [`ManagerProbeKind`] through `hooks` — the caller-chosen
+/// manager, typically a [`ManagerConsumer`]'s stored one — and returns the single
+/// hook outcome, so a test can distinguish a resolved run from a
+/// [`ResolverUnavailable`](upwell_hooks::Error::ResolverUnavailable) one.
+pub(super) async fn fire_manager_probe(hooks: &HookManager) -> upwell_hooks::Result<()> {
+    let outcomes = hooks.run::<ManagerProbeKind>(&(), |_| true).await;
+
+    assert_eq!(
+        outcomes.len(),
+        1,
+        "exactly one manager-probe hook is registered"
+    );
+
+    outcomes
+        .into_iter()
+        .next()
+        .expect("one manager-probe outcome")
+        .1
 }
 
 static PROBE_COMPONENT: ComponentDescriptor = ComponentDescriptor {
@@ -406,10 +508,92 @@ static PROBE_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     generation_snapshot: None,
 };
 
+/// A factory-backed singleton that injects the generation's [`HookManager`] through
+/// ordinary DI and stores it — the holder pattern of a component that fires hooks
+/// later from its own stored handle. Because it consumes the framework hook-manager
+/// singleton, every publication reconstructs it, so the current root's holder stores
+/// the current generation's manager while an older generation's retained holder keeps
+/// its own.
+pub(super) struct ManagerConsumer {
+    /// The manager this construction's generation injected — attached to that
+    /// generation's root only.
+    pub(super) hooks: HookManager,
+}
+
+impl Component for ManagerConsumer {
+    type Handle = Arc<Self>;
+
+    const ID: &'static str = "manager_consumer";
+    const NAME: &'static str = "ManagerConsumer";
+
+    fn into_handle(self) -> Self::Handle {
+        Arc::new(self)
+    }
+}
+
+fn manager_consumer_dependencies() -> Vec<DependencyDescriptor> {
+    vec![<HookManager as FromContainer>::dependency()]
+}
+
+fn construct_manager_consumer(
+    context: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async move {
+        let hooks = <HookManager as FromContainer>::from_container(context).await?;
+
+        Ok(BoxedComponent {
+            ty: TypeDescriptor::of::<ManagerConsumer>(ManagerConsumer::NAME),
+            value: Box::new(Injectable::into_stored(Arc::new(ManagerConsumer { hooks }))),
+        })
+    })
+}
+
+fn manager_consumer_factories() -> &'static [ComponentFactoryDescriptor] {
+    &[ComponentFactoryDescriptor {
+        id: "static",
+        construct: construct_manager_consumer,
+        dependencies: manager_consumer_dependencies,
+        default: true,
+    }]
+}
+
+static MANAGER_CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
+    id: ManagerConsumer::ID,
+    name: ManagerConsumer::NAME,
+    ty: TypeDescriptor::of::<ManagerConsumer>(ManagerConsumer::NAME),
+    scope: &Singleton,
+    condition: None,
+    factories: manager_consumer_factories,
+    hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
+};
+
 /// Builds a file-backed app with the probe component registered, its config bound at
 /// `probe`, and its availability fact sourced from the same binding. The temp dir is
 /// returned so the source file outlives the app and can be rewritten by the test.
 pub(super) async fn build_probe_app(enabled: bool, token: i64) -> (TempDir, App<()>) {
+    build_probe_app_with(enabled, token, |builder| builder).await
+}
+
+/// Builds the probe app plus the [`ManagerConsumer`] singleton, so a test can fire
+/// hooks through a component-stored manager.
+pub(super) async fn build_probe_app_with_manager_consumer(
+    enabled: bool,
+    token: i64,
+) -> (TempDir, App<()>) {
+    build_probe_app_with(enabled, token, |builder| {
+        builder.component_descriptor(&MANAGER_CONSUMER_COMPONENT)
+    })
+    .await
+}
+
+/// Shared probe-app builder: `extend` adds the caller's extra registrations on top of
+/// the probe component's.
+async fn build_probe_app_with(
+    enabled: bool,
+    token: i64,
+    extend: impl FnOnce(AppBuilder<()>) -> AppBuilder<()>,
+) -> (TempDir, App<()>) {
     let dir = tempfile::Builder::new()
         .prefix("upwell-runtime-reload-")
         .tempdir()
@@ -422,14 +606,13 @@ pub(super) async fn build_probe_app(enabled: bool, token: i64) -> (TempDir, App<
         ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
             .expect("load config");
 
-    let app = App::<()>::builder("runtime-reload-test")
+    let builder = App::<()>::builder("runtime-reload-test")
         .config_source(manager)
         .config::<ProbeConfig>("probe")
         .condition_facts::<ProbeConfig>("probe")
-        .component_descriptor(&PROBE_COMPONENT)
-        .build()
-        .await
-        .expect("probe app builds");
+        .component_descriptor(&PROBE_COMPONENT);
+
+    let app = extend(builder).build().await.expect("probe app builds");
 
     (dir, app)
 }
