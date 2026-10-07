@@ -685,6 +685,7 @@ impl StagedReload {
     /// Shared by the legacy [`ConfigReloader::reload`] (against the active generation's
     /// manager) and the app runtime's transactional reload (against the candidate
     /// generation's manager), so both pipelines filter and execute hooks identically.
+    #[allow(clippy::result_large_err)]
     pub async fn run_config_reload_hooks(
         &self,
         hooks: &HookManager,
