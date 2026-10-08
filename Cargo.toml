@@ -331,6 +331,11 @@ tempfile = { workspace = true }
 # dev-dependency covers the tests without affecting downstream users.
 utoipa = { workspace = true }
 
+[[test]]
+name = "tooling_probe_process"
+path = "tests/tooling_probe_process.rs"
+required-features = ["cli", "tooling"]
+
 [[bin]]
 name = "tooling_probe_fixture"
 path = "tests/tooling_probe_process/fixture.rs"
