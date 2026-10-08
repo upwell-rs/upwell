@@ -23,9 +23,8 @@ use upwell_di::{BoxedComponent, Injectable, Live, LiveRef};
 pub use dirs::DirectoriesResolver;
 use reload::ConfigSlot;
 pub use reload::{
-    CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ChangedBinding, ComponentHookReport, ConfigReload,
-    ConfigReloadError, ConfigReloadReport, ConfigReloader, HookOutcome, ReloadProposal,
-    ReloadableConfig, StagedConfig, StagedReload,
+    ChangedBinding, ComponentHookReport, ConfigReload, ConfigReloadError, ConfigReloader,
+    HookOutcome, ReloadProposal, ReloadableConfig, StagedConfig, StagedReload,
 };
 pub use store::{ConfigStore, ContainerConfigExt};
 pub use trigger::{ReloadSummary, ReloadTarget, spawn_reload_triggers, stop_reload_triggers};

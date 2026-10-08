@@ -23,7 +23,7 @@ mod reload;
 
 pub(crate) use generation::PreparedRuntimeGeneration;
 pub use generation::{AppConditionState, RuntimeView};
-use generation::{RuntimeGeneration, RuntimeTransitionCoordinator};
+use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransitionCoordinator};
 pub use reload::RuntimeReloadReport;
 
 /// Everything a protocol needs to drive requests through DI, cheaply cloneable.
@@ -40,6 +40,28 @@ pub struct AppRuntime {
     /// The config reloader this runtime's transactional reload drives. Shared with the
     /// app handle, so its serialization lock covers both pipelines.
     reloader: ConfigReloader,
+}
+
+/// A non-owning [`AppRuntime`] reference, so framework handles seeded into the runtime's
+/// own root never keep that runtime alive.
+#[derive(Clone)]
+pub(crate) struct WeakAppRuntime {
+    name: Arc<str>,
+    transitions: WeakTransitionCoordinator,
+    reloader: ConfigReloader,
+}
+
+impl WeakAppRuntime {
+    /// The runtime, while any owner still holds it.
+    pub(crate) fn upgrade(&self) -> Option<AppRuntime> {
+        let transitions = self.transitions.upgrade()?;
+
+        Some(AppRuntime {
+            name: Arc::clone(&self.name),
+            transitions,
+            reloader: self.reloader.clone(),
+        })
+    }
 }
 
 /// Prepared scope state shared by every clone of an application runtime.
@@ -75,6 +97,20 @@ impl AppRuntime {
             transitions: RuntimeTransitionCoordinator::new(generation),
             reloader,
         }
+    }
+
+    /// A non-owning reference to this runtime.
+    pub(crate) fn downgrade(&self) -> WeakAppRuntime {
+        WeakAppRuntime {
+            name: Arc::clone(&self.name),
+            transitions: self.transitions.downgrade(),
+            reloader: self.reloader.clone(),
+        }
+    }
+
+    /// The number of committed config reloads (the current config generation).
+    pub fn config_generation(&self) -> u64 {
+        self.reloader.generation()
     }
 
     /// The application name.

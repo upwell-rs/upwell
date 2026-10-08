@@ -1,11 +1,10 @@
 //! Automatic config-reload triggers.
 //!
-//! Beyond the always-available manual [`ConfigReloader::reload`], a [`ConfigManager`] may
-//! request reloads on `SIGHUP` (Unix) or on config-file changes (the `watch` feature). The
-//! daemon spawns the matching background tasks at `serve`/`run` and aborts them on shutdown;
-//! each drives one [`ReloadTarget`] and logs the outcome. An application runtime is the
-//! target inside an app, so triggered reloads take the same transactional config-and-graph
-//! path as a manual runtime reload; a bare [`ConfigReloader`] is the config-only target.
+//! A [`ConfigManager`] may request reloads on `SIGHUP` (Unix) or on config-file changes (the
+//! `watch` feature). The daemon spawns the matching background tasks at `serve`/`run` and
+//! aborts them on shutdown; each drives one [`ReloadTarget`] and logs the outcome. The
+//! application runtime is the target, so triggered reloads take the same transactional
+//! config-and-graph path as a manual reload.
 //!
 //! [`ConfigManager`]: super::ConfigManager
 
@@ -19,13 +18,12 @@ use tracing::error;
 #[cfg(any(unix, feature = "watch"))]
 use tracing::{info, warn};
 
-use super::{ConfigReloadError, ConfigReloader, ReloadTriggers};
+use super::ReloadTriggers;
 
 /// A reload operation that the automatic `SIGHUP` and file-watch triggers drive.
 ///
-/// [`ConfigReloader`] implements it as the config-only reload. An application runtime
-/// implements it with its transactional config-and-graph reload, so triggered reloads never
-/// bypass the runtime transition coordinator.
+/// The application runtime implements it with its transactional config-and-graph reload, so
+/// triggered reloads never bypass the runtime transition coordinator.
 pub trait ReloadTarget: Clone + Send + Sync + 'static {
     /// The error a failed reload reports.
     type Error: Display + Send;
@@ -44,23 +42,6 @@ pub struct ReloadSummary {
     pub generation: u64,
     /// How many bindings changed and were re-published.
     pub changed: usize,
-}
-
-impl ReloadTarget for ConfigReloader {
-    type Error = ConfigReloadError;
-
-    fn sources(&self) -> Vec<PathBuf> {
-        ConfigReloader::sources(self)
-    }
-
-    async fn trigger_reload(&self) -> Result<ReloadSummary, Self::Error> {
-        let report = self.reload().await?;
-
-        Ok(ReloadSummary {
-            generation: report.generation,
-            changed: report.changed.len(),
-        })
-    }
 }
 
 /// Spawns the background tasks for the requested triggers, returning their handles so the

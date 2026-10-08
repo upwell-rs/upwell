@@ -11,9 +11,9 @@ use std::path::PathBuf;
 use futures::FutureExt;
 use tracing::{debug, error, info};
 use upwell_config::{
-    CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ConditionFactSource, ConditionFacts, ConfigBinding,
-    ConfigManager, ConfigProperties, ConfigReloader, ConfigStore, ReloadTriggers, ReloadableConfig,
-    spawn_reload_triggers, stop_reload_triggers,
+    ConditionFactSource, ConditionFacts, ConfigBinding, ConfigManager, ConfigProperties,
+    ConfigReloader, ConfigStore, ReloadTriggers, ReloadableConfig, spawn_reload_triggers,
+    stop_reload_triggers,
 };
 use upwell_core::{
     Descriptor, ResolverSet, RuntimeGenerationId, Singleton as SingletonScope, TypeDescriptor,
@@ -27,6 +27,7 @@ use upwell_hooks::{
     HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookDescriptor, HookKind, HookManager, Shutdown, Startup,
 };
 
+use crate::builtins::RuntimeReloader;
 use crate::error::Error;
 use crate::lifecycle::{ShutdownHandle, ShutdownSignal};
 use crate::plugin::{
@@ -48,11 +49,11 @@ static SHUTDOWN_HANDLE_DESCRIPTOR: ComponentDescriptor =
         &SingletonScope,
     );
 
-/// The framework-provided singleton injectable for triggering a config reload.
-static CONFIG_RELOADER_DESCRIPTOR: ComponentDescriptor =
-    ComponentDescriptor::manual_of::<ConfigReloader>(
-        CONFIG_RELOADER_ID,
-        CONFIG_RELOADER_NAME,
+/// The framework-provided singleton injectable for requesting a runtime reload.
+static RUNTIME_RELOADER_DESCRIPTOR: ComponentDescriptor =
+    ComponentDescriptor::manual_of::<RuntimeReloader>(
+        crate::builtins::reloader::RUNTIME_RELOADER_ID,
+        crate::builtins::reloader::RUNTIME_RELOADER_NAME,
         &SingletonScope,
     );
 
@@ -96,6 +97,7 @@ pub struct PreparedApp<D: ProtocolDefinition> {
     shutdown: ShutdownSignal,
     root_resolver: RootResolver,
     reloader: ConfigReloader,
+    runtime_reloader: RuntimeReloader,
     reload_triggers: ReloadTriggers,
     resolved: Arc<[ComponentDescriptor]>,
     root_order: Arc<[ComponentDescriptor]>,
@@ -352,9 +354,19 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         // Other framework singletons (the shutdown handle, the root resolver).
         seed_builtins(&shutdown, &root_resolver, &mut registry, &mut instances);
 
-        // The config reloader and hook manager are always available; their instances are
-        // seeded below, once the config slots and collected hooks exist.
-        registry.components.push(CONFIG_RELOADER_DESCRIPTOR);
+        // The runtime reloader is seeded unattached and attached once the runtime exists.
+        let runtime_reloader = RuntimeReloader::new();
+
+        registry.components.push(RUNTIME_RELOADER_DESCRIPTOR);
+        instances.push(BoxedComponent {
+            ty: TypeDescriptor::of::<RuntimeReloader>(
+                crate::builtins::reloader::RUNTIME_RELOADER_NAME,
+            ),
+            value: Box::new(Injectable::into_stored(runtime_reloader.clone())),
+        });
+
+        // The hook manager is always available; its instance is seeded below, once the
+        // collected hooks exist.
         registry.components.push(HOOK_MANAGER_DESCRIPTOR);
 
         protocol.pre_build(&mut PreBuildContext::new(&mut registry, &mut instances))?;
@@ -427,7 +439,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         let hook_manager = HookManager::new(hooks);
         instances.push(BoxedComponent {
             ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-            value: Box::new(Injectable::into_stored(hook_manager.clone())),
+            value: Box::new(Injectable::into_stored(hook_manager)),
         });
 
         let effective_graph = EffectiveGraph::build(
@@ -480,13 +492,9 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
 
         let reload_triggers = tree.triggers();
 
-        let reloader = ConfigReloader::new(tree, reload_slots, hook_manager.clone());
+        let reloader = ConfigReloader::new(tree, reload_slots);
         #[cfg(feature = "tooling")]
         let config_sources = Arc::from(reloader.sources());
-        instances.push(BoxedComponent {
-            ty: TypeDescriptor::of::<ConfigReloader>(CONFIG_RELOADER_NAME),
-            value: Box::new(Injectable::into_stored(reloader.clone())),
-        });
 
         #[cfg(feature = "tooling")]
         let provider_order =
@@ -538,6 +546,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             shutdown,
             root_resolver,
             reloader,
+            runtime_reloader,
             reload_triggers,
             resolved: Arc::from(resolved),
             root_order: Arc::from(root_order),
@@ -660,6 +669,7 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             shutdown,
             root_resolver,
             reloader,
+            runtime_reloader,
             reload_triggers,
             resolved,
             root_order,
@@ -711,7 +721,9 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             effective_graph,
             condition,
         );
-        let runtime = AppRuntime::new(Arc::from(name.as_str()), generation, reloader.clone());
+        let runtime = AppRuntime::new(Arc::from(name.as_str()), generation, reloader);
+
+        runtime_reloader.attach(&runtime);
 
         // Hand off to the prepared protocol: it constructs the served runtime.
         let protocol = protocol.build(&runtime)?;
@@ -723,7 +735,7 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             protocol,
             plugin_plan,
             shutdown,
-            reloader,
+            reloader: runtime_reloader,
             reload_triggers,
         })
     }
@@ -830,7 +842,7 @@ fn evaluate_startup_conditions(
 /// A fully assembled app, ready to serve its protocol.
 ///
 /// Holds the agnostic [`AppRuntime`] (DI container, scope orders, hooks) and the built
-/// [`ProtocolRuntime`], plus the shutdown signal, the config-only reloader handle, and the
+/// [`ProtocolRuntime`], plus the shutdown signal, the runtime reloader handle, and the
 /// reload triggers the serve envelope spawns against the runtime.
 pub struct App<D: ProtocolDefinition> {
     pub name: String,
@@ -839,7 +851,7 @@ pub struct App<D: ProtocolDefinition> {
     protocol: <D::Prepared as PreparedProtocol>::Runtime,
     plugin_plan: EffectivePluginPlan,
     shutdown: ShutdownSignal,
-    reloader: ConfigReloader,
+    reloader: RuntimeReloader,
     reload_triggers: ReloadTriggers,
 }
 
@@ -904,12 +916,10 @@ impl<D: ProtocolDefinition> App<D> {
         self.shutdown.handle()
     }
 
-    /// A config-only compatibility handle that re-reads configuration and re-publishes changed
-    /// bindings through [`ConfigReloader::reload`].
-    ///
-    /// It does not transition the application graph; graph-affecting reloads must use
-    /// [`AppRuntime::reload_config`], which the app's watch and signal triggers drive.
-    pub fn config_reloader(&self) -> ConfigReloader {
+    /// The handle that requests a transactional config-and-graph reload of this app — the
+    /// same [`RuntimeReloader`] components inject and the watch and signal triggers'
+    /// [`AppRuntime::reload_config`] path.
+    pub fn reloader(&self) -> RuntimeReloader {
         self.reloader.clone()
     }
 

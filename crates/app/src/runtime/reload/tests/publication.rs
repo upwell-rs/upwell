@@ -21,7 +21,7 @@ async fn candidate_factory_resolves_proposed_config_before_publication() {
     // factory has never run.
     let old_root = runtime.root();
     let old_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
+    let old_config_generation = app.runtime().config_generation();
 
     assert!(old_root.get::<ProbeComponent>().is_none());
     assert_eq!(factory_calls(), 0);
@@ -39,7 +39,7 @@ async fn candidate_factory_resolves_proposed_config_before_publication() {
         "the runtime generation advances exactly once"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation + 1,
         "the config generation advances once, at the terminal commit"
     );
@@ -82,7 +82,7 @@ async fn successive_value_only_changes_reconstruct_the_consumer_and_pin_old_gene
 
     // Generation 0: the probe is active, constructed exactly once against token 1.
     let old_runtime_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
+    let old_config_generation = app.runtime().config_generation();
     let root0 = runtime.root().clone();
     let probe0 = root0
         .get::<ProbeComponent>()
@@ -110,7 +110,7 @@ async fn successive_value_only_changes_reconstruct_the_consumer_and_pin_old_gene
         "the runtime generation advances exactly once"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation + 1,
         "the config generation advances once per published reload"
     );
@@ -171,7 +171,7 @@ async fn successive_value_only_changes_reconstruct_the_consumer_and_pin_old_gene
         "the runtime generation advances exactly once per reload"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation + 2,
         "the config generation advances exactly once per reload"
     );

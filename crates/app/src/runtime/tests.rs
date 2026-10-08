@@ -124,11 +124,7 @@ async fn build_runtime(
         graph,
         empty_condition(),
     );
-    let reloader = ConfigReloader::new(
-        ConfigManager::empty(),
-        Vec::new(),
-        HookManager::new(Vec::new()),
-    );
+    let reloader = ConfigReloader::new(ConfigManager::empty(), Vec::new());
     let runtime = AppRuntime::new(Arc::from("test"), generation, reloader);
 
     (runtime, registry)

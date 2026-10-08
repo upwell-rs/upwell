@@ -18,5 +18,5 @@ mod manager_consumer;
 mod noop;
 mod provider_switch;
 mod publication;
-mod reloader_manager;
+mod runtime_reloader;
 mod trigger;
