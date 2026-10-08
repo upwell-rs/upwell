@@ -353,9 +353,10 @@ impl<T: ConfigProperties> ReloadableConfig for ConfigSlot<T> {
 /// A cheap, cloneable, injectable handle that re-reads configuration on demand.
 ///
 /// Seeded by the daemon as a framework singleton, so any component or handler can
-/// inject it (`reloader: ConfigReloader`) and trigger a reload. Always available;
-/// signal- and file-watch-driven reloads (configured on the [`ConfigManager`]) build
-/// on the same [`reload`](Self::reload) entry point.
+/// inject it (`reloader: ConfigReloader`) and trigger a reload. Always available.
+/// Outside an application runtime, signal- and file-watch-driven reloads (configured on
+/// the [`ConfigManager`]) drive this handle through [`ReloadTarget`](crate::ReloadTarget);
+/// inside one, they drive the runtime's transactional reload instead.
 #[derive(Clone)]
 pub struct ConfigReloader {
     inner: Arc<ReloaderInner>,

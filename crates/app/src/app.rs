@@ -830,7 +830,8 @@ fn evaluate_startup_conditions(
 /// A fully assembled app, ready to serve its protocol.
 ///
 /// Holds the agnostic [`AppRuntime`] (DI container, scope orders, hooks) and the built
-/// [`ProtocolRuntime`], plus the shutdown signal and config reloader the serve envelope drives.
+/// [`ProtocolRuntime`], plus the shutdown signal, the config-only reloader handle, and the
+/// reload triggers the serve envelope spawns against the runtime.
 pub struct App<D: ProtocolDefinition> {
     pub name: String,
     pub registry: AppRegistry,
@@ -906,8 +907,8 @@ impl<D: ProtocolDefinition> App<D> {
     /// A config-only compatibility handle that re-reads configuration and re-publishes changed
     /// bindings through [`ConfigReloader::reload`].
     ///
-    /// Watch and signal triggers also use this handle until #211. It does not transition the
-    /// application graph; graph-affecting reloads must use [`AppRuntime::reload_config`].
+    /// It does not transition the application graph; graph-affecting reloads must use
+    /// [`AppRuntime::reload_config`], which the app's watch and signal triggers drive.
     pub fn config_reloader(&self) -> ConfigReloader {
         self.reloader.clone()
     }
@@ -935,7 +936,6 @@ impl<D: ProtocolDefinition> App<D> {
             runtime,
             protocol,
             shutdown,
-            reloader,
             reload_triggers,
             ..
         } = self;
@@ -954,7 +954,7 @@ impl<D: ProtocolDefinition> App<D> {
             }
         };
 
-        let trigger_tasks = spawn_reload_triggers(reloader, reload_triggers);
+        let trigger_tasks = spawn_reload_triggers(runtime.clone(), reload_triggers);
 
         // Bridge ctrl-c to the shutdown signal so every protocol's loop only watches `shutdown`.
         let shutdown_handle = shutdown.handle();
@@ -989,7 +989,6 @@ impl<D: ProtocolDefinition> App<D> {
         let App {
             runtime,
             mut shutdown,
-            reloader,
             reload_triggers,
             ..
         } = self;
@@ -1008,7 +1007,7 @@ impl<D: ProtocolDefinition> App<D> {
             }
         };
 
-        let trigger_tasks = spawn_reload_triggers(reloader, reload_triggers);
+        let trigger_tasks = spawn_reload_triggers(runtime.clone(), reload_triggers);
 
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {},

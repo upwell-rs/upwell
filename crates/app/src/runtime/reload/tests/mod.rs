@@ -19,3 +19,4 @@ mod noop;
 mod provider_switch;
 mod publication;
 mod reloader_manager;
+mod trigger;

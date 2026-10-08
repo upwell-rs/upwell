@@ -78,9 +78,10 @@
 //!
 //! [`ConfigReloader::reload`](upwell_config::ConfigReloader::reload) remains a
 //! config-only compatibility operation: it runs the current generation's hooks against
-//! the current root, but does not transition the graph. Watch and signal triggers also
-//! continue to call it until #211; application graph transitions must use
-//! [`AppRuntime::reload_config`].
+//! the current root, but does not transition the graph. Application graph transitions
+//! must use [`AppRuntime::reload_config`]. The app's watch and signal triggers drive it
+//! through [`ReloadTarget`](upwell_config::ReloadTarget), so they never take the
+//! config-only path.
 
 use std::any::TypeId;
 use std::cell::Cell;
@@ -150,8 +151,7 @@ impl AppRuntime {
     /// root. The staged commit advances the config generation exactly once. Unlike
     /// [`ConfigReloader::reload`](upwell_config::ConfigReloader::reload), which is
     /// config-only compatibility behavior, this method is required for application
-    /// graph transitions. Watch and signal triggers continue to use
-    /// `ConfigReloader::reload` until #211.
+    /// graph transitions, and the app's watch and signal triggers drive it.
     ///
     /// Hook managers are generation-bound: refetch [`hooks`](Self::hooks) after a
     /// published reload to run the new generation's hooks. A handle stays associated
@@ -307,8 +307,8 @@ impl AppRuntime {
 
             // Install the just-published generation's hook manager — the same manager
             // seeded in the candidate root — while both serializers remain held, so
-            // legacy reloads (direct calls and watch/signal triggers) run the current
-            // generation's hooks against the current root.
+            // direct legacy reloads run the current generation's hooks against the
+            // current root.
             self.reloader.install_hook_manager(hook_manager);
 
             config_generation.set(generation);
@@ -400,6 +400,8 @@ fn config_target_matches(target: &EffectiveTarget, changed: &[(TypeId, &str)]) -
             && binding_path.is_none_or(|binding_path| binding_path == *changed_path)
     })
 }
+
+mod trigger;
 
 #[cfg(test)]
 mod tests;
