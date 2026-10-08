@@ -80,8 +80,9 @@ pub use upwell_config::{
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigBindingDescriptor, ConfigDefaults,
     ConfigError, ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError,
     ConfigReloadReport, ConfigReloader, ConfigStore, ContainerConfigExt, DefaultSpec,
-    DirectoriesResolver, EnumTag, HookOutcome, ReloadProposal, ReloadTriggers, ReloadableConfig,
-    StagedConfig, StagedReload, spawn_reload_triggers, stop_reload_triggers,
+    DirectoriesResolver, EnumTag, HookOutcome, ReloadProposal, ReloadSummary, ReloadTarget,
+    ReloadTriggers, ReloadableConfig, StagedConfig, StagedReload, spawn_reload_triggers,
+    stop_reload_triggers,
 };
 
 // ---------------------------------------------------------------------------
