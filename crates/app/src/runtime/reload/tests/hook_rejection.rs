@@ -25,7 +25,7 @@ async fn hook_rejection_preserves_config_and_graph() {
     // Initially disabled: the component is absent and the active config holds token 1.
     let old_root = runtime.root();
     let old_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
+    let old_config_generation = app.runtime().config_generation();
 
     assert!(old_root.get::<ProbeComponent>().is_none());
     assert_eq!(
@@ -64,7 +64,7 @@ async fn hook_rejection_preserves_config_and_graph() {
         "the runtime generation is unchanged"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation,
         "the config generation is unchanged"
     );
@@ -118,7 +118,7 @@ async fn receiver_mutating_hook_rejection_preserves_the_active_receiver() {
     // The probe is active, so the hook has a real receiver to mutate: constructed once
     // against token 1, with its receiver-local marker clear.
     let old_runtime_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
+    let old_config_generation = app.runtime().config_generation();
     let old_root = runtime.root().clone();
     let active = old_root
         .get::<ProbeComponent>()
@@ -160,7 +160,7 @@ async fn receiver_mutating_hook_rejection_preserves_the_active_receiver() {
         "the runtime generation is unchanged"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation,
         "the config generation is unchanged"
     );

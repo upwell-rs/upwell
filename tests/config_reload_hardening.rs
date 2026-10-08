@@ -13,8 +13,8 @@ use tempfile::TempDir;
 use upwell::config::Toml;
 use upwell::daemon::App;
 use upwell::{
-    Cfg, CfgNext, ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError, HookOutcome,
-    component, config, methods,
+    AppError, Cfg, CfgNext, ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError,
+    HookOutcome, component, config, methods,
 };
 use upwell_config::{Resolver, ResolverChain};
 
@@ -70,7 +70,7 @@ async fn cross_path_reference_changes_republish_the_dependent_binding() {
     )
     .expect("update referenced path");
 
-    let report = app.config_reloader().reload().await.expect("reload");
+    let report = app.reloader().reload().await.expect("reload");
 
     assert_eq!(report.changed.len(), 1);
     assert_eq!(report.changed[0].path, "server");
@@ -119,7 +119,7 @@ async fn resolver_changes_republish_a_binding_without_source_edits() {
     assert_eq!(consumer.config.get().value, "first");
     *value.write().expect("resolver lock") = "second".to_string();
 
-    let report = app.config_reloader().reload().await.expect("reload");
+    let report = app.reloader().reload().await.expect("reload");
 
     assert_eq!(report.changed.len(), 1);
     assert_eq!(consumer.config.get().value, "second");
@@ -175,17 +175,18 @@ async fn reload_hook_can_read_an_unchanged_staged_binding() {
         .build()
         .await
         .expect("build app");
-    let hook = app
-        .container()
-        .get::<MultiConfigHook>()
-        .expect("resolve hook component");
 
     fs::write(&file, "[changed]\nvalue = 2\n[unchanged]\nvalue = 9\n").expect("change one binding");
 
-    app.config_reloader()
+    app.reloader()
         .reload()
         .await
         .expect("unchanged CfgNext parameter remains available");
+
+    let hook = app
+        .container()
+        .get::<MultiConfigHook>()
+        .expect("the published hook component resolves");
 
     assert_eq!(hook.unchanged_seen.load(Ordering::SeqCst), 9);
 }
@@ -229,12 +230,12 @@ async fn committed_snapshot_comes_from_the_same_resolver_pass_as_the_value() {
 
     assert_eq!(consumer.config.get().value, "first");
 
-    let first = app.config_reloader().reload().await.expect("first reload");
+    let first = app.reloader().reload().await.expect("first reload");
 
     assert_eq!(first.changed.len(), 1);
     assert_eq!(consumer.config.get().value, "third");
 
-    let second = app.config_reloader().reload().await.expect("second reload");
+    let second = app.reloader().reload().await.expect("second reload");
 
     assert!(
         second.changed.is_empty(),
@@ -292,9 +293,12 @@ async fn panicking_deserializer_does_not_poison_future_reloads() {
         .expect("resolve consumer");
 
     fs::write(&file, "[panic]\nvalue = 2\n").expect("write panicking value");
-    let error = app.config_reloader().reload().await.unwrap_err();
+    let error = app.reloader().reload().await.unwrap_err();
 
-    assert!(matches!(error, ConfigReloadError::Panicked));
+    assert!(
+        matches!(&error, AppError::ConfigReload(error) if matches!(**error, ConfigReloadError::Panicked)),
+        "unexpected reload error: {error:?}"
+    );
     assert!(!error.to_string().contains("sensitive"));
     assert_eq!(
         consumer.config.get().value,
@@ -304,7 +308,7 @@ async fn panicking_deserializer_does_not_poison_future_reloads() {
 
     fs::write(&file, "[panic]\nvalue = 3\n").expect("write valid value");
     let report = app
-        .config_reloader()
+        .reloader()
         .reload()
         .await
         .expect("later reload recovers");
@@ -319,12 +323,14 @@ struct HookPanicConfig {
     value: u32,
 }
 
+/// Counts every [`PanicOnceHook`] run across instances: each reload attempt runs the hook
+/// on a freshly constructed candidate, so per-instance state cannot express "first run".
+static PANIC_ONCE_HOOK_CALLS: AtomicUsize = AtomicUsize::new(0);
+
 #[component]
 struct PanicOnceHook {
     #[config("hooked")]
     config: Cfg<HookPanicConfig>,
-    #[default]
-    calls: AtomicUsize,
 }
 
 #[methods]
@@ -334,7 +340,7 @@ impl PanicOnceHook {
         &self,
         #[config("hooked")] _next: CfgNext<HookPanicConfig>,
     ) -> upwell::daemon::Result<HookOutcome> {
-        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+        if PANIC_ONCE_HOOK_CALLS.fetch_add(1, Ordering::SeqCst) == 0 {
             panic!("sensitive hook panic payload");
         }
 
@@ -361,9 +367,12 @@ async fn panicking_reload_hook_does_not_disable_later_reloads() {
         .expect("resolve component");
 
     fs::write(&file, "[hooked]\nvalue = 2\n").expect("write first update");
-    let error = app.config_reloader().reload().await.unwrap_err();
+    let error = app.reloader().reload().await.unwrap_err();
 
-    assert!(matches!(error, ConfigReloadError::Hook { .. }));
+    assert!(
+        matches!(&error, AppError::ConfigReload(error) if matches!(**error, ConfigReloadError::Hook { .. })),
+        "unexpected reload error: {error:?}"
+    );
     assert!(!error.to_string().contains("sensitive"));
     assert_eq!(
         component.config.get().value,
@@ -372,11 +381,17 @@ async fn panicking_reload_hook_does_not_disable_later_reloads() {
     );
 
     fs::write(&file, "[hooked]\nvalue = 3\n").expect("write second update");
-    app.config_reloader()
+    app.reloader()
         .reload()
         .await
         .expect("reload subsystem remains usable");
 
+    let published = app
+        .container()
+        .get::<PanicOnceHook>()
+        .expect("the published component resolves");
+
     assert_eq!(component.config.get().value, 3);
-    assert_eq!(component.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(published.config.get().value, 3);
+    assert_eq!(PANIC_ONCE_HOOK_CALLS.load(Ordering::SeqCst), 2);
 }

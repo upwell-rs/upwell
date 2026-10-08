@@ -18,7 +18,7 @@ async fn unchanged_reload_skips_candidate_work() {
 
     let old_root = runtime.root();
     let old_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
+    let old_config_generation = app.runtime().config_generation();
     let factories_before = factory_calls();
     let hooks_before = hook_calls();
 
@@ -39,7 +39,7 @@ async fn unchanged_reload_skips_candidate_work() {
         "the runtime generation is unchanged"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation,
         "the config generation is unchanged"
     );

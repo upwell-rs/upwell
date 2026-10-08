@@ -1,19 +1,20 @@
 //! End-to-end proof of manual config reloading: a file-backed app injects two
-//! `Cfg<T>` bindings, one source value changes, and a reload re-publishes **only**
+//! `Cfg<T>` bindings, one source value changes, and a runtime reload re-publishes **only**
 //! the changed binding — the unchanged one keeps its exact `Arc` (no spurious swap),
 //! and a snapshot taken before the reload stays pinned to the old value.
 
 use std::any::TypeId;
 use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 
 use serde::Deserialize;
 use tempfile::TempDir;
-use upwell::ContainerConfigExt;
 use upwell::config::Toml;
 use upwell::dirs::{Config, DirectoriesManager};
 use upwell::{
-    App, Cfg, ConfigManager, RuntimeReloadReport, StagedConfig, StagedReload, component, config,
+    App, Cfg, ConfigManager, ConfigReloader, ConfigStore, RuntimeReloadReport, StagedConfig,
+    StagedReload, component, config,
 };
 use upwell_config::ResolverChain;
 
@@ -46,6 +47,20 @@ impl Consumer {
     fn other(&self) -> &Cfg<OtherCfg> {
         &self.other
     }
+}
+
+/// The config staging engine over `[svc]` and `[other]`, plus the active store whose
+/// `Cfg` handles share the engine's live slots.
+fn staging_engine(config_dir: &Path) -> (ConfigReloader, ConfigStore) {
+    let manager =
+        ConfigManager::<Toml>::load_in_with_resolvers(config_dir, &[], ResolverChain::empty())
+            .expect("load config")
+            .with_config::<SvcCfg>("svc")
+            .with_config::<OtherCfg>("other")
+            .into_dynamic();
+    let (store, slots) = ConfigStore::build(&manager).expect("bind config");
+
+    (ConfigReloader::new(manager, slots), store)
 }
 
 fn temp_config_dir() -> TempDir {
@@ -89,15 +104,11 @@ async fn reload_swaps_only_the_changed_binding() {
 
     fs::write(&config_file, "[svc]\nvalue = 2\n\n[other]\nvalue = 100\n").expect("rewrite config");
 
-    let report = daemon
-        .config_reloader()
-        .reload()
-        .await
-        .expect("reload succeeds");
+    let report = daemon.reloader().reload().await.expect("reload succeeds");
 
     assert_eq!(
-        report.generation, 1,
-        "first successful reload is generation 1"
+        report.config_generation, 1,
+        "first successful reload is config generation 1"
     );
     assert_eq!(report.changed.len(), 1, "only one binding changed");
     assert_eq!(report.changed[0].path, "svc", "the changed binding is svc");
@@ -127,12 +138,19 @@ async fn reload_swaps_only_the_changed_binding() {
     );
 
     let unchanged = daemon
-        .config_reloader()
+        .reloader()
         .reload()
         .await
         .expect("second reload succeeds");
 
-    assert_eq!(unchanged.generation, 2, "generation advances every reload");
+    assert!(
+        !unchanged.published,
+        "an unchanged source publishes nothing"
+    );
+    assert_eq!(
+        unchanged.config_generation, 1,
+        "an unchanged source does not advance the config generation"
+    );
     assert!(
         unchanged.changed.is_empty(),
         "re-reading identical sources changes nothing"
@@ -153,22 +171,13 @@ async fn staged_reload_commits_only_when_explicitly_committed() {
     fs::create_dir_all(config_dir.path()).expect("create config subdir");
     fs::write(&config_file, "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n").expect("write config");
 
-    let manager =
-        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
-            .expect("load config");
-
-    let daemon = App::<()>::builder("config-staged-reload-test")
-        .config_source(manager)
-        .auto_discover()
-        .build()
-        .await
-        .expect("daemon builds");
-
-    let consumer = daemon
-        .container()
-        .get::<Consumer>()
-        .expect("Consumer constructed");
-    let reloader = daemon.config_reloader();
+    let (reloader, store) = staging_engine(config_dir.path());
+    let svc = store
+        .resolve_path::<Cfg<SvcCfg>>("svc")
+        .expect("active store resolves svc");
+    let other = store
+        .resolve_path::<Cfg<OtherCfg>>("other")
+        .expect("active store resolves other");
 
     let unchanged = reloader.stage().expect("staging identical sources");
 
@@ -212,12 +221,12 @@ async fn staged_reload_commits_only_when_explicitly_committed() {
     );
 
     assert_eq!(
-        consumer.svc().get().value,
+        svc.get().value,
         1,
         "the live value is untouched while the reload is only staged"
     );
     assert_eq!(
-        consumer.other().get().value,
+        other.get().value,
         100,
         "the unchanged binding keeps its value while staged"
     );
@@ -225,12 +234,12 @@ async fn staged_reload_commits_only_when_explicitly_committed() {
     staged.commit();
 
     assert_eq!(
-        consumer.svc().get().value,
+        svc.get().value,
         2,
         "an explicit commit publishes the staged value"
     );
     assert_eq!(
-        consumer.other().get().value,
+        other.get().value,
         100,
         "the unchanged binding keeps its value after the commit"
     );
@@ -250,22 +259,10 @@ async fn staged_candidate_store_resolves_proposed_values_without_touching_active
     fs::create_dir_all(config_dir.path()).expect("create config subdir");
     fs::write(&config_file, "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n").expect("write config");
 
-    let manager =
-        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
-            .expect("load config");
-
-    let daemon = App::<()>::builder("config-candidate-store-test")
-        .config_source(manager)
-        .auto_discover()
-        .build()
-        .await
-        .expect("daemon builds");
-
-    let consumer = daemon
-        .container()
-        .get::<Consumer>()
-        .expect("Consumer constructed");
-    let reloader = daemon.config_reloader();
+    let (reloader, store) = staging_engine(config_dir.path());
+    let svc = store
+        .resolve_path::<Cfg<SvcCfg>>("svc")
+        .expect("active store resolves svc");
 
     fs::write(&config_file, "[svc]\nvalue = 2\n\n[other]\nvalue = 100\n").expect("rewrite config");
 
@@ -297,14 +294,13 @@ async fn staged_candidate_store_resolves_proposed_values_without_touching_active
     );
 
     assert_eq!(
-        consumer.svc().get().value,
+        svc.get().value,
         1,
         "the active handle keeps the old value while staged"
     );
     assert_eq!(
-        daemon
-            .container()
-            .config::<SvcCfg>("svc")
+        store
+            .resolve_path::<Cfg<SvcCfg>>("svc")
             .expect("active store resolves svc")
             .get()
             .value,
@@ -315,7 +311,7 @@ async fn staged_candidate_store_resolves_proposed_values_without_touching_active
     drop(staged);
 
     assert_eq!(
-        consumer.svc().get().value,
+        svc.get().value,
         1,
         "dropping the staged reload publishes nothing"
     );
@@ -334,22 +330,10 @@ async fn noop_stage_candidate_store_resolves_current_values() {
     fs::create_dir_all(config_dir.path()).expect("create config subdir");
     fs::write(&config_file, "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n").expect("write config");
 
-    let manager =
-        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
-            .expect("load config");
-
-    let daemon = App::<()>::builder("config-noop-candidate-test")
-        .config_source(manager)
-        .auto_discover()
-        .build()
-        .await
-        .expect("daemon builds");
-
-    let consumer = daemon
-        .container()
-        .get::<Consumer>()
-        .expect("Consumer constructed");
-    let reloader = daemon.config_reloader();
+    let (reloader, store) = staging_engine(config_dir.path());
+    let svc = store
+        .resolve_path::<Cfg<SvcCfg>>("svc")
+        .expect("active store resolves svc");
 
     let staged = reloader.stage().expect("staging identical sources");
 
@@ -381,7 +365,7 @@ async fn noop_stage_candidate_store_resolves_current_values() {
     );
 
     assert_eq!(
-        consumer.svc().get().value,
+        svc.get().value,
         1,
         "the active handle is untouched by staging and candidate resolution"
     );
@@ -401,18 +385,7 @@ async fn facade_root_exposes_staged_reload_and_staged_config() {
     fs::create_dir_all(config_dir.path()).expect("create config subdir");
     fs::write(&config_file, "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n").expect("write config");
 
-    let manager =
-        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
-            .expect("load config");
-
-    let daemon = App::<()>::builder("config-facade-staged-types-test")
-        .config_source(manager)
-        .auto_discover()
-        .build()
-        .await
-        .expect("daemon builds");
-
-    let reloader = daemon.config_reloader();
+    let (reloader, _) = staging_engine(config_dir.path());
 
     fs::write(&config_file, "[svc]\nvalue = 2\n\n[other]\nvalue = 100\n").expect("rewrite config");
 
@@ -544,4 +517,54 @@ async fn facade_root_names_reload_failure_and_runtime_state_types() {
     // generations — so naming coverage spells it in a signature instead.
     let _condition_catalog: fn(&upwell::AppConditionState) -> &Arc<upwell::AppRegistry> =
         upwell::AppConditionState::catalog;
+}
+
+/// Requests reloads through the injected framework handle.
+#[component]
+struct ReloadAdmin {
+    reloader: upwell::RuntimeReloader,
+}
+
+/// A component injects the facade's [`RuntimeReloader`](upwell::RuntimeReloader) and
+/// drives the transactional reload with it.
+#[tokio::test]
+async fn components_inject_the_runtime_reloader() {
+    let root = temp_config_dir();
+    let dirs = DirectoriesManager::from_path(root.path().to_path_buf());
+    let config_dir = dirs.dir::<Config>();
+    let config_file = config_dir.path().join("application.toml");
+
+    fs::create_dir_all(config_dir.path()).expect("create config subdir");
+    fs::write(&config_file, "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n").expect("write config");
+
+    let manager =
+        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
+            .expect("load config");
+
+    let daemon = App::<()>::builder("config-injected-reloader-test")
+        .config_source(manager)
+        .auto_discover()
+        .build()
+        .await
+        .expect("daemon builds");
+    let admin = daemon
+        .container()
+        .get::<ReloadAdmin>()
+        .expect("ReloadAdmin constructed");
+    let before = daemon.runtime().generation();
+
+    fs::write(&config_file, "[svc]\nvalue = 2\n\n[other]\nvalue = 100\n").expect("rewrite config");
+
+    let report = admin
+        .reloader
+        .reload()
+        .await
+        .expect("the injected reloader reloads");
+
+    assert!(report.published, "a changed source publishes a generation");
+    assert_eq!(
+        daemon.runtime().generation().get(),
+        before.get() + 1,
+        "the injected handle transitions the app's runtime"
+    );
 }

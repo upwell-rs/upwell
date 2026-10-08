@@ -24,7 +24,7 @@ async fn candidate_reconstruction_failure_preserves_config_and_graph() {
     // Initially disabled: the component is absent and the active config holds token 1.
     let old_root = runtime.root();
     let old_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
+    let old_config_generation = app.runtime().config_generation();
 
     assert!(old_root.get::<ProbeComponent>().is_none());
 
@@ -51,7 +51,7 @@ async fn candidate_reconstruction_failure_preserves_config_and_graph() {
         "the runtime generation is unchanged"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation,
         "the config generation is unchanged"
     );

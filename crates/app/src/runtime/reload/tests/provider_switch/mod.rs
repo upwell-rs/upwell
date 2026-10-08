@@ -33,7 +33,7 @@ async fn config_switch_swaps_the_effective_authenticator_provider_transactionall
 
     let old_view = runtime.view();
     let old_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
+    let old_config_generation = app.runtime().config_generation();
 
     // The initial build resolves the primary through the trait mapping, and its
     // factory read the initial config value.
@@ -80,7 +80,7 @@ async fn config_switch_swaps_the_effective_authenticator_provider_transactionall
         "the runtime generation advances exactly once"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation + 1,
         "the config generation advances once, at the terminal commit"
     );
@@ -164,7 +164,7 @@ async fn config_switch_swaps_the_effective_authenticator_provider_transactionall
         "the runtime generation advances exactly once more"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation + 2,
         "the config generation advances once more"
     );

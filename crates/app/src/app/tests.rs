@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use upwell_config::{
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigManager, ConfigProperties,
-    ConfigReloader, ConfigStore, Toml,
+    ConfigStore, Toml,
 };
 use upwell_core::{
     ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
@@ -22,6 +22,7 @@ use upwell_dirs::{Config as ConfigDir, Dir, DirectoriesManager};
 use upwell_hooks::HookManager;
 
 use super::App;
+use crate::builtins::RuntimeReloader;
 use crate::{
     AppRegistry, AppRuntime, LoggingConfig, PreBuildContext, PreparedProtocol, ProtocolDefinition,
     ProtocolRuntime, ScopeTopology, ShutdownSignal, ValidationContext,
@@ -290,10 +291,10 @@ fn framework_singletons_are_snapshot_capable_and_user_prebuilts_are_not() {
         "the shutdown handle must be retainable across generations"
     );
     assert!(
-        super::CONFIG_RELOADER_DESCRIPTOR
+        super::RUNTIME_RELOADER_DESCRIPTOR
             .generation_snapshot
             .is_some(),
-        "the config reloader must be retainable across generations"
+        "the runtime reloader must be retainable across generations"
     );
     assert!(
         super::HOOK_MANAGER_DESCRIPTOR.generation_snapshot.is_none(),
@@ -377,22 +378,12 @@ async fn candidate_metadata_cannot_upgrade_user_prebuilt_provenance() {
 async fn framework_singletons_snapshot_out_of_a_built_root() {
     let shutdown = ShutdownSignal::new();
     let hooks = HookManager::new(Vec::new());
-    let manager = ConfigManager::<Toml>::from_str(
-        r#"
-            [logging]
-            level = "debug"
-            format = "compact"
-            ansi = false
-        "#,
-    )
-    .expect("test config parses")
-    .into_dynamic();
-    let reloader = ConfigReloader::new(manager, Vec::new(), hooks.clone());
+    let reloader = RuntimeReloader::new();
     let dirs = DirectoriesManager::from_path(std::env::temp_dir().join("upwell-app-snapshot-test"));
 
     let descriptors = [
         super::SHUTDOWN_HANDLE_DESCRIPTOR,
-        super::CONFIG_RELOADER_DESCRIPTOR,
+        super::RUNTIME_RELOADER_DESCRIPTOR,
         super::HOOK_MANAGER_DESCRIPTOR,
         ComponentDescriptor::of::<DirectoriesManager>(),
         ComponentDescriptor::of::<Dir<ConfigDir>>(),

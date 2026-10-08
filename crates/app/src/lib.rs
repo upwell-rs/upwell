@@ -29,7 +29,9 @@ pub mod transition;
 #[doc(hidden)]
 pub use app::HostLifecycleCapabilities;
 pub use app::{App, AppBuilder, PreparedApp};
-pub use builtins::{LogFormat, LoggingConfig, ParseLogFormatError, ServerConfig, SpanEvents};
+pub use builtins::{
+    LogFormat, LoggingConfig, ParseLogFormatError, RuntimeReloader, ServerConfig, SpanEvents,
+};
 pub use composition::{
     CompositionDiagnostic, CompositionDiagnostics, CompositionDirective, CompositionEdge,
     CompositionPhase, CompositionTarget, ContributionId, ContributionProvenance, Contributor,

@@ -32,7 +32,7 @@ async fn assert_panic_contained_reload_recovers(
 
     let old_root = runtime.root();
     let old_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
+    let old_config_generation = app.runtime().config_generation();
     let factories_before = factory_calls();
     let hooks_before = hook_calls();
 
@@ -60,7 +60,7 @@ async fn assert_panic_contained_reload_recovers(
         "the runtime generation is unchanged"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation,
         "the config generation is unchanged"
     );
@@ -122,7 +122,7 @@ async fn assert_panic_contained_reload_recovers(
         "the recovered reload advances the runtime generation"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation + 1,
         "the recovered reload advances the config generation"
     );

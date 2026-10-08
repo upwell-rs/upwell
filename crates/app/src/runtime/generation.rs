@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 
 use arc_swap::ArcSwap;
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -165,6 +165,30 @@ pub(crate) struct RuntimeTransitionCoordinator {
     next_attempt: Arc<AtomicU64>,
 }
 
+/// A non-owning [`RuntimeTransitionCoordinator`] reference that never keeps a committed
+/// generation alive.
+#[derive(Clone)]
+pub(crate) struct WeakTransitionCoordinator {
+    owner: Arc<()>,
+    current: Weak<ArcSwap<RuntimeGeneration>>,
+    writer: Arc<Mutex<()>>,
+    next_attempt: Arc<AtomicU64>,
+}
+
+impl WeakTransitionCoordinator {
+    /// The coordinator, while its publication cell is still owned by a runtime.
+    pub(crate) fn upgrade(&self) -> Option<RuntimeTransitionCoordinator> {
+        let current = self.current.upgrade()?;
+
+        Some(RuntimeTransitionCoordinator {
+            owner: Arc::clone(&self.owner),
+            publication: RuntimePublication { current },
+            writer: Arc::clone(&self.writer),
+            next_attempt: Arc::clone(&self.next_attempt),
+        })
+    }
+}
+
 impl RuntimeTransitionCoordinator {
     pub(crate) fn new(initial: PreparedRuntimeGeneration) -> Self {
         let owner = Arc::new(());
@@ -176,6 +200,16 @@ impl RuntimeTransitionCoordinator {
             publication,
             writer: Arc::new(Mutex::new(())),
             next_attempt: Arc::new(AtomicU64::new(1)),
+        }
+    }
+
+    /// A non-owning reference for handles seeded into the coordinator's own generations.
+    pub(crate) fn downgrade(&self) -> WeakTransitionCoordinator {
+        WeakTransitionCoordinator {
+            owner: Arc::clone(&self.owner),
+            current: Arc::downgrade(&self.publication.current),
+            writer: Arc::clone(&self.writer),
+            next_attempt: Arc::clone(&self.next_attempt),
         }
     }
 

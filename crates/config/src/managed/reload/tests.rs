@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use tempfile::TempDir;
-use upwell_hooks::HookManager;
 
 use crate::ResolverChain;
 use crate::managed::{Cfg, ConfigManager, ConfigProperties, ConfigReloader, ConfigStore, Toml};
@@ -54,11 +53,7 @@ fn two_binding_reloader(initial: &str) -> (TempDir, PathBuf, ConfigReloader) {
 
     let (_store, slots) = ConfigStore::build(&manager).expect("bind config");
 
-    (
-        root,
-        config_file,
-        ConfigReloader::new(manager, slots, HookManager::new(Vec::new())),
-    )
+    (root, config_file, ConfigReloader::new(manager, slots))
 }
 
 #[test]

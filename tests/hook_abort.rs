@@ -11,8 +11,8 @@ use upwell::config::Toml;
 use upwell::daemon::App;
 use upwell::dirs::{Config, DirectoriesManager};
 use upwell::{
-    Cfg, CfgNext, ConfigManager, ConfigReload, ConfigReloadError, HookOutcome, component, config,
-    methods,
+    AppError, Cfg, CfgNext, ConfigManager, ConfigReload, ConfigReloadError, HookOutcome, component,
+    config, methods,
 };
 use upwell_config::ResolverChain;
 
@@ -85,10 +85,13 @@ async fn a_rejecting_hook_aborts_the_reload() {
 
     fs::write(&config_file, "[svc]\nvalue = 2\n").expect("rewrite config");
 
-    let result = daemon.config_reloader().reload().await;
+    let result = daemon.reloader().reload().await;
 
     assert!(
-        matches!(result, Err(ConfigReloadError::Hook { .. })),
+        matches!(
+            &result,
+            Err(AppError::ConfigReload(error)) if matches!(**error, ConfigReloadError::Hook { .. })
+        ),
         "the rejecting hook surfaces as a hook error: {result:?}"
     );
     assert_eq!(
@@ -99,7 +102,7 @@ async fn a_rejecting_hook_aborts_the_reload() {
 
     // The reloader is still usable; the generation did not advance on the aborted reload.
     assert_eq!(
-        daemon.config_reloader().generation(),
+        daemon.runtime().config_generation(),
         0,
         "no successful reload yet"
     );

@@ -26,7 +26,7 @@ async fn cancelled_precommit_attempt_releases_serializers() {
     // Initially disabled: the component is absent and the active config holds token 1.
     let old_root = runtime.root();
     let old_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
+    let old_config_generation = app.runtime().config_generation();
 
     assert!(old_root.get::<ProbeComponent>().is_none());
 
@@ -61,7 +61,7 @@ async fn cancelled_precommit_attempt_releases_serializers() {
         "the runtime generation is unchanged"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation,
         "the config generation is unchanged"
     );
@@ -107,7 +107,7 @@ async fn cancelled_precommit_attempt_releases_serializers() {
         "the aborted attempt consumed no runtime generation"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         old_config_generation + 1,
         "the aborted attempt consumed no config generation"
     );

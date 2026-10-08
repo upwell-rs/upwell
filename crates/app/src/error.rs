@@ -149,6 +149,11 @@ pub enum Error {
     #[error("candidate runtime preparation panicked")]
     CandidatePreparationPanicked,
 
+    /// A runtime reloader was used before its application was built or after its runtime
+    /// was dropped.
+    #[error("the application runtime is not attached or has been dropped")]
+    RuntimeUnavailable,
+
     /// A configuration loading, binding, or substitution failure.
     #[error(transparent)]
     Config(#[from] upwell_config::ConfigError),

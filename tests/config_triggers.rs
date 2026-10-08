@@ -76,7 +76,7 @@ async fn app_builder_builds_with_a_configured_manager() -> upwell::daemon::Resul
 
     // The reloader is always present; a manual reload still works.
     let report = built
-        .config_reloader()
+        .reloader()
         .reload()
         .await
         .expect("manual reload works");
@@ -111,9 +111,8 @@ async fn watching_a_source_file_triggers_a_reload() -> Result<(), Box<dyn std::e
         .expect("protocol-neutral app builds");
 
     let runtime = app.runtime().clone();
-    let reloader = app.config_reloader();
     let shutdown = app.shutdown_handle();
-    let before = reloader.generation();
+    let before = runtime.config_generation();
     let runtime_before = runtime.generation();
 
     let mut task = AbortOnDropTask::spawn("watch daemon", app.run());
@@ -131,7 +130,7 @@ async fn watching_a_source_file_triggers_a_reload() -> Result<(), Box<dyn std::e
             () = tokio::time::sleep(Duration::from_millis(100)) => {}
         }
 
-        if reloader.generation() > before {
+        if runtime.config_generation() > before {
             reloaded = true;
             break;
         }

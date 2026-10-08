@@ -68,7 +68,7 @@ async fn concurrent_reloads_commit_in_staging_order() {
 
     let runtime = app.runtime();
     let base_runtime_generation = runtime.generation();
-    let base_config_generation = app.config_reloader().generation();
+    let base_config_generation = app.runtime().config_generation();
 
     park_factory_after_staging(true).await;
     write_probe_config(&config_dir_of(&dir), true, 2);
@@ -144,7 +144,7 @@ async fn concurrent_reloads_commit_in_staging_order() {
         "the active root belongs to the current runtime generation"
     );
     assert_eq!(
-        app.config_reloader().generation(),
+        app.runtime().config_generation(),
         report_b.config_generation,
         "the active config generation is reload B's terminal commit"
     );

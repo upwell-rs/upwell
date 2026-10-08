@@ -17,7 +17,7 @@ async fn triggered_reload_publishes_a_runtime_generation() {
     let (dir, app) = build_probe_app(false, 1).await;
     let runtime = app.runtime();
     let old_generation = runtime.generation();
-    let old_config_generation = app.config_reloader().generation();
+    let old_config_generation = app.runtime().config_generation();
 
     write_probe_config(&config_dir_of(&dir), true, 3);
 
@@ -58,11 +58,6 @@ async fn triggered_reload_watches_the_reloader_sources() {
 
     let sources = ReloadTarget::sources(runtime);
 
-    assert_eq!(
-        sources,
-        app.config_reloader().sources(),
-        "the runtime watches the same files as its config reloader"
-    );
     assert!(
         sources
             .iter()

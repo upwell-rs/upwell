@@ -78,11 +78,10 @@ pub use upwell_dirs::{Dir, DirKind, DirectoriesManager};
 pub use upwell_config::{
     BindingFacts, CONFIG_BINDINGS, Cfg, CfgNext, ChangedBinding, ComponentHookReport,
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigBindingDescriptor, ConfigDefaults,
-    ConfigError, ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError,
-    ConfigReloadReport, ConfigReloader, ConfigStore, ContainerConfigExt, DefaultSpec,
-    DirectoriesResolver, EnumTag, HookOutcome, ReloadProposal, ReloadSummary, ReloadTarget,
-    ReloadTriggers, ReloadableConfig, StagedConfig, StagedReload, spawn_reload_triggers,
-    stop_reload_triggers,
+    ConfigError, ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError, ConfigReloader,
+    ConfigStore, ContainerConfigExt, DefaultSpec, DirectoriesResolver, EnumTag, HookOutcome,
+    ReloadProposal, ReloadSummary, ReloadTarget, ReloadTriggers, ReloadableConfig, StagedConfig,
+    StagedReload, spawn_reload_triggers, stop_reload_triggers,
 };
 
 // ---------------------------------------------------------------------------
@@ -110,8 +109,8 @@ pub use upwell_app::{
     PreBuildContext, PreparedApp, PreparedProtocol, PreparedScopeTopology, ProtocolDefinition,
     ProtocolId, ProtocolPluginRegistrar, ProtocolRuntime, RelationKind, RelationTarget,
     ReplacementDecision, ResolvedPlugin, RestartReason, RestartRequired, RuntimeReloadReport,
-    RuntimeView, ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError, Serve,
-    ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents,
+    RuntimeReloader, RuntimeView, ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError,
+    Serve, ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents,
     SuppressionDecision, ValidationContext, build_host, build_host_context, build_prepared_host,
     extend_late_plugins, prepare_host, prepare_host_context, prepare_setup_host_context,
     resolve_early_plugins, resolve_host_dependency, resolve_host_plugin_catalog,
@@ -238,7 +237,7 @@ pub mod config {
     pub use upwell_config::Yaml;
 }
 
-/// Framework builtins: the seeded [`ShutdownHandle`] injectable, the opt-in
+/// Framework builtins: the seeded [`ShutdownHandle`] and [`RuntimeReloader`] injectables, the opt-in
 /// [`ServerConfig`] / [`LoggingConfig`] property structs, and the feature-gated
 /// `init_tracing` subscriber helper.
 #[cfg(not(target_family = "wasm"))]
