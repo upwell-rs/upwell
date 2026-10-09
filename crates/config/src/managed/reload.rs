@@ -1,8 +1,10 @@
 //! The configuration staging engine behind the application runtime's reload.
 //!
 //! [`ConfigReloader`] re-reads the [`ConfigManager`]'s sources, diffs each binding's
-//! merged subtree against the live tree, and stages **only** the bindings whose source
-//! actually changed. A [`StagedReload`] is inert: the application runtime's
+//! merged subtree against the live tree, and stages a proposal for every binding: only
+//! the bindings whose source actually changed are re-deserialized into committable swaps,
+//! while unchanged bindings contribute their current value so hooks reading them still
+//! resolve. A [`StagedReload`] is inert: the application runtime's
 //! transactional reload builds its candidate generation over the staged proposal, runs
 //! the affected `#[hook(ConfigReload)]` hooks (which may **abort**), and commits the new
 //! values into their shared `Live` slots only as part of its terminal publication. On
