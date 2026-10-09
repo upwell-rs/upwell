@@ -1,11 +1,15 @@
 //! Automatic config-reload triggers.
 //!
-//! Beyond the always-available manual [`ConfigReloader::reload`], a [`ConfigManager`] may
-//! request reloads on `SIGHUP` (Unix) or on config-file changes (the `watch` feature). The
-//! daemon spawns the matching background tasks at `serve`/`run` and aborts them on shutdown;
-//! each just calls `reload()` and logs the outcome.
+//! A [`ConfigManager`] may request reloads on `SIGHUP` (Unix) or on config-file changes (the
+//! `watch` feature). The daemon spawns the matching background tasks at `serve`/`run` and
+//! aborts them on shutdown; each drives one [`ReloadTarget`] and logs the outcome. The
+//! application runtime is the target, so triggered reloads take the same transactional
+//! config-and-graph path as a manual reload.
 //!
 //! [`ConfigManager`]: super::ConfigManager
+
+use std::fmt::Display;
+use std::path::PathBuf;
 
 #[cfg(any(unix, feature = "watch"))]
 use futures::FutureExt;
@@ -14,21 +18,45 @@ use tracing::error;
 #[cfg(any(unix, feature = "watch"))]
 use tracing::{info, warn};
 
-use super::{ConfigReloader, ReloadTriggers};
+use super::ReloadTriggers;
+
+/// A reload operation that the automatic `SIGHUP` and file-watch triggers drive.
+///
+/// The application runtime implements it with its transactional config-and-graph reload, so
+/// triggered reloads never bypass the runtime transition coordinator.
+pub trait ReloadTarget: Clone + Send + Sync + 'static {
+    /// The error a failed reload reports.
+    type Error: Display + Send;
+
+    /// A snapshot of the config source files a file watcher observes.
+    fn sources(&self) -> Vec<PathBuf>;
+
+    /// Runs one complete reload.
+    fn trigger_reload(&self) -> impl Future<Output = Result<ReloadSummary, Self::Error>> + Send;
+}
+
+/// The loggable outcome of one triggered reload.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReloadSummary {
+    /// The config generation after the reload.
+    pub generation: u64,
+    /// How many bindings changed and were re-published.
+    pub changed: usize,
+}
 
 /// Spawns the background tasks for the requested triggers, returning their handles so the
 /// caller can abort them on shutdown. Unsupported requests (SIGHUP off-Unix, watching
 /// without the `watch` feature) are logged and skipped.
 #[allow(unused_mut, unused_variables)]
-pub fn spawn_reload_triggers(
-    reloader: ConfigReloader,
+pub fn spawn_reload_triggers<T: ReloadTarget>(
+    target: T,
     triggers: ReloadTriggers,
 ) -> Vec<JoinHandle<()>> {
     let mut handles = Vec::new();
 
     if triggers.sighup {
         #[cfg(unix)]
-        handles.push(spawn_sighup(reloader.clone()));
+        handles.push(spawn_sighup(target.clone()));
 
         #[cfg(not(unix))]
         tracing::warn!(target: "upwell::config", "reload_on_sighup is Unix-only; ignoring");
@@ -36,7 +64,7 @@ pub fn spawn_reload_triggers(
 
     if triggers.watch {
         #[cfg(feature = "watch")]
-        if let Some(handle) = spawn_watch(reloader.clone(), triggers.debounce) {
+        if let Some(handle) = spawn_watch(target.clone(), triggers.debounce) {
             handles.push(handle);
         }
 
@@ -68,8 +96,8 @@ pub async fn stop_reload_triggers(handles: Vec<JoinHandle<()>>) {
 
 /// Runs one reload and logs its outcome.
 #[cfg(any(unix, feature = "watch"))]
-async fn run_reload(reloader: &ConfigReloader, cause: &'static str) {
-    match std::panic::AssertUnwindSafe(reloader.reload())
+async fn run_reload<T: ReloadTarget>(target: &T, cause: &'static str) {
+    match std::panic::AssertUnwindSafe(target.trigger_reload())
         .catch_unwind()
         .await
     {
@@ -77,7 +105,7 @@ async fn run_reload(reloader: &ConfigReloader, cause: &'static str) {
             target: "upwell::config",
             cause,
             generation = report.generation,
-            changed = report.changed.len(),
+            changed = report.changed,
             "configuration reloaded"
         ),
 
@@ -98,7 +126,7 @@ async fn run_reload(reloader: &ConfigReloader, cause: &'static str) {
 
 /// Reloads whenever the process receives `SIGHUP`.
 #[cfg(unix)]
-fn spawn_sighup(reloader: ConfigReloader) -> JoinHandle<()> {
+fn spawn_sighup<T: ReloadTarget>(target: T) -> JoinHandle<()> {
     use tokio::signal::unix::{SignalKind, signal};
 
     tokio::spawn(async move {
@@ -115,7 +143,7 @@ fn spawn_sighup(reloader: ConfigReloader) -> JoinHandle<()> {
         info!(target: "upwell::config", "reloading configuration on SIGHUP");
 
         while hangup.recv().await.is_some() {
-            run_reload(&reloader, "sighup").await;
+            run_reload(&target, "sighup").await;
         }
 
         warn!(target: "upwell::config", "SIGHUP reload trigger stopped unexpectedly");
@@ -126,13 +154,16 @@ fn spawn_sighup(reloader: ConfigReloader) -> JoinHandle<()> {
 /// Watches the source files' parent directories, since editors and atomic writes replace the
 /// file (which would drop a file-level watch).
 #[cfg(feature = "watch")]
-fn spawn_watch(reloader: ConfigReloader, debounce: std::time::Duration) -> Option<JoinHandle<()>> {
+fn spawn_watch<T: ReloadTarget>(
+    target: T,
+    debounce: std::time::Duration,
+) -> Option<JoinHandle<()>> {
     use std::collections::HashSet;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     use notify::{RecursiveMode, Watcher};
 
-    let sources = reloader.sources();
+    let sources = target.sources();
 
     if sources.is_empty() {
         tracing::warn!(
@@ -189,7 +220,7 @@ fn spawn_watch(reloader: ConfigReloader, debounce: std::time::Duration) -> Optio
 
             while rx.try_recv().is_ok() {}
 
-            run_reload(&reloader, "file-change").await;
+            run_reload(&target, "file-change").await;
         }
 
         warn!(target: "upwell::config", "config file reload trigger stopped unexpectedly");

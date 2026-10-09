@@ -11,21 +11,23 @@ use std::path::PathBuf;
 use futures::FutureExt;
 use tracing::{debug, error, info};
 use upwell_config::{
-    CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ConfigBinding, ConfigManager, ConfigProperties,
-    ConfigReloader, ConfigStore, ReloadTriggers, spawn_reload_triggers, stop_reload_triggers,
+    ConditionFactSource, ConditionFacts, ConfigBinding, ConfigManager, ConfigProperties,
+    ConfigReloader, ConfigStore, ReloadTriggers, ReloadableConfig, spawn_reload_triggers,
+    stop_reload_triggers,
 };
 use upwell_core::{
-    Descriptor, ResolverCtx, ResolverSet, Singleton as SingletonScope, TypeDescriptor,
+    Descriptor, ResolverSet, RuntimeGenerationId, Singleton as SingletonScope, TypeDescriptor,
 };
 use upwell_di::{
-    BoxedComponent, Component, ComponentDescriptor, Injectable, RootResolver, ScopeContainer,
-    ScopeRegistry, root_resolver_descriptor, topological_sort,
+    BoxedComponent, Component, ComponentDescriptor, EffectiveGraph, Injectable, RootResolver,
+    ScopeContainer, ScopeRegistry, root_resolver_descriptor, topological_sort,
 };
 use upwell_dirs::{Cache, Config, Data, Dir, DirKind, DirectoriesManager, Runtime, State, Tmp};
 use upwell_hooks::{
     HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookDescriptor, HookKind, HookManager, Shutdown, Startup,
 };
 
+use crate::builtins::RuntimeReloader;
 use crate::error::Error;
 use crate::lifecycle::{ShutdownHandle, ShutdownSignal};
 use crate::plugin::{
@@ -35,25 +37,25 @@ use crate::protocol::{
     PreBuildContext, PreparedProtocol, ProtocolDefinition, ProtocolRuntime, Serve,
     ValidationContext,
 };
-use crate::registry::AppRegistry;
-use crate::runtime::{AppRuntime, RuntimeScopePlan};
+use crate::registry::{AppConditionEvaluation, AppRegistry};
+use crate::runtime::{AppConditionState, AppRuntime, PreparedRuntimeGeneration, RuntimeScopePlan};
 use crate::scope::{PreparedScopeTopology, ScopePlan, SeedDestination};
 
 /// The framework-provided singleton injectable for triggering graceful shutdown.
-static SHUTDOWN_HANDLE_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
-    crate::builtins::shutdown::SHUTDOWN_HANDLE_ID,
-    crate::builtins::shutdown::SHUTDOWN_HANDLE_NAME,
-    TypeDescriptor::of::<ShutdownHandle>(crate::builtins::shutdown::SHUTDOWN_HANDLE_NAME),
-    &SingletonScope,
-);
+static SHUTDOWN_HANDLE_DESCRIPTOR: ComponentDescriptor =
+    ComponentDescriptor::manual_of::<ShutdownHandle>(
+        crate::builtins::shutdown::SHUTDOWN_HANDLE_ID,
+        crate::builtins::shutdown::SHUTDOWN_HANDLE_NAME,
+        &SingletonScope,
+    );
 
-/// The framework-provided singleton injectable for triggering a config reload.
-static CONFIG_RELOADER_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
-    CONFIG_RELOADER_ID,
-    CONFIG_RELOADER_NAME,
-    TypeDescriptor::of::<ConfigReloader>(CONFIG_RELOADER_NAME),
-    &SingletonScope,
-);
+/// The framework-provided singleton injectable for requesting a runtime reload.
+static RUNTIME_RELOADER_DESCRIPTOR: ComponentDescriptor =
+    ComponentDescriptor::manual_of::<RuntimeReloader>(
+        crate::builtins::reloader::RUNTIME_RELOADER_ID,
+        crate::builtins::reloader::RUNTIME_RELOADER_NAME,
+        &SingletonScope,
+    );
 
 /// The framework-provided singleton injectable that runs lifecycle/event hooks.
 static HOOK_MANAGER_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
@@ -94,11 +96,13 @@ pub struct PreparedApp<D: ProtocolDefinition> {
     plugin_plan: EffectivePluginPlan,
     shutdown: ShutdownSignal,
     root_resolver: RootResolver,
-    hook_manager: HookManager,
     reloader: ConfigReloader,
+    runtime_reloader: RuntimeReloader,
     reload_triggers: ReloadTriggers,
     resolved: Arc<[ComponentDescriptor]>,
     root_order: Arc<[ComponentDescriptor]>,
+    effective_graph: EffectiveGraph,
+    condition: Arc<AppConditionState>,
     #[cfg(feature = "tooling")]
     host_lifecycle: Option<HostLifecycleCapabilities>,
     #[cfg(feature = "tooling")]
@@ -209,11 +213,31 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         self
     }
 
-    /// Registers a pre-built singleton instance, holding it until the container is built.
-    pub fn with_component<T: Component>(mut self, value: T) -> Self {
+    /// Registers the condition facts of config type `T` at `path`, so conditional
+    /// components can key their availability on `T`'s values. The path is part of every
+    /// fact id the source emits, so the same type may be registered at several paths.
+    /// The transactional reload extracts the scalars from every staged binding of the
+    /// type.
+    pub fn condition_facts<T: ConditionFacts>(mut self, path: &'static str) -> Self {
         self.registry
-            .components
-            .push(ComponentDescriptor::of::<T>());
+            .condition_facts
+            .push(ConditionFactSource::of::<T>(path));
+
+        self
+    }
+
+    /// Registers a pre-built singleton instance, holding it until the container is built.
+    ///
+    /// The instance is seeded with a raw manual descriptor: it carries no
+    /// generation-snapshot adapter, so a runtime transition that would retain it
+    /// requires a process restart instead of sharing the instance.
+    pub fn with_component<T: Component>(mut self, value: T) -> Self {
+        self.registry.components.push(ComponentDescriptor::manual(
+            T::ID,
+            T::NAME,
+            TypeDescriptor::of::<T>(T::NAME),
+            &SingletonScope,
+        ));
 
         self.instances.push(BoxedComponent {
             ty: TypeDescriptor::of::<T>(T::NAME),
@@ -330,9 +354,19 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         // Other framework singletons (the shutdown handle, the root resolver).
         seed_builtins(&shutdown, &root_resolver, &mut registry, &mut instances);
 
-        // The config reloader and hook manager are always available; their instances are
-        // seeded below, once the config slots and collected hooks exist.
-        registry.components.push(CONFIG_RELOADER_DESCRIPTOR);
+        // The runtime reloader is seeded unattached and attached once the runtime exists.
+        let runtime_reloader = RuntimeReloader::new();
+
+        registry.components.push(RUNTIME_RELOADER_DESCRIPTOR);
+        instances.push(BoxedComponent {
+            ty: TypeDescriptor::of::<RuntimeReloader>(
+                crate::builtins::reloader::RUNTIME_RELOADER_NAME,
+            ),
+            value: Box::new(Injectable::into_stored(runtime_reloader.clone())),
+        });
+
+        // The hook manager is always available; its instance is seeded below, once the
+        // collected hooks exist.
         registry.components.push(HOOK_MANAGER_DESCRIPTOR);
 
         protocol.pre_build(&mut PreBuildContext::new(&mut registry, &mut instances))?;
@@ -358,9 +392,42 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
 
         let scope_topology = Arc::new(D::SCOPE_TOPOLOGY.prepare().map_err(Error::from)?);
 
-        // Collapse to the effective component set (explicit factories override defaults).
-        let resolved = registry.resolved_components()?;
-        registry.components = resolved.clone();
+        // Collapse to the full component catalog (explicit factories override defaults).
+        // The catalog keeps conditionally disabled descriptors so a later reload can
+        // re-include them; the effective set is selected by the evaluation below.
+        let catalog = registry.resolved_components()?;
+        registry
+            .component_registry()
+            .provider_selection_model(&catalog)
+            .map_err(Error::from)?;
+        registry.components = catalog.clone();
+
+        // Build the config store before graph planning — the initial condition evaluation
+        // reads the staged binding values.
+        let (config_store, reload_slots) = ConfigStore::build(&tree).map_err(Error::from)?;
+        let config_store = Arc::new(config_store);
+
+        // Evaluate the startup conditions from the staged config values, with the same
+        // evaluator the transactional reload uses. An app with no condition facts gets an
+        // empty-facts evaluation, which leaves every unconditional component eligible.
+        let evaluation = evaluate_startup_conditions(&registry, &reload_slots)?;
+
+        // Retain the full catalog with the evaluation for this and future generations.
+        let condition = Arc::new(AppConditionState::new(
+            Arc::new(registry.clone()),
+            evaluation,
+        ));
+
+        // Narrow to the effective registry: eligible components and providers only.
+        let eligible = condition
+            .evaluation()
+            .evaluation()
+            .eligible_registry()
+            .clone();
+        let resolved = eligible.resolved_components().map_err(Error::from)?;
+        registry.components = eligible.components.clone();
+        registry.providers = eligible.providers.clone();
+
         #[cfg(feature = "tooling")]
         plugin_plan.reconcile(&registry);
 
@@ -372,15 +439,16 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         let hook_manager = HookManager::new(hooks);
         instances.push(BoxedComponent {
             ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-            value: Box::new(Injectable::into_stored(hook_manager.clone())),
+            value: Box::new(Injectable::into_stored(hook_manager)),
         });
 
-        let component_registry = registry.component_registry();
-        let provider_selection = Arc::new(
-            component_registry
-                .provider_selection_model(&resolved)
-                .map_err(Error::from)?,
-        );
+        let effective_graph = EffectiveGraph::build(
+            RuntimeGenerationId::INITIAL,
+            &eligible,
+            |consumer, dependency| scope_topology.is_reachable(&consumer, &dependency),
+        )
+        .map_err(Error::from)?;
+        let provider_selection = Arc::clone(effective_graph.provider_selection());
         registry.validate_effective_with_scope_topology(
             &resolved,
             &provider_selection,
@@ -401,10 +469,6 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         .into_iter()
         .copied()
         .collect();
-
-        // Build the config store — every bound `Cfg<T>` value, plus the reload slots.
-        let (config_store, reload_slots) = ConfigStore::build(&tree).map_err(Error::from)?;
-        let config_store = Arc::new(config_store);
 
         let protocol = protocol.prepare(&ValidationContext::new(
             &self.name,
@@ -428,13 +492,9 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
 
         let reload_triggers = tree.triggers();
 
-        let reloader = ConfigReloader::new(tree, reload_slots, hook_manager.clone());
+        let reloader = ConfigReloader::new(tree, reload_slots);
         #[cfg(feature = "tooling")]
         let config_sources = Arc::from(reloader.sources());
-        instances.push(BoxedComponent {
-            ty: TypeDescriptor::of::<ConfigReloader>(CONFIG_RELOADER_NAME),
-            value: Box::new(Injectable::into_stored(reloader.clone())),
-        });
 
         #[cfg(feature = "tooling")]
         let provider_order =
@@ -485,11 +545,13 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             plugin_plan,
             shutdown,
             root_resolver,
-            hook_manager,
             reloader,
+            runtime_reloader,
             reload_triggers,
             resolved: Arc::from(resolved),
             root_order: Arc::from(root_order),
+            effective_graph,
+            condition,
             #[cfg(feature = "tooling")]
             host_lifecycle: None,
             #[cfg(feature = "tooling")]
@@ -606,11 +668,13 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             plugin_plan,
             shutdown,
             root_resolver,
-            hook_manager,
             reloader,
+            runtime_reloader,
             reload_triggers,
             resolved,
             root_order,
+            effective_graph,
+            condition,
             #[cfg(feature = "tooling")]
                 host_lifecycle: _,
             #[cfg(feature = "tooling")]
@@ -637,10 +701,6 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
         .await
         .map_err(Error::from)?;
 
-        // Hooks resolve their `&self` receiver through the root container.
-        let hook_ctx: Arc<dyn ResolverCtx + Send + Sync> = root.clone();
-        hook_manager.attach(hook_ctx);
-
         // The root resolver hands the finished root to any singleton that needs to resolve
         // from the container at run time (kept as a `Weak`, so it adds no reference cycle).
         root_resolver.attach(&root);
@@ -651,14 +711,19 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             "app built"
         );
 
-        let runtime = AppRuntime::new(
-            Arc::from(name.as_str()),
+        // The generation resolves the root-seeded hook manager and attaches it to this
+        // root, so hook receivers resolve through the generation that owns them.
+        let generation = PreparedRuntimeGeneration::new(
             root,
             scope_registry,
             RuntimeScopePlan::new(scope_topology, scope_orders, seed_destinations),
             resolved,
-            hook_manager,
+            effective_graph,
+            condition,
         );
+        let runtime = AppRuntime::new(Arc::from(name.as_str()), generation, reloader);
+
+        runtime_reloader.attach(&runtime);
 
         // Hand off to the prepared protocol: it constructs the served runtime.
         let protocol = protocol.build(&runtime)?;
@@ -670,7 +735,7 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             protocol,
             plugin_plan,
             shutdown,
-            reloader,
+            reloader: runtime_reloader,
             reload_triggers,
         })
     }
@@ -738,10 +803,47 @@ fn seed_dir<K: DirKind>(
     });
 }
 
+/// Evaluates the startup conditions from the staged config values, with the same
+/// evaluator the transactional reload uses. An app with no condition facts gets an
+/// empty-facts evaluation, which leaves every unconditional component eligible.
+///
+/// Staging, fact extraction, descriptor callbacks, and evaluation are application
+/// extension points, so — like the reload's condition stage — the whole stage runs
+/// inside a panic boundary: a panic returns the redacted preparation panic error,
+/// while ordinary errors pass through unchanged.
+fn evaluate_startup_conditions(
+    registry: &AppRegistry,
+    reload_slots: &[Box<dyn ReloadableConfig>],
+) -> crate::Result<AppConditionEvaluation> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let staged: Vec<_> = reload_slots
+            .iter()
+            .map(|slot| slot.stage_current())
+            .collect();
+        let snapshot = registry
+            .condition_snapshot(
+                staged
+                    .iter()
+                    .map(|entry| (entry.type_id(), entry.path(), entry.value())),
+            )
+            .map_err(Error::from)?;
+        let facts = registry
+            .condition_facts
+            .iter()
+            .flat_map(|source| (source.facts.descriptors)(source.path));
+
+        registry
+            .evaluate_conditions(facts, &snapshot)
+            .map_err(Error::from)
+    }))
+    .map_err(|_| Error::CandidatePreparationPanicked)?
+}
+
 /// A fully assembled app, ready to serve its protocol.
 ///
 /// Holds the agnostic [`AppRuntime`] (DI container, scope orders, hooks) and the built
-/// [`ProtocolRuntime`], plus the shutdown signal and config reloader the serve envelope drives.
+/// [`ProtocolRuntime`], plus the shutdown signal, the runtime reloader handle, and the
+/// reload triggers the serve envelope spawns against the runtime.
 pub struct App<D: ProtocolDefinition> {
     pub name: String,
     pub registry: AppRegistry,
@@ -749,7 +851,7 @@ pub struct App<D: ProtocolDefinition> {
     protocol: <D::Prepared as PreparedProtocol>::Runtime,
     plugin_plan: EffectivePluginPlan,
     shutdown: ShutdownSignal,
-    reloader: ConfigReloader,
+    reloader: RuntimeReloader,
     reload_triggers: ReloadTriggers,
 }
 
@@ -785,7 +887,7 @@ impl<D: ProtocolDefinition> App<D> {
     }
 
     /// The root (singleton) scope container.
-    pub fn container(&self) -> &Arc<ScopeContainer> {
+    pub fn container(&self) -> Arc<ScopeContainer> {
         self.runtime.root()
     }
 
@@ -814,14 +916,17 @@ impl<D: ProtocolDefinition> App<D> {
         self.shutdown.handle()
     }
 
-    /// A handle that re-reads configuration and re-publishes the changed bindings.
-    pub fn config_reloader(&self) -> ConfigReloader {
+    /// The handle that requests a transactional config-and-graph reload of this app — the
+    /// same [`RuntimeReloader`] components inject and the watch and signal triggers'
+    /// [`AppRuntime::reload_config`] path.
+    pub fn reloader(&self) -> RuntimeReloader {
         self.reloader.clone()
     }
 
-    /// The hook manager, for running lifecycle/event hooks by kind.
+    /// The hook manager of the currently committed runtime generation, for running
+    /// lifecycle/event hooks by kind.
     pub fn hook_manager(&self) -> HookManager {
-        self.runtime.hooks().clone()
+        self.runtime.hooks()
     }
 
     /// Serves the app's protocol over `endpoint` until ctrl-c or a shutdown signal.
@@ -841,21 +946,25 @@ impl<D: ProtocolDefinition> App<D> {
             runtime,
             protocol,
             shutdown,
-            reloader,
             reload_triggers,
             ..
         } = self;
 
-        let started = match run_startup(runtime.hooks()).await {
+        // Pin the generation the lifecycle runs in: the cloned manager resolves hook
+        // receivers through its root, which stays alive only while this view is held.
+        let lifecycle_view = runtime.view();
+        let hooks = lifecycle_view.hooks().clone();
+
+        let started = match run_startup(&hooks).await {
             Ok(started) => started,
             Err((error, started)) => {
-                run_shutdown(runtime.hooks(), &started).await;
+                run_shutdown(&hooks, &started).await;
 
                 return Err(error.into());
             }
         };
 
-        let trigger_tasks = spawn_reload_triggers(reloader, reload_triggers);
+        let trigger_tasks = spawn_reload_triggers(runtime.clone(), reload_triggers);
 
         // Bridge ctrl-c to the shutdown signal so every protocol's loop only watches `shutdown`.
         let shutdown_handle = shutdown.handle();
@@ -877,7 +986,7 @@ impl<D: ProtocolDefinition> App<D> {
 
         stop_reload_triggers(trigger_tasks).await;
 
-        run_shutdown(runtime.hooks(), &started).await;
+        run_shutdown(&hooks, &started).await;
 
         match result {
             Ok(result) => result,
@@ -890,21 +999,25 @@ impl<D: ProtocolDefinition> App<D> {
         let App {
             runtime,
             mut shutdown,
-            reloader,
             reload_triggers,
             ..
         } = self;
 
-        let started = match run_startup(runtime.hooks()).await {
+        // Pin the generation the lifecycle runs in: the cloned manager resolves hook
+        // receivers through its root, which stays alive only while this view is held.
+        let lifecycle_view = runtime.view();
+        let hooks = lifecycle_view.hooks().clone();
+
+        let started = match run_startup(&hooks).await {
             Ok(started) => started,
             Err((error, started)) => {
-                run_shutdown(runtime.hooks(), &started).await;
+                run_shutdown(&hooks, &started).await;
 
                 return Err(error);
             }
         };
 
-        let trigger_tasks = spawn_reload_triggers(reloader, reload_triggers);
+        let trigger_tasks = spawn_reload_triggers(runtime.clone(), reload_triggers);
 
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {},
@@ -913,7 +1026,7 @@ impl<D: ProtocolDefinition> App<D> {
 
         stop_reload_triggers(trigger_tasks).await;
 
-        run_shutdown(runtime.hooks(), &started).await;
+        run_shutdown(&hooks, &started).await;
 
         Ok(())
     }
@@ -922,6 +1035,7 @@ impl<D: ProtocolDefinition> App<D> {
 /// Runs startup hooks sequentially, returning the components whose startup fully
 /// succeeded. On failure the list lets the caller pair shutdown only with work that
 /// actually started.
+#[allow(clippy::result_large_err)]
 async fn run_startup(
     hooks: &HookManager,
 ) -> Result<HashSet<TypeId>, (crate::Error, HashSet<TypeId>)> {

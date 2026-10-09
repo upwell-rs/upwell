@@ -27,6 +27,7 @@ watch = ["upwell-config/watch"]
 tracing-subscriber = ["dep:tracing-subscriber"]
 
 [dependencies]
+arc-swap = { workspace = true }
 upwell-core = { workspace = true }
 upwell-di = { workspace = true }
 upwell-hooks = { workspace = true }

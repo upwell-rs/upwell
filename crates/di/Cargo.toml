@@ -26,6 +26,9 @@ futures = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+
 # Sets the `upwell_hybrid` cfg (target-correct here) so the registration read-side can branch on
 # the active backend if it ever needs to.
 [build-dependencies]

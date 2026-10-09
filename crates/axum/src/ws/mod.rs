@@ -802,9 +802,8 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
                 };
 
                 let connection = match runtime
-                    .open_scope(
+                    .open_scope_from_root(
                         &crate::scope::WebsocketConnection,
-                        Arc::clone(runtime.root()),
                         vec![upgrade_seed, connection_seed],
                     )
                     .await

@@ -1,6 +1,6 @@
 //! Phase 4 triggers: `ConfigManager` carries the opt-in reload triggers (config lives on the
 //! manager, never a protocol), an app builder can be configured with that manager, and — under the
-//! `watch` feature — a file change drives a reload.
+//! `watch` feature — a file change drives the app runtime's transactional reload.
 #![allow(dead_code)]
 
 use std::fs;
@@ -15,7 +15,18 @@ use upwell_config::ResolverChain;
 use upwell_test_utils::AbortOnDropTask;
 
 #[cfg(feature = "watch")]
-use upwell::App;
+use serde::Deserialize;
+#[cfg(feature = "watch")]
+use upwell::{App, config};
+
+/// The bound `[demo]` section, so a file edit is a real binding change that the
+/// transactional reload publishes rather than an unchanged-source no-op.
+#[cfg(feature = "watch")]
+#[config]
+#[derive(Deserialize)]
+struct DemoConfig {
+    value: u32,
+}
 
 fn temp_dir(tag: &str) -> TempDir {
     tempfile::Builder::new()
@@ -65,7 +76,7 @@ async fn app_builder_builds_with_a_configured_manager() -> upwell::daemon::Resul
 
     // The reloader is always present; a manual reload still works.
     let report = built
-        .config_reloader()
+        .reloader()
         .reload()
         .await
         .expect("manual reload works");
@@ -94,13 +105,15 @@ async fn watching_a_source_file_triggers_a_reload() -> Result<(), Box<dyn std::e
 
     let app = App::<()>::builder("watch-test")
         .config_source(manager)
+        .config::<DemoConfig>("demo")
         .build()
         .await
         .expect("protocol-neutral app builds");
 
-    let reloader = app.config_reloader();
+    let runtime = app.runtime().clone();
     let shutdown = app.shutdown_handle();
-    let before = reloader.generation();
+    let before = runtime.config_generation();
+    let runtime_before = runtime.generation();
 
     let mut task = AbortOnDropTask::spawn("watch daemon", app.run());
     let mut daemon_exit = None;
@@ -117,7 +130,7 @@ async fn watching_a_source_file_triggers_a_reload() -> Result<(), Box<dyn std::e
             () = tokio::time::sleep(Duration::from_millis(100)) => {}
         }
 
-        if reloader.generation() > before {
+        if runtime.config_generation() > before {
             reloaded = true;
             break;
         }
@@ -135,6 +148,10 @@ async fn watching_a_source_file_triggers_a_reload() -> Result<(), Box<dyn std::e
 
     assert!(!exited_early, "daemon exited before a reload was observed");
     assert!(reloaded, "a config file change triggered a reload");
+    assert!(
+        runtime.generation() > runtime_before,
+        "the triggered reload published a runtime generation, not only config"
+    );
 
     Ok(())
 }

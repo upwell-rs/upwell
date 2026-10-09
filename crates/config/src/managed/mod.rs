@@ -17,18 +17,20 @@ use std::sync::{Arc, Mutex};
 
 use serde::de::DeserializeOwned;
 
-use upwell_core::TypeDescriptor;
+use upwell_core::{ConditionScalar, ConfigFactDescriptor, ConfigFactId, TypeDescriptor};
 use upwell_di::{BoxedComponent, Injectable, Live, LiveRef};
 
 pub use dirs::DirectoriesResolver;
 use reload::ConfigSlot;
 pub use reload::{
-    CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ChangedBinding, ComponentHookReport, ConfigReload,
-    ConfigReloadError, ConfigReloadReport, ConfigReloader, HookOutcome, ReloadProposal,
-    ReloadableConfig,
+    ChangedBinding, ComponentHookReport, ConfigReload, ConfigReloadError, ConfigReloader,
+    HookOutcome, ReloadProposal, ReloadableConfig, StagedConfig, StagedReload,
 };
 pub use store::{ConfigStore, ContainerConfigExt};
-pub use trigger::{spawn_reload_triggers, stop_reload_triggers};
+pub use trigger::{ReloadSummary, ReloadTarget, spawn_reload_triggers, stop_reload_triggers};
+
+#[cfg(test)]
+mod tests;
 
 use crate::DefaultSpec;
 
@@ -111,8 +113,19 @@ impl<T: Send + Sync + 'static> Cfg<T> {
         path: impl Into<Arc<str>>,
         committed_snapshot: source::ConfigSnapshot,
     ) -> Self {
+        Self::from_shared(Arc::new(value), path, committed_snapshot)
+    }
+
+    /// Wraps an already-shared value with the property path it was bound at — the seam
+    /// for seeding a generation-local candidate handle from a staged snapshot without
+    /// re-serializing. Each call creates an independent live cell.
+    pub(crate) fn from_shared(
+        value: Arc<T>,
+        path: impl Into<Arc<str>>,
+        committed_snapshot: source::ConfigSnapshot,
+    ) -> Self {
         Self {
-            live: Live::new(Arc::new(value)),
+            live: Live::new(value),
             path: path.into(),
             committed_snapshot: Arc::new(Mutex::new(committed_snapshot)),
         }
@@ -272,6 +285,78 @@ pub trait ConfigProperties: DeserializeOwned + Send + Sync + 'static + Sized {
 /// Monomorphized-per-type recovery of a [`ReloadableConfig`] from a bind seed, so the
 /// type-erased manager can build reload slots without naming the config type.
 pub type SlotThunk = fn(&ConfigManager, &BoxedComponent, &str) -> Option<Box<dyn ReloadableConfig>>;
+
+/// The condition-fact extraction thunks captured from a config type: its declared fact
+/// descriptors and an erased scalar extractor over a staged value. Both receive the
+/// registered binding path, so one type bound at several paths emits distinct fact ids.
+#[derive(Clone, Copy)]
+pub struct BindingFacts {
+    pub descriptors: fn(&'static str) -> Vec<ConfigFactDescriptor>,
+    pub scalars: fn(&'static str, &dyn std::any::Any) -> Vec<(ConfigFactId, ConditionScalar)>,
+}
+
+/// A config type whose values expose typed facts to component conditions.
+///
+/// Implemented manually per type (macro support is deferred); registered per binding
+/// path through [`ConditionFactSource::of`] so the transactional reload can extract the
+/// scalars of every staged binding of the type. The registered path is supplied to both
+/// methods, so the same type bound at several paths produces distinct
+/// [`ConfigFactId`]s per binding.
+pub trait ConditionFacts: ConfigProperties {
+    /// The typed facts this type exposes at `binding_path`, identified by this type's
+    /// name, the binding path, and the property path within the value.
+    fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor>;
+
+    /// The current scalar values of [`condition_facts`](Self::condition_facts) at
+    /// `binding_path`, in the same order.
+    fn condition_scalars(&self, binding_path: &'static str)
+    -> Vec<(ConfigFactId, ConditionScalar)>;
+}
+
+/// One registered condition-fact source: a config type's facts at one binding path.
+#[derive(Clone)]
+pub struct ConditionFactSource {
+    pub ty: TypeDescriptor,
+    pub path: &'static str,
+    pub facts: BindingFacts,
+}
+
+impl std::fmt::Debug for ConditionFactSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConditionFactSource")
+            .field("ty", &self.ty)
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ConditionFactSource {
+    /// Registers the condition facts of type `T` at `path`. The path is part of every
+    /// fact id the source emits, so it must outlive the registration — hence
+    /// `&'static str`.
+    pub fn of<T: ConditionFacts>(path: &'static str) -> Self {
+        Self {
+            ty: TypeDescriptor::of::<T>(T::NAME),
+            path,
+            facts: BindingFacts {
+                descriptors: T::condition_facts,
+                scalars: condition_scalars_erased::<T>,
+            },
+        }
+    }
+}
+
+/// Captures `T`'s condition scalars from an erased staged value. Staged binding values
+/// erase to `T` itself, so a plain downcast covers every production caller.
+fn condition_scalars_erased<T: ConditionFacts>(
+    binding_path: &'static str,
+    value: &dyn std::any::Any,
+) -> Vec<(ConfigFactId, ConditionScalar)> {
+    value
+        .downcast_ref::<T>()
+        .map(|value| value.condition_scalars(binding_path))
+        .unwrap_or_default()
+}
 
 #[derive(Clone)]
 pub struct ConfigBinding {

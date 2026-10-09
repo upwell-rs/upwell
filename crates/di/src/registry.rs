@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
-mod order;
+pub(crate) mod order;
 pub(crate) mod selection;
 
 pub use selection::{
@@ -62,13 +62,17 @@ impl ComponentRegistry {
 
     /// Collapses the registered descriptors to one per type. A manually-provided
     /// instance (an empty-factory descriptor) **overrides** an auto-constructed one
-    /// for the same type. The per-type factory ambiguity check runs here via
-    /// [`ComponentDescriptor::effective_factory`].
+    /// for the same type. When factoryless descriptors share the same identity, a raw
+    /// non-snapshot-capable descriptor overrides a typed catalog descriptor so active
+    /// seed provenance cannot be upgraded by later candidate metadata. The per-type
+    /// factory ambiguity check runs here via [`ComponentDescriptor::effective_factory`].
     pub fn resolved_components(&self) -> crate::Result<Vec<ComponentDescriptor>> {
         let mut chosen = Vec::new();
         let mut positions: HashMap<TypeId, usize> = HashMap::new();
 
         for component in &self.components {
+            component.validate_factory_ids()?;
+
             let type_id = component.ty.type_id;
             let new_manual = component.effective_factory()?.is_none();
 
@@ -85,6 +89,16 @@ impl ComponentRegistry {
                     if new_manual && !existing_manual {
                         // An override replaces the descriptor at its original position.
                         // Lifecycle hook ordering must not depend on HashMap iteration.
+                        chosen[position] = *component;
+                    } else if new_manual
+                        && existing_manual
+                        && existing.id == component.id
+                        && existing.generation_snapshot.is_some()
+                        && component.generation_snapshot.is_none()
+                    {
+                        // A raw pre-built registration has stronger provenance than a
+                        // snapshot-capable factoryless catalog descriptor for the same
+                        // component. Preserve that active-seed policy for later transitions.
                         chosen[position] = *component;
                     } else if new_manual == existing_manual && existing.id != component.id {
                         return Err(Error::DuplicateComponentType(
@@ -143,7 +157,7 @@ impl ComponentRegistry {
         })
     }
 
-    fn validate_with_scope_access(
+    pub(crate) fn validate_with_scope_access(
         &self,
         components: &[ComponentDescriptor],
         selection: &selection::ProviderSelectionModel,
@@ -299,24 +313,36 @@ impl ComponentRegistry {
                     continue;
                 }
 
-                if dep.cardinality == Cardinality::One
-                    && !dep.dynamic
-                    && matching
-                    && visible
-                    && model
-                        .select_runtime_one(
-                            dep_id,
-                            dep.qualifier,
-                            dep.resolution,
-                            c.scope,
-                            can_access,
-                        )
-                        .is_none()
-                {
-                    return Err(Error::AmbiguousProvider {
-                        component_id: Some(c.id.to_string()),
-                        type_name: (dep.ty.type_name)().to_string(),
-                    });
+                if dep.cardinality == Cardinality::One && !dep.dynamic && matching && visible {
+                    let selected = model.select_runtime_one(
+                        dep_id,
+                        dep.qualifier,
+                        dep.resolution,
+                        c.scope,
+                        can_access,
+                    );
+
+                    if let Some(selected) = selected {
+                        if let Some(component) =
+                            model.component(selected.provider.concrete_ty.type_id)
+                        {
+                            crate::observability::provider_selection(
+                                c,
+                                &dep,
+                                selected.provider,
+                                component,
+                                selected.reason,
+                                selected.stage,
+                            );
+                        }
+                    } else {
+                        crate::observability::selection_absent(c, &dep);
+
+                        return Err(Error::AmbiguousProvider {
+                            component_id: Some(c.id.to_string()),
+                            type_name: (dep.ty.type_name)().to_string(),
+                        });
+                    }
                 }
 
                 if must_exist && !available.contains(&dep_id) && (!matching || !visible) {
@@ -793,6 +819,115 @@ mod tests {
         Box::pin(async { todo!() })
     }
 
+    fn no_dependencies() -> Vec<DependencyDescriptor> {
+        Vec::new()
+    }
+
+    fn descriptor_with_factories(
+        factories: fn() -> &'static [ComponentFactoryDescriptor],
+    ) -> ComponentDescriptor {
+        ComponentDescriptor {
+            id: "factory-fixture",
+            name: "FactoryFixture",
+            ty: TypeDescriptor::of::<u128>("FactoryFixture"),
+            scope: &Singleton,
+            condition: None,
+            factories,
+            hooks: upwell_hooks::no_hooks,
+            generation_snapshot: None,
+        }
+    }
+
+    #[test]
+    fn factory_ids_are_validated_during_registry_resolution() {
+        static EMPTY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+            id: "",
+            construct: fake_factory,
+            dependencies: no_dependencies,
+            default: false,
+        }];
+        static DUPLICATE: [ComponentFactoryDescriptor; 2] = [
+            ComponentFactoryDescriptor {
+                id: "duplicate",
+                construct: fake_factory,
+                dependencies: no_dependencies,
+                default: false,
+            },
+            ComponentFactoryDescriptor {
+                id: "duplicate",
+                construct: fake_factory,
+                dependencies: no_dependencies,
+                default: true,
+            },
+        ];
+        fn empty() -> &'static [ComponentFactoryDescriptor] {
+            &EMPTY
+        }
+        fn duplicate() -> &'static [ComponentFactoryDescriptor] {
+            &DUPLICATE
+        }
+
+        let empty_error = ComponentRegistry {
+            components: vec![descriptor_with_factories(empty)],
+            providers: Vec::new(),
+        }
+        .resolved_components()
+        .expect_err("empty factory ID is invalid");
+        let duplicate_error = ComponentRegistry {
+            components: vec![descriptor_with_factories(duplicate)],
+            providers: Vec::new(),
+        }
+        .resolved_components()
+        .expect_err("duplicate factory ID is invalid");
+
+        assert!(matches!(empty_error, Error::EmptyFactoryId(_)));
+        assert!(matches!(duplicate_error, Error::DuplicateFactoryId { .. }));
+    }
+
+    #[test]
+    fn explicit_factory_still_wins_over_multiple_defaults() {
+        static FACTORIES: [ComponentFactoryDescriptor; 3] = [
+            ComponentFactoryDescriptor {
+                id: "default-a",
+                construct: fake_factory,
+                dependencies: no_dependencies,
+                default: true,
+            },
+            ComponentFactoryDescriptor {
+                id: "explicit",
+                construct: fake_factory,
+                dependencies: no_dependencies,
+                default: false,
+            },
+            ComponentFactoryDescriptor {
+                id: "default-b",
+                construct: fake_factory,
+                dependencies: no_dependencies,
+                default: true,
+            },
+        ];
+        fn factories() -> &'static [ComponentFactoryDescriptor] {
+            &FACTORIES
+        }
+
+        let descriptor = descriptor_with_factories(factories);
+        let resolved = ComponentRegistry {
+            components: vec![descriptor],
+            providers: Vec::new(),
+        }
+        .resolved_components()
+        .expect("multiple defaults remain valid when one explicit factory exists");
+
+        assert_eq!(
+            resolved[0]
+                .effective_factory()
+                .expect("factory selection succeeds")
+                .expect("explicit factory exists")
+                .id,
+            "explicit"
+        );
+    }
+
     macro_rules! scoped {
         ($name:expr, $scope:expr, $dep:expr, $ty:expr $(,)?) => {{
             fn deps() -> ::std::vec::Vec<DependencyDescriptor> {
@@ -800,6 +935,7 @@ mod tests {
             }
 
             static FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+                id: "static",
                 construct: fake_factory,
                 dependencies: deps,
                 default: false,
@@ -814,8 +950,10 @@ mod tests {
                 name: $name,
                 ty: $ty,
                 scope: $scope,
+                condition: None,
                 factories,
                 hooks: ::upwell_hooks::no_hooks,
+                generation_snapshot: None,
             }
         }};
     }
@@ -825,6 +963,7 @@ mod tests {
     }
 
     static PG_POOL_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+        id: "static",
         construct: fake_factory,
         dependencies: pg_pool_deps,
         default: false,
@@ -839,8 +978,10 @@ mod tests {
         name: "PgPool",
         ty: TypeDescriptor::of::<u16>("PgPool"),
         scope: &Singleton,
+        condition: None,
         factories: pg_pool_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     };
 
     fn backup_repo_deps() -> Vec<DependencyDescriptor> {
@@ -853,10 +994,12 @@ mod tests {
             qualifier: None,
             config: false,
             resolution: ResolutionMode::Eager,
+            observation: upwell_core::DependencyObservation::Snapshot,
         }]
     }
 
     static BACKUP_REPO_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+        id: "static",
         construct: fake_factory,
         dependencies: backup_repo_deps,
         default: false,
@@ -871,8 +1014,10 @@ mod tests {
         name: "BackupRepository",
         ty: TypeDescriptor::of::<u8>("BackupRepository"),
         scope: &Singleton,
+        condition: None,
         factories: backup_repo_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     };
 
     #[test]
@@ -960,6 +1105,7 @@ mod tests {
         qualifier: None,
         config: false,
         resolution: ResolutionMode::Eager,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }];
 
     static REQUEST_DEP_ON_CONNECTION: [DependencyDescriptor; 1] = [DependencyDescriptor {
@@ -971,6 +1117,7 @@ mod tests {
         qualifier: None,
         config: false,
         resolution: ResolutionMode::Eager,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }];
 
     static SINGLETON_DEFERRED_TRANSIENT: [DependencyDescriptor; 1] = [DependencyDescriptor {
@@ -982,6 +1129,7 @@ mod tests {
         qualifier: None,
         config: false,
         resolution: ResolutionMode::Deferred,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }];
 
     static SINGLETON_FRESH_REQUEST: [DependencyDescriptor; 1] = [DependencyDescriptor {
@@ -993,6 +1141,7 @@ mod tests {
         qualifier: None,
         config: false,
         resolution: ResolutionMode::Fresh,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }];
 
     static SINGLETON_FRESH_SHARED_COLLECTION: [DependencyDescriptor; 1] = [DependencyDescriptor {
@@ -1004,6 +1153,7 @@ mod tests {
         qualifier: None,
         config: false,
         resolution: ResolutionMode::Fresh,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }];
 
     static SINGLETON_FRESH_SHARED_KEYED: [DependencyDescriptor; 1] = [DependencyDescriptor {
@@ -1015,6 +1165,7 @@ mod tests {
         qualifier: None,
         config: false,
         resolution: ResolutionMode::Fresh,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }];
 
     static REQUEST_FRESH_CONNECTION_TARGET: [DependencyDescriptor; 1] = [DependencyDescriptor {
@@ -1026,6 +1177,7 @@ mod tests {
         qualifier: None,
         config: false,
         resolution: ResolutionMode::Fresh,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }];
 
     static CONNECTION_TARGET_DEP_ON_SHARED: [DependencyDescriptor; 1] = [DependencyDescriptor {
@@ -1037,6 +1189,7 @@ mod tests {
         qualifier: None,
         config: false,
         resolution: ResolutionMode::Eager,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }];
 
     #[test]
@@ -1182,6 +1335,7 @@ mod tests {
             qualifier: None,
             config: false,
             resolution: ResolutionMode::Lazy,
+            observation: upwell_core::DependencyObservation::Snapshot,
         }];
         let transient = scoped!(
             "TransientLazy",
@@ -1287,6 +1441,7 @@ mod tests {
             qualifier: None,
             config: false,
             resolution: ResolutionMode::Deferred,
+            observation: upwell_core::DependencyObservation::Snapshot,
         }];
         let consumer = scoped!(
             "DeferredTraitConsumer",
@@ -1333,6 +1488,7 @@ mod tests {
         qualifier: None,
         config: false,
         resolution: ResolutionMode::Deferred,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }];
 
     #[test]
@@ -1390,6 +1546,7 @@ mod tests {
             qualifier: None,
             config: false,
             resolution: ResolutionMode::Deferred,
+            observation: upwell_core::DependencyObservation::Snapshot,
         }];
         let consumer = scoped!(
             "RequestDeferredConsumer",
@@ -1440,6 +1597,7 @@ mod tests {
             qualifier: None,
             config: false,
             resolution: ResolutionMode::Deferred,
+            observation: upwell_core::DependencyObservation::Snapshot,
         }];
         let consumer = scoped!(
             "ChainConsumer",
@@ -1499,6 +1657,7 @@ mod tests {
             qualifier: None,
             config: false,
             resolution: ResolutionMode::Deferred,
+            observation: upwell_core::DependencyObservation::Snapshot,
         }];
         let consumer = scoped!(
             "SiblingConsumer",

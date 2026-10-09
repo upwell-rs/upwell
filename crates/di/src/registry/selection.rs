@@ -351,19 +351,33 @@ impl ProviderSelectionModel {
         self.components.get(&type_id).copied()
     }
 
+    pub(crate) fn components(&self) -> impl Iterator<Item = ComponentDescriptor> + '_ {
+        self.components.values().copied()
+    }
+
     fn selected_dependencies(
         &self,
         consumer: &ComponentDescriptor,
         dependency: &DependencyDescriptor,
         can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
     ) -> Vec<SelectedDependency> {
-        if dependency.config || dependency.dynamic {
+        if dependency.config {
+            crate::observability::selection_external(consumer, dependency, "config-external");
+
+            return Vec::new();
+        }
+
+        if dependency.dynamic {
+            crate::observability::selection_external(consumer, dependency, "dynamic-runtime");
+
             return Vec::new();
         }
 
         if let Some(component) = self.component(dependency.ty.type_id)
             && direct_component_is_selectable(component, dependency, consumer.scope, can_access)
         {
+            crate::observability::direct_selection(consumer, dependency, component);
+
             return vec![SelectedDependency {
                 target: DependencyTarget::Component(component),
                 reason: DependencySelectionReason::DirectConcrete,
@@ -372,7 +386,22 @@ impl ProviderSelectionModel {
             }];
         }
 
-        self.select_dependency(dependency, consumer.scope, can_access)
+        let provider_selections = self.select_dependency(dependency, consumer.scope, can_access);
+
+        for selection in &provider_selections {
+            let component = self.components[&selection.provider.concrete_ty.type_id];
+
+            crate::observability::provider_selection(
+                consumer,
+                dependency,
+                selection.provider,
+                component,
+                selection.reason,
+                selection.stage,
+            );
+        }
+
+        let selected = provider_selections
             .into_iter()
             .map(|selection| SelectedDependency {
                 target: DependencyTarget::Provider(selection.provider),
@@ -382,7 +411,13 @@ impl ProviderSelectionModel {
                     .map(|component| component.scope.id()),
                 stage: Some(selection.stage),
             })
-            .collect()
+            .collect::<Vec<_>>();
+
+        if selected.is_empty() {
+            crate::observability::selection_absent(consumer, dependency);
+        }
+
+        selected
     }
 
     pub(crate) fn matching_providers(

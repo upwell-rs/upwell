@@ -14,9 +14,9 @@ use super::{CONFIG_BINDINGS, ConfigBinding, ConfigError, ConfigProperties, Direc
 /// A parser from source text to the normalized config tree.
 type Parser = fn(&str) -> Result<ConfigValue, crate::TemplateError>;
 
-/// Which automatic reload triggers a [`ConfigManager`] requests, beyond the always-available
-/// manual [`ConfigReloader::reload`](super::ConfigReloader::reload). The daemon reads
-/// these at `serve`/`run` and spawns the matching background tasks.
+/// Which automatic reload triggers a [`ConfigManager`] requests, beyond manual reloads through
+/// the application runtime. The daemon reads these at `serve`/`run` and spawns the matching
+/// background tasks.
 #[derive(Clone, Copy, Debug)]
 pub struct ReloadTriggers {
     /// Reload on `SIGHUP` (Unix only).

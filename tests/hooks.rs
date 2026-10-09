@@ -142,20 +142,23 @@ async fn config_reload_hooks_fire_only_for_changed_configs() {
         .expect("daemon builds");
 
     let watcher = daemon.container().get::<Watcher>().expect("Watcher built");
-    let other = daemon
-        .container()
-        .get::<OtherWatcher>()
-        .expect("OtherWatcher built");
 
     assert_eq!(watcher.fired(), 0, "no reload yet");
 
     fs::write(&config_file, "[svc]\nvalue = 2\n\n[other]\nvalue = 100\n").expect("rewrite config");
 
-    let report = daemon
-        .config_reloader()
-        .reload()
-        .await
-        .expect("reload succeeds");
+    let report = daemon.reloader().reload().await.expect("reload succeeds");
+
+    // Hook owners reconstruct in the published generation, so its instances carry the
+    // hook-observed state.
+    let watcher = daemon
+        .container()
+        .get::<Watcher>()
+        .expect("the published Watcher resolves");
+    let other = daemon
+        .container()
+        .get::<OtherWatcher>()
+        .expect("the published OtherWatcher resolves");
 
     assert_eq!(watcher.fired(), 1, "the svc watcher fired exactly once");
     assert_eq!(
@@ -188,7 +191,7 @@ async fn config_reload_hooks_fire_only_for_changed_configs() {
 
     // A no-op reload fires no hooks.
     let again = daemon
-        .config_reloader()
+        .reloader()
         .reload()
         .await
         .expect("second reload succeeds");

@@ -5,6 +5,10 @@ use thiserror::Error;
 /// not an error.
 #[derive(Debug, Error)]
 pub enum Error {
+    /// The resolver context's owning runtime generation is no longer available.
+    #[error("hook resolver context is no longer available")]
+    ResolverUnavailable,
+
     /// The hook's `&self` receiver could not be resolved from the resolver context.
     #[error("hook receiver not found: {0}")]
     MissingReceiver(&'static str),

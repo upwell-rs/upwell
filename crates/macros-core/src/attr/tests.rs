@@ -10,6 +10,23 @@ fn parse_error(input: &str) -> syn::Error {
 }
 
 #[test]
+fn retainable_requires_a_by_value_handle() {
+    let error = parse_error("retainable");
+
+    assert!(error.to_string().contains("only valid with `by_value`"));
+
+    let args = syn::parse_str::<ComponentArgs<NoExt>>("by_value, retainable")
+        .expect("explicit by-value retention parses");
+
+    assert!(args.by_value);
+    assert!(args.retainable);
+
+    let scope_error = parse_error("by_value, retainable, scope = Request");
+
+    assert!(scope_error.to_string().contains("singleton-only"));
+}
+
+#[test]
 fn by_value_component_cannot_register_trait_providers() {
     let error = parse_error("by_value, provide = dyn Repository");
 

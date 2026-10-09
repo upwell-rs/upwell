@@ -36,6 +36,15 @@ pub enum Error {
         parent: ScopeId,
     },
 
+    /// A nested boundary was opened over a parent without a runtime-generation lease.
+    #[error("cannot open scope '{child}' over unpinned parent '{parent}'")]
+    UnpinnedScopeParent {
+        /// The requested child boundary.
+        child: ScopeId,
+        /// The supplied parent's stable scope identity.
+        parent: ScopeId,
+    },
+
     /// A child was opened over a parent other than its declared parent.
     #[error("scope '{child}' requires parent '{expected}', but parent '{actual}' was supplied")]
     InvalidScopeParent {
@@ -106,9 +115,54 @@ pub enum Error {
     #[error(transparent)]
     Di(#[from] upwell_di::Error),
 
+    /// A conditional component catalog or evaluation is invalid.
+    #[error(transparent)]
+    Condition(#[from] upwell_di::ConditionError),
+
+    /// A condition evaluation was produced from another application's config bindings.
+    #[error("condition evaluation belongs to another application config-binding catalog")]
+    ConditionEvaluationApplicationMismatch,
+
+    /// The requested graph transition cannot be applied safely without restarting.
+    #[error(transparent)]
+    RestartRequired(#[from] crate::transition::RestartRequired),
+
+    /// The candidate graph was derived from another committed generation.
+    #[error(transparent)]
+    StaleGraphCandidate(#[from] upwell_di::StaleGraphCandidate),
+
+    /// The same type was supplied as a candidate generation override more than once.
+    #[error("generation override type '{type_name}' is supplied more than once")]
+    DuplicateGenerationOverride {
+        /// The duplicated Rust type name.
+        type_name: &'static str,
+    },
+
+    /// A candidate generation override does not replace a singleton the plan retains.
+    #[error("generation override type '{type_name}' does not replace a retained singleton")]
+    InvalidGenerationOverride {
+        /// The rejected Rust type name.
+        type_name: &'static str,
+    },
+
+    /// Candidate preparation crossed a panicking extension boundary.
+    #[error("candidate runtime preparation panicked")]
+    CandidatePreparationPanicked,
+
+    /// A runtime reloader was used before its application was built or after its runtime
+    /// was dropped.
+    #[error("the application runtime is not attached or has been dropped")]
+    RuntimeUnavailable,
+
     /// A configuration loading, binding, or substitution failure.
     #[error(transparent)]
     Config(#[from] upwell_config::ConfigError),
+
+    /// A configuration reload failed (load, bind, hook rejection, or panic) before
+    /// anything was published. Boxed to keep the app error within the
+    /// `result_large_err` budget every `crate::Result` in the crate shares.
+    #[error(transparent)]
+    ConfigReload(Box<upwell_config::ConfigReloadError>),
 
     /// A hook failure (e.g. an unresolvable receiver or parameter).
     #[error(transparent)]
@@ -134,6 +188,12 @@ pub enum Error {
     /// An application-defined error surfaced through the framework.
     #[error(transparent)]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl From<upwell_config::ConfigReloadError> for Error {
+    fn from(error: upwell_config::ConfigReloadError) -> Self {
+        Self::ConfigReload(Box::new(error))
+    }
 }
 
 /// The app-layer result type.

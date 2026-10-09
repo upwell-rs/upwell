@@ -18,7 +18,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, TypeDescriptor};
+use upwell_core::{
+    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, TypeDescriptor,
+};
 
 use crate::descriptors::{
     BoxedComponent, Component, ComponentConstructionContext, Dep, Injectable,
@@ -39,6 +41,21 @@ pub fn dependency_of<T: ?Sized + 'static>(
     optional: bool,
     config: bool,
 ) -> DependencyDescriptor {
+    dependency_of_observed::<T>(
+        cardinality,
+        optional,
+        config,
+        DependencyObservation::Snapshot,
+    )
+}
+
+/// Builds a dependency edge for type `T` with an explicit observation contract.
+pub fn dependency_of_observed<T: ?Sized + 'static>(
+    cardinality: Cardinality,
+    optional: bool,
+    config: bool,
+    observation: DependencyObservation,
+) -> DependencyDescriptor {
     DependencyDescriptor {
         name: short_name::<T>(),
         ty: TypeDescriptor::of::<T>(short_name::<T>()),
@@ -48,6 +65,7 @@ pub fn dependency_of<T: ?Sized + 'static>(
         qualifier: None,
         config,
         resolution: ResolutionMode::Eager,
+        observation,
     }
 }
 
@@ -94,7 +112,7 @@ where
     T: ?Sized + Send + Sync + 'static,
 {
     fn dependency() -> DependencyDescriptor {
-        dependency_of::<T>(Cardinality::One, false, false)
+        dependency_of_observed::<T>(Cardinality::One, false, false, DependencyObservation::Live)
     }
 
     async fn from_container(cx: &ComponentConstructionContext) -> crate::Result<Self> {

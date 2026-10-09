@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, RwLock, Weak};
 
 use futures::FutureExt;
 use upwell_core::{DependencyDescriptor, ResolverCtx, TypeDescriptor, UpwellDescriptor};
@@ -164,7 +164,7 @@ pub struct HookManager {
 }
 
 struct HookManagerInner {
-    ctx: OnceLock<Arc<dyn ResolverCtx + Send + Sync>>,
+    resolver: RwLock<Option<Arc<ResolverProvider>>>,
     /// Hooks indexed by kind `TypeId`, so a kind with no listeners is an O(1) miss and a
     /// fire over it does no work at all.
     by_kind: HashMap<TypeId, Vec<HookDescriptor>>,
@@ -182,16 +182,40 @@ impl HookManager {
 
         Self {
             inner: Arc::new(HookManagerInner {
-                ctx: OnceLock::new(),
+                resolver: RwLock::new(None),
                 by_kind,
             }),
         }
     }
 
-    /// Attaches the resolver context, once it exists. Hooks resolve their `&self` receiver
-    /// through it. Idempotent; a second attach is ignored.
-    pub fn attach(&self, ctx: Arc<dyn ResolverCtx + Send + Sync>) {
-        let _ = self.inner.ctx.set(ctx);
+    /// Attaches the resolver context hook receivers resolve through.
+    ///
+    /// Attaching replaces any previously attached provider, so a second attach retargets
+    /// the manager. The manager retains only a weak reference, so a component storing its
+    /// own manager cannot create a root-container cycle; once the attached context is
+    /// dropped, runs report [`Error::ResolverUnavailable`] instead of resolving.
+    ///
+    /// Upwell's runtime never retargets: each runtime generation builds a fresh
+    /// generation-local manager and attaches it once to the root scope that seeded it,
+    /// so a manager stays bound to its own generation's root.
+    pub fn attach(&self, ctx: Weak<dyn ResolverCtx + Send + Sync>) {
+        self.attach_resolver_provider(move || ctx.upgrade());
+    }
+
+    /// Attaches a provider that selects the resolver context for each hook run.
+    ///
+    /// Runtime generation owners use this to load the resolver from the same atomic snapshot as
+    /// the rest of the committed runtime state.
+    #[doc(hidden)]
+    pub fn attach_resolver_provider(
+        &self,
+        provider: impl Fn() -> Option<Arc<dyn ResolverCtx + Send + Sync>> + Send + Sync + 'static,
+    ) {
+        *self
+            .inner
+            .resolver
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(provider));
     }
 
     /// Whether any hook of kind `K` is registered — an O(1) check a firing site uses to
@@ -212,14 +236,13 @@ impl HookManager {
             return Vec::new();
         };
 
-        let ctx = self
-            .inner
-            .ctx
-            .get()
-            .expect("hook manager resolver context attached before hooks run");
+        let Some(ctx) = self.resolver_context() else {
+            return unavailable_outcomes::<K>(bucket, filter);
+        };
 
         let calls = bucket.iter().filter(|hook| filter(hook)).map(|hook| {
             let component = hook.component_ty;
+            let ctx = Arc::clone(&ctx);
 
             async move {
                 let outcome = invoke_hook::<K>(hook, ctx.as_ref(), cx).await;
@@ -243,11 +266,13 @@ impl HookManager {
             return Vec::new();
         };
 
-        let ctx = self
-            .inner
-            .ctx
-            .get()
-            .expect("hook manager resolver context attached before hooks run");
+        let Some(ctx) = self.resolver_context() else {
+            return bucket
+                .iter()
+                .find(|hook| filter(hook))
+                .map(|hook| vec![(hook.component_ty, Err(Error::ResolverUnavailable))])
+                .unwrap_or_default();
+        };
         let mut outcomes = Vec::new();
 
         for hook in bucket.iter().filter(|hook| filter(hook)) {
@@ -276,6 +301,30 @@ impl HookManager {
                     .any(|hook| hook.component_ty.type_id == component)
             })
     }
+
+    fn resolver_context(&self) -> Option<Arc<dyn ResolverCtx + Send + Sync>> {
+        let provider = self
+            .inner
+            .resolver
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()?;
+
+        provider()
+    }
+}
+
+type ResolverProvider = dyn Fn() -> Option<Arc<dyn ResolverCtx + Send + Sync>> + Send + Sync;
+
+fn unavailable_outcomes<K: HookKind>(
+    bucket: &[HookDescriptor],
+    filter: impl Fn(&HookDescriptor) -> bool,
+) -> Vec<(TypeDescriptor, Result<K::Output>)> {
+    bucket
+        .iter()
+        .filter(|hook| filter(hook))
+        .map(|hook| (hook.component_ty, Err(Error::ResolverUnavailable)))
+        .collect()
 }
 
 async fn invoke_hook<K: HookKind>(

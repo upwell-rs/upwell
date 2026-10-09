@@ -350,10 +350,7 @@ async fn serve_connection<C: Connection>(
         Vec::new()
     };
 
-    let connection_scope = match runtime
-        .open_scope(&ConnectionScope, Arc::clone(runtime.root()), seeds)
-        .await
-    {
+    let connection_scope = match runtime.open_scope_from_root(&ConnectionScope, seeds).await {
         Ok(scope) => scope,
 
         Err(e) => {

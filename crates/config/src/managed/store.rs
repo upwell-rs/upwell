@@ -11,8 +11,8 @@ use std::collections::HashMap;
 
 use upwell_core::{Cardinality, DependencyDescriptor, Resolver, ResolverCtxExt};
 use upwell_di::{
-    BoxedComponent, ComponentConstructionContext, FromContainer, Injectable, ScopeContainer,
-    dependency_of, from_boxed,
+    BoxedComponent, ComponentConstructionContext, DependencyObservation, FromContainer, Injectable,
+    ScopeContainer, dependency_of_observed, from_boxed,
 };
 
 use super::{Cfg, ConfigError, ConfigManager, ConfigProperties, ReloadableConfig};
@@ -52,8 +52,9 @@ impl ConfigStore {
         Ok((store, slots))
     }
 
-    /// Records one bound value under its type and path.
-    fn insert(&mut self, path: String, seed: BoxedComponent) {
+    /// Records one bound value under its type and path. Also how the reload layer
+    /// assembles a generation-local candidate store from freshly seeded `Cfg` cells.
+    pub(crate) fn insert(&mut self, path: String, seed: BoxedComponent) {
         let type_id = seed.ty.type_id;
 
         self.by_type.entry(type_id).or_default().insert(path, seed);
@@ -84,7 +85,7 @@ impl ConfigStore {
 /// emitted by field injection, which calls [`ConfigStore::resolve_path`] directly.
 impl<T: ConfigProperties> FromContainer for Cfg<T> {
     fn dependency() -> DependencyDescriptor {
-        dependency_of::<T>(Cardinality::One, false, true)
+        dependency_of_observed::<T>(Cardinality::One, false, true, DependencyObservation::Live)
     }
 
     async fn from_container(cx: &ComponentConstructionContext) -> upwell_di::Result<Self> {
