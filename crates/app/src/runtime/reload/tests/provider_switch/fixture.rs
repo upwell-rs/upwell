@@ -9,9 +9,9 @@
 //! `Cfg<AuthConfig>` and records the config mode its construction resolved, so the
 //! test can prove which store each stage of the transaction read. A fixed
 //! [`AuthGate`](super::gate::AuthGate) consumer injects the effective provider, so the
-//! switch has an affected consumer to report. The fixture owns
-//! its statics alone and shares nothing with the probe fixture, so it needs no
-//! cross-test guard.
+//! switch has an affected consumer to report. The fixture owns its statics alone and
+//! shares nothing with the probe fixture, but its own tests share [`OBSERVED_MODES`], so
+//! [`TEST_GUARD`] serializes them under the default `cargo test` parallelism.
 
 use std::fs;
 use std::future::Future;
@@ -62,6 +62,15 @@ static FALLBACK_CONDITION: ConditionDescriptor = ConditionDescriptor {
 
 /// The config mode each factory construction resolved, in construction order.
 static OBSERVED_MODES: tokio::sync::Mutex<Vec<String>> = tokio::sync::Mutex::const_new(Vec::new());
+
+/// Serializes this fixture's tests so no concurrent construction pushes into
+/// [`OBSERVED_MODES`] between a clear and an exact-list assertion. Held for the entire
+/// body of each async test; await-safe, so no std guard ever crosses an await.
+static TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+pub(super) async fn lock_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+    TEST_GUARD.lock().await
+}
 
 pub(super) async fn observed_modes() -> Vec<String> {
     OBSERVED_MODES.lock().await.clone()

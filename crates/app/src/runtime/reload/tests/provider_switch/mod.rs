@@ -14,7 +14,7 @@ use upwell_di::{Component as _, ScopeContainer};
 
 use fixture::{
     Authenticator, FallbackAuthenticator, PrimaryAuthenticator, build_auth_app,
-    clear_observed_modes, config_dir_of, observed_modes, write_auth_config,
+    clear_observed_modes, config_dir_of, lock_test_guard, observed_modes, write_auth_config,
 };
 
 /// Resolves the effective `Authenticator` provider through the trait mapping and
@@ -30,6 +30,7 @@ async fn authenticator_scheme(root: &Arc<ScopeContainer>) -> String {
 
 #[tokio::test]
 async fn config_switch_swaps_the_effective_authenticator_provider_transactionally() {
+    let _guard = lock_test_guard().await;
     let (dir, app) = build_auth_app("primary").await;
     let runtime = app.runtime();
 

@@ -62,6 +62,18 @@ async fn noop_attempts_consume_distinct_attempt_ids() {
     );
     assert_eq!(first.runtime_generation(), second.runtime_generation());
     assert!(first.components().is_empty(), "a no-op plans nothing");
+
+    #[cfg(feature = "serde")]
+    {
+        let json = serde_json::to_value(&first).expect("the no-op report serializes");
+
+        assert_eq!(json["outcome"], "no_op");
+        assert!(
+            json.get("generation").is_none(),
+            "a no-op publishes no generation"
+        );
+        assert_eq!(json["attempt"], first.attempt().get());
+    }
 }
 
 #[tokio::test]
@@ -123,6 +135,32 @@ async fn a_committed_reload_reports_affected_components_and_traces_them() {
         Some(report.attempt().get().to_string().as_str())
     );
     assert_eq!(affected.field("action"), Some("Replace"));
+
+    #[cfg(feature = "serde")]
+    {
+        let json = serde_json::to_value(&report).expect("the committed report serializes");
+
+        assert_eq!(json["outcome"], "committed");
+        assert_eq!(json["generation"], runtime.generation().get());
+        assert_eq!(json["base_generation"], base_generation.get());
+        assert_eq!(json["changed"][0]["path"], "probe");
+        assert_eq!(json["changed"][0]["type_name"], "ProbeConfig");
+        assert_eq!(json["hooks"][0]["component"], "ProbeComponent");
+        assert_eq!(json["hooks"][0]["outcome"], "unchanged");
+        assert!(json["hooks"][0]["restart_reason"].is_null());
+        assert_eq!(json["phases"][0]["phase"], "stage");
+        assert!(json["phases"][0]["elapsed_us"].is_u64());
+
+        let probe_json = json["components"]
+            .as_array()
+            .expect("components serialize as an array")
+            .iter()
+            .find(|component| component["component"] == ProbeComponent::ID)
+            .expect("the probe component serializes");
+
+        assert_eq!(probe_json["action"], "replace");
+        assert_eq!(probe_json["role"], "singleton");
+    }
 }
 
 #[tokio::test]
@@ -214,7 +252,12 @@ async fn a_value_bearing_hook_rejection_never_reaches_the_report() {
         !rejection.to_string().contains(&secret),
         "rejection Display"
     );
+    assert!(
+        !format!("{rejection:?}").contains(&secret),
+        "rejection Debug"
+    );
     assert!(!error.to_string().contains(&secret), "app error Display");
+    assert!(!format!("{error:?}").contains(&secret), "app error Debug");
     assert_events_redacted(&events, &secret);
 
     #[cfg(feature = "serde")]

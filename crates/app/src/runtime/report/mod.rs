@@ -11,9 +11,11 @@
 //! component and factory IDs, planner actions and reason paths, changed binding paths and
 //! type names, hook outcomes, and phase timings. They never carry current or proposed
 //! config values, deserializer output, or panic payloads, in `Debug`, `Display`,
-//! serialized output, or the `upwell::transition` tracing events. The unredacted error
-//! that rejected an attempt is reachable only through
-//! [`TransitionRejection::error`] and the standard error source chain.
+//! serialized output, or the `upwell::transition` tracing events. A
+//! [`TransitionRejection`] renders only its report in `Debug` and `Display` too; the
+//! unredacted error that rejected an attempt is reachable only through
+//! [`TransitionRejection::error`], [`TransitionRejection::into_parts`], and the standard
+//! error source chain.
 
 use std::fmt;
 use std::time::Duration;
