@@ -5,7 +5,7 @@
 //!   injectable (impls live in [`shutdown`]),
 //! - the seeded [`RuntimeReloader`] singleton injectable (in [`reloader`]),
 //! - opt-in config property structs [`ServerConfig`] / [`LoggingConfig`],
-//! - the feature-gated [`init_tracing`] subscriber helper.
+//! - the `init_tracing` subscriber helper, behind the `tracing-subscriber` feature.
 
 pub mod config;
 pub mod reloader;
