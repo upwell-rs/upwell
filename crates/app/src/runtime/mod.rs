@@ -22,13 +22,19 @@ mod generation;
 mod reentrancy;
 mod reload;
 mod report;
+mod transition_hooks;
 
 pub(crate) use generation::PreparedRuntimeGeneration;
 pub use generation::{AppConditionState, RuntimeView};
 use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransitionCoordinator};
 pub use report::{
     ComponentTransitionReport, PhaseTiming, RuntimeTransitionReport, TransitionAttemptId,
-    TransitionFailure, TransitionOutcome, TransitionPhase, TransitionRejection,
+    TransitionFailure, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,
+    TransitionPhase, TransitionRejection,
+};
+pub use transition_hooks::{
+    PendingTransition, TransitionDecision, TransitionHookContext, TransitionProposal,
+    TransitionVerdict,
 };
 
 /// Everything a protocol needs to drive requests through DI, cheaply cloneable.

@@ -113,8 +113,10 @@ async fn a_committed_reload_reports_affected_components_and_traces_them() {
             TransitionPhase::Stage,
             TransitionPhase::Evaluate,
             TransitionPhase::Plan,
+            TransitionPhase::Proposal,
             TransitionPhase::Construct,
             TransitionPhase::Hooks,
+            TransitionPhase::Decision,
             TransitionPhase::Commit,
         ],
         "a committed reload times every phase in order"

@@ -27,12 +27,14 @@ use upwell_di::{EffectiveGraph, EffectiveNodeRole, NodeAction, TransitionPlan, T
 pub use super::generation::TransitionAttemptId;
 
 mod failure;
+mod hooks;
 mod recorder;
 #[cfg(feature = "serde")]
 mod serialize;
 mod trace;
 
 pub use failure::{TransitionFailure, TransitionRejection};
+pub use hooks::{TransitionHookOutcome, TransitionHookReport};
 pub(crate) use recorder::{TransitionCompletion, TransitionRecorder};
 pub(crate) use trace::TRANSITION_TARGET;
 
@@ -51,10 +53,16 @@ pub enum TransitionPhase {
     Evaluate,
     /// Preparing the candidate graph and resolving the transition plan.
     Plan,
+    /// Running transition-proposal hooks against the active generation, before any
+    /// candidate construction.
+    Proposal,
     /// Constructing the candidate root and prepared generation.
     Construct,
     /// Running the affected config-reload hooks against the candidate.
     Hooks,
+    /// Running transition-decision hooks against the constructed candidate,
+    /// immediately before commit.
+    Decision,
     /// Publishing the candidate and committing the staged config.
     Commit,
 }
@@ -66,8 +74,10 @@ impl TransitionPhase {
             Self::Stage => "stage",
             Self::Evaluate => "evaluate",
             Self::Plan => "plan",
+            Self::Proposal => "proposal",
             Self::Construct => "construct",
             Self::Hooks => "hooks",
+            Self::Decision => "decision",
             Self::Commit => "commit",
         }
     }
@@ -187,6 +197,7 @@ pub struct RuntimeTransitionReport {
     components: Box<[ComponentTransitionReport]>,
     #[cfg_attr(feature = "serde", serde(serialize_with = "serialize::hooks"))]
     hooks: Box<[ComponentHookReport]>,
+    transition_hooks: Box<[TransitionHookReport]>,
     phases: Box<[PhaseTiming]>,
 }
 
@@ -249,6 +260,12 @@ impl RuntimeTransitionReport {
     /// rejected the attempt.
     pub fn hooks(&self) -> &[ComponentHookReport] {
         &self.hooks
+    }
+
+    /// The transition-proposal and transition-decision hooks that ran, in firing order,
+    /// including a participant that rejected the attempt.
+    pub fn transition_hooks(&self) -> &[TransitionHookReport] {
+        &self.transition_hooks
     }
 
     /// The timing of every phase the attempt entered, in execution order.

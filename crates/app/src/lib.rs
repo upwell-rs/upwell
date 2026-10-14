@@ -70,9 +70,10 @@ pub use protocol::{
 };
 pub use registry::{AppConditionEvaluation, AppRegistry};
 pub use runtime::{
-    AppConditionState, AppRuntime, ComponentTransitionReport, PhaseTiming, RuntimeTransitionReport,
-    RuntimeView, TransitionAttemptId, TransitionFailure, TransitionOutcome, TransitionPhase,
-    TransitionRejection,
+    AppConditionState, AppRuntime, ComponentTransitionReport, PendingTransition, PhaseTiming,
+    RuntimeTransitionReport, RuntimeView, TransitionAttemptId, TransitionDecision,
+    TransitionFailure, TransitionHookContext, TransitionHookOutcome, TransitionHookReport,
+    TransitionOutcome, TransitionPhase, TransitionProposal, TransitionRejection, TransitionVerdict,
 };
 pub use scope::{
     PreparedScopeTopology, ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError,

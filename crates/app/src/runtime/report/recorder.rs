@@ -5,7 +5,8 @@ use upwell_core::RuntimeGenerationId;
 
 use super::{
     ComponentTransitionReport, PhaseTiming, RuntimeTransitionReport, TransitionAttemptId,
-    TransitionFailure, TransitionOutcome, TransitionPhase, TransitionRejection, trace,
+    TransitionFailure, TransitionHookReport, TransitionOutcome, TransitionPhase,
+    TransitionRejection, trace,
 };
 
 /// How a transition attempt that ran to completion ended.
@@ -34,6 +35,7 @@ pub(crate) struct TransitionRecorder {
     changed: Box<[ChangedBinding]>,
     components: Box<[ComponentTransitionReport]>,
     hooks: Box<[ComponentHookReport]>,
+    transition_hooks: Vec<TransitionHookReport>,
     finished: bool,
 }
 
@@ -52,6 +54,7 @@ impl TransitionRecorder {
             changed: Box::default(),
             components: Box::default(),
             hooks: Box::default(),
+            transition_hooks: Vec::new(),
             finished: false,
         }
     }
@@ -72,6 +75,18 @@ impl TransitionRecorder {
 
     pub(crate) fn record_hooks(&mut self, hooks: Vec<ComponentHookReport>) {
         self.hooks = hooks.into_boxed_slice();
+    }
+
+    pub(crate) fn record_transition_hooks(
+        &mut self,
+        hooks: impl IntoIterator<Item = TransitionHookReport>,
+    ) {
+        self.transition_hooks.extend(hooks);
+    }
+
+    /// The attempt this recorder reports.
+    pub(crate) fn attempt(&self) -> TransitionAttemptId {
+        self.attempt
     }
 
     /// Builds the attempt's report, emits its tracing events, and returns it, or wraps it
@@ -124,6 +139,7 @@ impl TransitionRecorder {
             changed: std::mem::take(&mut self.changed),
             components: std::mem::take(&mut self.components),
             hooks: std::mem::take(&mut self.hooks),
+            transition_hooks: std::mem::take(&mut self.transition_hooks).into_boxed_slice(),
             phases: std::mem::take(&mut self.phases).into_boxed_slice(),
         }
     }

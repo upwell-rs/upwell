@@ -81,8 +81,8 @@ pub(super) async fn clear_observed_modes() {
 }
 
 #[derive(Deserialize)]
-struct AuthConfig {
-    mode: String,
+pub(super) struct AuthConfig {
+    pub(super) mode: String,
 }
 
 impl ConfigProperties for AuthConfig {
@@ -280,9 +280,19 @@ static FALLBACK_COMPONENT: ComponentDescriptor = ComponentDescriptor {
 
 /// Builds a file-backed app with both provider components and the fixed
 /// [`AuthGate`](super::gate::AuthGate) consumer registered, the config bound at `auth`,
-/// and the availability fact sourced from the same binding. The temp dir is returned so the source file outlives the app and can be rewritten by
-/// the test.
+/// and the availability fact sourced from the same binding. The temp dir is returned so
+/// the source file outlives the app and can be rewritten by the test.
 pub(super) async fn build_auth_app(mode: &str) -> (TempDir, App<()>) {
+    build_auth_app_with(mode, &super::gate::GATE_COMPONENT, &[]).await
+}
+
+/// Builds the auth app with `gate` as the fixed consumer descriptor and `extra`
+/// components registered after it.
+pub(super) async fn build_auth_app_with(
+    mode: &str,
+    gate: &'static ComponentDescriptor,
+    extra: &[&'static ComponentDescriptor],
+) -> (TempDir, App<()>) {
     let dir = tempfile::Builder::new()
         .prefix("upwell-auth-switch-")
         .tempdir()
@@ -301,7 +311,11 @@ pub(super) async fn build_auth_app(mode: &str) -> (TempDir, App<()>) {
         .condition_facts::<AuthConfig>("auth")
         .component_descriptor(&PRIMARY_COMPONENT)
         .component_descriptor(&FALLBACK_COMPONENT)
-        .component_descriptor(&super::gate::GATE_COMPONENT);
+        .component_descriptor(gate);
+
+    for descriptor in extra {
+        builder = builder.component_descriptor(descriptor);
+    }
 
     builder
         .registry_mut()

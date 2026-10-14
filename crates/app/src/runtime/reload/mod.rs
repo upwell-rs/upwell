@@ -6,6 +6,15 @@
 //! the candidate [`ConfigStore`], and creates a generation-local [`HookManager`]. The
 //! affected config-reload hooks run against that candidate generation before commit.
 //!
+//! Two pre-commit hook phases bracket construction: [`TransitionProposal`] hooks run
+//! against the active generation after planning and before any construction, and
+//! [`TransitionDecision`] hooks run against the candidate after the config-reload hooks,
+//! immediately before commit. Either may reject the attempt; see
+//! [`transition_hooks`](super::transition_hooks) for their routing and ordering.
+//!
+//! [`TransitionProposal`]: crate::TransitionProposal
+//! [`TransitionDecision`]: crate::TransitionDecision
+//!
 //! # Rollback boundary
 //!
 //! Before the terminal commit, every recoverable error, hook rejection, failed candidate
@@ -31,8 +40,8 @@
 //!
 //! # Reentrancy
 //!
-//! Config-reload hooks and candidate factories run to completion while both
-//! serialization leases — the config reloader's reload lock and the runtime
+//! Transition hooks, config-reload hooks, and candidate factories run to completion
+//! while both serialization leases — the config reloader's reload lock and the runtime
 //! transition writer — are held, and neither lock is reentrant. The whole transaction
 //! therefore runs inside a task-local active-transition marker: a hook or factory that
 //! calls [`AppRuntime::reload_config`] or
@@ -109,6 +118,9 @@ use super::report::{
     ComponentTransitionReport, RuntimeTransitionReport, TRANSITION_TARGET, TransitionAttemptId,
     TransitionCompletion, TransitionPhase, TransitionRecorder,
 };
+use super::transition_hooks::{
+    AffectedComponents, PendingTransition, TransitionDecision, TransitionProposal, fire_gate,
+};
 use super::{AppConditionState, AppRuntime, PreparedRuntimeGeneration, RuntimeView};
 use crate::registry::AppConditionEvaluation;
 use crate::transition::{CandidateGraph, ResolvedTransitionPlan};
@@ -119,10 +131,14 @@ impl AppRuntime {
     ///
     /// It first acquires the [`ConfigReloader`](upwell_config::ConfigReloader) reload
     /// lock, then the runtime transition writer. While both leases are held, it stages
-    /// configuration; evaluates conditions; plans and builds a candidate graph and root
-    /// over a candidate [`ConfigStore`](upwell_config::ConfigStore); and
-    /// creates a generation-local [`HookManager`]. Affected config-reload hooks run
-    /// against that candidate before commit.
+    /// configuration; evaluates conditions; plans the candidate graph; runs
+    /// [`TransitionProposal`] hooks against the active
+    /// generation; builds the candidate root over a candidate
+    /// [`ConfigStore`](upwell_config::ConfigStore) with a generation-local
+    /// [`HookManager`]; runs the affected config-reload hooks and then
+    /// [`TransitionDecision`] hooks against that candidate; and
+    /// commits. A proposal rejection constructs nothing; a decision rejection drops the
+    /// constructed candidate.
     ///
     /// Returns the attempt's [`RuntimeTransitionReport`] when it commits or is a no-op.
     /// A rejected attempt returns
@@ -166,8 +182,8 @@ impl AppRuntime {
     ///
     /// # Reentrancy
     ///
-    /// Config-reload hooks and candidate factories run while both serialization
-    /// leases are held, and neither lock is reentrant. Calling this method or
+    /// Transition hooks, config-reload hooks, and candidate factories run while both
+    /// serialization leases are held, and neither lock is reentrant. Calling this method or
     /// [`RuntimeReloader::reload`](crate::builtins::RuntimeReloader::reload) for the
     /// same runtime from inside a running transaction returns
     /// [`Error::ReentrantReload`](crate::Error::ReentrantReload) instead of waiting on
@@ -228,12 +244,29 @@ impl AppRuntime {
         recorder.enter(TransitionPhase::Plan);
 
         let (candidate, resolved_plan) = plan_transition(&base, &staged, &evaluation)?;
-
-        recorder.record_components(ComponentTransitionReport::project(
+        let components = ComponentTransitionReport::project(
             resolved_plan.structural(),
             base.effective_graph(),
             candidate.graph(),
-        ));
+        );
+        let affected = AffectedComponents::new(
+            &components,
+            base.resolved_components(),
+            candidate.components(),
+        );
+        let pending = PendingTransition::proposed(
+            transition.attempt(),
+            base.id(),
+            staged.changed(),
+            &components,
+        );
+
+        recorder.record_components(components);
+        recorder.enter(TransitionPhase::Proposal);
+
+        fire_gate::<TransitionProposal>(base.hooks(), &pending, &staged, &affected, recorder)
+            .await?;
+
         recorder.enter(TransitionPhase::Construct);
 
         let (prepared, hook_manager) =
@@ -242,8 +275,14 @@ impl AppRuntime {
         recorder.enter(TransitionPhase::Hooks);
 
         let hook_reports = staged.run_config_reload_hooks(&hook_manager).await?;
+        let pending = pending.decided(&hook_reports);
 
         recorder.record_hooks(hook_reports);
+        recorder.enter(TransitionPhase::Decision);
+
+        fire_gate::<TransitionDecision>(&hook_manager, &pending, &staged, &affected, recorder)
+            .await?;
+
         recorder.enter(TransitionPhase::Commit);
 
         let completion = commit_candidate(transition, prepared, staged);
