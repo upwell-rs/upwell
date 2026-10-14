@@ -500,8 +500,9 @@ fn probe_externals(tag: &'static str) -> ResolverSet {
 
 async fn probe_tags(hooks: &HookManager) -> Vec<&'static str> {
     hooks
-        .run::<ProbeKind>(&(), |_| true)
+        .fire::<ProbeKind>(&(), |_| true)
         .await
+        .participants
         .into_iter()
         .map(|(_, outcome)| outcome.expect("probe hook resolves through its root"))
         .collect()
@@ -557,10 +558,10 @@ async fn prepared_generation_binds_the_root_seeded_hook_manager() {
 
     assert!(root_hooks.has::<ProbeKind>());
     assert!(view.hooks().has::<ProbeKind>());
-    assert!(root_hooks.component_has::<ProbeKind>(TypeId::of::<ProbeComponent>()));
+    assert!(root_hooks.component_participates::<ProbeKind>(TypeId::of::<ProbeComponent>()));
     assert!(
         view.hooks()
-            .component_has::<ProbeKind>(TypeId::of::<ProbeComponent>())
+            .component_participates::<ProbeKind>(TypeId::of::<ProbeComponent>())
     );
 
     // The generation attached the root-resolved manager, so both handles route hook

@@ -1032,16 +1032,19 @@ impl<D: ProtocolDefinition> App<D> {
     }
 }
 
-/// Runs startup hooks sequentially, returning the components whose startup fully
-/// succeeded. On failure the list lets the caller pair shutdown only with work that
-/// actually started.
+/// Fires the startup event, returning the components whose startup gates all succeeded.
+///
+/// Gates (participants) run sequentially and the first failure aborts startup; the
+/// returned set lets the caller pair shutdown only with work that actually started.
+/// Observers run once every gate passed; their failures are logged and never abort.
 #[allow(clippy::result_large_err)]
 async fn run_startup(
     hooks: &HookManager,
 ) -> Result<HashSet<TypeId>, (crate::Error, HashSet<TypeId>)> {
+    let fired = hooks.fire::<Startup>(&(), |_| true).await;
     let mut started = HashSet::new();
 
-    for (component, result) in hooks.run_until_error::<Startup>(&(), |_| true).await {
+    for (component, result) in fired.participants {
         let component_ty = component.type_id;
 
         match result {
@@ -1062,24 +1065,33 @@ async fn run_startup(
         }
     }
 
+    log_observer_failures::<Startup>(fired.observers);
+
     Ok(started)
 }
 
-/// Runs shutdown hooks for components with no startup hook and for components whose
-/// startup hook completed successfully. Errors are logged and cleanup continues.
+/// Fires the observer-only shutdown event for components with no startup gate and for
+/// components whose startup gates all succeeded. Errors are logged and cleanup continues.
 async fn run_shutdown(hooks: &HookManager, started: &HashSet<TypeId>) {
-    for (component, result) in hooks
-        .run::<Shutdown>(&(), |hook| {
+    let fired = hooks
+        .fire::<Shutdown>(&(), |hook| {
             let component_ty = hook.component_ty.type_id;
 
-            !hooks.component_has::<Startup>(component_ty) || started.contains(&component_ty)
+            !hooks.component_participates::<Startup>(component_ty)
+                || started.contains(&component_ty)
         })
-        .await
-    {
+        .await;
+
+    log_observer_failures::<Shutdown>(fired.observers);
+}
+
+/// Logs every failed lifecycle observer. Observer failures never change the lifecycle.
+fn log_observer_failures<K: HookKind>(observers: Vec<(TypeDescriptor, upwell_hooks::Result<()>)>) {
+    for (component, result) in observers {
         if let Err(error) = result {
             error!(
                 target: "upwell::app",
-                hook = Shutdown::NAME,
+                hook = K::NAME,
                 component = %component.name,
                 %error,
                 "lifecycle hook failed"

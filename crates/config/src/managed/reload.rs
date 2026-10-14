@@ -563,9 +563,12 @@ impl StagedReload {
         self.reloader.advance_generation()
     }
 
-    /// Runs every config-reload hook that targets a changed binding against `hooks`,
-    /// returning the accepted outcomes in registration order. Any hook error aborts the
-    /// whole reload with [`ConfigReloadError::Hook`].
+    /// Fires the config-reload event against `hooks` for every hook that targets a changed
+    /// binding (or is routed `always`), returning the accepted participant outcomes in
+    /// registration order. Participants run sequentially and the first error aborts the
+    /// whole reload with [`ConfigReloadError::Hook`]; later participants and observers do
+    /// not run. Observers run once every participant accepted, and their failures are
+    /// logged without affecting the reload.
     ///
     /// The application runtime's transactional reload runs it against the candidate
     /// generation's manager before commit.
@@ -574,7 +577,6 @@ impl StagedReload {
         &self,
         hooks: &HookManager,
     ) -> Result<Vec<ComponentHookReport>, ConfigReloadError> {
-        // Nothing listens for config_reload: no proposal is built (O(1)).
         if !hooks.has::<ConfigReload>() {
             return Ok(Vec::new());
         }
@@ -586,15 +588,14 @@ impl StagedReload {
             .collect::<HashSet<String>>();
         let bindings_by_type = bindings_by_type_index(&self.reloader.lock_manager());
         let proposal = ReloadProposal::new(self.staged.clone());
-        let outcomes = hooks
-            .run::<ConfigReload>(&proposal, |hook| {
+        let fired = hooks
+            .fire::<ConfigReload>(&proposal, |hook| {
                 hook_targets_changed(hook, &changed_paths, &bindings_by_type)
             })
             .await;
+        let mut reports = Vec::with_capacity(fired.participants.len());
 
-        let mut reports = Vec::with_capacity(outcomes.len());
-
-        for (component, result) in outcomes {
+        for (component, result) in fired.participants {
             match result {
                 Ok(outcome) => reports.push(ComponentHookReport {
                     component: component.name,
@@ -607,6 +608,18 @@ impl StagedReload {
                         source: Box::new(source),
                     });
                 }
+            }
+        }
+
+        for (component, result) in fired.observers {
+            if let Err(error) = result {
+                tracing::warn!(
+                    target: "upwell::config",
+                    hook = ConfigReload::NAME,
+                    component = component.name,
+                    %error,
+                    "config-reload observer failed"
+                );
             }
         }
 
