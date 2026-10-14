@@ -33,13 +33,19 @@
 //!
 //! Config-reload hooks and candidate factories run to completion while both
 //! serialization leases — the config reloader's reload lock and the runtime
-//! transition writer — are held, and neither lock is reentrant. A hook or factory
-//! body must therefore never call [`AppRuntime::reload_config`] or
-//! [`RuntimeReloader::reload`](crate::builtins::RuntimeReloader::reload) (or otherwise
-//! await the reload lease): doing so
-//! waits on the very transaction that is running the hook and deadlocks the reload
-//! forever, with no error, panic, or diagnostic. Defer such work outside the
-//! transaction instead.
+//! transition writer — are held, and neither lock is reentrant. The whole transaction
+//! therefore runs inside a task-local active-transition marker: a hook or factory that
+//! calls [`AppRuntime::reload_config`] or
+//! [`RuntimeReloader::reload`](crate::builtins::RuntimeReloader::reload) on the same
+//! runtime gets [`Error::ReentrantReload`](crate::Error::ReentrantReload) immediately,
+//! without touching either lease, and the running reload keeps its normal outcome.
+//!
+//! The marker is task-local, so work a hook or factory explicitly `tokio::spawn`s does
+//! not inherit it: a reload requested there waits for the lease and runs after the
+//! transaction completes. Awaiting such a spawned reload from the hook or factory itself
+//! still deadlocks, because the transaction cannot complete while it waits. Code that
+//! awaits the [`ConfigReloader`](upwell_config::ConfigReloader) reload lease directly
+//! bypasses the check.
 //!
 //! # Generation-bound hook managers
 //!
@@ -94,9 +100,10 @@ use upwell_di::{BoxedComponent, Injectable};
 use upwell_hooks::{HOOK_MANAGER_NAME, HookDescriptor, HookManager};
 
 use super::generation::RuntimeTransition;
+use super::reentrancy::ActiveTransition;
 use super::report::{
-    ComponentTransitionReport, RuntimeTransitionReport, TransitionCompletion, TransitionPhase,
-    TransitionRecorder,
+    ComponentTransitionReport, RuntimeTransitionReport, TRANSITION_TARGET, TransitionAttemptId,
+    TransitionCompletion, TransitionPhase, TransitionRecorder,
 };
 use super::{AppConditionState, AppRuntime, PreparedRuntimeGeneration, RuntimeView};
 use crate::registry::AppConditionEvaluation;
@@ -156,23 +163,31 @@ impl AppRuntime {
     /// # Reentrancy
     ///
     /// Config-reload hooks and candidate factories run while both serialization
-    /// leases are held, and neither lock is reentrant: a hook or factory body must
-    /// not call this method or
-    /// [`RuntimeReloader::reload`](crate::builtins::RuntimeReloader::reload) (or
-    /// otherwise await the reload lease) — doing so waits on the
-    /// transaction that is running the hook and deadlocks the reload forever, with
-    /// no error, panic, or diagnostic. Defer such work outside the transaction
-    /// instead.
+    /// leases are held, and neither lock is reentrant. Calling this method or
+    /// [`RuntimeReloader::reload`](crate::builtins::RuntimeReloader::reload) for the
+    /// same runtime from inside a running transaction returns
+    /// [`Error::ReentrantReload`](crate::Error::ReentrantReload) instead of waiting on
+    /// the leases the caller's own transaction holds; the running transaction is
+    /// unaffected. Work explicitly `tokio::spawn`ed from a hook or factory does not
+    /// inherit the marker and waits for the lease instead, so it must not be awaited
+    /// from inside the transaction.
     pub async fn reload_config(&self) -> crate::Result<RuntimeTransitionReport> {
+        if let Some(attempt) = ActiveTransition::current_for(self.transitions.owner()) {
+            return Err(reentrant_reload(attempt));
+        }
+
         let _reload_lease = self.reloader.lock_reload().await;
         let transition = self.begin_transition().await;
+        let active = transition.active();
         let mut recorder = TransitionRecorder::begin(
             transition.attempt(),
             transition.base().id(),
             self.reloader.generation(),
         );
 
-        let result = self.run_reload(transition, &mut recorder).await;
+        let result = active
+            .scope(self.run_reload(transition, &mut recorder))
+            .await;
 
         recorder.finish(result)
     }
@@ -231,6 +246,19 @@ impl AppRuntime {
 
         Ok(completion)
     }
+}
+
+/// Rejects a reload nested inside the running `attempt` of the same runtime, and traces
+/// the rejection.
+fn reentrant_reload(attempt: TransitionAttemptId) -> crate::Error {
+    tracing::warn!(
+        target: TRANSITION_TARGET,
+        attempt = attempt.get(),
+        outcome = "reentrant",
+        "reload requested from inside the running transition of the same runtime"
+    );
+
+    crate::Error::ReentrantReload { attempt }
 }
 
 /// Snapshots the staged condition facts and incrementally re-evaluates conditions against

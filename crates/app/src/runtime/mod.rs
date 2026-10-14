@@ -19,6 +19,7 @@ use upwell_hooks::HookManager;
 use crate::scope::{PreparedScopeTopology, ScopeParent, SeedDestination};
 
 mod generation;
+mod reentrancy;
 mod reload;
 mod report;
 
