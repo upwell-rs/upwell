@@ -20,9 +20,9 @@ pub const RUNTIME_RELOADER_NAME: &str = "RuntimeReloader";
 /// The handle that requests a transactional config-and-graph reload of its application.
 ///
 /// Inject it (`reloader: RuntimeReloader`) or take it from
-/// [`App::reloader`](crate::App::reloader). Every reload, including `SIGHUP` and
-/// file-watch triggers, runs through [`AppRuntime::reload_config`], so there is one reload
-/// pipeline.
+/// [`App::reloader`](crate::App::reloader). It drives [`AppRuntime::reload_config`], and
+/// the `SIGHUP` and file-watch triggers drive the same reload transaction with their own
+/// [`ReloadCause`](upwell_config::ReloadCause), so there is one reload pipeline.
 ///
 /// Calling [`reload`](Self::reload) from a transition hook, config-reload hook, or candidate
 /// factory of the running reload returns [`ReentrantReload`](crate::Error::ReentrantReload)

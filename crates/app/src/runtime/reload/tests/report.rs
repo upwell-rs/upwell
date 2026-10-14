@@ -133,6 +133,11 @@ async fn a_committed_reload_reports_affected_components_and_traces_them() {
 
     assert_eq!(committed.target, "upwell::transition");
     assert_eq!(
+        committed.field("cause"),
+        Some("requested"),
+        "the terminal event records the reload cause"
+    );
+    assert_eq!(
         committed.field("attempt"),
         Some(report.attempt().get().to_string().as_str())
     );

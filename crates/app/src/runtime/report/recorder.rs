@@ -166,6 +166,6 @@ impl Drop for TransitionRecorder {
 
         let phase = self.current.map(|(phase, _)| phase);
 
-        trace::cancelled(self.attempt, self.base_generation, phase);
+        trace::cancelled(self.attempt, self.cause, self.base_generation, phase);
     }
 }

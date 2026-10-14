@@ -7,9 +7,9 @@
 //!
 //! # Redaction
 //!
-//! Reports carry stable identities and categories only: attempt and generation IDs,
-//! component and factory IDs, planner actions and reason paths, changed binding paths and
-//! type names, hook outcomes, and phase timings. They never carry current or proposed
+//! Reports carry stable identities and categories only: attempt and generation IDs, the
+//! reload cause, component and factory IDs, planner actions and reason paths, changed
+//! binding paths and type names, hook outcomes, and phase timings. They never carry current or proposed
 //! config values, deserializer output, or panic payloads, in `Debug`, `Display`,
 //! serialized output, or the `upwell::transition` tracing events. A
 //! [`TransitionRejection`] renders only its report in `Debug` and `Display` too; the
