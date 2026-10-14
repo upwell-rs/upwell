@@ -81,7 +81,10 @@ async fn app_builder_builds_with_a_configured_manager() -> upwell::daemon::Resul
         .await
         .expect("manual reload works");
 
-    assert!(report.changed.is_empty(), "nothing changed on first reload");
+    assert!(
+        report.changed().is_empty(),
+        "nothing changed on first reload"
+    );
 
     Ok(())
 }

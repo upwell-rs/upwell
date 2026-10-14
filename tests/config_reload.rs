@@ -13,7 +13,7 @@ use tempfile::TempDir;
 use upwell::config::Toml;
 use upwell::dirs::{Config, DirectoriesManager};
 use upwell::{
-    App, Cfg, ConfigManager, ConfigReloader, ConfigStore, RuntimeReloadReport, StagedConfig,
+    App, Cfg, ConfigManager, ConfigReloader, ConfigStore, RuntimeTransitionReport, StagedConfig,
     StagedReload, component, config,
 };
 use upwell_config::ResolverChain;
@@ -107,11 +107,16 @@ async fn reload_swaps_only_the_changed_binding() {
     let report = daemon.reloader().reload().await.expect("reload succeeds");
 
     assert_eq!(
-        report.config_generation, 1,
+        report.config_generation(),
+        1,
         "first successful reload is config generation 1"
     );
-    assert_eq!(report.changed.len(), 1, "only one binding changed");
-    assert_eq!(report.changed[0].path, "svc", "the changed binding is svc");
+    assert_eq!(report.changed().len(), 1, "only one binding changed");
+    assert_eq!(
+        report.changed()[0].path,
+        "svc",
+        "the changed binding is svc"
+    );
 
     assert_eq!(
         consumer.svc().get().value,
@@ -144,15 +149,16 @@ async fn reload_swaps_only_the_changed_binding() {
         .expect("second reload succeeds");
 
     assert!(
-        !unchanged.published,
+        !unchanged.is_committed(),
         "an unchanged source publishes nothing"
     );
     assert_eq!(
-        unchanged.config_generation, 1,
+        unchanged.config_generation(),
+        1,
         "an unchanged source does not advance the config generation"
     );
     assert!(
-        unchanged.changed.is_empty(),
+        unchanged.changed().is_empty(),
         "re-reading identical sources changes nothing"
     );
 }
@@ -405,7 +411,7 @@ async fn facade_root_exposes_staged_reload_and_staged_config() {
 }
 
 /// The facade root re-exports the transactional reload report: `AppRuntime::reload_config`'s
-/// return type is nameable as `RuntimeReloadReport` through `upwell::` — so facade-only
+/// return type is nameable as `RuntimeTransitionReport` through `upwell::` — so facade-only
 /// users can run a graph-transitioning reload and inspect its report without depending on
 /// `upwell-app` directly.
 #[tokio::test]
@@ -431,24 +437,29 @@ async fn facade_root_exposes_runtime_reload_report() {
 
     fs::write(&config_file, "[svc]\nvalue = 2\n\n[other]\nvalue = 100\n").expect("rewrite config");
 
-    let report: RuntimeReloadReport = daemon
+    let report: RuntimeTransitionReport = daemon
         .runtime()
         .reload_config()
         .await
         .expect("reload succeeds");
 
     assert!(
-        report.published,
+        report.is_committed(),
         "a changed source publishes a new runtime generation"
     );
-    assert_eq!(report.changed.len(), 1, "only one binding changed");
-    assert_eq!(report.changed[0].path, "svc", "the changed binding is svc");
+    assert_eq!(report.changed().len(), 1, "only one binding changed");
+    assert_eq!(
+        report.changed()[0].path,
+        "svc",
+        "the changed binding is svc"
+    );
     assert!(
-        report.hooks.is_empty(),
+        report.hooks().is_empty(),
         "no config-reload hooks are registered in this app"
     );
     assert_eq!(
-        report.config_generation, 1,
+        report.config_generation(),
+        1,
         "the first commit advances the config generation to 1"
     );
 }
@@ -561,7 +572,10 @@ async fn components_inject_the_runtime_reloader() {
         .await
         .expect("the injected reloader reloads");
 
-    assert!(report.published, "a changed source publishes a generation");
+    assert!(
+        report.is_committed(),
+        "a changed source publishes a generation"
+    );
     assert_eq!(
         daemon.runtime().generation().get(),
         before.get() + 1,

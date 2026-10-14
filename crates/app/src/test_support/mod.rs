@@ -1,6 +1,10 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+mod capture;
+
+pub(crate) use capture::{CapturedEvent, capture_events};
+
 pub(crate) struct TempFixture {
     root: tempfile::TempDir,
 }

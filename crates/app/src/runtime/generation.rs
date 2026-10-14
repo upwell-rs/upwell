@@ -12,14 +12,28 @@ use crate::registry::AppConditionEvaluation;
 use crate::registry::AppRegistry;
 
 /// Stable identity of one runtime transition attempt, including no-op and failed attempts.
+///
+/// Attempt IDs are allocated monotonically per runtime when an attempt acquires the
+/// transition writer. Unlike [`RuntimeGenerationId`], every attempt consumes one, whether
+/// it commits, is a no-op, or is rejected.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(crate) struct TransitionAttemptId(u64);
+#[cfg_attr(feature = "serde", derive(serde::Serialize), serde(transparent))]
+pub struct TransitionAttemptId(u64);
 
 impl TransitionAttemptId {
+    pub(crate) const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
     /// Returns the monotonic sequence value.
-    #[allow(dead_code, reason = "reserved for transition observability")]
     pub const fn get(self) -> u64 {
         self.0
+    }
+}
+
+impl std::fmt::Display for TransitionAttemptId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.0)
     }
 }
 
@@ -225,7 +239,7 @@ impl RuntimeTransitionCoordinator {
     /// Starts one serialized transition attempt against the exact current generation.
     pub(crate) async fn begin(&self) -> RuntimeTransition {
         let writer = Arc::clone(&self.writer).lock_owned().await;
-        let attempt = TransitionAttemptId(self.next_attempt.fetch_add(1, Ordering::Relaxed));
+        let attempt = TransitionAttemptId::new(self.next_attempt.fetch_add(1, Ordering::Relaxed));
         let base = self.publication.pin();
 
         RuntimeTransition {
@@ -247,7 +261,6 @@ pub(crate) struct RuntimeTransition {
 
 impl RuntimeTransition {
     /// The observability identity allocated for this attempt.
-    #[allow(dead_code, reason = "reserved for transition observability")]
     pub(crate) const fn attempt(&self) -> TransitionAttemptId {
         self.attempt
     }

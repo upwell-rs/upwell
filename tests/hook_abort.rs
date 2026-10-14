@@ -90,7 +90,11 @@ async fn a_rejecting_hook_aborts_the_reload() {
     assert!(
         matches!(
             &result,
-            Err(AppError::ConfigReload(error)) if matches!(**error, ConfigReloadError::Hook { .. })
+            Err(AppError::TransitionRejected(rejection))
+                if matches!(
+                    rejection.error(),
+                    AppError::ConfigReload(error) if matches!(**error, ConfigReloadError::Hook { .. })
+                )
         ),
         "the rejecting hook surfaces as a hook error: {result:?}"
     );

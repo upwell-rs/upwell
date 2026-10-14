@@ -28,15 +28,18 @@ async fn app_reloader_publishes_a_runtime_generation() {
         .await
         .expect("the reloader's reload succeeds");
 
-    assert!(report.published, "a changed source publishes a generation");
-    assert_eq!(report.runtime_generation, runtime.generation());
+    assert!(
+        report.is_committed(),
+        "a changed source publishes a generation"
+    );
+    assert_eq!(report.runtime_generation(), runtime.generation());
     assert_eq!(
         runtime.generation().get(),
         old_generation.get() + 1,
         "the reloader transitions the runtime generation"
     );
     assert_eq!(
-        report.config_generation,
+        report.config_generation(),
         old_config_generation + 1,
         "the reloader commits the config generation once"
     );

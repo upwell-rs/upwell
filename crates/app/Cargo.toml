@@ -25,6 +25,8 @@ di-check = [
 yaml = ["upwell-config/yaml"]
 watch = ["upwell-config/watch"]
 tracing-subscriber = ["dep:tracing-subscriber"]
+# Serialize redacted runtime transition reports for tooling and telemetry.
+serde = ["upwell-di/serde"]
 
 [dependencies]
 arc-swap = { workspace = true }
@@ -45,4 +47,6 @@ clap = { workspace = true, optional = true }
 upwell-tooling-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }

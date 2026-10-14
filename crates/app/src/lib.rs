@@ -69,7 +69,11 @@ pub use protocol::{
     ValidationContext,
 };
 pub use registry::{AppConditionEvaluation, AppRegistry};
-pub use runtime::{AppConditionState, AppRuntime, RuntimeReloadReport, RuntimeView};
+pub use runtime::{
+    AppConditionState, AppRuntime, ComponentTransitionReport, PhaseTiming, RuntimeTransitionReport,
+    RuntimeView, TransitionAttemptId, TransitionFailure, TransitionOutcome, TransitionPhase,
+    TransitionRejection,
+};
 pub use scope::{
     PreparedScopeTopology, ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError,
 };

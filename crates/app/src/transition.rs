@@ -45,6 +45,11 @@ pub struct ComponentTransitionDecision {
 
 /// Why an otherwise valid graph transition requires process restart in the v1 runtime.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize),
+    serde(rename_all = "snake_case")
+)]
 #[non_exhaustive]
 pub enum RestartReason {
     MissingDecision,

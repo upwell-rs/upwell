@@ -47,9 +47,20 @@ async fn assert_panic_contained_reload_recovers(
         .await
         .expect_err("the armed condition-stage callback panics");
 
+    let (report, error) = super::rejected(error);
+
     assert!(
         matches!(error, crate::Error::CandidatePreparationPanicked),
         "expected the redacted preparation panic error, got {error:?}"
+    );
+    super::assert_rejected(
+        &report,
+        crate::TransitionPhase::Evaluate,
+        crate::TransitionFailure::Panicked,
+    );
+    assert!(
+        report.components().is_empty(),
+        "nothing was planned before the evaluation panic"
     );
 
     // The panic hit before any candidate work: the complete previous generation,
@@ -110,9 +121,9 @@ async fn assert_panic_contained_reload_recovers(
         .await
         .expect("the reload succeeds after the panic control resets");
 
-    assert!(report.published, "the recovered reload publishes");
+    assert!(report.is_committed(), "the recovered reload publishes");
     assert_eq!(
-        report.changed.len(),
+        report.changed().len(),
         1,
         "the recovered reload republishes the changed binding"
     );

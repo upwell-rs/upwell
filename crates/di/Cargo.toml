@@ -14,6 +14,9 @@ categories.workspace = true
 default = []
 # Emit compile-time DI checks (`Wiring: Provide<Dep>` bounds).
 di-check = []
+# Serialize the transition-planning vocabulary (actions, reasons, demand identities) for
+# redacted transition reports, tooling, and telemetry.
+serde = ["dep:serde"]
 
 [dependencies]
 upwell-core = { workspace = true }
@@ -25,6 +28,7 @@ tokio = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }

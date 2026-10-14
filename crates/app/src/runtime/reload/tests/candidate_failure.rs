@@ -39,9 +39,20 @@ async fn candidate_reconstruction_failure_preserves_config_and_graph() {
         .await
         .expect_err("the candidate factory fails after staging");
 
+    let (report, error) = super::rejected(error);
+
     assert!(
         matches!(error, crate::Error::Di(_)),
         "expected a DI error from the candidate factory, got {error:?}"
+    );
+    super::assert_rejected(
+        &report,
+        crate::TransitionPhase::Construct,
+        crate::TransitionFailure::ConstructionFailed,
+    );
+    assert!(
+        !report.components().is_empty(),
+        "the attempted plan is reported even though construction failed"
     );
 
     // The same unchanged state as the hook-rejection rollback.

@@ -9,7 +9,7 @@ use std::sync::{Arc, OnceLock};
 
 use upwell_di::{Component, Injectable};
 
-use crate::runtime::{AppRuntime, RuntimeReloadReport, WeakAppRuntime};
+use crate::runtime::{AppRuntime, RuntimeTransitionReport, WeakAppRuntime};
 
 /// The stable component id of the seeded [`RuntimeReloader`] singleton.
 pub const RUNTIME_RELOADER_ID: &str = "upwell:runtime-reloader";
@@ -50,7 +50,7 @@ impl RuntimeReloader {
     ///
     /// Fails with [`RuntimeUnavailable`](crate::Error::RuntimeUnavailable) while the
     /// application is still being built or after its runtime has been dropped.
-    pub async fn reload(&self) -> crate::Result<RuntimeReloadReport> {
+    pub async fn reload(&self) -> crate::Result<RuntimeTransitionReport> {
         let runtime = self
             .runtime
             .get()

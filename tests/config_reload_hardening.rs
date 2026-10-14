@@ -72,8 +72,8 @@ async fn cross_path_reference_changes_republish_the_dependent_binding() {
 
     let report = app.reloader().reload().await.expect("reload");
 
-    assert_eq!(report.changed.len(), 1);
-    assert_eq!(report.changed[0].path, "server");
+    assert_eq!(report.changed().len(), 1);
+    assert_eq!(report.changed()[0].path, "server");
     assert_eq!(consumer.config.get().url, "10.0.0.2:8080");
 }
 
@@ -121,7 +121,7 @@ async fn resolver_changes_republish_a_binding_without_source_edits() {
 
     let report = app.reloader().reload().await.expect("reload");
 
-    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed().len(), 1);
     assert_eq!(consumer.config.get().value, "second");
 }
 
@@ -232,13 +232,13 @@ async fn committed_snapshot_comes_from_the_same_resolver_pass_as_the_value() {
 
     let first = app.reloader().reload().await.expect("first reload");
 
-    assert_eq!(first.changed.len(), 1);
+    assert_eq!(first.changed().len(), 1);
     assert_eq!(consumer.config.get().value, "third");
 
     let second = app.reloader().reload().await.expect("second reload");
 
     assert!(
-        second.changed.is_empty(),
+        second.changed().is_empty(),
         "the stable third resolver value matches the exact committed pass"
     );
     assert_eq!(consumer.config.get().value, "third");
@@ -296,10 +296,18 @@ async fn panicking_deserializer_does_not_poison_future_reloads() {
     let error = app.reloader().reload().await.unwrap_err();
 
     assert!(
-        matches!(&error, AppError::ConfigReload(error) if matches!(**error, ConfigReloadError::Panicked)),
+        matches!(
+            &error,
+            AppError::TransitionRejected(rejection)
+                if matches!(
+                    rejection.error(),
+                    AppError::ConfigReload(error) if matches!(**error, ConfigReloadError::Panicked)
+                )
+        ),
         "unexpected reload error: {error:?}"
     );
     assert!(!error.to_string().contains("sensitive"));
+    assert_redacted_report(&error);
     assert_eq!(
         consumer.config.get().value,
         1,
@@ -313,7 +321,7 @@ async fn panicking_deserializer_does_not_poison_future_reloads() {
         .await
         .expect("later reload recovers");
 
-    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed().len(), 1);
     assert_eq!(consumer.config.get().value, 3);
 }
 
@@ -370,10 +378,18 @@ async fn panicking_reload_hook_does_not_disable_later_reloads() {
     let error = app.reloader().reload().await.unwrap_err();
 
     assert!(
-        matches!(&error, AppError::ConfigReload(error) if matches!(**error, ConfigReloadError::Hook { .. })),
+        matches!(
+            &error,
+            AppError::TransitionRejected(rejection)
+                if matches!(
+                    rejection.error(),
+                    AppError::ConfigReload(error) if matches!(**error, ConfigReloadError::Hook { .. })
+                )
+        ),
         "unexpected reload error: {error:?}"
     );
     assert!(!error.to_string().contains("sensitive"));
+    assert_redacted_report(&error);
     assert_eq!(
         component.config.get().value,
         1,
@@ -394,4 +410,14 @@ async fn panicking_reload_hook_does_not_disable_later_reloads() {
     assert_eq!(component.config.get().value, 3);
     assert_eq!(published.config.get().value, 3);
     assert_eq!(PANIC_ONCE_HOOK_CALLS.load(Ordering::SeqCst), 2);
+}
+
+/// Asserts that a rejected reload's report never renders the sensitive marker.
+fn assert_redacted_report(error: &AppError) {
+    let AppError::TransitionRejected(rejection) = error else {
+        panic!("expected a rejected transition, got {error:?}");
+    };
+
+    assert!(!format!("{:?}", rejection.report()).contains("sensitive"));
+    assert!(!rejection.to_string().contains("sensitive"));
 }

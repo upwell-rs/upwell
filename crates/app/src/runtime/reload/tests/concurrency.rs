@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 use upwell_config::ContainerConfigExt;
 
-use crate::RuntimeReloadReport;
+use crate::RuntimeTransitionReport;
 
 use super::fixture::{
     ProbeComponent, ProbeConfig, build_probe_app, config_dir_of, factory_parked, lock_test_guard,
@@ -16,7 +16,7 @@ use super::fixture::{
 
 /// Aborts a reload task and opens its factory gate if an assertion unwinds while it is parked.
 struct ParkedReload {
-    task: Option<tokio::task::JoinHandle<crate::Result<RuntimeReloadReport>>>,
+    task: Option<tokio::task::JoinHandle<crate::Result<RuntimeTransitionReport>>>,
     factory_parked: bool,
 }
 
@@ -37,7 +37,9 @@ impl ParkedReload {
         release_factory();
     }
 
-    async fn join(&mut self) -> Result<crate::Result<RuntimeReloadReport>, tokio::task::JoinError> {
+    async fn join(
+        &mut self,
+    ) -> Result<crate::Result<RuntimeTransitionReport>, tokio::task::JoinError> {
         self.task
             .take()
             .expect("reload task is joined at most once")
@@ -116,36 +118,42 @@ async fn concurrent_reloads_commit_in_staging_order() {
         "reload B entered config staging after reload A committed"
     );
 
-    assert!(report_a.published, "reload A publishes its V2 candidate");
-    assert!(report_b.published, "reload B publishes its V3 candidate");
+    assert!(
+        report_a.is_committed(),
+        "reload A publishes its V2 candidate"
+    );
+    assert!(
+        report_b.is_committed(),
+        "reload B publishes its V3 candidate"
+    );
     assert_eq!(
-        report_a.runtime_generation.get(),
+        report_a.runtime_generation().get(),
         base_runtime_generation.get() + 1,
         "reload A advances the runtime generation once"
     );
     assert_eq!(
-        report_b.runtime_generation.get(),
+        report_b.runtime_generation().get(),
         base_runtime_generation.get() + 2,
         "reload B advances the runtime generation after reload A"
     );
     assert_eq!(
-        report_a.config_generation,
+        report_a.config_generation(),
         base_config_generation + 1,
         "reload A advances the config generation once"
     );
     assert_eq!(
-        report_b.config_generation,
+        report_b.config_generation(),
         base_config_generation + 2,
         "reload B advances the config generation after reload A"
     );
     assert_eq!(
         runtime.generation(),
-        report_b.runtime_generation,
+        report_b.runtime_generation(),
         "the active root belongs to the current runtime generation"
     );
     assert_eq!(
         app.runtime().config_generation(),
-        report_b.config_generation,
+        report_b.config_generation(),
         "the active config generation is reload B's terminal commit"
     );
     assert_eq!(
