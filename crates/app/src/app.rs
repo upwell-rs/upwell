@@ -1041,7 +1041,7 @@ impl<D: ProtocolDefinition> App<D> {
 async fn run_startup(
     hooks: &HookManager,
 ) -> Result<HashSet<TypeId>, (crate::Error, HashSet<TypeId>)> {
-    let fired = hooks.fire::<Startup>(&(), |_| true).await;
+    let fired = hooks.fire_all::<Startup>(&()).await;
     let mut started = HashSet::new();
 
     for (component, result) in fired.participants {

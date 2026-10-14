@@ -19,7 +19,10 @@
 //!
 //! Observing is owned by the runtime, never by the firing site: [`HookManager::fire`]
 //! runs participants sequentially in registration order, stops at the first outcome that
-//! ends the event, and only then runs every observer concurrently. An observer therefore
+//! ends the event, and only then runs every observer concurrently.
+//! [`HookManager::fire_streamed`] yields the same outcomes as each hook completes, so a
+//! caller can act on independent observer outcomes immediately; the `*_all` variants
+//! ignore the firing site's targeting. An observer therefore
 //! never sees an event a participant can still change, nor one a participant ended. A kind
 //! with no outcome to affect declares
 //! [`ObserversOnly`](HookParticipation::ObserversOnly), making each of its hooks an
@@ -49,7 +52,7 @@ pub use descriptor::{ComponentHooks, HookCall, HookDescriptor, no_hooks};
 pub use error::{Error, Result};
 pub use kind::{HookKind, HookParam, HookParticipation, HookRole, HookRouting};
 pub use lifecycle::{Shutdown, Startup};
-pub use manager::{FiredHooks, HookManager};
+pub use manager::{FiredHook, FiredHooks, HookManager};
 
 /// The stable component id of the seeded [`HookManager`] singleton.
 pub const HOOK_MANAGER_ID: &str = "upwell:hook-manager";

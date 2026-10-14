@@ -544,10 +544,7 @@ fn probe_hooks() -> &'static [HookDescriptor] {
 /// hook outcome, so a test can distinguish a resolved run from a
 /// [`ResolverUnavailable`](upwell_hooks::Error::ResolverUnavailable) one.
 pub(super) async fn fire_manager_probe(hooks: &HookManager) -> upwell_hooks::Result<()> {
-    let outcomes = hooks
-        .fire::<ManagerProbeKind>(&(), |_| true)
-        .await
-        .participants;
+    let outcomes = hooks.fire_all::<ManagerProbeKind>(&()).await.participants;
 
     assert_eq!(
         outcomes.len(),

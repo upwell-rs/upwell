@@ -113,14 +113,14 @@ async fn external_hook_kind_fires_through_the_manager() {
     );
     assert_eq!(boot.started(), 0, "not started yet");
 
-    let outcomes = hooks.fire::<Startup>(&(), |_| true).await.participants;
+    let outcomes = hooks.fire_all::<Startup>(&()).await.participants;
 
     assert_eq!(outcomes.len(), 1, "the one Startup hook ran");
     assert!(outcomes[0].1.is_ok(), "the hook succeeded");
     assert_eq!(boot.started(), 1, "the component observed the fire");
 
     // Firing a kind with no listeners is a no-op that does no work.
-    let none = hooks.fire::<Unused>(&(), |_| true).await;
+    let none = hooks.fire_all::<Unused>(&()).await;
     assert!(
         none.participants.is_empty() && none.observers.is_empty(),
         "no listeners -> empty, silently dropped"
@@ -149,7 +149,7 @@ async fn macro_declared_roles_and_routing_drive_the_fire() {
         "only the `always` observer bypasses the selection"
     );
 
-    let accepted = hooks.fire::<Vote>(&(), |_| true).await;
+    let accepted = hooks.fire_all::<Vote>(&()).await;
 
     assert!(
         accepted.ended,
