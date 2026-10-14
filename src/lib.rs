@@ -57,8 +57,8 @@ pub use upwell_di::{Error as DiError, Result as DiResult};
 // ---------------------------------------------------------------------------
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_hooks::{
-    ComponentHooks, HookCall, HookDescriptor, HookKind, HookManager, HookParam, Shutdown, Startup,
-    no_hooks,
+    ComponentHooks, FiredHooks, HookCall, HookDescriptor, HookKind, HookManager, HookParam,
+    HookParticipation, HookRole, HookRouting, Shutdown, Startup, no_hooks,
 };
 /// The hook layer's own error/result, exposed under distinct names so macro-generated hook
 /// code can name them without colliding with the root [`Error`]/[`Result`].
