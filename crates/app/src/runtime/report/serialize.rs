@@ -6,6 +6,7 @@ use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Serialize, Serializer};
 use upwell_config::{ChangedBinding, ComponentHookReport, HookOutcome};
 use upwell_core::RuntimeGenerationId;
+use upwell_hooks::HookRole;
 
 pub(super) fn generation<S: Serializer>(
     generation: &RuntimeGenerationId,
@@ -32,6 +33,13 @@ pub(super) fn changed<S: Serializer>(
     }
 
     seq.end()
+}
+
+pub(super) fn role<S: Serializer>(role: &HookRole, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(match role {
+        HookRole::Participant => "participant",
+        HookRole::Observer => "observer",
+    })
 }
 
 pub(super) fn hooks<S: Serializer>(

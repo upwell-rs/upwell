@@ -6,6 +6,8 @@
 
 mod fixture;
 mod gate;
+mod gate_hooks;
+mod pre_commit;
 mod report;
 
 use std::sync::Arc;

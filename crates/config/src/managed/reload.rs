@@ -105,8 +105,9 @@ impl ReloadProposal {
 
     /// The proposed value of type `T` at `path` (or its sole binding when `path` is
     /// `None`), as a [`CfgNext<T>`]. `None` if no such binding is staged or the by-type
-    /// lookup is ambiguous.
-    fn next<T: Send + Sync + 'static>(&self, path: Option<&str>) -> Option<CfgNext<T>> {
+    /// lookup is ambiguous. Hook kinds whose context carries a proposal extract their
+    /// `CfgNext<T>` parameters through it.
+    pub fn next<T: Send + Sync + 'static>(&self, path: Option<&str>) -> Option<CfgNext<T>> {
         let type_id = TypeId::of::<T>();
 
         let entry = match path {

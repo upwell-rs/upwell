@@ -6,8 +6,8 @@ use super::{RuntimeTransitionReport, TransitionAttemptId, TransitionOutcome, Tra
 /// The log target every runtime transition event uses.
 pub(crate) const TRANSITION_TARGET: &str = "upwell::transition";
 
-/// Emits one structured event per affected component, then one terminal event, with the
-/// report's stable redacted fields.
+/// Emits one structured event per affected component and per transition hook that ran,
+/// then one terminal event, with the report's stable redacted fields.
 pub(super) fn report(report: &RuntimeTransitionReport) {
     let attempt = report.attempt().get();
     let base_generation = report.base_generation().get();
@@ -31,6 +31,18 @@ pub(super) fn report(report: &RuntimeTransitionReport) {
         );
     }
 
+    for hook in report.transition_hooks() {
+        debug!(
+            target: TRANSITION_TARGET,
+            attempt,
+            phase = hook.phase.as_str(),
+            component = hook.component,
+            role = ?hook.role,
+            outcome = ?hook.outcome,
+            "runtime transition hook ran"
+        );
+    }
+
     match report.outcome() {
         TransitionOutcome::Committed { generation } => info!(
             target: TRANSITION_TARGET,
@@ -41,6 +53,7 @@ pub(super) fn report(report: &RuntimeTransitionReport) {
             changed = report.changed().len(),
             affected = report.components().len(),
             hooks = report.hooks().len(),
+            transition_hooks = report.transition_hooks().len(),
             elapsed_us,
             outcome = "committed",
             "runtime transition committed"

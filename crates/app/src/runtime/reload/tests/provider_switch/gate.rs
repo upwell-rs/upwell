@@ -52,7 +52,7 @@ fn construct_gate(context: &mut ComponentConstructionContext) -> GateFactoryFutu
     })
 }
 
-fn gate_factories() -> &'static [ComponentFactoryDescriptor] {
+pub(super) fn gate_factories() -> &'static [ComponentFactoryDescriptor] {
     &[ComponentFactoryDescriptor {
         id: "static",
         construct: construct_gate,

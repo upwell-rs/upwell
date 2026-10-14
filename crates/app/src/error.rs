@@ -170,6 +170,31 @@ pub enum Error {
         attempt: crate::TransitionAttemptId,
     },
 
+    /// A transition-proposal or transition-decision participant rejected the attempt
+    /// with an author-chosen static reason code.
+    #[error("{kind} hook on '{component}' rejected the transition: {reason}")]
+    TransitionHookRejected {
+        /// The hook kind's name.
+        kind: &'static str,
+        /// The display name of the component owning the hook.
+        component: &'static str,
+        /// The static reason code the hook returned.
+        reason: &'static str,
+    },
+
+    /// A transition-proposal or transition-decision participant failed or panicked, so
+    /// it could not vouch for the attempt and the attempt was rejected.
+    #[error("{kind} hook on '{component}' failed: {source}")]
+    TransitionHookFailed {
+        /// The hook kind's name.
+        kind: &'static str,
+        /// The display name of the component owning the hook.
+        component: &'static str,
+        /// The hook failure, redacted for panics.
+        #[source]
+        source: Box<upwell_hooks::Error>,
+    },
+
     /// A runtime reloader was used before its application was built or after its runtime
     /// was dropped.
     #[error("the application runtime is not attached or has been dropped")]

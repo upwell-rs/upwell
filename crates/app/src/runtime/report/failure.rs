@@ -27,8 +27,16 @@ pub enum TransitionFailure {
         /// The bound type's display name.
         type_name: &'static str,
     },
-    /// A config-reload hook rejected the proposal.
+    /// A participant hook ended the attempt, by a rejecting verdict or an error. The
+    /// rejecting phase names the hook kind; a verdict's reason code is in
+    /// [`RuntimeTransitionReport::transition_hooks`].
     HookRejected {
+        /// The display name of the component owning the hook, as the hook catalog
+        /// records it (its type descriptor name, not its stable component ID).
+        component: &'static str,
+    },
+    /// A participant hook panicked, ending the attempt. The payload is never recorded.
+    HookPanicked {
         /// The display name of the component owning the hook, as the hook catalog
         /// records it (its type descriptor name, not its stable component ID).
         component: &'static str,
@@ -72,6 +80,12 @@ impl TransitionFailure {
             },
             crate::Error::StaleGraphCandidate(_) => Self::StaleBase,
             crate::Error::Di(error) => Self::classify_di(phase, error),
+            crate::Error::TransitionHookRejected { component, .. } => {
+                Self::HookRejected { component }
+            }
+            crate::Error::TransitionHookFailed {
+                component, source, ..
+            } => Self::classify_hook(component, source),
             crate::Error::DuplicateGenerationOverride { .. }
             | crate::Error::InvalidGenerationOverride { .. } => Self::ConstructionFailed,
             _ => Self::Other,
@@ -87,8 +101,15 @@ impl TransitionFailure {
                 path: path.clone(),
                 type_name,
             },
-            ConfigReloadError::Hook { component, .. } => Self::HookRejected { component },
+            ConfigReloadError::Hook { component, source } => Self::classify_hook(component, source),
             ConfigReloadError::Panicked => Self::Panicked,
+        }
+    }
+
+    fn classify_hook(component: &'static str, error: &upwell_hooks::Error) -> Self {
+        match error {
+            upwell_hooks::Error::Panicked { .. } => Self::HookPanicked { component },
+            _ => Self::HookRejected { component },
         }
     }
 
@@ -116,10 +137,10 @@ impl fmt::Display for TransitionFailure {
                 )
             }
             Self::HookRejected { component } => {
-                write!(
-                    formatter,
-                    "config-reload hook on '{component}' rejected the proposal"
-                )
+                write!(formatter, "a hook on '{component}' rejected the attempt")
+            }
+            Self::HookPanicked { component } => {
+                write!(formatter, "a hook on '{component}' panicked")
             }
             Self::Panicked => formatter.write_str("an application extension point panicked"),
             Self::ConditionInvalid => formatter.write_str("condition evaluation is invalid"),
