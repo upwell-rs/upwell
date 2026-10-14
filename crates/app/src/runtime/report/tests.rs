@@ -1,4 +1,4 @@
-use upwell_config::ConfigReloadError;
+use upwell_config::{ConfigReloadError, ReloadCause};
 use upwell_core::RuntimeGenerationId;
 
 use super::*;
@@ -7,7 +7,12 @@ use crate::test_support::capture_events;
 const SECRET: &str = "s3cr3t-config-value";
 
 fn recorder() -> TransitionRecorder {
-    TransitionRecorder::begin(TransitionAttemptId::new(7), RuntimeGenerationId::new(3), 11)
+    TransitionRecorder::begin(
+        TransitionAttemptId::new(7),
+        ReloadCause::Requested,
+        RuntimeGenerationId::new(3),
+        11,
+    )
 }
 
 fn rejection(result: crate::Result<RuntimeTransitionReport>) -> Box<TransitionRejection> {

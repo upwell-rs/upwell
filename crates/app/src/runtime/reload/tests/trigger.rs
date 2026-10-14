@@ -1,7 +1,7 @@
 //! Automatic reload triggers drive the runtime through [`ReloadTarget`], so a triggered
 //! reload transitions the component graph instead of taking the config-only path.
 
-use upwell_config::ReloadTarget;
+use upwell_config::{ReloadCause, ReloadTarget};
 
 use super::fixture::{
     ProbeComponent, build_probe_app, config_dir_of, factory_calls, lock_test_guard, reset_controls,
@@ -22,7 +22,7 @@ async fn triggered_reload_publishes_a_runtime_generation() {
     write_probe_config(&config_dir_of(&dir), true, 3);
 
     let summary = runtime
-        .trigger_reload()
+        .trigger_reload(ReloadCause::Signal)
         .await
         .expect("the triggered reload succeeds");
 

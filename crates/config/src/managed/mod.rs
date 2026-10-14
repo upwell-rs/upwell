@@ -27,7 +27,9 @@ pub use reload::{
     HookOutcome, ReloadProposal, ReloadableConfig, StagedConfig, StagedReload,
 };
 pub use store::{ConfigStore, ContainerConfigExt};
-pub use trigger::{ReloadSummary, ReloadTarget, spawn_reload_triggers, stop_reload_triggers};
+pub use trigger::{
+    ReloadCause, ReloadSummary, ReloadTarget, spawn_reload_triggers, stop_reload_triggers,
+};
 
 #[cfg(test)]
 mod tests;

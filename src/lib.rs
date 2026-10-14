@@ -80,8 +80,8 @@ pub use upwell_config::{
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigBindingDescriptor, ConfigDefaults,
     ConfigError, ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError, ConfigReloader,
     ConfigStore, ContainerConfigExt, DefaultSpec, DirectoriesResolver, EnumTag, HookOutcome,
-    ReloadProposal, ReloadSummary, ReloadTarget, ReloadTriggers, ReloadableConfig, StagedConfig,
-    StagedReload, spawn_reload_triggers, stop_reload_triggers,
+    ReloadCause, ReloadProposal, ReloadSummary, ReloadTarget, ReloadTriggers, ReloadableConfig,
+    StagedConfig, StagedReload, spawn_reload_triggers, stop_reload_triggers,
 };
 
 // ---------------------------------------------------------------------------
@@ -111,14 +111,14 @@ pub use upwell_app::{
     ProtocolRuntime, RelationKind, RelationTarget, ReplacementDecision, ResolvedPlugin,
     RestartReason, RestartRequired, RuntimeReloader, RuntimeTransitionReport, RuntimeView,
     ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError, Serve, ServerConfig, Setup,
-    ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents, SuppressionDecision,
-    TransitionAttemptId, TransitionDecision, TransitionFailure, TransitionHookContext,
-    TransitionHookOutcome, TransitionHookReport, TransitionOutcome, TransitionPhase,
-    TransitionProposal, TransitionRejection, TransitionVerdict, ValidationContext, build_host,
-    build_host_context, build_prepared_host, extend_late_plugins, prepare_host,
-    prepare_host_context, prepare_setup_host_context, resolve_early_plugins,
-    resolve_host_dependency, resolve_host_plugin_catalog, retain_host_plugin_catalog, serve_host,
-    setup_host, setup_host_context,
+    ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents, SuppressionDecision, TransitionAborted,
+    TransitionAttemptId, TransitionCommitted, TransitionDecision, TransitionFailure,
+    TransitionHookContext, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,
+    TransitionOutcomeContext, TransitionPhase, TransitionProposal, TransitionRejection,
+    TransitionVerdict, ValidationContext, build_host, build_host_context, build_prepared_host,
+    extend_late_plugins, prepare_host, prepare_host_context, prepare_setup_host_context,
+    resolve_early_plugins, resolve_host_dependency, resolve_host_plugin_catalog,
+    retain_host_plugin_catalog, serve_host, setup_host, setup_host_context,
 };
 
 /// Versioned protocol-neutral developer-tooling schema and prepared-state projection types.

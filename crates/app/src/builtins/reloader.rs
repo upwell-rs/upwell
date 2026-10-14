@@ -24,10 +24,12 @@ pub const RUNTIME_RELOADER_NAME: &str = "RuntimeReloader";
 /// file-watch triggers, runs through [`AppRuntime::reload_config`], so there is one reload
 /// pipeline.
 ///
-/// Calling [`reload`](Self::reload) from a config-reload hook or candidate factory of the
-/// running reload returns [`ReentrantReload`](crate::Error::ReentrantReload) instead of
-/// deadlocking on the serialization lease that reload holds. To reload after the
-/// transaction, `tokio::spawn` the call and do not await it from the hook or factory.
+/// Calling [`reload`](Self::reload) from a transition hook, config-reload hook, or candidate
+/// factory of the running reload returns [`ReentrantReload`](crate::Error::ReentrantReload)
+/// instead of deadlocking on the serialization lease that reload holds. Outcome observers
+/// ([`TransitionCommitted`](crate::TransitionCommitted),
+/// [`TransitionAborted`](crate::TransitionAborted)) run after the leases are released and
+/// may request a follow-up reload directly.
 #[derive(Clone)]
 pub struct RuntimeReloader {
     runtime: Arc<OnceLock<WeakAppRuntime>>,

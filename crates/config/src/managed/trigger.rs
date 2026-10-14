@@ -31,8 +31,41 @@ pub trait ReloadTarget: Clone + Send + Sync + 'static {
     /// A snapshot of the config source files a file watcher observes.
     fn sources(&self) -> Vec<PathBuf>;
 
-    /// Runs one complete reload.
-    fn trigger_reload(&self) -> impl Future<Output = Result<ReloadSummary, Self::Error>> + Send;
+    /// Runs one complete reload requested by `cause`.
+    fn trigger_reload(
+        &self,
+        cause: ReloadCause,
+    ) -> impl Future<Output = Result<ReloadSummary, Self::Error>> + Send;
+}
+
+/// What requested a reload.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ReloadCause {
+    /// A programmatic request, such as an injected runtime reloader or a direct call.
+    Requested,
+    /// The process received `SIGHUP`.
+    Signal,
+    /// A watched config source file changed.
+    FileWatch,
+}
+
+impl ReloadCause {
+    /// The cause's stable snake-case name, as used in tracing and serialized reports.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Requested => "requested",
+            Self::Signal => "signal",
+            Self::FileWatch => "file_watch",
+        }
+    }
+}
+
+impl std::fmt::Display for ReloadCause {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
 }
 
 /// The loggable outcome of one triggered reload.
@@ -96,8 +129,10 @@ pub async fn stop_reload_triggers(handles: Vec<JoinHandle<()>>) {
 
 /// Runs one reload and logs its outcome.
 #[cfg(any(unix, feature = "watch"))]
-async fn run_reload<T: ReloadTarget>(target: &T, cause: &'static str) {
-    match std::panic::AssertUnwindSafe(target.trigger_reload())
+async fn run_reload<T: ReloadTarget>(target: &T, reload_cause: ReloadCause) {
+    let cause = reload_cause.as_str();
+
+    match std::panic::AssertUnwindSafe(target.trigger_reload(reload_cause))
         .catch_unwind()
         .await
     {
@@ -143,7 +178,7 @@ fn spawn_sighup<T: ReloadTarget>(target: T) -> JoinHandle<()> {
         info!(target: "upwell::config", "reloading configuration on SIGHUP");
 
         while hangup.recv().await.is_some() {
-            run_reload(&target, "sighup").await;
+            run_reload(&target, ReloadCause::Signal).await;
         }
 
         warn!(target: "upwell::config", "SIGHUP reload trigger stopped unexpectedly");
@@ -220,7 +255,7 @@ fn spawn_watch<T: ReloadTarget>(
 
             while rx.try_recv().is_ok() {}
 
-            run_reload(&target, "file-change").await;
+            run_reload(&target, ReloadCause::FileWatch).await;
         }
 
         warn!(target: "upwell::config", "config file reload trigger stopped unexpectedly");

@@ -34,6 +34,6 @@ pub use managed::{
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigBindingDescriptor, ConfigDefaults,
     ConfigError, ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError, ConfigReloader,
     ConfigStore, ContainerConfigExt, DirectoriesResolver, Dynamic, Format, FormatId, HookOutcome,
-    ReloadProposal, ReloadSummary, ReloadTarget, ReloadTriggers, ReloadableConfig, StagedConfig,
-    StagedReload, spawn_reload_triggers, stop_reload_triggers,
+    ReloadCause, ReloadProposal, ReloadSummary, ReloadTarget, ReloadTriggers, ReloadableConfig,
+    StagedConfig, StagedReload, spawn_reload_triggers, stop_reload_triggers,
 };
