@@ -5,7 +5,7 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -30,6 +30,7 @@ struct SvcCfg {
 /// What one nested reload request returned, reduced to its comparable shape.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Nested {
+    Committed,
     Reentrant(TransitionAttemptId),
     Unavailable,
     Other(String),
@@ -41,7 +42,8 @@ impl Nested {
             Err(AppError::ReentrantReload { attempt }) => Self::Reentrant(attempt),
             Err(AppError::RuntimeUnavailable) => Self::Unavailable,
             Err(other) => Self::Other(other.to_string()),
-            Ok(report) => Self::Other(format!("unexpected success: {report:?}")),
+            Ok(report) if report.is_committed() => Self::Committed,
+            Ok(report) => Self::Other(format!("uncommitted reload: {report:?}")),
         }
     }
 }
@@ -95,6 +97,67 @@ impl ReloadingFactory {
     }
 }
 
+#[config(path = "cycle_a")]
+#[derive(Deserialize)]
+struct CycleACfg {
+    value: u32,
+}
+
+#[config(path = "cycle_b")]
+#[derive(Deserialize)]
+struct CycleBCfg {
+    value: u32,
+}
+
+static CYCLE_A_RELOADER: OnceLock<RuntimeReloader> = OnceLock::new();
+static CYCLE_B_RELOADER: OnceLock<RuntimeReloader> = OnceLock::new();
+static CYCLE_A_NESTED: Mutex<Vec<Nested>> = Mutex::new(Vec::new());
+static CYCLE_B_NESTED: Mutex<Vec<Nested>> = Mutex::new(Vec::new());
+
+/// Runtime A's hook reloads runtime B inline, which is allowed: B's leases are free.
+#[component]
+struct CycleAHook {
+    #[config("cycle_a")]
+    cfg: Cfg<CycleACfg>,
+}
+
+#[methods]
+impl CycleAHook {
+    #[hook(ConfigReload)]
+    async fn on_reload(
+        &self,
+        #[config("cycle_a")] _next: CfgNext<CycleACfg>,
+    ) -> Result<HookOutcome, AppError> {
+        let reloader = CYCLE_B_RELOADER.get().expect("runtime B is attached");
+
+        record(&CYCLE_A_NESTED, Nested::of(reloader.reload().await));
+
+        Ok(HookOutcome::Reloaded)
+    }
+}
+
+/// Runtime B's hook reloads runtime A, closing an `A -> B -> A` cycle on one task.
+#[component]
+struct CycleBHook {
+    #[config("cycle_b")]
+    cfg: Cfg<CycleBCfg>,
+}
+
+#[methods]
+impl CycleBHook {
+    #[hook(ConfigReload)]
+    async fn on_reload(
+        &self,
+        #[config("cycle_b")] _next: CfgNext<CycleBCfg>,
+    ) -> Result<HookOutcome, AppError> {
+        let reloader = CYCLE_A_RELOADER.get().expect("runtime A is attached");
+
+        record(&CYCLE_B_NESTED, Nested::of(reloader.reload().await));
+
+        Ok(HookOutcome::Reloaded)
+    }
+}
+
 /// A temp config dir holding `application.toml` with the given `svc.value`.
 fn config_dir(value: u32) -> (TempDir, PathBuf, ConfigManager<Toml>) {
     let root = tempfile::Builder::new()
@@ -116,7 +179,13 @@ fn config_dir(value: u32) -> (TempDir, PathBuf, ConfigManager<Toml>) {
 }
 
 fn write_value(config_file: &PathBuf, value: u32) {
-    fs::write(config_file, format!("[svc]\nvalue = {value}\n")).expect("write config");
+    fs::write(
+        config_file,
+        format!(
+            "[svc]\nvalue = {value}\n\n[cycle_a]\nvalue = {value}\n\n[cycle_b]\nvalue = {value}\n"
+        ),
+    )
+    .expect("write config");
 }
 
 async fn reload_within_timeout(
@@ -222,4 +291,75 @@ async fn a_candidate_factory_reloading_its_own_runtime_gets_reentrant_reload() {
         .expect("no lease leaked: a later reload runs");
 
     assert!(next.is_committed());
+}
+
+#[tokio::test]
+async fn an_a_to_b_to_a_reload_cycle_is_rejected_for_the_outer_runtime() {
+    let (_root_a, config_a, manager_a) = config_dir(1);
+    let (_root_b, config_b, manager_b) = config_dir(1);
+
+    let app_a = App::<()>::builder("reload-reentrancy-cycle-a")
+        .config_source(manager_a)
+        .config::<CycleACfg>("cycle_a")
+        .component::<CycleAHook>()
+        .build()
+        .await
+        .expect("app A builds");
+    let app_b = App::<()>::builder("reload-reentrancy-cycle-b")
+        .config_source(manager_b)
+        .config::<CycleBCfg>("cycle_b")
+        .component::<CycleBHook>()
+        .build()
+        .await
+        .expect("app B builds");
+    let reloader_a = app_a.reloader();
+
+    CYCLE_A_RELOADER
+        .set(app_a.reloader())
+        .unwrap_or_else(|_| panic!("runtime A's reloader is set once"));
+    CYCLE_B_RELOADER
+        .set(app_b.reloader())
+        .unwrap_or_else(|_| panic!("runtime B's reloader is set once"));
+
+    write_value(&config_a, 2);
+    write_value(&config_b, 2);
+
+    let report = reload_within_timeout(&reloader_a)
+        .await
+        .expect("the outer reload of A keeps its normal outcome");
+    let a_nested = recorded(&CYCLE_A_NESTED);
+
+    assert!(report.is_committed(), "the outer reload of A commits");
+    assert_eq!(
+        a_nested,
+        [Nested::Committed],
+        "A's hook reloads runtime B inline, which is not reentrant"
+    );
+    assert_eq!(
+        recorded(&CYCLE_B_NESTED),
+        [Nested::Reentrant(report.attempt())],
+        "B's hook reloading A inside A's transaction is rejected with A's attempt"
+    );
+    assert_eq!(
+        app_b
+            .container()
+            .get::<CycleBHook>()
+            .expect("B's hook owner resolves")
+            .cfg
+            .get()
+            .value,
+        2,
+        "the nested reload of B committed"
+    );
+    assert_eq!(
+        app_a
+            .container()
+            .get::<CycleAHook>()
+            .expect("A's hook owner resolves")
+            .cfg
+            .get()
+            .value,
+        2,
+        "the outer reload of A committed"
+    );
 }

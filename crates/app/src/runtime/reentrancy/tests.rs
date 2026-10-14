@@ -40,6 +40,48 @@ async fn another_runtimes_transition_is_not_reentrant() {
 }
 
 #[tokio::test]
+async fn an_outer_runtime_stays_marked_inside_a_nested_runtimes_transition() {
+    let outer = Arc::new(());
+    let inner = Arc::new(());
+
+    let (outer_seen, inner_seen) = active(&outer, 4)
+        .scope(active(&inner, 9).scope(async {
+            (
+                ActiveTransition::current_for(&outer),
+                ActiveTransition::current_for(&inner),
+            )
+        }))
+        .await;
+
+    assert_eq!(
+        outer_seen,
+        Some(TransitionAttemptId::new(4)),
+        "an A -> B -> A reload cycle is still rejected for A"
+    );
+    assert_eq!(inner_seen, Some(TransitionAttemptId::new(9)));
+}
+
+#[tokio::test]
+async fn a_nested_scope_ends_without_unmarking_the_outer_transition() {
+    let outer = Arc::new(());
+    let inner = Arc::new(());
+
+    let (after_inner, inner_after) = active(&outer, 4)
+        .scope(async {
+            active(&inner, 9).scope(async {}).await;
+
+            (
+                ActiveTransition::current_for(&outer),
+                ActiveTransition::current_for(&inner),
+            )
+        })
+        .await;
+
+    assert_eq!(after_inner, Some(TransitionAttemptId::new(4)));
+    assert_eq!(inner_after, None, "the inner marker ends with its scope");
+}
+
+#[tokio::test]
 async fn spawned_work_does_not_inherit_the_marker() {
     let owner = Arc::new(());
     let spawned_owner = Arc::clone(&owner);

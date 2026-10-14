@@ -157,10 +157,11 @@ pub enum Error {
     #[error(transparent)]
     TransitionRejected(Box<crate::TransitionRejection>),
 
-    /// A reload of a runtime was requested from inside that runtime's running transition
-    /// (a config-reload hook or candidate factory), which holds the non-reentrant
-    /// serialization leases. The running attempt is unaffected; defer the reload outside
-    /// the transaction, for example by `tokio::spawn`ing it.
+    /// A reload of a runtime was requested from inside that runtime's running transition,
+    /// by one of its config-reload hooks or candidate factories. The running transition
+    /// holds the non-reentrant serialization leases, so the nested request is rejected
+    /// and the running attempt is unaffected. Defer the reload outside the transaction,
+    /// for example by `tokio::spawn`ing it without awaiting it from the hook or factory.
     #[error(
         "reload requested from inside running transition attempt {attempt} of the same runtime"
     )]

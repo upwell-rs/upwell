@@ -39,6 +39,8 @@
 //! [`RuntimeReloader::reload`](crate::builtins::RuntimeReloader::reload) on the same
 //! runtime gets [`Error::ReentrantReload`](crate::Error::ReentrantReload) immediately,
 //! without touching either lease, and the running reload keeps its normal outcome.
+//! Markers nest across runtimes, so a cycle in which runtime A's transaction reloads
+//! runtime B inline and B's transaction reloads A is rejected for A as well.
 //!
 //! The marker is task-local, so work a hook or factory explicitly `tokio::spawn`s does
 //! not inherit it: a reload requested there waits for the lease and runs after the
