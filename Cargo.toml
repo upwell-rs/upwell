@@ -280,6 +280,10 @@ watch = [
     "upwell-axum?/watch",
 ]
 
+# Serialize redacted runtime transition reports (`RuntimeTransitionReport`) for tooling and
+# telemetry. Reports carry stable IDs and categories only, never config values.
+serde = ["upwell-app/serde"]
+
 # Force the `inventory` registration backend (Apple/Mach-O targets auto-select it via the macro
 # crate's build script). A marker feature — it activates no dependency (`inventory` is an
 # unconditional native dep); it flips the `hybrid-registry` feature on the macro crates, which the

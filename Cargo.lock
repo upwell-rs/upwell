@@ -4502,6 +4502,7 @@ dependencies = [
  "futures",
  "inventory",
  "linkme",
+ "serde",
  "thiserror",
  "tokio",
  "tracing",

@@ -20,11 +20,15 @@ use crate::scope::{PreparedScopeTopology, ScopeParent, SeedDestination};
 
 mod generation;
 mod reload;
+mod report;
 
 pub(crate) use generation::PreparedRuntimeGeneration;
 pub use generation::{AppConditionState, RuntimeView};
 use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransitionCoordinator};
-pub use reload::RuntimeReloadReport;
+pub use report::{
+    ComponentTransitionReport, PhaseTiming, RuntimeTransitionReport, TransitionAttemptId,
+    TransitionFailure, TransitionOutcome, TransitionPhase, TransitionRejection,
+};
 
 /// Everything a protocol needs to drive requests through DI, cheaply cloneable.
 ///

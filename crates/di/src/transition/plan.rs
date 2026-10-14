@@ -31,6 +31,11 @@ pub struct GraphDiff {
 
 /// Minimum structural action required for one affected component.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize),
+    serde(rename_all = "snake_case")
+)]
 pub enum NodeAction {
     Retain,
     RebindLive,
@@ -41,6 +46,11 @@ pub enum NodeAction {
 
 /// Stable category explaining why an action is required.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize),
+    serde(rename_all = "snake_case")
+)]
 pub enum ReasonKind {
     Added,
     Removed,
@@ -56,6 +66,7 @@ pub enum ReasonKind {
 
 /// Canonical shortest reason path from a direct change to an affected consumer.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct TransitionReason {
     pub kind: ReasonKind,
     pub path: Box<[DependencyDemandId]>,

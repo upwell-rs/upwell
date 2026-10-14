@@ -23,17 +23,34 @@ pub use plan::{
 
 /// Runtime role represented by an effective component node.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize),
+    serde(rename_all = "snake_case")
+)]
 pub enum EffectiveNodeRole {
     /// A stored root instance that can participate in a runtime transition.
     Singleton,
     /// A construction recipe used by future openings of one declared scope.
-    FutureScope(ScopeId),
+    FutureScope(
+        #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_scope_id"))] ScopeId,
+    ),
     /// A recipe executed for each resolution rather than a stored instance.
     Transient,
 }
 
+/// Serializes a scope identity as its stable namespaced string.
+#[cfg(feature = "serde")]
+fn serialize_scope_id<S: serde::Serializer>(
+    scope: &ScopeId,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(scope.as_str())
+}
+
 /// Stable identity of one dependency demand in a component's selected factory.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct DependencyDemandId {
     pub consumer: &'static str,
     pub ordinal: usize,

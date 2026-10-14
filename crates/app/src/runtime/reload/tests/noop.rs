@@ -30,9 +30,12 @@ async fn unchanged_reload_skips_candidate_work() {
     // No source edit: the reload must be a true no-op.
     let report = runtime.reload_config().await.expect("reload succeeds");
 
-    assert!(!report.published, "an unchanged source publishes nothing");
-    assert!(report.changed.is_empty());
-    assert!(report.hooks.is_empty());
+    assert!(
+        !report.is_committed(),
+        "an unchanged source publishes nothing"
+    );
+    assert!(report.changed().is_empty());
+    assert!(report.hooks().is_empty());
     assert_eq!(
         runtime.generation(),
         old_generation,

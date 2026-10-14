@@ -149,6 +149,13 @@ pub enum Error {
     #[error("candidate runtime preparation panicked")]
     CandidatePreparationPanicked,
 
+    /// A runtime transition attempt was rejected before publication, leaving the previous
+    /// generation active. Carries the attempt's redacted report; the error that rejected
+    /// it is the [`source`](std::error::Error::source) and
+    /// [`TransitionRejection::error`](crate::TransitionRejection::error).
+    #[error(transparent)]
+    TransitionRejected(Box<crate::TransitionRejection>),
+
     /// A runtime reloader was used before its application was built or after its runtime
     /// was dropped.
     #[error("the application runtime is not attached or has been dropped")]

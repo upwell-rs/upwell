@@ -7,7 +7,9 @@
 //! `#[component]` macros — so nothing registers into the link-time inventory and the
 //! test cannot interfere with discovery-based tests. Each factory injects
 //! `Cfg<AuthConfig>` and records the config mode its construction resolved, so the
-//! test can prove which store each stage of the transaction read. The fixture owns
+//! test can prove which store each stage of the transaction read. A fixed
+//! [`AuthGate`](super::gate::AuthGate) consumer injects the effective provider, so the
+//! switch has an affected consumer to report. The fixture owns
 //! its statics alone and shares nothing with the probe fixture, so it needs no
 //! cross-test guard.
 
@@ -267,9 +269,9 @@ static FALLBACK_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     generation_snapshot: None,
 };
 
-/// Builds a file-backed app with both provider components registered, the config
-/// bound at `auth`, and the availability fact sourced from the same binding. The
-/// temp dir is returned so the source file outlives the app and can be rewritten by
+/// Builds a file-backed app with both provider components and the fixed
+/// [`AuthGate`](super::gate::AuthGate) consumer registered, the config bound at `auth`,
+/// and the availability fact sourced from the same binding. The temp dir is returned so the source file outlives the app and can be rewritten by
 /// the test.
 pub(super) async fn build_auth_app(mode: &str) -> (TempDir, App<()>) {
     let dir = tempfile::Builder::new()
@@ -289,7 +291,8 @@ pub(super) async fn build_auth_app(mode: &str) -> (TempDir, App<()>) {
         .config::<AuthConfig>("auth")
         .condition_facts::<AuthConfig>("auth")
         .component_descriptor(&PRIMARY_COMPONENT)
-        .component_descriptor(&FALLBACK_COMPONENT);
+        .component_descriptor(&FALLBACK_COMPONENT)
+        .component_descriptor(&super::gate::GATE_COMPONENT);
 
     builder
         .registry_mut()

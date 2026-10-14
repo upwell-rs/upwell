@@ -178,8 +178,8 @@ async fn config_reload_hooks_fire_only_for_changed_configs() {
     );
 
     // Both svc-targeting hooks (Watcher + RestartWatcher) ran; the other-targeting one did not.
-    let outcomes: Vec<HookOutcome> = report.hooks.iter().map(|h| h.outcome).collect();
-    assert_eq!(report.hooks.len(), 2, "two svc hooks ran: {outcomes:?}");
+    let outcomes: Vec<HookOutcome> = report.hooks().iter().map(|h| h.outcome).collect();
+    assert_eq!(report.hooks().len(), 2, "two svc hooks ran: {outcomes:?}");
     assert!(
         outcomes.contains(&HookOutcome::Reloaded),
         "Watcher reported Reloaded"
@@ -197,7 +197,7 @@ async fn config_reload_hooks_fire_only_for_changed_configs() {
         .expect("second reload succeeds");
 
     assert!(
-        again.hooks.is_empty(),
+        again.hooks().is_empty(),
         "no config changed, so no hooks fired"
     );
     assert_eq!(watcher.fired(), 1, "watcher did not fire again");

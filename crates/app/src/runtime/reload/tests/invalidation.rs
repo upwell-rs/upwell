@@ -23,7 +23,7 @@ use upwell_di::{
 };
 use upwell_hooks::{HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookDescriptor, HookKind, HookManager};
 
-use super::super::invalidated_component_roots;
+use super::super::invalidation::invalidated_component_roots;
 use super::fixture::{
     ProbeComponent, build_probe_app, config_dir_of, factory_calls, lock_test_guard, reset_controls,
     write_probe_config,
@@ -606,8 +606,11 @@ async fn changed_binding_reconstructs_its_config_consumer() {
 
     let report = runtime.reload_config().await.expect("reload succeeds");
 
-    assert!(report.published, "a changed source publishes a generation");
-    assert_eq!(report.changed.len(), 1, "only the probe binding changed");
+    assert!(
+        report.is_committed(),
+        "a changed source publishes a generation"
+    );
+    assert_eq!(report.changed().len(), 1, "only the probe binding changed");
 
     assert_eq!(
         factory_calls(),

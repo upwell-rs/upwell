@@ -47,6 +47,16 @@ async fn hook_rejection_preserves_config_and_graph() {
         .await
         .expect_err("the hook rejects the proposed token");
 
+    let (report, error) = super::rejected(error);
+
+    super::assert_rejected(
+        &report,
+        crate::TransitionPhase::Hooks,
+        crate::TransitionFailure::HookRejected {
+            component: "ProbeComponent",
+        },
+    );
+
     match error {
         crate::Error::ConfigReload(error) => match *error {
             ConfigReloadError::Hook { component, .. } => {
@@ -139,6 +149,16 @@ async fn receiver_mutating_hook_rejection_preserves_the_active_receiver() {
         .reload_config()
         .await
         .expect_err("the hook rejects the proposed token");
+
+    let (report, error) = super::rejected(error);
+
+    super::assert_rejected(
+        &report,
+        crate::TransitionPhase::Hooks,
+        crate::TransitionFailure::HookRejected {
+            component: "ProbeComponent",
+        },
+    );
 
     match error {
         crate::Error::ConfigReload(error) => match *error {

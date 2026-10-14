@@ -5,6 +5,8 @@
 //! provider through its own root.
 
 mod fixture;
+mod gate;
+mod report;
 
 use std::sync::Arc;
 
@@ -70,10 +72,13 @@ async fn config_switch_swaps_the_effective_authenticator_provider_transactionall
 
     let report = runtime.reload_config().await.expect("reload succeeds");
 
-    assert!(report.published, "a changed source publishes a generation");
-    assert_eq!(report.changed.len(), 1, "only the auth binding changed");
-    assert_eq!(report.changed[0].path, "auth");
-    assert_eq!(report.runtime_generation, runtime.generation());
+    assert!(
+        report.is_committed(),
+        "a changed source publishes a generation"
+    );
+    assert_eq!(report.changed().len(), 1, "only the auth binding changed");
+    assert_eq!(report.changed()[0].path, "auth");
+    assert_eq!(report.runtime_generation(), runtime.generation());
     assert_eq!(
         runtime.generation().get(),
         old_generation.get() + 1,
@@ -111,6 +116,15 @@ async fn config_switch_swaps_the_effective_authenticator_provider_transactionall
         "the primary was removed from the effective graph"
     );
     assert_eq!(observed_modes().await, ["fallback"]);
+    assert_eq!(
+        fallback_view
+            .root()
+            .get::<gate::AuthGate>()
+            .expect("the gate resolves from the new root")
+            .scheme,
+        "fallback",
+        "the fixed consumer reconstructed against the new provider"
+    );
 
     // The pinned old generation still represents the primary: its root, graph, and
     // provider mapping belong to that generation and are untouched by the
@@ -152,9 +166,9 @@ async fn config_switch_swaps_the_effective_authenticator_provider_transactionall
         .await
         .expect("the reverse reload succeeds");
 
-    assert!(report.published, "the reverse switch also publishes");
+    assert!(report.is_committed(), "the reverse switch also publishes");
     assert_eq!(
-        report.runtime_generation,
+        report.runtime_generation(),
         runtime.generation(),
         "the report names the generation it published"
     );

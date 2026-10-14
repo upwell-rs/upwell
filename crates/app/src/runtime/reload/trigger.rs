@@ -17,8 +17,8 @@ impl ReloadTarget for AppRuntime {
         let report = self.reload_config().await?;
 
         Ok(ReloadSummary {
-            generation: report.config_generation,
-            changed: report.changed.len(),
+            generation: report.config_generation(),
+            changed: report.changed().len(),
         })
     }
 }

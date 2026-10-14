@@ -100,7 +100,10 @@ async fn cancelled_precommit_attempt_releases_serializers() {
         .expect("the later reload completes after the aborted attempt released both serializers")
         .expect("the later reload completes");
 
-    assert!(report.published, "the later reload publishes a generation");
+    assert!(
+        report.is_committed(),
+        "the later reload publishes a generation"
+    );
     assert_eq!(
         runtime.generation().get(),
         old_generation.get() + 1,

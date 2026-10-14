@@ -30,9 +30,12 @@ async fn candidate_factory_resolves_proposed_config_before_publication() {
 
     let report = runtime.reload_config().await.expect("reload succeeds");
 
-    assert!(report.published, "a changed source publishes a generation");
-    assert_eq!(report.changed.len(), 1, "only the probe binding changed");
-    assert_eq!(report.changed[0].path, "probe");
+    assert!(
+        report.is_committed(),
+        "a changed source publishes a generation"
+    );
+    assert_eq!(report.changed().len(), 1, "only the probe binding changed");
+    assert_eq!(report.changed()[0].path, "probe");
     assert_eq!(
         runtime.generation().get(),
         old_generation.get() + 1,
@@ -62,7 +65,7 @@ async fn candidate_factory_resolves_proposed_config_before_publication() {
     assert!(old_root.get::<ProbeComponent>().is_none());
 
     // The reload hook ran against the candidate manager over the staged proposal.
-    assert_eq!(report.hooks.len(), 1, "the config-reload hook ran");
+    assert_eq!(report.hooks().len(), 1, "the config-reload hook ran");
     assert_eq!(
         proposed_tokens().await,
         vec![7],
@@ -100,10 +103,10 @@ async fn successive_value_only_changes_reconstruct_the_consumer_and_pin_old_gene
         .expect("first reload succeeds");
 
     assert!(
-        report.published,
+        report.is_committed(),
         "a value-only change publishes a generation"
     );
-    assert_eq!(report.changed.len(), 1, "only the probe binding changed");
+    assert_eq!(report.changed().len(), 1, "only the probe binding changed");
     assert_eq!(
         runtime.generation().get(),
         old_runtime_generation.get() + 1,
@@ -163,8 +166,8 @@ async fn successive_value_only_changes_reconstruct_the_consumer_and_pin_old_gene
         .await
         .expect("second reload succeeds");
 
-    assert!(report.published);
-    assert_eq!(report.changed.len(), 1);
+    assert!(report.is_committed());
+    assert_eq!(report.changed().len(), 1);
     assert_eq!(
         runtime.generation().get(),
         old_runtime_generation.get() + 2,
