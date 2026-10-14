@@ -4,10 +4,12 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use futures::StreamExt;
+use futures::channel::oneshot;
 use upwell_core::{DependencyDescriptor, ResolverCtx, ResolverSet, TypeDescriptor};
 
 use super::{
-    Error, HookCall, HookDescriptor, HookKind, HookManager, HookParticipation, HookRole,
+    Error, FiredHook, HookCall, HookDescriptor, HookKind, HookManager, HookParticipation, HookRole,
     HookRouting, Shutdown, Startup,
 };
 
@@ -45,6 +47,8 @@ impl HookKind for Notice {
 }
 
 static CALLS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+static RELEASE: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
+static RELEASED: Mutex<Option<oneshot::Receiver<()>>> = Mutex::new(None);
 static TEST_GUARD: Mutex<()> = Mutex::new(());
 
 fn record(call: &'static str) {
@@ -129,6 +133,48 @@ fn failing_observe_call<'a>(
     })
 }
 
+/// Waits until [`releasing_observe_call`] runs, so it completes after a later observer.
+fn waiting_observe_call<'a>(
+    _ctx: &'a (dyn ResolverCtx + Send + Sync),
+    _cx: &'a (dyn Any + Send + Sync),
+) -> CallFuture<'a> {
+    let released = RELEASED.lock().expect("release receiver").take();
+
+    Box::pin(async move {
+        released
+            .expect("a release channel is armed")
+            .await
+            .expect("the releasing observer runs");
+        record("waited");
+
+        Ok(Box::new(()) as Box<dyn Any + Send>)
+    })
+}
+
+fn releasing_observe_call<'a>(
+    _ctx: &'a (dyn ResolverCtx + Send + Sync),
+    _cx: &'a (dyn Any + Send + Sync),
+) -> CallFuture<'a> {
+    let release = RELEASE.lock().expect("release sender").take();
+
+    Box::pin(async move {
+        record("released");
+        release
+            .expect("a release channel is armed")
+            .send(())
+            .expect("the waiting observer is pending");
+
+        Ok(Box::new(()) as Box<dyn Any + Send>)
+    })
+}
+
+fn arm_release() {
+    let (sender, receiver) = oneshot::channel();
+
+    *RELEASE.lock().expect("release sender") = Some(sender);
+    *RELEASED.lock().expect("release receiver") = Some(receiver);
+}
+
 fn hook<T: 'static>(name: &'static str, kind_ty: fn() -> TypeId, call: HookCall) -> HookDescriptor {
     HookDescriptor::new(
         0,
@@ -177,7 +223,7 @@ fn hook_panics_are_isolated_and_the_manager_remains_usable() {
     let (manager, _resolver) = attached(vec![panicking_hook()]);
 
     for _ in 0..2 {
-        let fired = futures::executor::block_on(manager.fire::<Startup>(&(), |_| true));
+        let fired = futures::executor::block_on(manager.fire_all::<Startup>(&()));
 
         assert!(fired.ended, "a panicking participant is fail-closed");
         assert!(matches!(
@@ -205,7 +251,7 @@ fn hook_panics_are_isolated_and_the_manager_remains_usable() {
 fn synchronous_hook_call_panics_are_isolated() {
     let (manager, _resolver) = attached(vec![synchronously_panicking_hook()]);
 
-    let fired = futures::executor::block_on(manager.fire::<Startup>(&(), |_| true));
+    let fired = futures::executor::block_on(manager.fire_all::<Startup>(&()));
 
     assert!(matches!(
         fired.participants.as_slice(),
@@ -233,7 +279,7 @@ fn expired_resolver_context_ends_the_event_at_the_first_participant() {
 
     drop(resolver);
 
-    let fired = futures::executor::block_on(manager.fire::<Startup>(&(), |_| true));
+    let fired = futures::executor::block_on(manager.fire_all::<Startup>(&()));
 
     assert!(fired.ended);
     assert!(matches!(
@@ -252,7 +298,7 @@ fn attaching_a_new_generation_replaces_an_expired_context() {
 
     manager.attach(Arc::downgrade(&replacement));
 
-    let fired = futures::executor::block_on(manager.fire::<Startup>(&(), |_| true));
+    let fired = futures::executor::block_on(manager.fire_all::<Startup>(&()));
 
     assert!(matches!(
         fired.participants.as_slice(),
@@ -279,8 +325,8 @@ fn resolver_provider_is_loaded_once_per_fire() {
         Some(Arc::clone(&resolver))
     });
 
-    let _ = futures::executor::block_on(manager.fire::<Startup>(&(), |_| true));
-    let _ = futures::executor::block_on(manager.fire::<Startup>(&(), |_| true));
+    let _ = futures::executor::block_on(manager.fire_all::<Startup>(&()));
+    let _ = futures::executor::block_on(manager.fire_all::<Startup>(&()));
 
     assert_eq!(loads.load(Ordering::Relaxed), 2);
 }
@@ -296,7 +342,7 @@ fn observers_run_after_every_participant_accepted() {
 
     take_calls();
 
-    let fired = futures::executor::block_on(manager.fire::<Gate>(&(), |_| true));
+    let fired = futures::executor::block_on(manager.fire_all::<Gate>(&()));
 
     assert!(!fired.ended);
     assert_eq!(
@@ -319,7 +365,7 @@ fn an_ending_participant_skips_later_participants_and_every_observer() {
 
     take_calls();
 
-    let fired = futures::executor::block_on(manager.fire::<Gate>(&(), |_| true));
+    let fired = futures::executor::block_on(manager.fire_all::<Gate>(&()));
 
     assert!(fired.ended, "the kind ends the event on a `false` verdict");
     assert_eq!(take_calls(), ["deny"]);
@@ -337,7 +383,7 @@ fn observer_failures_are_reported_without_ending_the_event() {
 
     take_calls();
 
-    let fired = futures::executor::block_on(manager.fire::<Gate>(&(), |_| true));
+    let fired = futures::executor::block_on(manager.fire_all::<Gate>(&()));
 
     assert!(!fired.ended);
     assert!(matches!(
@@ -356,7 +402,7 @@ fn observer_only_kinds_never_run_participants() {
 
     take_calls();
 
-    let fired = futures::executor::block_on(manager.fire::<Notice>(&(), |_| true));
+    let fired = futures::executor::block_on(manager.fire_all::<Notice>(&()));
 
     assert!(
         fired.participants.is_empty(),
@@ -387,4 +433,84 @@ fn always_routed_hooks_bypass_the_firing_sites_selection() {
     assert_eq!(names(&fired.observers), ["Third"]);
     assert!(manager.component_participates::<Gate>(TypeId::of::<First>()));
     assert!(!manager.component_participates::<Gate>(TypeId::of::<Third>()));
+}
+
+#[test]
+fn streamed_observers_arrive_in_completion_order_and_collect_in_registration_order() {
+    let _guard = TEST_GUARD.lock().expect("test guard");
+    let hooks = || {
+        vec![
+            hook::<First>("First", gate_type_id, accept_call),
+            hook::<Second>("Second", gate_type_id, waiting_observe_call)
+                .with_role(HookRole::Observer),
+            hook::<Third>("Third", gate_type_id, releasing_observe_call)
+                .with_role(HookRole::Observer),
+        ]
+    };
+    let (manager, _resolver) = attached(hooks());
+
+    take_calls();
+    arm_release();
+
+    let streamed = futures::executor::block_on(
+        manager
+            .fire_all_streamed::<Gate>(&())
+            .map(|fired| match fired {
+                FiredHook::Participant { component, .. } => ("participant", component.name),
+                FiredHook::Observer { component, .. } => ("observer", component.name),
+            })
+            .collect::<Vec<_>>(),
+    );
+
+    assert_eq!(
+        streamed,
+        [
+            ("participant", "First"),
+            ("observer", "Third"),
+            ("observer", "Second"),
+        ],
+        "observers run concurrently and stream as they complete"
+    );
+    assert_eq!(take_calls(), ["accept", "released", "waited"]);
+
+    arm_release();
+
+    let collected = futures::executor::block_on(manager.fire_all::<Gate>(&()));
+
+    assert_eq!(
+        names(&collected.observers),
+        ["Second", "Third"],
+        "collected observers keep registration order"
+    );
+}
+
+#[test]
+fn a_streamed_ending_participant_is_the_last_item() {
+    let _guard = TEST_GUARD.lock().expect("test guard");
+    let (manager, _resolver) = attached(vec![
+        hook::<First>("First", gate_type_id, deny_call),
+        hook::<Second>("Second", gate_type_id, observe_call).with_role(HookRole::Observer),
+    ]);
+
+    let streamed = futures::executor::block_on(
+        manager
+            .fire_streamed::<Gate>(&(), |_| true)
+            .collect::<Vec<_>>(),
+    );
+
+    assert_eq!(streamed.len(), 1);
+    assert!(streamed[0].ends_event());
+    assert_eq!(streamed[0].component().name, "First");
+}
+
+#[test]
+fn fire_all_ignores_targeting() {
+    let _guard = TEST_GUARD.lock().expect("test guard");
+    let (manager, _resolver) = attached(vec![hook::<First>("First", gate_type_id, accept_call)]);
+
+    let selected = futures::executor::block_on(manager.fire::<Gate>(&(), |_| false));
+    let all = futures::executor::block_on(manager.fire_all::<Gate>(&()));
+
+    assert!(selected.participants.is_empty());
+    assert_eq!(names(&all.participants), ["First"]);
 }

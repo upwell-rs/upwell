@@ -500,7 +500,7 @@ fn probe_externals(tag: &'static str) -> ResolverSet {
 
 async fn probe_tags(hooks: &HookManager) -> Vec<&'static str> {
     hooks
-        .fire::<ProbeKind>(&(), |_| true)
+        .fire_all::<ProbeKind>(&())
         .await
         .participants
         .into_iter()
