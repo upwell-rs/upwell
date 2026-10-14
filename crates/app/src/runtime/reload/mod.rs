@@ -40,7 +40,9 @@
 //! runtime gets [`Error::ReentrantReload`](crate::Error::ReentrantReload) immediately,
 //! without touching either lease, and the running reload keeps its normal outcome.
 //! Markers nest across runtimes, so a cycle in which runtime A's transaction reloads
-//! runtime B inline and B's transaction reloads A is rejected for A as well.
+//! runtime B inline and B's transaction reloads A on the same task is rejected for A as
+//! well. Cycles split across tasks (A's transaction reloading B while another task's B
+//! transaction reloads A) are not detected and deadlock on each other's leases.
 //!
 //! The marker is task-local, so work a hook or factory explicitly `tokio::spawn`s does
 //! not inherit it: a reload requested there waits for the lease and runs after the
@@ -152,7 +154,7 @@ impl AppRuntime {
     /// Hook managers are generation-bound: refetch [`hooks`](Self::hooks) after a
     /// published reload to run the new generation's hooks. A handle stays associated
     /// with its original generation but invokes only while that generation's root is
-    /// still pinned or owned — a [`RuntimeView`](crate::RuntimeView) held across the
+    /// still pinned or owned — a [`RuntimeView`] held across the
     /// invocation keeps it alive, while a standalone old handle may return
     /// [`ResolverUnavailable`](upwell_hooks::Error::ResolverUnavailable) after the root
     /// is released. Components that inject [`HookManager`] reconstruct under the

@@ -6,10 +6,17 @@
 //! fast with [`ReentrantReload`](crate::Error::ReentrantReload) instead of awaiting a
 //! lease its own caller holds.
 //!
-//! Markers nest: a transaction of one runtime that reloads another runtime inline (allowed,
-//! because the other runtime's leases are free) keeps its own marker active underneath
-//! the inner one, so an inner transaction that reloads the outer runtime (an `A -> B -> A`
-//! cycle) is still rejected.
+//! Markers nest: a transaction of one runtime that reloads another runtime inline (allowed
+//! by this check, though the inner reload still waits if that runtime's leases are held
+//! by another task) keeps its own marker active underneath the inner one, so an inner
+//! transaction that reloads the outer runtime (an `A -> B -> A` cycle on one task) is
+//! still rejected.
+//!
+//! The marker only sees the current task. Two transactions on different tasks that each
+//! reload the other's runtime inline (`A -> B` on one task while `B -> A` runs on another)
+//! wait on each other's leases and deadlock; that cross-task lock-order cycle is not
+//! detected. Avoid inline cross-runtime reloads from hooks and factories, or spawn them
+//! without awaiting them.
 //!
 //! The marker is task-local. Work explicitly `tokio::spawn`ed from a hook or factory does
 //! not inherit it: such a reload waits for the lease and runs after the transaction
