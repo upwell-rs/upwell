@@ -277,6 +277,9 @@ pub fn generate_hook(
     }
 }
 
+/// The flags a `#[hook(Kind, ..)]` attribute accepts after its kind.
+const HOOK_FLAGS: [&str; 2] = ["observe", "always"];
+
 /// Parses a `#[hook(Kind[, observe][, always])]` attribute: the kind path, then optional
 /// flags declaring an observer role and untargeted routing, each at most once.
 pub fn parse_hook_attr(attr: &syn::Attribute) -> syn::Result<HookAttr> {
@@ -297,6 +300,14 @@ pub fn parse_hook_attr(attr: &syn::Attribute) -> syn::Result<HookAttr> {
 
         Ok((kind, flags))
     })?;
+
+    if let Some(flag) = HOOK_FLAGS.iter().find(|flag| kind.is_ident(flag)) {
+        return Err(syn::Error::new_spanned(
+            &kind,
+            format!("expected a hook kind before `{flag}`, as in #[hook(Kind, {flag})]"),
+        ));
+    }
+
     let mut parsed = HookAttr {
         kind,
         observe: false,
@@ -324,3 +335,6 @@ pub fn parse_hook_attr(attr: &syn::Attribute) -> syn::Result<HookAttr> {
 
     Ok(parsed)
 }
+
+#[cfg(test)]
+mod tests;

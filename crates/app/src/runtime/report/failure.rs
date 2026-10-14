@@ -27,15 +27,21 @@ pub enum TransitionFailure {
         /// The bound type's display name.
         type_name: &'static str,
     },
-    /// A participant hook ended the attempt, by a rejecting verdict or an error. The
-    /// rejecting phase names the hook kind; a verdict's reason code is in
-    /// [`RuntimeTransitionReport::transition_hooks`].
+    /// A participant hook ended the attempt by rejecting it or returning an error. The
+    /// rejecting phase names the hook kind: a config-reload hook error during
+    /// [`Hooks`](TransitionPhase::Hooks), or a transition-proposal or transition-decision
+    /// hook during [`Proposal`](TransitionPhase::Proposal) or
+    /// [`Decision`](TransitionPhase::Decision). Only the latter two carry a
+    /// [`TransitionVerdict`](crate::TransitionVerdict) reason code, recorded in
+    /// [`RuntimeTransitionReport::transition_hooks`]; config-reload hooks have no verdict
+    /// and no per-hook record.
     HookRejected {
         /// The display name of the component owning the hook, as the hook catalog
         /// records it (its type descriptor name, not its stable component ID).
         component: &'static str,
     },
-    /// A participant hook panicked, ending the attempt. The payload is never recorded.
+    /// A participant hook panicked, ending the attempt. The rejecting phase names the hook
+    /// kind, as for [`HookRejected`](Self::HookRejected). The payload is never recorded.
     HookPanicked {
         /// The display name of the component owning the hook, as the hook catalog
         /// records it (its type descriptor name, not its stable component ID).
