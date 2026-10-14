@@ -8,6 +8,7 @@ use upwell_di::{ComponentDescriptor, EffectiveGraph, ScopeContainer, ScopeRegist
 use upwell_hooks::HookManager;
 
 use super::RuntimeScopePlan;
+use super::reentrancy::ActiveTransition;
 use crate::registry::AppConditionEvaluation;
 use crate::registry::AppRegistry;
 
@@ -232,6 +233,11 @@ impl RuntimeTransitionCoordinator {
         self.publication.pin()
     }
 
+    /// The runtime identity shared by every handle of this coordinator.
+    pub(crate) fn owner(&self) -> &Arc<()> {
+        &self.owner
+    }
+
     pub(crate) fn owns(&self, generation: &Arc<RuntimeGeneration>) -> bool {
         Arc::ptr_eq(&self.owner, &generation.owner)
     }
@@ -263,6 +269,11 @@ impl RuntimeTransition {
     /// The observability identity allocated for this attempt.
     pub(crate) const fn attempt(&self) -> TransitionAttemptId {
         self.attempt
+    }
+
+    /// The marker identifying this attempt as the active transition of its runtime.
+    pub(crate) fn active(&self) -> ActiveTransition {
+        ActiveTransition::new(Arc::clone(&self.coordinator.owner), self.attempt)
     }
 
     /// The exact committed generation against which preparation must run.

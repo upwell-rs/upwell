@@ -157,6 +157,18 @@ pub enum Error {
     #[error(transparent)]
     TransitionRejected(Box<crate::TransitionRejection>),
 
+    /// A reload of a runtime was requested from inside that runtime's running transition
+    /// (a config-reload hook or candidate factory), which holds the non-reentrant
+    /// serialization leases. The running attempt is unaffected; defer the reload outside
+    /// the transaction, for example by `tokio::spawn`ing it.
+    #[error(
+        "reload requested from inside running transition attempt {attempt} of the same runtime"
+    )]
+    ReentrantReload {
+        /// The running attempt whose leases the nested reload would have waited on.
+        attempt: crate::TransitionAttemptId,
+    },
+
     /// A runtime reloader was used before its application was built or after its runtime
     /// was dropped.
     #[error("the application runtime is not attached or has been dropped")]

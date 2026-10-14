@@ -34,6 +34,7 @@ mod trace;
 
 pub use failure::{TransitionFailure, TransitionRejection};
 pub(crate) use recorder::{TransitionCompletion, TransitionRecorder};
+pub(crate) use trace::TRANSITION_TARGET;
 
 /// One phase of a runtime transition attempt, in execution order.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
