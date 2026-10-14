@@ -6,7 +6,8 @@ use upwell_di::{
 };
 
 use super::fixture::{
-    FallbackAuthenticator, PrimaryAuthenticator, build_auth_app, config_dir_of, write_auth_config,
+    FallbackAuthenticator, PrimaryAuthenticator, build_auth_app, config_dir_of, lock_test_guard,
+    write_auth_config,
 };
 use super::gate::AuthGate;
 use crate::{ComponentTransitionReport, RuntimeTransitionReport, TransitionOutcome};
@@ -33,6 +34,7 @@ fn affected(report: &RuntimeTransitionReport) -> Vec<(&'static str, NodeAction)>
 
 #[tokio::test]
 async fn provider_switch_reports_replaced_providers_and_the_affected_consumer() {
+    let _guard = lock_test_guard().await;
     let gate_demand = DependencyDemandId {
         consumer: AuthGate::ID,
         ordinal: 0,
@@ -100,6 +102,7 @@ async fn provider_switch_reports_replaced_providers_and_the_affected_consumer() 
 
 #[tokio::test]
 async fn identical_switches_produce_identical_reports() {
+    let _guard = lock_test_guard().await;
     let first = switch_to_fallback().await;
     let second = switch_to_fallback().await;
 

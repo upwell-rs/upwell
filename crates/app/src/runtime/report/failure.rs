@@ -142,10 +142,10 @@ impl fmt::Display for TransitionFailure {
 /// A rejected runtime transition attempt: its redacted report plus the error that
 /// rejected it.
 ///
-/// `Display` renders only the redacted report outcome. The original error is the
-/// [`source`](std::error::Error::source) and [`error`](Self::error); its message may
-/// contain config-derived text, so do not forward it where values must stay redacted.
-#[derive(Debug)]
+/// `Display` and `Debug` render only the redacted report. The original error is
+/// reachable only through [`error`](Self::error), [`into_parts`](Self::into_parts), and
+/// the [`source`](std::error::Error::source) chain; its message may contain
+/// config-derived text, so do not forward it where values must stay redacted.
 pub struct TransitionRejection {
     report: RuntimeTransitionReport,
     error: crate::Error,
@@ -169,6 +169,15 @@ impl TransitionRejection {
     /// Splits the rejection into its report and the error that rejected the attempt.
     pub fn into_parts(self) -> (RuntimeTransitionReport, crate::Error) {
         (self.report, self.error)
+    }
+}
+
+impl fmt::Debug for TransitionRejection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TransitionRejection")
+            .field("report", &self.report)
+            .finish_non_exhaustive()
     }
 }
 

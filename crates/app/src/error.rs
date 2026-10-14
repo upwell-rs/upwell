@@ -150,8 +150,9 @@ pub enum Error {
     CandidatePreparationPanicked,
 
     /// A runtime transition attempt was rejected before publication, leaving the previous
-    /// generation active. Carries the attempt's redacted report; the error that rejected
-    /// it is the [`source`](std::error::Error::source) and
+    /// generation active. Carries the attempt's redacted report, which is all `Display`
+    /// and `Debug` render; the error that rejected it is the
+    /// [`source`](std::error::Error::source) and
     /// [`TransitionRejection::error`](crate::TransitionRejection::error).
     #[error(transparent)]
     TransitionRejected(Box<crate::TransitionRejection>),

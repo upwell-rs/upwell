@@ -415,7 +415,7 @@ async fn facade_root_exposes_staged_reload_and_staged_config() {
 /// users can run a graph-transitioning reload and inspect its report without depending on
 /// `upwell-app` directly.
 #[tokio::test]
-async fn facade_root_exposes_runtime_reload_report() {
+async fn facade_root_exposes_runtime_transition_report() {
     let root = temp_config_dir();
     let dirs = DirectoriesManager::from_path(root.path().to_path_buf());
     let config_dir = dirs.dir::<Config>();
