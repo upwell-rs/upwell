@@ -1,4 +1,5 @@
 use tracing::{debug, info, warn};
+use upwell_config::ReloadCause;
 use upwell_core::RuntimeGenerationId;
 
 use super::{RuntimeTransitionReport, TransitionAttemptId, TransitionOutcome, TransitionPhase};
@@ -10,6 +11,7 @@ pub(crate) const TRANSITION_TARGET: &str = "upwell::transition";
 /// then one terminal event, with the report's stable redacted fields.
 pub(super) fn report(report: &RuntimeTransitionReport) {
     let attempt = report.attempt().get();
+    let cause = report.cause().as_str();
     let base_generation = report.base_generation().get();
     let elapsed_us = u64::try_from(report.elapsed().as_micros()).unwrap_or(u64::MAX);
 
@@ -47,6 +49,7 @@ pub(super) fn report(report: &RuntimeTransitionReport) {
         TransitionOutcome::Committed { generation } => info!(
             target: TRANSITION_TARGET,
             attempt,
+            cause,
             base_generation,
             generation = generation.get(),
             config_generation = report.config_generation(),
@@ -61,6 +64,7 @@ pub(super) fn report(report: &RuntimeTransitionReport) {
         TransitionOutcome::NoOp => debug!(
             target: TRANSITION_TARGET,
             attempt,
+            cause,
             base_generation,
             elapsed_us,
             outcome = "no_op",
@@ -69,6 +73,7 @@ pub(super) fn report(report: &RuntimeTransitionReport) {
         TransitionOutcome::Rejected { phase, failure } => warn!(
             target: TRANSITION_TARGET,
             attempt,
+            cause,
             base_generation,
             changed = report.changed().len(),
             affected = report.components().len(),
@@ -84,12 +89,14 @@ pub(super) fn report(report: &RuntimeTransitionReport) {
 /// Emits the terminal event of an attempt whose future was dropped before it finished.
 pub(super) fn cancelled(
     attempt: TransitionAttemptId,
+    cause: ReloadCause,
     base_generation: RuntimeGenerationId,
     phase: Option<TransitionPhase>,
 ) {
     warn!(
         target: TRANSITION_TARGET,
         attempt = attempt.get(),
+        cause = cause.as_str(),
         base_generation = base_generation.get(),
         phase = phase.map(TransitionPhase::as_str),
         outcome = "cancelled",

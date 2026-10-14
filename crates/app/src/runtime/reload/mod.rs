@@ -109,9 +109,10 @@
 //! report is also emitted as structured `upwell::transition` tracing events.
 //!
 //! This is the only reload pipeline. The injectable
-//! [`RuntimeReloader`](crate::builtins::RuntimeReloader) and the app's watch and signal
-//! triggers (through [`ReloadTarget`](upwell_config::ReloadTarget)) all drive
-//! [`AppRuntime::reload_config`].
+//! [`RuntimeReloader`](crate::builtins::RuntimeReloader) drives
+//! [`AppRuntime::reload_config`], and the app's watch and signal triggers (through
+//! [`ReloadTarget`](upwell_config::ReloadTarget)) drive the same reload transaction,
+//! recording their own [`ReloadCause`](upwell_config::ReloadCause).
 
 use super::generation::RuntimeTransition;
 use super::reentrancy::ActiveTransition;
