@@ -50,8 +50,11 @@ use upwell_hooks::{HookKind, HookParam};
 use super::{ComponentTransitionReport, TransitionAttemptId, TransitionPhase};
 
 mod fire;
+mod outcome;
 
 pub(crate) use fire::{AffectedComponents, fire_gate};
+pub(crate) use outcome::observe_outcome;
+pub use outcome::{TransitionAborted, TransitionCommitted, TransitionOutcomeContext};
 
 /// Fired after planning and before candidate construction, against the active generation.
 /// A participant may reject the pending transition.

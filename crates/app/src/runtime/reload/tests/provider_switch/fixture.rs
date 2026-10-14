@@ -18,6 +18,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Deserialize;
 use tempfile::TempDir;
@@ -62,6 +63,13 @@ static FALLBACK_CONDITION: ConditionDescriptor = ConditionDescriptor {
 
 /// The config mode each factory construction resolved, in construction order.
 static OBSERVED_MODES: tokio::sync::Mutex<Vec<String>> = tokio::sync::Mutex::const_new(Vec::new());
+
+/// Whether the fallback factory fails, to abort a switch during candidate construction.
+static FALLBACK_FAILS: AtomicBool = AtomicBool::new(false);
+
+pub(super) fn fail_fallback_factory(fails: bool) {
+    FALLBACK_FAILS.store(fails, Ordering::SeqCst);
+}
 
 /// Serializes this fixture's tests so no concurrent construction pushes into
 /// [`OBSERVED_MODES`] between a clear and an exact-list assertion. Held for the entire
@@ -178,6 +186,12 @@ fn construct_primary(context: &mut ComponentConstructionContext) -> AuthFactoryF
 
 fn construct_fallback(context: &mut ComponentConstructionContext) -> AuthFactoryFuture<'_> {
     Box::pin(async move {
+        if FALLBACK_FAILS.load(Ordering::SeqCst) {
+            return Err(upwell_di::Error::Other(
+                "the fallback authenticator is unavailable".into(),
+            ));
+        }
+
         let cfg = <Cfg<AuthConfig> as FromContainer>::from_container(context).await?;
         let observed_mode = cfg.snapshot().mode.clone();
 

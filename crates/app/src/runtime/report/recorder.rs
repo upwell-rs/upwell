@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use upwell_config::{ChangedBinding, ComponentHookReport};
+use upwell_config::{ChangedBinding, ComponentHookReport, ReloadCause};
 use upwell_core::RuntimeGenerationId;
 
 use super::{
@@ -28,6 +28,7 @@ pub(crate) enum TransitionCompletion {
 /// one.
 pub(crate) struct TransitionRecorder {
     attempt: TransitionAttemptId,
+    cause: ReloadCause,
     base_generation: RuntimeGenerationId,
     config_generation: u64,
     current: Option<(TransitionPhase, Instant)>,
@@ -42,11 +43,13 @@ pub(crate) struct TransitionRecorder {
 impl TransitionRecorder {
     pub(crate) fn begin(
         attempt: TransitionAttemptId,
+        cause: ReloadCause,
         base_generation: RuntimeGenerationId,
         config_generation: u64,
     ) -> Self {
         Self {
             attempt,
+            cause,
             base_generation,
             config_generation,
             current: None,
@@ -133,6 +136,7 @@ impl TransitionRecorder {
     fn take_report(&mut self, outcome: TransitionOutcome) -> RuntimeTransitionReport {
         RuntimeTransitionReport {
             attempt: self.attempt,
+            cause: self.cause,
             base_generation: self.base_generation,
             outcome,
             config_generation: self.config_generation,

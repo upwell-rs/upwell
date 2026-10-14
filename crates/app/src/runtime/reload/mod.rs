@@ -91,6 +91,15 @@
 //!
 //! [`Cfg<T>`]: upwell_config::Cfg
 //!
+//! # Outcome observers
+//!
+//! After the attempt released both leases, observer-only
+//! [`TransitionCommitted`](crate::TransitionCommitted) hooks fire on the published
+//! generation for a committed attempt, and [`TransitionAborted`](crate::TransitionAborted)
+//! hooks fire on the generation that stayed active for a rejected one, each exactly once
+//! with the final report. They run outside the reentrancy scope, so they may request a
+//! follow-up reload; their failures are traced and never affect the outcome.
+//!
 //! # Reports
 //!
 //! Every reload that acquires the transition writer produces one canonical, redacted
@@ -104,14 +113,6 @@
 //! triggers (through [`ReloadTarget`](upwell_config::ReloadTarget)) all drive
 //! [`AppRuntime::reload_config`].
 
-use std::cell::Cell;
-use std::sync::Arc;
-
-use upwell_config::StagedReload;
-use upwell_core::{ResolverSet, TypeDescriptor};
-use upwell_di::{BoxedComponent, Injectable};
-use upwell_hooks::{HOOK_MANAGER_NAME, HookDescriptor, HookManager};
-
 use super::generation::RuntimeTransition;
 use super::reentrancy::ActiveTransition;
 use super::report::{
@@ -120,10 +121,11 @@ use super::report::{
 };
 use super::transition_hooks::{
     AffectedComponents, PendingTransition, TransitionDecision, TransitionProposal, fire_gate,
+    observe_outcome,
 };
-use super::{AppConditionState, AppRuntime, PreparedRuntimeGeneration, RuntimeView};
-use crate::registry::AppConditionEvaluation;
-use crate::transition::{CandidateGraph, ResolvedTransitionPlan};
+use super::{AppRuntime, RuntimeView};
+use stages::{commit_candidate, construct_candidate, evaluate_conditions, plan_transition};
+use upwell_config::ReloadCause;
 
 impl AppRuntime {
     /// Re-reads configuration and republishes changed bindings and the derived
@@ -139,6 +141,12 @@ impl AppRuntime {
     /// [`TransitionDecision`] hooks against that candidate; and
     /// commits. A proposal rejection constructs nothing; a decision rejection drops the
     /// constructed candidate.
+    ///
+    /// Once both leases are released, it fires
+    /// [`TransitionCommitted`](crate::TransitionCommitted) observers for a committed
+    /// attempt or [`TransitionAborted`](crate::TransitionAborted) observers for a rejected
+    /// one, then returns. The report's [`cause`](RuntimeTransitionReport::cause) is
+    /// [`ReloadCause::Requested`]; `SIGHUP` and file-watch triggers record their own cause.
     ///
     /// Returns the attempt's [`RuntimeTransitionReport`] when it commits or is a no-op.
     /// A rejected attempt returns
@@ -191,17 +199,30 @@ impl AppRuntime {
     /// unaffected. Work explicitly `tokio::spawn`ed from a hook or factory does not
     /// inherit the marker and waits for the lease instead, so it must not be awaited
     /// from inside the transaction.
+    ///
+    /// [`HookManager`]: upwell_hooks::HookManager
     pub async fn reload_config(&self) -> crate::Result<RuntimeTransitionReport> {
+        self.reload_for(ReloadCause::Requested).await
+    }
+
+    /// Runs one reload attempt requested by `cause`, then fires its outcome observers
+    /// once both serialization leases are released.
+    pub(crate) async fn reload_for(
+        &self,
+        cause: ReloadCause,
+    ) -> crate::Result<RuntimeTransitionReport> {
         if let Some(attempt) = ActiveTransition::current_for(self.transitions.owner()) {
             return Err(reentrant_reload(attempt));
         }
 
-        let _reload_lease = self.reloader.lock_reload().await;
+        let reload_lease = self.reloader.lock_reload().await;
         let transition = self.begin_transition().await;
+        let base = transition.base().clone();
         let active = transition.active();
         let mut recorder = TransitionRecorder::begin(
             transition.attempt(),
-            transition.base().id(),
+            cause,
+            base.id(),
             self.reloader.generation(),
         );
 
@@ -209,11 +230,22 @@ impl AppRuntime {
             .scope(self.run_reload(transition, &mut recorder))
             .await;
 
-        recorder.finish(result)
+        drop(reload_lease);
+
+        let (result, published) = match result {
+            Ok((completion, published)) => (Ok(completion), published),
+            Err(error) => (Err(error), None),
+        };
+        let outcome = recorder.finish(result);
+
+        observe_outcome(&outcome, &base, published.as_ref()).await;
+
+        outcome
     }
 
     /// Runs one reload attempt's phases under both held leases, recording each phase and
-    /// its redacted results.
+    /// its redacted results, and returns the completion with the published view when it
+    /// committed.
     ///
     /// Lock order is fixed by the caller: the config reloader's serialization lock first,
     /// then the runtime transition writer. An unchanged source is a true no-op, with no
@@ -222,7 +254,7 @@ impl AppRuntime {
         &self,
         transition: RuntimeTransition,
         recorder: &mut TransitionRecorder,
-    ) -> crate::Result<TransitionCompletion> {
+    ) -> crate::Result<(TransitionCompletion, Option<RuntimeView>)> {
         let base = transition.base().clone();
 
         recorder.enter(TransitionPhase::Stage);
@@ -234,7 +266,7 @@ impl AppRuntime {
         if staged.is_empty() {
             transition.finish_noop();
 
-            return Ok(TransitionCompletion::NoOp);
+            return Ok((TransitionCompletion::NoOp, None));
         }
 
         recorder.enter(TransitionPhase::Evaluate);
@@ -285,9 +317,9 @@ impl AppRuntime {
 
         recorder.enter(TransitionPhase::Commit);
 
-        let completion = commit_candidate(transition, prepared, staged);
+        let (completion, published) = commit_candidate(transition, prepared, staged);
 
-        Ok(completion)
+        Ok((completion, Some(published)))
     }
 }
 
@@ -304,137 +336,8 @@ fn reentrant_reload(attempt: TransitionAttemptId) -> crate::Error {
     crate::Error::ReentrantReload { attempt }
 }
 
-/// Snapshots the staged condition facts and incrementally re-evaluates conditions against
-/// the base generation's catalog.
-///
-/// The fact-extraction, descriptor, and condition callbacks are application extension
-/// points, so the whole stage runs inside a panic boundary: a panic returns the redacted
-/// [`CandidatePreparationPanicked`](crate::Error::CandidatePreparationPanicked) error and
-/// aborts the reload before any candidate graph, root, hook, or publication work.
-fn evaluate_conditions(
-    base: &RuntimeView,
-    staged: &StagedReload,
-) -> crate::Result<AppConditionEvaluation> {
-    let condition = base.condition();
-    let catalog = condition.catalog();
-
-    let evaluation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let snapshot = catalog.condition_snapshot(
-            staged
-                .staged()
-                .iter()
-                .map(|entry| (entry.type_id(), entry.path(), entry.value())),
-        )?;
-        let facts = catalog
-            .condition_facts
-            .iter()
-            .flat_map(|source| (source.facts.descriptors)(source.path));
-
-        catalog.evaluate_changed_conditions(facts, condition.evaluation(), &snapshot)
-    }))
-    .map_err(|_| crate::Error::CandidatePreparationPanicked)??;
-
-    Ok(evaluation)
-}
-
-/// Prepares and validates the candidate graph from the re-evaluated eligibility, then
-/// resolves the runtime transition against the base generation's effective graph.
-///
-/// The deterministic invalidation roots — changed config bindings, matched by exact
-/// `(TypeId, path)` identity, config-reload hook owners, and `HookManager` consumers —
-/// must reconstruct instead of retaining stale state. The planner propagates each
-/// invalidation to dependent singletons; an affected component that cannot reconstruct
-/// in place fails resolution with `RestartRequired` before any construction runs.
-fn plan_transition(
-    base: &RuntimeView,
-    staged: &StagedReload,
-    evaluation: &AppConditionEvaluation,
-) -> crate::Result<(CandidateGraph, ResolvedTransitionPlan)> {
-    let catalog = base.condition().catalog();
-    let topology = &base.scope_plan().topology;
-
-    let candidate = CandidateGraph::prepare_evaluation(base.id(), catalog, evaluation, topology)?;
-    let changed_typed = staged
-        .changed_staged()
-        .map(|entry| (entry.type_id(), entry.path()))
-        .collect::<Vec<_>>();
-    let invalidated = invalidation::invalidated_component_roots(&candidate, &changed_typed);
-    let resolved_plan =
-        candidate.resolve_runtime_transition(base.effective_graph(), &invalidated)?;
-
-    Ok((candidate, resolved_plan))
-}
-
-/// Builds the candidate root and the prepared generation, plus the generation-local hook
-/// manager built from the candidate descriptors.
-///
-/// The candidate root seeds that manager through a generation override, so candidate
-/// hooks resolve through the candidate root only and the active manager is never reused.
-async fn construct_candidate(
-    base: &RuntimeView,
-    candidate: CandidateGraph,
-    resolved_plan: &ResolvedTransitionPlan,
-    staged: &StagedReload,
-    evaluation: AppConditionEvaluation,
-) -> crate::Result<(PreparedRuntimeGeneration, HookManager)> {
-    let catalog = base.condition().catalog();
-    let topology = Arc::clone(&base.scope_plan().topology);
-    let hooks: Vec<HookDescriptor> = candidate
-        .components()
-        .iter()
-        .flat_map(|component| (component.hooks)().iter().copied())
-        .collect();
-    let hook_manager = HookManager::new(hooks);
-    let mut externals = ResolverSet::new();
-    let overrides = vec![BoxedComponent {
-        ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-        value: Box::new(Injectable::into_stored(hook_manager.clone())),
-    }];
-
-    externals.insert(staged.candidate_store());
-
-    let (root, scopes) = resolved_plan
-        .build_candidate_root_from_active_with_overrides(&candidate, base, externals, overrides)
-        .await?;
-    let (resolved, scope_plan, graph) = candidate.into_runtime_parts(&topology);
-    let prepared = PreparedRuntimeGeneration::new(
-        root,
-        scopes,
-        scope_plan,
-        resolved,
-        graph,
-        Arc::new(AppConditionState::new(Arc::clone(catalog), evaluation)),
-    );
-
-    Ok((prepared, hook_manager))
-}
-
-/// Publishes the validated candidate and commits the staged config slots.
-///
-/// The validated candidate becomes current first, then the staged config slots commit
-/// while the writer lease is still held, advancing the config generation exactly once.
-/// Every step is infallible: under the held writer lease the base cannot have moved, so
-/// `prepare_commit` cannot report a stale proposal.
-fn commit_candidate(
-    transition: RuntimeTransition,
-    prepared: PreparedRuntimeGeneration,
-    staged: StagedReload,
-) -> TransitionCompletion {
-    let config_generation = Cell::new(0);
-    let commit = transition
-        .prepare_commit(prepared)
-        .expect("candidate prepared under the sole writer cannot be stale");
-    let view = commit.commit_with(|| {
-        config_generation.set(staged.commit());
-    });
-
-    TransitionCompletion::Committed {
-        generation: view.id(),
-        config_generation: config_generation.get(),
-    }
-}
-
 mod invalidation;
+mod stages;
 mod trigger;
 
 #[cfg(test)]

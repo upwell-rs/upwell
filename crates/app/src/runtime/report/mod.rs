@@ -20,7 +20,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use upwell_config::{ChangedBinding, ComponentHookReport};
+use upwell_config::{ChangedBinding, ComponentHookReport, ReloadCause};
 use upwell_core::RuntimeGenerationId;
 use upwell_di::{EffectiveGraph, EffectiveNodeRole, NodeAction, TransitionPlan, TransitionReason};
 
@@ -187,6 +187,7 @@ impl ComponentTransitionReport {
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct RuntimeTransitionReport {
     attempt: TransitionAttemptId,
+    cause: ReloadCause,
     #[cfg_attr(feature = "serde", serde(serialize_with = "serialize::generation"))]
     base_generation: RuntimeGenerationId,
     #[cfg_attr(feature = "serde", serde(flatten))]
@@ -205,6 +206,12 @@ impl RuntimeTransitionReport {
     /// The attempt's identity. No-op and rejected attempts consume one too.
     pub fn attempt(&self) -> TransitionAttemptId {
         self.attempt
+    }
+
+    /// What requested the attempt: a programmatic request, `SIGHUP`, or a watched file
+    /// change.
+    pub fn cause(&self) -> ReloadCause {
+        self.cause
     }
 
     /// The committed generation the attempt was prepared against.

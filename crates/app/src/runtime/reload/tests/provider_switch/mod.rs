@@ -7,6 +7,8 @@
 mod fixture;
 mod gate;
 mod gate_hooks;
+mod outcome_hooks;
+mod outcomes;
 mod pre_commit;
 mod report;
 

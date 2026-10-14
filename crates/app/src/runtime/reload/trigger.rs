@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use upwell_config::{ReloadSummary, ReloadTarget};
+use upwell_config::{ReloadCause, ReloadSummary, ReloadTarget};
 
 use crate::AppRuntime;
 
@@ -13,8 +13,8 @@ impl ReloadTarget for AppRuntime {
         self.reloader.sources()
     }
 
-    async fn trigger_reload(&self) -> Result<ReloadSummary, Self::Error> {
-        let report = self.reload_config().await?;
+    async fn trigger_reload(&self, cause: ReloadCause) -> Result<ReloadSummary, Self::Error> {
+        let report = self.reload_for(cause).await?;
 
         Ok(ReloadSummary {
             generation: report.config_generation(),
