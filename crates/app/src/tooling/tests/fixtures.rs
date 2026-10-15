@@ -320,18 +320,26 @@ pub(super) static FIRST_BEFORE_SECOND: [ProviderOrder; 1] = [ProviderOrder {
     direction: ProviderOrderDirection::Before,
 }];
 
+/// The `OrderedProvider` mapping of `T` under `qualifier`. Its erase panics, so a
+/// projection regression that erases a provider fails these tests.
+const fn ordered_provider<T>(qualifier: &'static str) -> ProviderDescriptor
+where
+    T: Component + upwell_di::ProviderOf<dyn OrderedProvider>,
+{
+    ProviderDescriptor {
+        erase: |_| panic!("tooling projection never erases providers"),
+        ..ProviderDescriptor::of::<T, dyn OrderedProvider>("OrderedProvider").qualifier(qualifier)
+    }
+}
+
 pub(super) static FIRST_PROVIDER_DESCRIPTOR: ProviderDescriptor =
-    ProviderDescriptor::of::<FirstProvider, dyn OrderedProvider>("OrderedProvider")
-        .qualifier("first")
-        .ordering(&FIRST_BEFORE_SECOND);
+    ordered_provider::<FirstProvider>("first").ordering(&FIRST_BEFORE_SECOND);
 
 pub(super) static SECOND_PROVIDER_DESCRIPTOR: ProviderDescriptor =
-    ProviderDescriptor::of::<SecondProvider, dyn OrderedProvider>("OrderedProvider")
-        .qualifier("second");
+    ordered_provider::<SecondProvider>("second");
 
 pub(super) static PROJECTED_PROVIDER_DESCRIPTOR: ProviderDescriptor =
-    ProviderDescriptor::of::<ProjectedComponent, dyn OrderedProvider>("OrderedProvider")
-        .qualifier("projected");
+    ordered_provider::<ProjectedComponent>("projected");
 
 pub(super) fn provider_consumer_dependencies() -> Vec<DependencyDescriptor> {
     vec![DependencyDescriptor {
