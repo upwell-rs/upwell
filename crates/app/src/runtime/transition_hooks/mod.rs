@@ -4,10 +4,15 @@
 //! it before anything is published. They run inside the reload transaction, so the
 //! reentrancy check of [`reload_config`](crate::AppRuntime::reload_config) applies.
 //!
+//! The user guide `docs/transition-hooks.md` covers the whole model: every phase, routing,
+//! redaction, reentrancy, trigger sources, and the lifecycle hooks.
+//!
 //! # Phases
 //!
 //! A non-empty reload runs `stage → evaluate → plan → proposal → construct → hooks →
-//! decision → commit`:
+//! decision → commit`, then, once its leases are released,
+//! [`ComponentRetired`](crate::ComponentRetired) for each displaced component and
+//! [`TransitionCommitted`] or [`TransitionAborted`]:
 //!
 //! - **Proposal** runs after planning and before any candidate construction, against the
 //!   **active** generation's hooks, because no candidate exists yet. A rejection here
