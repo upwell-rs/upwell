@@ -933,7 +933,8 @@ impl<D: ProtocolDefinition> App<D> {
     ///
     /// The agnostic envelope: runs startup hooks, spawns config-reload triggers, bridges
     /// ctrl-c to the shutdown signal, then hands the runtime + shutdown signal to the
-    /// protocol's [`Serve`] impl. Shutdown hooks run on the way out.
+    /// protocol's [`Serve`] impl. Shutdown hooks run on the way out, on the generation
+    /// current at that point, so instances a reload retired never receive them.
     pub async fn serve<E>(
         self,
         endpoint: E,
@@ -950,15 +951,10 @@ impl<D: ProtocolDefinition> App<D> {
             ..
         } = self;
 
-        // Pin the generation the lifecycle runs in: the cloned manager resolves hook
-        // receivers through its root, which stays alive only while this view is held.
-        let lifecycle_view = runtime.view();
-        let hooks = lifecycle_view.hooks().clone();
-
-        let started = match run_startup(&hooks).await {
+        let started = match run_startup(&runtime).await {
             Ok(started) => started,
             Err((error, started)) => {
-                run_shutdown(&hooks, &started).await;
+                run_shutdown(&runtime, &started).await;
 
                 return Err(error.into());
             }
@@ -986,7 +982,7 @@ impl<D: ProtocolDefinition> App<D> {
 
         stop_reload_triggers(trigger_tasks).await;
 
-        run_shutdown(&hooks, &started).await;
+        run_shutdown(&runtime, &started).await;
 
         match result {
             Ok(result) => result,
@@ -1003,15 +999,10 @@ impl<D: ProtocolDefinition> App<D> {
             ..
         } = self;
 
-        // Pin the generation the lifecycle runs in: the cloned manager resolves hook
-        // receivers through its root, which stays alive only while this view is held.
-        let lifecycle_view = runtime.view();
-        let hooks = lifecycle_view.hooks().clone();
-
-        let started = match run_startup(&hooks).await {
+        let started = match run_startup(&runtime).await {
             Ok(started) => started,
             Err((error, started)) => {
-                run_shutdown(&hooks, &started).await;
+                run_shutdown(&runtime, &started).await;
 
                 return Err(error);
             }
@@ -1026,7 +1017,7 @@ impl<D: ProtocolDefinition> App<D> {
 
         stop_reload_triggers(trigger_tasks).await;
 
-        run_shutdown(&hooks, &started).await;
+        run_shutdown(&runtime, &started).await;
 
         Ok(())
     }
@@ -1039,9 +1030,10 @@ impl<D: ProtocolDefinition> App<D> {
 /// Observers run once every gate passed; their failures are logged and never abort.
 #[allow(clippy::result_large_err)]
 async fn run_startup(
-    hooks: &HookManager,
+    runtime: &AppRuntime,
 ) -> Result<HashSet<TypeId>, (crate::Error, HashSet<TypeId>)> {
-    let fired = hooks.fire_all::<Startup>(&()).await;
+    let view = runtime.view();
+    let fired = view.hooks().fire_all::<Startup>(&()).await;
     let mut started = HashSet::new();
 
     for (component, result) in fired.participants {
@@ -1072,7 +1064,14 @@ async fn run_startup(
 
 /// Fires the observer-only shutdown event for components with no startup gate and for
 /// components whose startup gates all succeeded. Errors are logged and cleanup continues.
-async fn run_shutdown(hooks: &HookManager, started: &HashSet<TypeId>) {
+///
+/// It fires on the generation current at shutdown, so the live instances receive it, not
+/// the ones a reload has since retired. `started` holds component types, so a component a
+/// reload replaced still pairs with its predecessor's startup, while one a reload added
+/// with an unrun startup gate is skipped.
+async fn run_shutdown(runtime: &AppRuntime, started: &HashSet<TypeId>) {
+    let view = runtime.view();
+    let hooks = view.hooks();
     let fired = hooks
         .fire::<Shutdown>(&(), |hook| {
             let component_ty = hook.component_ty.type_id;
