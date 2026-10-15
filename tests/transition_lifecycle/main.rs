@@ -85,7 +85,9 @@ async fn switch_provider(switch: Switch) {
         observed.outcome(),
         TransitionOutcome::Rejected {
             phase: TransitionPhase::Decision,
-            failure: TransitionFailure::HookRejected { .. },
+            failure: TransitionFailure::HookRejected {
+                component: ChangeFreeze::ID,
+            },
         }
     ));
     assert!(observed.displaced().is_empty(), "nothing was displaced");

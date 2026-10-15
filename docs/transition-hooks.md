@@ -174,6 +174,10 @@ or no-op returns it from `reload_config()`. A rejection carries it inside
 - the displaced components, config-reload hook outcomes, and transition hook outcomes;
 - per-phase timings.
 
+Every component in a report is named by its stable component ID, including the owner of
+each hook outcome and of a rejecting hook in `TransitionFailure`, so entries for one component
+correlate across `components()`, `hooks()`, `transition_hooks()` and `displaced()`.
+
 Reports and hook contexts never contain current or proposed config values, deserializer output,
 error messages, or panic payloads. That applies to `Debug`, `Display`, serialized output (with
 the `serde` feature), and the structured `upwell::transition` tracing events. The only free text

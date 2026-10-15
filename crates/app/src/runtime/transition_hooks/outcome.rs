@@ -41,9 +41,10 @@
 use upwell_core::{
     Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, TypeDescriptor,
 };
-use upwell_hooks::{HookKind, HookManager, HookParam, HookParticipation};
+use upwell_hooks::{HookKind, HookParam, HookParticipation};
 
 use super::super::RuntimeView;
+use super::HookOwners;
 use super::retirement::retire_displaced;
 use crate::RuntimeTransitionReport;
 use crate::runtime::report::TRANSITION_TARGET;
@@ -111,19 +112,21 @@ pub(crate) async fn observe_outcome(
     match (outcome, published) {
         (Ok(report), Some(published)) if report.is_committed() => {
             retire_displaced(report, base).await;
-            fire::<TransitionCommitted>(published.hooks(), report).await;
+            fire::<TransitionCommitted>(published, report).await;
         }
         (Err(crate::Error::TransitionRejected(rejection)), _) => {
-            fire::<TransitionAborted>(base.hooks(), rejection.report()).await;
+            fire::<TransitionAborted>(base, rejection.report()).await;
         }
         _ => {}
     }
 }
 
-async fn fire<K>(hooks: &HookManager, report: &RuntimeTransitionReport)
+async fn fire<K>(view: &RuntimeView, report: &RuntimeTransitionReport)
 where
     K: HookKind<Cx = TransitionOutcomeContext>,
 {
+    let hooks = view.hooks();
+
     if !hooks.has::<K>() {
         return;
     }
@@ -132,8 +135,9 @@ where
         report: report.clone(),
     };
     let fired = hooks.fire_all::<K>(&cx).await;
+    let owners = HookOwners::new(view.resolved_components());
 
-    for (component, outcome) in fired.observers {
+    for (owner, outcome) in fired.observers {
         let Err(error) = outcome else {
             continue;
         };
@@ -146,7 +150,7 @@ where
             target: TRANSITION_TARGET,
             attempt = report.attempt().get(),
             hook = K::NAME,
-            component = component.name,
+            component = owners.id(&owner),
             outcome = category,
             "transition outcome observer failed"
         );

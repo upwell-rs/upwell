@@ -41,6 +41,7 @@ use upwell_di::NodeAction;
 use upwell_hooks::{HookKind, HookParam, HookParticipation};
 
 use super::super::RuntimeView;
+use super::HookOwners;
 use crate::RuntimeTransitionReport;
 use crate::runtime::report::{TRANSITION_TARGET, TransitionAttemptId, TransitionOutcome};
 
@@ -183,6 +184,7 @@ async fn retire(base: &RuntimeView, retirement: ComponentRetirement) {
         .hooks()
         .fire::<ComponentRetired>(&cx, |hook| Some(hook.component_ty.type_id) == ty)
         .await;
+    let owners = HookOwners::new(base.resolved_components());
 
     for (owner, outcome) in fired.observers {
         let Err(error) = outcome else {
@@ -199,7 +201,7 @@ async fn retire(base: &RuntimeView, retirement: ComponentRetirement) {
             component = retirement.component,
             reason = retirement.reason.as_str(),
             hook = ComponentRetired::NAME,
-            owner = owner.name,
+            owner = owners.id(&owner),
             outcome = category,
             "component retirement hook failed"
         );

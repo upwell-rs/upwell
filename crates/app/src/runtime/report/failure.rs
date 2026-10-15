@@ -36,15 +36,13 @@ pub enum TransitionFailure {
     /// [`RuntimeTransitionReport::transition_hooks`]; config-reload hooks have no verdict
     /// and no per-hook record.
     HookRejected {
-        /// The display name of the component owning the hook, as the hook catalog
-        /// records it (its type descriptor name, not its stable component ID).
+        /// The stable ID of the component owning the hook.
         component: &'static str,
     },
     /// A participant hook panicked, ending the attempt. The rejecting phase names the hook
     /// kind, as for [`HookRejected`](Self::HookRejected). The payload is never recorded.
     HookPanicked {
-        /// The display name of the component owning the hook, as the hook catalog
-        /// records it (its type descriptor name, not its stable component ID).
+        /// The stable ID of the component owning the hook.
         component: &'static str,
     },
     /// An application extension point (deserializer, condition callback, factory, or

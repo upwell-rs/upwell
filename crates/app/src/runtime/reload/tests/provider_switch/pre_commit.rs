@@ -119,31 +119,31 @@ async fn proposal_hooks_see_why_the_authenticator_is_replaced_before_constructio
         [
             (
                 TransitionPhase::Proposal,
-                AuthGate::NAME,
+                AuthGate::ID,
                 HookRole::Participant,
                 TransitionHookOutcome::Completed
             ),
             (
                 TransitionPhase::Proposal,
-                AuditLog::NAME,
+                AuditLog::ID,
                 HookRole::Participant,
                 TransitionHookOutcome::Completed
             ),
             (
                 TransitionPhase::Proposal,
-                AuditLog::NAME,
+                AuditLog::ID,
                 HookRole::Observer,
                 TransitionHookOutcome::Completed
             ),
             (
                 TransitionPhase::Decision,
-                AuthGate::NAME,
+                AuthGate::ID,
                 HookRole::Participant,
                 TransitionHookOutcome::Completed
             ),
             (
                 TransitionPhase::Decision,
-                AuditLog::NAME,
+                AuditLog::ID,
                 HookRole::Observer,
                 TransitionHookOutcome::Completed
             ),
@@ -192,14 +192,14 @@ async fn proposal_rejection_constructs_nothing_and_changes_nothing() {
         &report,
         TransitionPhase::Proposal,
         TransitionFailure::HookRejected {
-            component: AuditLog::NAME,
+            component: AuditLog::ID,
         },
     );
     assert!(matches!(
         error,
         crate::Error::TransitionHookRejected {
             kind: "transition_proposal",
-            component: "AuditLog",
+            component: "audit-log",
             reason: "auth-freeze",
         }
     ));
@@ -255,8 +255,12 @@ async fn decision_rejection_drops_the_constructed_candidate() {
         &report,
         TransitionPhase::Decision,
         TransitionFailure::HookRejected {
-            component: AuthGate::NAME,
+            component: AuthGate::ID,
         },
+    );
+    assert!(
+        report.component(AuthGate::ID).is_some(),
+        "the rejecting hook's owner correlates with the gate's planned action"
     );
     assert_eq!(
         observed_modes().await,
@@ -301,7 +305,7 @@ async fn hook_panics_are_redacted_and_later_reloads_still_work() {
         &report,
         TransitionPhase::Proposal,
         TransitionFailure::HookPanicked {
-            component: AuthGate::NAME,
+            component: AuthGate::ID,
         },
     );
     assert!(matches!(

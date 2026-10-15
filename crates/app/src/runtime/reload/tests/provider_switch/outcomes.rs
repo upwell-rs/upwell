@@ -11,7 +11,9 @@ use super::fixture::{
     fail_fallback_factory, lock_test_guard, write_auth_config,
 };
 use super::gate::AuthGate;
-use super::gate_hooks::{AUDIT_COMPONENT, Behavior, Controls, HOOKED_GATE_COMPONENT, set_controls};
+use super::gate_hooks::{
+    AUDIT_COMPONENT, AuditLog, Behavior, Controls, HOOKED_GATE_COMPONENT, set_controls,
+};
 use super::outcome_hooks::{
     OUTCOME_COMPONENT, OutcomeControls, SECRET_OBSERVER_PANIC, observed, observed_kinds,
     set_outcome_controls,
@@ -128,13 +130,13 @@ async fn every_aborted_attempt_reaches_aborted_observers_exactly_once() {
             TransitionOutcome::Rejected {
                 phase: TransitionPhase::Proposal,
                 failure: TransitionFailure::HookRejected {
-                    component: "AuditLog",
+                    component: AuditLog::ID,
                 },
             },
             TransitionOutcome::Rejected {
                 phase: TransitionPhase::Proposal,
                 failure: TransitionFailure::HookPanicked {
-                    component: AuthGate::NAME,
+                    component: AuthGate::ID,
                 },
             },
             TransitionOutcome::Rejected {
