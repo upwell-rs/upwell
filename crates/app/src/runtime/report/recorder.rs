@@ -35,6 +35,7 @@ pub(crate) struct TransitionRecorder {
     phases: Vec<PhaseTiming>,
     changed: Box<[ChangedBinding]>,
     components: Box<[ComponentTransitionReport]>,
+    displaced: Box<[&'static str]>,
     hooks: Box<[ComponentHookReport]>,
     transition_hooks: Vec<TransitionHookReport>,
     finished: bool,
@@ -56,6 +57,7 @@ impl TransitionRecorder {
             phases: Vec::new(),
             changed: Box::default(),
             components: Box::default(),
+            displaced: Box::default(),
             hooks: Box::default(),
             transition_hooks: Vec::new(),
             finished: false,
@@ -74,6 +76,12 @@ impl TransitionRecorder {
 
     pub(crate) fn record_components(&mut self, components: Box<[ComponentTransitionReport]>) {
         self.components = components;
+    }
+
+    /// Records the singletons the plan displaces, in retirement order. The report keeps
+    /// them only when the attempt commits.
+    pub(crate) fn record_displaced(&mut self, displaced: &[&'static str]) {
+        self.displaced = displaced.into();
     }
 
     pub(crate) fn record_hooks(&mut self, hooks: Vec<ComponentHookReport>) {
@@ -134,6 +142,11 @@ impl TransitionRecorder {
     }
 
     fn take_report(&mut self, outcome: TransitionOutcome) -> RuntimeTransitionReport {
+        let displaced = match outcome {
+            TransitionOutcome::Committed { .. } => std::mem::take(&mut self.displaced),
+            TransitionOutcome::NoOp | TransitionOutcome::Rejected { .. } => Box::default(),
+        };
+
         RuntimeTransitionReport {
             attempt: self.attempt,
             cause: self.cause,
@@ -142,6 +155,7 @@ impl TransitionRecorder {
             config_generation: self.config_generation,
             changed: std::mem::take(&mut self.changed),
             components: std::mem::take(&mut self.components),
+            displaced,
             hooks: std::mem::take(&mut self.hooks),
             transition_hooks: std::mem::take(&mut self.transition_hooks).into_boxed_slice(),
             phases: std::mem::take(&mut self.phases).into_boxed_slice(),

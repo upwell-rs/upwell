@@ -51,10 +51,12 @@ use super::{ComponentTransitionReport, TransitionAttemptId, TransitionPhase};
 
 mod fire;
 mod outcome;
+mod retirement;
 
 pub(crate) use fire::{AffectedComponents, fire_gate};
 pub(crate) use outcome::observe_outcome;
 pub use outcome::{TransitionAborted, TransitionCommitted, TransitionOutcomeContext};
+pub use retirement::{ComponentRetired, ComponentRetirement, RetirementContext, RetirementReason};
 
 /// Fired after planning and before candidate construction, against the active generation.
 /// A participant may reject the pending transition.

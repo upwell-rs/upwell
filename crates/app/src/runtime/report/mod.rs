@@ -196,6 +196,7 @@ pub struct RuntimeTransitionReport {
     #[cfg_attr(feature = "serde", serde(serialize_with = "serialize::changed"))]
     changed: Box<[ChangedBinding]>,
     components: Box<[ComponentTransitionReport]>,
+    displaced: Box<[&'static str]>,
     #[cfg_attr(feature = "serde", serde(serialize_with = "serialize::hooks"))]
     hooks: Box<[ComponentHookReport]>,
     transition_hooks: Box<[TransitionHookReport]>,
@@ -261,6 +262,14 @@ impl RuntimeTransitionReport {
         self.components
             .iter()
             .find(|component| component.component == id)
+    }
+
+    /// The stable IDs of the singletons the committed generation displaced (replaced or
+    /// removed), in retirement order: every consumer precedes the components it depends
+    /// on. Each receives [`ComponentRetired`](crate::ComponentRetired) once. Empty unless
+    /// the attempt committed.
+    pub fn displaced(&self) -> &[&'static str] {
+        &self.displaced
     }
 
     /// The config-reload hooks that ran and accepted. Empty when no hook ran or a hook

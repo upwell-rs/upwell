@@ -70,7 +70,8 @@ pub use protocol::{
 };
 pub use registry::{AppConditionEvaluation, AppRegistry};
 pub use runtime::{
-    AppConditionState, AppRuntime, ComponentTransitionReport, PendingTransition, PhaseTiming,
+    AppConditionState, AppRuntime, ComponentRetired, ComponentRetirement,
+    ComponentTransitionReport, PendingTransition, PhaseTiming, RetirementContext, RetirementReason,
     RuntimeTransitionReport, RuntimeView, TransitionAborted, TransitionAttemptId,
     TransitionCommitted, TransitionDecision, TransitionFailure, TransitionHookContext,
     TransitionHookOutcome, TransitionHookReport, TransitionOutcome, TransitionOutcomeContext,

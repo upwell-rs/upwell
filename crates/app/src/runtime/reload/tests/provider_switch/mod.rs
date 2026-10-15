@@ -11,6 +11,8 @@ mod outcome_hooks;
 mod outcomes;
 mod pre_commit;
 mod report;
+mod retirement;
+mod retirement_hooks;
 
 use std::sync::Arc;
 

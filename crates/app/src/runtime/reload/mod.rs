@@ -100,6 +100,13 @@
 //! with the final report. They run outside the reentrancy scope, so they may request a
 //! follow-up reload; their failures are traced and never affect the outcome.
 //!
+//! Before the committed observers, every singleton the commit displaced (replaced or
+//! removed, listed by [`RuntimeTransitionReport::displaced`]) receives
+//! [`ComponentRetired`](crate::ComponentRetired) once, resolved through the displaced
+//! generation's root so the receiver is the retired instance itself. Retirement is
+//! logical displacement: pinned views and open scopes may keep using the instance until
+//! they release it.
+//!
 //! # Reports
 //!
 //! Every reload that acquires the transition writer produces one canonical, redacted
@@ -143,7 +150,8 @@ impl AppRuntime {
     /// commits. A proposal rejection constructs nothing; a decision rejection drops the
     /// constructed candidate.
     ///
-    /// Once both leases are released, it fires
+    /// Once both leases are released, it retires the singletons a committed attempt
+    /// displaced through [`ComponentRetired`](crate::ComponentRetired), then fires
     /// [`TransitionCommitted`](crate::TransitionCommitted) observers for a committed
     /// attempt or [`TransitionAborted`](crate::TransitionAborted) observers for a rejected
     /// one, then returns. The report's [`cause`](RuntimeTransitionReport::cause) is
@@ -295,6 +303,7 @@ impl AppRuntime {
         );
 
         recorder.record_components(components);
+        recorder.record_displaced(&resolved_plan.structural().retirement_order);
         recorder.enter(TransitionPhase::Proposal);
 
         fire_gate::<TransitionProposal>(base.hooks(), &pending, &staged, &affected, recorder)

@@ -55,6 +55,7 @@ pub(super) fn report(report: &RuntimeTransitionReport) {
             config_generation = report.config_generation(),
             changed = report.changed().len(),
             affected = report.components().len(),
+            displaced = report.displaced().len(),
             hooks = report.hooks().len(),
             transition_hooks = report.transition_hooks().len(),
             elapsed_us,

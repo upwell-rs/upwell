@@ -33,8 +33,9 @@ pub use report::{
     TransitionPhase, TransitionRejection,
 };
 pub use transition_hooks::{
-    PendingTransition, TransitionAborted, TransitionCommitted, TransitionDecision,
-    TransitionHookContext, TransitionOutcomeContext, TransitionProposal, TransitionVerdict,
+    ComponentRetired, ComponentRetirement, PendingTransition, RetirementContext, RetirementReason,
+    TransitionAborted, TransitionCommitted, TransitionDecision, TransitionHookContext,
+    TransitionOutcomeContext, TransitionProposal, TransitionVerdict,
 };
 
 /// Everything a protocol needs to drive requests through DI, cheaply cloneable.
