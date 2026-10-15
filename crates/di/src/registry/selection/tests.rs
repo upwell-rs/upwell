@@ -44,6 +44,7 @@ fn no_dependencies() -> Vec<DependencyDescriptor> {
 }
 
 static FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: fake_factory,
     dependencies: no_dependencies,
     default: false,
@@ -67,8 +68,10 @@ fn component<T: 'static>(
         name: id,
         ty: TypeDescriptor::of::<T>(id),
         scope,
+        condition: None,
         factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 
@@ -106,6 +109,7 @@ fn dependency(
         qualifier,
         config: false,
         resolution,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }
 }
 

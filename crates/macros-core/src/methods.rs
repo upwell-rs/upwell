@@ -105,9 +105,9 @@ where
 
         if let Some(pos) = method.attrs.iter().position(|a| a.path().is_ident("hook")) {
             let attr = method.attrs.remove(pos);
-            let kind = hook::parse_hook_kind(&attr)?;
+            let hook_attr = hook::parse_hook_attr(&attr)?;
 
-            hooks.push(hook::parse_hook(method, kind)?);
+            hooks.push(hook::parse_hook(method, hook_attr)?);
 
             continue;
         }
@@ -284,6 +284,7 @@ fn generate_init(
 
     let factory_literal = quote! {
         #component_factory_descriptor {
+            id: concat!("init:", stringify!(#marked)),
             construct: __upwell_init_factory,
             dependencies: __upwell_init_deps,
             default: false,

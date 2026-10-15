@@ -361,6 +361,10 @@ impl<K: DirKind> Injectable for Dir<K> {
     fn from_stored(stored: &Self) -> Self {
         stored.clone()
     }
+
+    fn snapshot_stored(stored: &Self) -> Option<Self> {
+        Some(stored.clone())
+    }
 }
 
 /// Under `di-check`, every `Dir<K>` is framework-seeded, so it is always provided.
@@ -501,6 +505,10 @@ impl Injectable for DirectoriesManager {
 
     fn from_stored(stored: &Self) -> Self {
         stored.clone()
+    }
+
+    fn snapshot_stored(stored: &Self) -> Option<Self> {
+        Some(stored.clone())
     }
 }
 

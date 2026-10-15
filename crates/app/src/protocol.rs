@@ -5,7 +5,7 @@
 use std::future::Future;
 
 use upwell_config::{Cfg, ConfigBinding, ConfigProperties, ConfigStore};
-use upwell_core::{Descriptor, TypeDescriptor};
+use upwell_core::{Descriptor, Singleton, TypeDescriptor};
 use upwell_di::{BoxedComponent, Component, ComponentDescriptor, Injectable};
 
 use crate::lifecycle::ShutdownSignal;
@@ -107,10 +107,17 @@ impl<'a> PreBuildContext<'a> {
     }
 
     /// Registers a pre-built singleton component.
+    ///
+    /// The instance is seeded with a raw manual descriptor: it carries no
+    /// generation-snapshot adapter, so a runtime transition that would retain it
+    /// requires a process restart instead of sharing the instance.
     pub fn with_component<T: Component>(&mut self, value: T) {
-        self.registry
-            .components
-            .push(ComponentDescriptor::of::<T>());
+        self.registry.components.push(ComponentDescriptor::manual(
+            T::ID,
+            T::NAME,
+            TypeDescriptor::of::<T>(T::NAME),
+            &Singleton,
+        ));
         self.instances.push(BoxedComponent {
             ty: TypeDescriptor::of::<T>(T::NAME),
             value: Box::new(Injectable::into_stored(value.into_handle())),

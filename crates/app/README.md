@@ -52,3 +52,4 @@ The protocol crates (`upwell-rpc`, `upwell-axum`) build directly on this crate: 
 | `watch` | forward config file watching/reload (`upwell-config/watch`) |
 | `tracing-subscriber` | pull in `tracing-subscriber` for the `init_tracing` helper |
 | `di-check` | compile-time DI graph validation (forwards to `upwell-di`/`upwell-config`) |
+| `serde` | serialize redacted `RuntimeTransitionReport`s for tooling and telemetry (forwards to `upwell-di/serde`) |

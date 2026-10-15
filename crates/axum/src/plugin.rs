@@ -293,8 +293,6 @@ impl PreparedProtocol for PreparedAxum {
                 let scope_runtime = scope_runtime.clone();
 
                 async move {
-                    let parent = Arc::clone(scope_runtime.root());
-
                     let meta = RequestMeta::from_parts(
                         request.method().clone(),
                         request.uri().clone(),
@@ -306,7 +304,7 @@ impl PreparedProtocol for PreparedAxum {
                     };
 
                     match scope_runtime
-                        .open_scope(&HttpRequestScope, parent, vec![seed])
+                        .open_scope_from_root(&HttpRequestScope, vec![seed])
                         .await
                     {
                         Ok(scope) => {

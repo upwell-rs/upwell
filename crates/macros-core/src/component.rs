@@ -12,7 +12,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{ItemStruct, LitStr};
+use syn::{GenericArgument, ItemStruct, LitStr, PathArguments, Type};
 
 use crate::attr::ComponentArgs;
 use crate::extend::{ComponentContext, ComponentExt};
@@ -25,8 +25,20 @@ pub fn expand<Ext: ComponentExt>(
     paths: &Paths,
 ) -> syn::Result<TokenStream> {
     let self_ident = item.ident.clone();
+
+    if args.retainable {
+        for field in &item.fields {
+            if contains_live_slot(&field.ty) {
+                return Err(syn::Error::new_spanned(
+                    &field.ty,
+                    "`retainable` components cannot contain Dep<T>, Cfg<T>, or Live<T> fields",
+                ));
+            }
+        }
+    }
+
     let providers = provide::generate_providers(&self_ident, &args, paths);
-    let handle = handle::handle_impl(&self_ident, args.by_value, paths);
+    let handle = handle::handle_impl(&self_ident, args.by_value, args.retainable, paths);
     let handle_associated_type = &handle.associated_type;
     let handle_method = &handle.method;
     let injectable = &handle.injectable;
@@ -149,6 +161,27 @@ pub fn expand<Ext: ComponentExt>(
 
         #ext
     })
+}
+
+fn contains_live_slot(ty: &Type) -> bool {
+    match ty {
+        Type::Path(path) => path.path.segments.iter().any(|segment| {
+            matches!(segment.ident.to_string().as_str(), "Dep" | "Cfg" | "Live")
+                || match &segment.arguments {
+                    PathArguments::AngleBracketed(arguments) => arguments.args.iter().any(|arg| {
+                        matches!(arg, GenericArgument::Type(inner) if contains_live_slot(inner))
+                    }),
+                    _ => false,
+                }
+        }),
+        Type::Array(array) => contains_live_slot(&array.elem),
+        Type::Group(group) => contains_live_slot(&group.elem),
+        Type::Paren(paren) => contains_live_slot(&paren.elem),
+        Type::Reference(reference) => contains_live_slot(&reference.elem),
+        Type::Slice(slice) => contains_live_slot(&slice.elem),
+        Type::Tuple(tuple) => tuple.elems.iter().any(contains_live_slot),
+        _ => false,
+    }
 }
 
 #[cfg(test)]

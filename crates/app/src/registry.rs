@@ -3,15 +3,33 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write;
 
-use upwell_config::{CONFIG_BINDINGS, ConfigBinding};
-use upwell_core::DependencyDescriptor;
+use upwell_config::{CONFIG_BINDINGS, ConditionFactSource, ConfigBinding};
+use upwell_core::{ConfigFactDescriptor, DependencyDescriptor};
 use upwell_di::{
-    COMPONENTS, Component, ComponentDescriptor, ComponentRegistry, PROVIDERS, ProviderDescriptor,
+    COMPONENTS, Component, ComponentDescriptor, ComponentRegistry, ConditionCatalog,
+    ConditionEvaluation, ConditionFactSnapshot, PROVIDERS, ProviderDescriptor,
     ProviderSelectionModel,
 };
 
 use crate::error::Error;
 use crate::scope::PreparedScopeTopology;
+
+/// A condition evaluation bound to one application's DI and config catalogs.
+#[derive(Clone, Debug)]
+pub struct AppConditionEvaluation {
+    evaluation: ConditionEvaluation,
+    bindings: HashMap<(TypeId, String), usize>,
+}
+
+impl AppConditionEvaluation {
+    pub fn evaluation(&self) -> &ConditionEvaluation {
+        &self.evaluation
+    }
+
+    pub(crate) fn belongs_to(&self, registry: &AppRegistry) -> bool {
+        self.bindings == registry.condition_identity()
+    }
+}
 
 /// Holds the *agnostic* component, provider, and config-binding descriptors of an app —
 /// declarations only. Runtime instances live in the
@@ -21,13 +39,16 @@ use crate::scope::PreparedScopeTopology;
 /// bindings, and runs the cross-cutting validation the component graph alone cannot
 /// (config edges). Protocol-specific declarations (services/routes) live in the protocol
 /// plugin, not here, so this stays usable by any protocol.
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct AppRegistry {
     pub components: Vec<ComponentDescriptor>,
     pub providers: Vec<ProviderDescriptor>,
     /// Config bindings (a config type bound to a property path). Populated from the
     /// auto-discovered config bindings slice and from explicit builder bindings.
     pub config_bindings: Vec<ConfigBinding>,
+    /// Registered condition-fact sources (a config type's condition facts at one binding
+    /// path). Populated from explicit builder registrations.
+    pub condition_facts: Vec<ConditionFactSource>,
 }
 
 impl AppRegistry {
@@ -58,6 +79,7 @@ impl AppRegistry {
             components,
             providers,
             config_bindings,
+            condition_facts: Vec::new(),
         }
     }
 
@@ -72,6 +94,70 @@ impl AppRegistry {
     /// Collapses the registered descriptors to one per type (delegated to the DI engine).
     pub fn resolved_components(&self) -> crate::Result<Vec<ComponentDescriptor>> {
         Ok(self.component_registry().resolved_components()?)
+    }
+
+    /// Evaluates static eligibility from an already validated typed fact snapshot.
+    ///
+    /// This does not load configuration or construct ordinary components. The returned registry
+    /// contains eligible declarations and still requires ordinary scope-aware graph validation.
+    pub fn evaluate_conditions(
+        &self,
+        facts: impl IntoIterator<Item = ConfigFactDescriptor>,
+        snapshot: &ConditionFactSnapshot,
+    ) -> Result<AppConditionEvaluation, upwell_di::ConditionError> {
+        let evaluation =
+            ConditionCatalog::new(&self.component_registry(), facts)?.evaluate(snapshot)?;
+
+        Ok(AppConditionEvaluation {
+            evaluation,
+            bindings: self.condition_identity(),
+        })
+    }
+
+    /// Extracts the condition-fact scalars of every registered fact source from a
+    /// staged reload's values, producing a validated fact snapshot.
+    ///
+    /// Each staged value is its binding's `(TypeId, path, erased value)`. A source whose
+    /// binding has no staged value contributes nothing — the transactional reload stages
+    /// every binding, changed or not, so registered sources always resolve.
+    pub fn condition_snapshot<'a>(
+        &self,
+        staged: impl IntoIterator<Item = (TypeId, &'a str, &'a dyn std::any::Any)>,
+    ) -> Result<ConditionFactSnapshot, upwell_di::ConditionError> {
+        let staged = staged.into_iter().collect::<Vec<_>>();
+        let mut scalars = Vec::new();
+
+        for source in &self.condition_facts {
+            for (type_id, path, value) in &staged {
+                if *type_id == source.ty.type_id && *path == source.path {
+                    scalars.extend((source.facts.scalars)(source.path, *value));
+                }
+            }
+        }
+
+        ConditionFactSnapshot::new(scalars)
+    }
+
+    /// Incrementally re-evaluates conditions while preserving this application's catalog identity.
+    pub fn evaluate_changed_conditions(
+        &self,
+        facts: impl IntoIterator<Item = ConfigFactDescriptor>,
+        previous: &AppConditionEvaluation,
+        snapshot: &ConditionFactSnapshot,
+    ) -> crate::Result<AppConditionEvaluation> {
+        let bindings = self.condition_identity();
+
+        if previous.bindings != bindings {
+            return Err(Error::ConditionEvaluationApplicationMismatch);
+        }
+
+        let evaluation = ConditionCatalog::new(&self.component_registry(), facts)?
+            .evaluate_changed(&previous.evaluation, snapshot)?;
+
+        Ok(AppConditionEvaluation {
+            evaluation,
+            bindings,
+        })
     }
 
     /// Returns the effective descriptor registered for component type `T`.
@@ -138,7 +224,7 @@ impl AppRegistry {
     /// Validates config edges against the registered bindings: a `#[config("path")]` edge
     /// must have a binding of its type at that path, and a `#[config]` shorthand edge must
     /// have exactly one binding of its type.
-    fn validate_configs(&self, components: &[ComponentDescriptor]) -> crate::Result<()> {
+    pub(crate) fn validate_configs(&self, components: &[ComponentDescriptor]) -> crate::Result<()> {
         let mut bound: HashMap<TypeId, Vec<&str>> = HashMap::new();
 
         for binding in &self.config_bindings {
@@ -197,6 +283,18 @@ impl AppRegistry {
         Ok(())
     }
 
+    fn condition_identity(&self) -> HashMap<(TypeId, String), usize> {
+        let mut identity = HashMap::new();
+
+        for binding in &self.config_bindings {
+            *identity
+                .entry((binding.ty.type_id, binding.path.clone()))
+                .or_default() += 1;
+        }
+
+        identity
+    }
+
     fn write_components(&self, f: &mut impl Write) -> fmt::Result {
         let components = self
             .resolved_components()
@@ -247,8 +345,11 @@ mod tests {
     use std::future::Future;
     use std::pin::Pin;
 
-    use upwell_config::{ConfigBinding, ConfigProperties};
-    use upwell_core::{Cardinality, DependencyDescriptor, TypeDescriptor};
+    use upwell_config::{ConditionFactSource, ConditionFacts, ConfigBinding, ConfigProperties};
+    use upwell_core::{
+        Cardinality, ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId,
+        DependencyDescriptor, TypeDescriptor,
+    };
     use upwell_di::{
         BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
         ComponentFactoryDescriptor, Singleton,
@@ -293,10 +394,12 @@ mod tests {
             qualifier: None,
             config: true,
             resolution: upwell_core::ResolutionMode::Eager,
+            observation: upwell_core::DependencyObservation::Live,
         }]
     }
 
     static CONFIG_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+        id: "static",
         construct: fake_factory,
         dependencies: config_deps,
         default: false,
@@ -312,8 +415,10 @@ mod tests {
             name: "NeedsConfig",
             ty: TypeDescriptor::of::<()>("NeedsConfig"),
             scope: &Singleton,
+            condition: None,
             factories: config_factories,
             hooks: upwell_hooks::no_hooks,
+            generation_snapshot: None,
         }
     }
 
@@ -323,6 +428,7 @@ mod tests {
             components: vec![ComponentDescriptor::of::<RegisteredComponent>()],
             providers: Vec::new(),
             config_bindings: Vec::new(),
+            condition_facts: Vec::new(),
         };
 
         let descriptor = registry
@@ -340,6 +446,7 @@ mod tests {
             components: vec![component()],
             providers: Vec::new(),
             config_bindings: Vec::new(),
+            condition_facts: Vec::new(),
         };
 
         let err = registry.validate().expect_err("config binding is missing");
@@ -365,6 +472,7 @@ mod tests {
                 ConfigBinding::of::<TestConfig>("one"),
                 ConfigBinding::of::<TestConfig>("two"),
             ],
+            condition_facts: Vec::new(),
         };
 
         let err = registry
@@ -382,5 +490,140 @@ mod tests {
                 && type_name.ends_with("TestConfig")
                 && paths == "one, two"
         ));
+    }
+
+    #[test]
+    fn condition_snapshot_extracts_scalars_from_staged_values() {
+        #[derive(serde::Deserialize)]
+        struct FlagConfig {
+            enabled: bool,
+        }
+
+        impl ConfigProperties for FlagConfig {
+            const NAME: &'static str = "FlagConfig";
+        }
+
+        impl ConditionFacts for FlagConfig {
+            fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
+                vec![ConfigFactDescriptor {
+                    id: ConfigFactId::new("FlagConfig", binding_path, "enabled"),
+                    kind: ConditionScalarKind::Bool,
+                    source: upwell_core::descriptor_source!(),
+                }]
+            }
+
+            fn condition_scalars(
+                &self,
+                binding_path: &'static str,
+            ) -> Vec<(ConfigFactId, ConditionScalar)> {
+                vec![(
+                    ConfigFactId::new("FlagConfig", binding_path, "enabled"),
+                    ConditionScalar::Bool(self.enabled),
+                )]
+            }
+        }
+
+        let mut registry = AppRegistry::default();
+        registry
+            .condition_facts
+            .push(ConditionFactSource::of::<FlagConfig>("flags"));
+
+        let enabled = FlagConfig { enabled: true };
+        let disabled = FlagConfig { enabled: false };
+        let unrelated = TestConfig;
+
+        let snapshot = registry
+            .condition_snapshot([
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "flags",
+                    &enabled as &dyn std::any::Any,
+                ),
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "other",
+                    &disabled as &dyn std::any::Any,
+                ),
+                (
+                    TypeId::of::<TestConfig>(),
+                    "flags",
+                    &unrelated as &dyn std::any::Any,
+                ),
+            ])
+            .expect("snapshot validates");
+
+        registry
+            .evaluate_conditions(
+                <FlagConfig as ConditionFacts>::condition_facts("flags"),
+                &snapshot,
+            )
+            .expect("the matching staged binding supplies the declared fact");
+    }
+
+    #[test]
+    fn condition_snapshot_distinguishes_two_bindings_of_one_type() {
+        #[derive(serde::Deserialize)]
+        struct FlagConfig {
+            enabled: bool,
+        }
+
+        impl ConfigProperties for FlagConfig {
+            const NAME: &'static str = "FlagConfig";
+        }
+
+        impl ConditionFacts for FlagConfig {
+            fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
+                vec![ConfigFactDescriptor {
+                    id: ConfigFactId::new("FlagConfig", binding_path, "enabled"),
+                    kind: ConditionScalarKind::Bool,
+                    source: upwell_core::descriptor_source!(),
+                }]
+            }
+
+            fn condition_scalars(
+                &self,
+                binding_path: &'static str,
+            ) -> Vec<(ConfigFactId, ConditionScalar)> {
+                vec![(
+                    ConfigFactId::new("FlagConfig", binding_path, "enabled"),
+                    ConditionScalar::Bool(self.enabled),
+                )]
+            }
+        }
+
+        let mut registry = AppRegistry::default();
+        registry
+            .condition_facts
+            .push(ConditionFactSource::of::<FlagConfig>("flags"));
+        registry
+            .condition_facts
+            .push(ConditionFactSource::of::<FlagConfig>("toggles"));
+
+        let primary = FlagConfig { enabled: true };
+        let shadow = FlagConfig { enabled: false };
+
+        let snapshot = registry
+            .condition_snapshot([
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "flags",
+                    &primary as &dyn std::any::Any,
+                ),
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "toggles",
+                    &shadow as &dyn std::any::Any,
+                ),
+            ])
+            .expect("each binding contributes its own fact");
+
+        let facts = registry
+            .condition_facts
+            .iter()
+            .flat_map(|source| (source.facts.descriptors)(source.path));
+
+        registry
+            .evaluate_conditions(facts, &snapshot)
+            .expect("both bindings evaluate without duplicate facts");
     }
 }

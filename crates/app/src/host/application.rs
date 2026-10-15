@@ -358,7 +358,7 @@ where
     P: ProtocolDefinition,
     H: upwell_di::Injectable,
 {
-    let container = std::sync::Arc::clone(app.container());
+    let container = app.container();
     let consumer = consumer.to_string();
 
     async move {

@@ -250,6 +250,7 @@ pub fn field_injection_component(
 
         let factory_literal = quote! {
             #component_factory_descriptor {
+                id: "default",
                 construct: __upwell_factory,
                 dependencies: __upwell_deps,
                 default: true,
@@ -324,8 +325,10 @@ pub fn field_injection_component(
                 name: #name,
                 ty: #type_descriptor::of::<#self_ident>(#name),
                 scope: &#scope_path,
+                condition: ::core::option::Option::None,
                 factories: <#self_ident as #component_factories>::factories,
                 hooks: <#self_ident as #component_hooks>::hooks,
+                generation_snapshot: #component_descriptor::typed_snapshot::<#self_ident>(),
             };
 
         impl #descriptor_trait<#component_descriptor> for #self_ident {
@@ -365,6 +368,7 @@ pub fn explicit_factory(
 
     let factory_literal = quote! {
         #component_factory_descriptor {
+            id: concat!("factory:", stringify!(#factory_path)),
             construct: __upwell_explicit_factory,
             dependencies: __upwell_explicit_deps,
             default: false,
@@ -473,16 +477,25 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
     let config_store = paths.core("ConfigStore");
     let resolver_ctx_ext = paths.core("ResolverCtxExt");
 
+    let dependency_observation = paths.core("DependencyObservation");
     let dep = |handle: &syn::Type,
                kind: TokenStream,
                optional: bool,
                dynamic: bool,
                qualifier: TokenStream| {
-        let dep_name_str = match attr::arc_inner_type(handle) {
-            Ok(inner) => inner.to_token_stream().to_string(),
-            Err(_) => handle.to_token_stream().to_string(),
-        };
+        let dep_name_str = attr::arc_inner_type(handle)
+            .ok()
+            .or_else(|| attr::dep_inner(handle))
+            .map_or_else(
+                || handle.to_token_stream().to_string(),
+                |inner| inner.to_token_stream().to_string(),
+            );
         let dep_name = LitStr::new(&dep_name_str, handle.span());
+        let observation = if attr::dep_inner(handle).is_some() {
+            quote!(#dependency_observation::Live)
+        } else {
+            quote!(#dependency_observation::Snapshot)
+        };
 
         quote! {
             #dependency_descriptor {
@@ -494,6 +507,7 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
                 qualifier: #qualifier,
                 config: false,
                 resolution: #resolution_mode::Eager,
+                observation: #observation,
             }
         }
     };
@@ -606,6 +620,7 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
                 qualifier: #qualifier,
                 config: true,
                 resolution: #resolution_mode::Eager,
+                observation: #dependency_observation::Live,
             }
         };
 

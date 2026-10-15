@@ -36,3 +36,4 @@ This is the engine the application layer drives. `upwell-dirs` implements [`Comp
 | Feature | Effect |
 |---|---|
 | `di-check` | Emit compile-time DI checks (`Wiring: Provide<Dep>` bounds) so a missing provider is a `cargo check` error rather than a runtime failure. |
+| `serde` | Derive `Serialize` for the transition-planning vocabulary (`NodeAction`, `ReasonKind`, `TransitionReason`, `DependencyDemandId`, `EffectiveNodeRole`) used by redacted transition reports. |

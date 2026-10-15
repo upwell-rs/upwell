@@ -114,18 +114,21 @@ fn transient_factory<'a>(
 }
 
 static VISIBLE_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: visible_factory,
     dependencies: no_dependencies,
     default: false,
 }];
 
 static SIBLING_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: sibling_factory,
     dependencies: no_dependencies,
     default: false,
 }];
 
 static TRANSIENT_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: transient_factory,
     dependencies: no_dependencies,
     default: false,
@@ -149,8 +152,10 @@ fn visible_descriptor() -> ComponentDescriptor {
         name: "VisibleProvider",
         ty: TypeDescriptor::of::<VisibleProvider>("VisibleProvider"),
         scope: &VisibleScope,
+        condition: None,
         factories: visible_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 
@@ -160,8 +165,10 @@ fn sibling_descriptor() -> ComponentDescriptor {
         name: "SiblingPrimaryProvider",
         ty: TypeDescriptor::of::<SiblingPrimaryProvider>("SiblingPrimaryProvider"),
         scope: &SiblingScope,
+        condition: None,
         factories: sibling_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 
@@ -171,8 +178,10 @@ fn transient_descriptor() -> ComponentDescriptor {
         name: "TransientProvider",
         ty: TypeDescriptor::of::<TransientProvider>("TransientProvider"),
         scope: &Transient,
+        condition: None,
         factories: transient_factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 

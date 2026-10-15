@@ -19,6 +19,9 @@ use crate::{
     error::Error,
 };
 
+mod candidate;
+mod snapshot;
+
 /// Shared, immutable data a [`ScopeContainer`] needs to resolve beyond its own
 /// store: the `Transient` components it may construct on demand and the trait
 /// providers used to alias instances. Held behind an `Arc` and shared by every
@@ -143,6 +146,14 @@ impl ScopeRegistry {
 
     pub(crate) fn component(&self, target: TypeId) -> Option<ComponentDescriptor> {
         self.selection.component(target)
+    }
+
+    pub(crate) fn components(&self) -> impl Iterator<Item = ComponentDescriptor> + '_ {
+        self.selection.components()
+    }
+
+    pub(crate) fn component_by_id(&self, id: &str) -> Option<ComponentDescriptor> {
+        self.components().find(|component| component.id == id)
     }
 }
 
@@ -302,9 +313,16 @@ pub(crate) async fn construct_fresh_boxed(
                 component_id: Some(descriptor.id.to_string()),
                 type_name: (descriptor.ty.type_name)().to_string(),
             })?;
-    let target_scope = owner
-        .container_for_scope(descriptor.scope)
-        .ok_or(Error::MissingComponent(descriptor.name))?;
+    let target_scope = if descriptor.scope.is_transient() {
+        // A transient has no container of its own: rebuild it in a throwaway
+        // context parented to the requesting scope, like on-demand transient
+        // construction, so its dependencies resolve up the owner's chain.
+        Arc::clone(&owner)
+    } else {
+        owner
+            .container_for_scope(descriptor.scope)
+            .ok_or(Error::MissingComponent(descriptor.name))?
+    };
     let externals = target_scope.resolvers().clone();
     let slot = owner.slot.clone();
     let mut cx = ComponentConstructionContext::new_with_slot(
@@ -367,6 +385,7 @@ pub struct ScopeContainer {
     resolver_base: ResolverSet,
     resolvers: std::sync::OnceLock<ResolverSet>,
     slot: ScopeResolverSlot,
+    generation_lease: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl ResolverCtx for ScopeContainer {
@@ -435,6 +454,12 @@ impl ScopeContainer {
         Arc::ptr_eq(&self.registry, registry)
     }
 
+    /// Returns the runtime-generation lease retained by this scope when its type matches `T`.
+    #[doc(hidden)]
+    pub fn generation_lease<T: Any + Send + Sync>(&self) -> Option<Arc<T>> {
+        Arc::clone(self.generation_lease.as_ref()?).downcast().ok()
+    }
+
     pub(crate) fn can_access(&self, scope: &'static dyn Scope) -> bool {
         if scope.is_transient() || self.scope.id() == scope.id() {
             return true;
@@ -475,7 +500,10 @@ impl ScopeContainer {
         externals: ResolverSet,
         registry: Arc<ScopeRegistry>,
     ) -> crate::Result<Arc<ScopeContainer>> {
-        let root = Self::build(&Singleton, None, registry, order, instances, externals).await?;
+        let root = Self::build(
+            &Singleton, None, registry, order, instances, externals, None,
+        )
+        .await?;
 
         info!(count = root.store.components.len(), "root container built");
 
@@ -496,6 +524,40 @@ impl ScopeContainer {
         order: &[ComponentDescriptor],
         seeds: Vec<BoxedComponent>,
     ) -> crate::Result<Arc<ScopeContainer>> {
+        let generation_lease = parent.generation_lease.clone();
+
+        Self::open_child_inner(scope, parent, registry, order, seeds, generation_lease).await
+    }
+
+    /// Opens a child scope while retaining one opaque runtime-generation state object.
+    #[doc(hidden)]
+    pub async fn open_child_with_generation_lease<T: Any + Send + Sync>(
+        scope: &'static dyn Scope,
+        parent: Arc<ScopeContainer>,
+        registry: Arc<ScopeRegistry>,
+        order: &[ComponentDescriptor],
+        seeds: Vec<BoxedComponent>,
+        generation_lease: Arc<T>,
+    ) -> crate::Result<Arc<ScopeContainer>> {
+        Self::open_child_inner(
+            scope,
+            parent,
+            registry,
+            order,
+            seeds,
+            Some(generation_lease),
+        )
+        .await
+    }
+
+    async fn open_child_inner(
+        scope: &'static dyn Scope,
+        parent: Arc<ScopeContainer>,
+        registry: Arc<ScopeRegistry>,
+        order: &[ComponentDescriptor],
+        seeds: Vec<BoxedComponent>,
+        generation_lease: Option<Arc<dyn Any + Send + Sync>>,
+    ) -> crate::Result<Arc<ScopeContainer>> {
         let externals = parent.resolvers().clone();
 
         if order.is_empty() && seeds.is_empty() {
@@ -507,10 +569,20 @@ impl ScopeContainer {
                 resolver_base: externals,
                 resolvers: std::sync::OnceLock::new(),
                 slot: ScopeResolverSlot::attached(container.clone()),
+                generation_lease,
             }));
         }
 
-        Self::build(scope, Some(parent), registry, order, seeds, externals).await
+        Self::build(
+            scope,
+            Some(parent),
+            registry,
+            order,
+            seeds,
+            externals,
+            generation_lease,
+        )
+        .await
     }
 
     /// Seeds instances, then constructs `order` in sequence, aliasing trait
@@ -524,6 +596,7 @@ impl ScopeContainer {
         order: &[ComponentDescriptor],
         seeds: Vec<BoxedComponent>,
         externals: ResolverSet,
+        generation_lease: Option<Arc<dyn Any + Send + Sync>>,
     ) -> crate::Result<Arc<ScopeContainer>> {
         let slot = ScopeResolverSlot::default();
         let mut cx = ComponentConstructionContext::new_with_slot(
@@ -582,6 +655,7 @@ impl ScopeContainer {
                 resolver_base: resolvers.clone(),
                 resolvers: std::sync::OnceLock::from(resolvers),
                 slot: slot.clone(),
+                generation_lease,
             }
         });
         slot.attach(&container)?;
@@ -771,6 +845,7 @@ pub fn topological_sort<'a>(
     let mut expansion = WaitExpansion {
         selection,
         sortable: &sortable,
+        components,
         can_access: &can_access,
         provider_memo: HashMap::new(),
         visiting: HashSet::new(),
@@ -801,8 +876,8 @@ pub fn topological_sort<'a>(
                 .all(|dependency| is_built(*dependency));
 
             if resolved {
-                trace!(component = %descriptor.name, "dependency order resolved");
                 result.push(descriptor);
+                crate::observability::build_position(descriptor, result.len() - 1);
                 false
             } else {
                 true
@@ -815,6 +890,14 @@ pub fn topological_sort<'a>(
                 .map(|d| d.name)
                 .collect::<Vec<_>>()
                 .join(", ");
+            for diagnostics in construction_cycle_diagnostics(components, &waits, &remaining) {
+                crate::observability::construction_cycle(
+                    diagnostics.cycle_id,
+                    &diagnostics.members,
+                    &diagnostics.edges,
+                    &diagnostics.blocked,
+                );
+            }
 
             error!(components = %stuck, "dependency cycle detected in component graph");
 
@@ -831,6 +914,7 @@ pub fn topological_sort<'a>(
 struct WaitExpansion<'a> {
     selection: &'a ProviderSelectionModel,
     sortable: &'a HashSet<TypeId>,
+    components: &'a [ComponentDescriptor],
     can_access: &'a dyn Fn(&dyn Scope, &'static dyn Scope) -> bool,
     provider_memo: HashMap<TypeId, HashSet<TypeId>>,
     visiting: HashSet<TypeId>,
@@ -840,13 +924,28 @@ impl WaitExpansion<'_> {
     fn component_waits(&mut self, descriptor: ComponentDescriptor) -> HashSet<TypeId> {
         let mut waits = HashSet::new();
 
-        for dependency in descriptor.dependencies().into_iter().filter(|dependency| {
-            !dependency.optional
-                && !dependency.dynamic
-                && !dependency.config
-                && dependency.resolution == ResolutionMode::Eager
-        }) {
-            self.expand_dependency(descriptor.scope, &dependency, &mut waits);
+        for dependency in descriptor.dependencies() {
+            let reason = construction_edge_reason(&dependency);
+            let accepted = reason == "required-eager";
+
+            crate::observability::construction_edge(&descriptor, &dependency, accepted, reason);
+
+            if accepted {
+                self.expand_dependency(descriptor.scope, &dependency, &mut waits);
+            }
+        }
+
+        let mut ordered = waits.iter().copied().collect::<Vec<_>>();
+        ordered.sort_by_key(|type_id| component_id(self.components, *type_id));
+
+        for dependency in ordered {
+            if let Some(target) = self
+                .components
+                .iter()
+                .find(|component| component.ty.type_id == dependency)
+            {
+                crate::observability::construction_wait(&descriptor, target);
+            }
         }
 
         waits
@@ -922,5 +1021,127 @@ impl WaitExpansion<'_> {
     }
 }
 
+fn construction_edge_reason(dependency: &upwell_core::DependencyDescriptor) -> &'static str {
+    if dependency.optional {
+        return "optional";
+    }
+
+    if dependency.dynamic {
+        return "dynamic";
+    }
+
+    if dependency.config {
+        return "config-external";
+    }
+
+    match dependency.resolution {
+        ResolutionMode::Eager => "required-eager",
+        ResolutionMode::Lazy => "lazy",
+        ResolutionMode::Deferred => "deferred-cycle-break",
+        ResolutionMode::Fresh => "fresh",
+    }
+}
+
+struct CycleDiagnostics<'a> {
+    cycle_id: &'a str,
+    members: Vec<&'a str>,
+    edges: Vec<(&'a str, &'a str)>,
+    blocked: Vec<&'a str>,
+}
+
+fn construction_cycle_diagnostics<'a>(
+    components: &'a [ComponentDescriptor],
+    waits: &HashMap<TypeId, HashSet<TypeId>>,
+    remaining: &[&ComponentDescriptor],
+) -> Vec<CycleDiagnostics<'a>> {
+    let remaining_ids = remaining
+        .iter()
+        .map(|component| component.ty.type_id)
+        .collect::<Vec<_>>();
+    let keys = components
+        .iter()
+        .map(|component| (component.ty.type_id, component.id.to_string()))
+        .collect::<HashMap<_, _>>();
+    let cycles = crate::registry::order::cycle::components(&remaining_ids, waits, &keys);
+    let all_cyclic = cycles.iter().flatten().copied().collect::<HashSet<_>>();
+
+    cycles
+        .into_iter()
+        .map(|cycle| {
+            let cycle_set = cycle.iter().copied().collect::<HashSet<_>>();
+            let mut members = cycle
+                .iter()
+                .map(|type_id| component_id(components, *type_id))
+                .collect::<Vec<_>>();
+            let mut edges = cycle
+                .iter()
+                .flat_map(|from| {
+                    waits[from]
+                        .iter()
+                        .filter(|to| cycle_set.contains(to))
+                        .map(|to| {
+                            (
+                                component_id(components, *from),
+                                component_id(components, *to),
+                            )
+                        })
+                })
+                .collect::<Vec<_>>();
+            let mut blocked = remaining_ids
+                .iter()
+                .filter(|candidate| !all_cyclic.contains(candidate))
+                .filter(|candidate| transitively_waits_on(**candidate, &cycle_set, waits))
+                .map(|type_id| component_id(components, *type_id))
+                .collect::<Vec<_>>();
+
+            members.sort_unstable();
+            edges.sort_unstable();
+            blocked.sort_unstable();
+
+            CycleDiagnostics {
+                cycle_id: members.first().copied().unwrap_or(""),
+                members,
+                edges,
+                blocked,
+            }
+        })
+        .collect()
+}
+
+fn transitively_waits_on(
+    component: TypeId,
+    targets: &HashSet<TypeId>,
+    waits: &HashMap<TypeId, HashSet<TypeId>>,
+) -> bool {
+    let mut pending = vec![component];
+    let mut visited = HashSet::new();
+
+    while let Some(current) = pending.pop() {
+        if !visited.insert(current) {
+            continue;
+        }
+
+        for dependency in waits.get(&current).into_iter().flatten() {
+            if targets.contains(dependency) {
+                return true;
+            }
+
+            pending.push(*dependency);
+        }
+    }
+
+    false
+}
+
+fn component_id(components: &[ComponentDescriptor], type_id: TypeId) -> &str {
+    components
+        .iter()
+        .find(|component| component.ty.type_id == type_id)
+        .map_or("<external>", |component| component.id)
+}
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod observability_tests;

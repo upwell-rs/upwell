@@ -61,6 +61,7 @@ fn no_dependencies() -> Vec<DependencyDescriptor> {
 }
 
 static NO_DEPENDENCY_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: fake_factory,
     dependencies: no_dependencies,
     default: false,
@@ -72,6 +73,7 @@ fn no_dependency_factory() -> &'static [ComponentFactoryDescriptor] {
 
 fn dependency_factory() -> &'static [ComponentFactoryDescriptor] {
     static FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+        id: "static",
         construct: fake_factory,
         dependencies: dependency,
         default: false,
@@ -82,6 +84,7 @@ fn dependency_factory() -> &'static [ComponentFactoryDescriptor] {
 
 fn provider_dependency_factory() -> &'static [ComponentFactoryDescriptor] {
     static FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+        id: "static",
         construct: fake_factory,
         dependencies: required_provider_dependency,
         default: false,
@@ -100,6 +103,7 @@ fn dependency() -> Vec<DependencyDescriptor> {
         qualifier: None,
         config: false,
         resolution: ResolutionMode::Eager,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }]
 }
 
@@ -119,8 +123,10 @@ fn component(
         name,
         ty,
         scope,
+        condition: None,
         factories,
         hooks: upwell_hooks::no_hooks,
+        generation_snapshot: None,
     }
 }
 
@@ -163,6 +169,7 @@ fn provider_dependency(
         qualifier,
         config: false,
         resolution: ResolutionMode::Eager,
+        observation: upwell_core::DependencyObservation::Snapshot,
     }
 }
 
@@ -419,6 +426,7 @@ fn provider_introspection_uses_runtime_scope_and_order_semantics() {
                 qualifier: None,
                 config: false,
                 resolution: ResolutionMode::Eager,
+                observation: upwell_core::DependencyObservation::Snapshot,
             },
             &components,
             reaches,

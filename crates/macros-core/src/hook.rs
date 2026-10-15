@@ -8,7 +8,8 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, quote_spanned};
-use syn::{FnArg, ImplItemFn, LitStr, Meta, Path, Type};
+use syn::punctuated::Punctuated;
+use syn::{FnArg, Ident, ImplItemFn, LitStr, Meta, Path, Token, Type};
 
 use crate::attr;
 use crate::paths::Paths;
@@ -19,19 +20,26 @@ struct HookParamInfo {
     path: Option<LitStr>,
 }
 
+/// The parsed `#[hook(Kind[, observe][, always])]` attribute.
+pub struct HookAttr {
+    kind: Path,
+    observe: bool,
+    always: bool,
+}
+
 /// The parsed shape of a `#[hook(Kind)]` method.
 pub struct HookInfo {
     ident: syn::Ident,
-    kind: Path,
+    attr: HookAttr,
     takes_self: bool,
     params: Vec<HookParamInfo>,
     is_result: bool,
 }
 
 /// Parses a `#[hook(kind)]` method, stripping per-parameter `#[config("..")]` attributes so
-/// the re-emitted method stays valid. `kind` is the path from the `#[hook(..)]` attribute,
-/// already removed by the caller.
-pub fn parse_hook(method: &mut ImplItemFn, kind: Path) -> syn::Result<HookInfo> {
+/// the re-emitted method stays valid. `attr` is the parsed `#[hook(..)]` attribute, already
+/// removed by the caller.
+pub fn parse_hook(method: &mut ImplItemFn, attr: HookAttr) -> syn::Result<HookInfo> {
     if method.sig.asyncness.is_none() {
         return Err(syn::Error::new_spanned(
             &method.sig,
@@ -68,7 +76,7 @@ pub fn parse_hook(method: &mut ImplItemFn, kind: Path) -> syn::Result<HookInfo> 
 
     Ok(HookInfo {
         ident: method.sig.ident.clone(),
-        kind,
+        attr,
         takes_self,
         params,
         is_result: attr::result_type_args(&method.sig.output).is_some(),
@@ -124,7 +132,10 @@ pub fn generate_hook(
     let registration = paths.core("Registration");
     let descriptor_for = paths.core("DescriptorFor");
 
-    let kind = &info.kind;
+    let hook_role = paths.core("HookRole");
+    let hook_routing = paths.core("HookRouting");
+
+    let kind = &info.attr.kind;
     let method = &info.ident;
 
     let deps_fn = format_ident!("__upwell_hook_{index}_deps");
@@ -161,20 +172,33 @@ pub fn generate_hook(
         }
     };
 
-    // Normalize the return into the kind's `Output`: unwrap a `Result`, boxing its error
-    // into the hook layer's error (the hook layer sits below the daemon, so it cannot name
-    // the daemon error — any `Error + Send + Sync` domain error boxes), then bind it at the
-    // kind's `Output` type so a mismatched return is a compile error.
+    // Normalize the return: unwrap a `Result`, boxing its error into the hook layer's error
+    // (the hook layer sits below the daemon, so it cannot name the daemon error — any
+    // `Error + Send + Sync` domain error boxes), then bind it at the kind's `Output` for a
+    // participant or at `()` for an observer, so a mismatched return is a compile error and
+    // an observer can never return an action.
+    let output = if info.attr.observe {
+        quote!(())
+    } else {
+        quote!(<#kind as #hook_kind>::Output)
+    };
     let normalize = if info.is_result {
         quote! {
-            let __out: <#kind as #hook_kind>::Output =
-                __out.map_err(|__e| #hook_error::Other(__e.into()))?;
+            let __out: #output = __out.map_err(|__e| #hook_error::Other(__e.into()))?;
         }
     } else {
         quote! {
-            let __out: <#kind as #hook_kind>::Output = __out;
+            let __out: #output = __out;
         }
     };
+    let role = info
+        .attr
+        .observe
+        .then(|| quote!(.with_role(#hook_role::Observer)));
+    let routing = info
+        .attr
+        .always
+        .then(|| quote!(.with_routing(#hook_routing::Always)));
 
     // Source-position ordinal: `line!()` resolved at the hook method's span, so a type's hooks run
     // in source order on the `inventory` backend (which does not preserve registration order) just
@@ -189,6 +213,8 @@ pub fn generate_hook(
             #deps_fn,
             #call_fn,
         )
+        #role
+        #routing
     };
     // The hook, appended to the type's registrations.
     let register = crate::backend::dual_backend(
@@ -251,8 +277,12 @@ pub fn generate_hook(
     }
 }
 
-/// Extracts the kind path from a `#[hook(Kind)]` attribute's tokens.
-pub fn parse_hook_kind(attr: &syn::Attribute) -> syn::Result<Path> {
+/// The flags a `#[hook(Kind, ..)]` attribute accepts after its kind.
+const HOOK_FLAGS: [&str; 2] = ["observe", "always"];
+
+/// Parses a `#[hook(Kind[, observe][, always])]` attribute: the kind path, then optional
+/// flags declaring an observer role and untargeted routing, each at most once.
+pub fn parse_hook_attr(attr: &syn::Attribute) -> syn::Result<HookAttr> {
     let Meta::List(list) = &attr.meta else {
         return Err(syn::Error::new_spanned(
             attr,
@@ -260,5 +290,51 @@ pub fn parse_hook_kind(attr: &syn::Attribute) -> syn::Result<Path> {
         ));
     };
 
-    syn::parse2::<Path>(list.tokens.clone())
+    let (kind, flags) = list.parse_args_with(|input: syn::parse::ParseStream| {
+        let kind = input.parse::<Path>()?;
+        let mut flags = Punctuated::<Ident, Token![,]>::new();
+
+        if input.parse::<Option<Token![,]>>()?.is_some() {
+            flags = Punctuated::parse_terminated(input)?;
+        }
+
+        Ok((kind, flags))
+    })?;
+
+    if let Some(flag) = HOOK_FLAGS.iter().find(|flag| kind.is_ident(flag)) {
+        return Err(syn::Error::new_spanned(
+            &kind,
+            format!("expected a hook kind before `{flag}`, as in #[hook(Kind, {flag})]"),
+        ));
+    }
+
+    let mut parsed = HookAttr {
+        kind,
+        observe: false,
+        always: false,
+    };
+
+    for flag in flags {
+        let slot = match flag.to_string().as_str() {
+            "observe" => &mut parsed.observe,
+            "always" => &mut parsed.always,
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    flag,
+                    "unknown hook flag: expected `observe` or `always`",
+                ));
+            }
+        };
+
+        if *slot {
+            return Err(syn::Error::new_spanned(flag, "duplicate hook flag"));
+        }
+
+        *slot = true;
+    }
+
+    Ok(parsed)
 }
+
+#[cfg(test)]
+mod tests;

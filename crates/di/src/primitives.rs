@@ -128,6 +128,7 @@ where
         let mut dependency = H::dependency();
 
         dependency.resolution = ResolutionMode::Lazy;
+        dependency.observation = upwell_core::DependencyObservation::Snapshot;
 
         dependency
     }
@@ -194,6 +195,7 @@ where
         let mut dependency = H::dependency();
 
         dependency.resolution = ResolutionMode::Fresh;
+        dependency.observation = upwell_core::DependencyObservation::Snapshot;
 
         dependency
     }

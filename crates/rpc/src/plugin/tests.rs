@@ -51,6 +51,7 @@ fn no_dependencies() -> Vec<upwell_core::DependencyDescriptor> {
 }
 
 static SENTINEL_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: construct_sentinel,
     dependencies: no_dependencies,
     default: true,
@@ -65,8 +66,10 @@ static SENTINEL_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     name: SentinelComponent::NAME,
     ty: TypeDescriptor::of::<SentinelComponent>(SentinelComponent::NAME),
     scope: &Singleton,
+    condition: None,
     factories: sentinel_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 struct EmptyService;
@@ -181,9 +184,8 @@ async fn peer_info_seed_opens_only_at_connection_destination() {
         addr: Some("127.0.0.1:1234".parse().expect("valid test address")),
     };
     let connection = runtime
-        .open_scope(
+        .open_scope_from_root(
             &ConnectionScope,
-            Arc::clone(runtime.root()),
             vec![BoxedComponent {
                 ty: TypeDescriptor::of::<upwell_transport::PeerInfo>("PeerInfo"),
                 value: Box::new(peer.clone()),

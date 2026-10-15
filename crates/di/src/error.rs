@@ -224,6 +224,12 @@ pub enum Error {
     )]
     AmbiguousFactory(String),
 
+    #[error("factory for component '{0}' has an empty stable identity")]
+    EmptyFactoryId(String),
+
+    #[error("component '{component}' registers duplicate factory identity '{factory}'")]
+    DuplicateFactoryId { component: String, factory: String },
+
     #[error("missing dependency for component '{component}': {dependency}")]
     MissingDependency {
         /// Human-readable component name.
@@ -280,6 +286,55 @@ pub enum Error {
 
     #[error("missing component: {0}")]
     MissingComponent(&'static str),
+
+    #[error("candidate component '{component}' is not part of the candidate registry")]
+    CandidateComponentMismatch { component: &'static str },
+
+    #[error(
+        "candidate factory for component '{component}' returned type '{actual}' instead of '{expected}'"
+    )]
+    CandidateFactoryTypeMismatch {
+        component: &'static str,
+        expected: &'static str,
+        actual: &'static str,
+    },
+
+    #[error("candidate factory for component '{component}' panicked")]
+    CandidateFactoryPanicked { component: &'static str },
+
+    #[error("candidate provider projection for component '{component}' panicked")]
+    CandidateProviderPanicked { component: &'static str },
+
+    #[error("candidate root finalization panicked")]
+    CandidateFinalizationPanicked,
+
+    #[error("candidate metadata evaluation panicked")]
+    CandidateMetadataPanicked,
+
+    #[error("candidate external resolvers contain an active component source")]
+    CandidateActiveResolver,
+
+    #[error("candidate root cannot retain generation-bound component '{component}'")]
+    CandidateRuntimeBoundComponent { component: &'static str },
+
+    #[error("component '{component}' does not support generation snapshots")]
+    SnapshotUnavailable { component: &'static str },
+
+    #[error("component '{component}' handle does not support generation-local snapshots")]
+    SnapshotHandleUnsupported { component: &'static str },
+
+    #[error("generation snapshot for component '{component}' panicked")]
+    SnapshotPanicked { component: &'static str },
+
+    #[error(
+        "generation snapshot for component '{component}' found active storage of an incompatible type"
+    )]
+    SnapshotStorageMismatch { component: &'static str },
+
+    #[error(
+        "generation snapshot for component '{component}' produced storage of an incompatible type"
+    )]
+    SnapshotOutputMismatch { component: &'static str },
 
     #[error(
         "the root resolver is unavailable: the root container was never attached or has been dropped"

@@ -36,6 +36,15 @@ pub enum Error {
         parent: ScopeId,
     },
 
+    /// A nested boundary was opened over a parent without a runtime-generation lease.
+    #[error("cannot open scope '{child}' over unpinned parent '{parent}'")]
+    UnpinnedScopeParent {
+        /// The requested child boundary.
+        child: ScopeId,
+        /// The supplied parent's stable scope identity.
+        parent: ScopeId,
+    },
+
     /// A child was opened over a parent other than its declared parent.
     #[error("scope '{child}' requires parent '{expected}', but parent '{actual}' was supplied")]
     InvalidScopeParent {
@@ -106,9 +115,100 @@ pub enum Error {
     #[error(transparent)]
     Di(#[from] upwell_di::Error),
 
+    /// A conditional component catalog or evaluation is invalid.
+    #[error(transparent)]
+    Condition(#[from] upwell_di::ConditionError),
+
+    /// A condition evaluation was produced from another application's config bindings.
+    #[error("condition evaluation belongs to another application config-binding catalog")]
+    ConditionEvaluationApplicationMismatch,
+
+    /// The requested graph transition cannot be applied safely without restarting.
+    #[error(transparent)]
+    RestartRequired(#[from] crate::transition::RestartRequired),
+
+    /// The candidate graph was derived from another committed generation.
+    #[error(transparent)]
+    StaleGraphCandidate(#[from] upwell_di::StaleGraphCandidate),
+
+    /// The same type was supplied as a candidate generation override more than once.
+    #[error("generation override type '{type_name}' is supplied more than once")]
+    DuplicateGenerationOverride {
+        /// The duplicated Rust type name.
+        type_name: &'static str,
+    },
+
+    /// A candidate generation override does not replace a singleton the plan retains.
+    #[error("generation override type '{type_name}' does not replace a retained singleton")]
+    InvalidGenerationOverride {
+        /// The rejected Rust type name.
+        type_name: &'static str,
+    },
+
+    /// Candidate preparation crossed a panicking extension boundary.
+    #[error("candidate runtime preparation panicked")]
+    CandidatePreparationPanicked,
+
+    /// A runtime transition attempt was rejected before publication, leaving the previous
+    /// generation active. Carries the attempt's redacted report, which is all `Display`
+    /// and `Debug` render; the error that rejected it is the
+    /// [`source`](std::error::Error::source) and
+    /// [`TransitionRejection::error`](crate::TransitionRejection::error).
+    #[error(transparent)]
+    TransitionRejected(Box<crate::TransitionRejection>),
+
+    /// A reload of a runtime was requested from inside that runtime's running transition,
+    /// by one of its config-reload hooks or candidate factories. The running transition
+    /// holds the non-reentrant serialization leases, so the nested request is rejected
+    /// and the running attempt is unaffected. Defer the reload outside the transaction,
+    /// for example by `tokio::spawn`ing it without awaiting it from the hook or factory.
+    #[error(
+        "reload requested from inside running transition attempt {attempt} of the same runtime"
+    )]
+    ReentrantReload {
+        /// The running attempt whose leases the nested reload would have waited on.
+        attempt: crate::TransitionAttemptId,
+    },
+
+    /// A transition-proposal or transition-decision participant rejected the attempt
+    /// with an author-chosen static reason code.
+    #[error("{kind} hook on '{component}' rejected the transition: {reason}")]
+    TransitionHookRejected {
+        /// The hook kind's name.
+        kind: &'static str,
+        /// The display name of the component owning the hook.
+        component: &'static str,
+        /// The static reason code the hook returned.
+        reason: &'static str,
+    },
+
+    /// A transition-proposal or transition-decision participant failed or panicked, so
+    /// it could not vouch for the attempt and the attempt was rejected.
+    #[error("{kind} hook on '{component}' failed: {source}")]
+    TransitionHookFailed {
+        /// The hook kind's name.
+        kind: &'static str,
+        /// The display name of the component owning the hook.
+        component: &'static str,
+        /// The hook failure, redacted for panics.
+        #[source]
+        source: Box<upwell_hooks::Error>,
+    },
+
+    /// A runtime reloader was used before its application was built or after its runtime
+    /// was dropped.
+    #[error("the application runtime is not attached or has been dropped")]
+    RuntimeUnavailable,
+
     /// A configuration loading, binding, or substitution failure.
     #[error(transparent)]
     Config(#[from] upwell_config::ConfigError),
+
+    /// A configuration reload failed (load, bind, hook rejection, or panic) before
+    /// anything was published. Boxed to keep the app error within the
+    /// `result_large_err` budget every `crate::Result` in the crate shares.
+    #[error(transparent)]
+    ConfigReload(Box<upwell_config::ConfigReloadError>),
 
     /// A hook failure (e.g. an unresolvable receiver or parameter).
     #[error(transparent)]
@@ -134,6 +234,12 @@ pub enum Error {
     /// An application-defined error surfaced through the framework.
     #[error(transparent)]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl From<upwell_config::ConfigReloadError> for Error {
+    fn from(error: upwell_config::ConfigReloadError) -> Self {
+        Self::ConfigReload(Box::new(error))
+    }
 }
 
 /// The app-layer result type.
