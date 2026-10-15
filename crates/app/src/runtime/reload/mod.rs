@@ -128,8 +128,8 @@ use super::report::{
     TransitionCompletion, TransitionPhase, TransitionRecorder,
 };
 use super::transition_hooks::{
-    AffectedComponents, PendingTransition, TransitionDecision, TransitionProposal, fire_gate,
-    observe_outcome,
+    AffectedComponents, HookOwners, PendingTransition, TransitionDecision, TransitionProposal,
+    fire_gate, observe_outcome,
 };
 use super::{AppRuntime, RuntimeView};
 use stages::{commit_candidate, construct_candidate, evaluate_conditions, plan_transition};
@@ -295,6 +295,8 @@ impl AppRuntime {
             base.resolved_components(),
             candidate.components(),
         );
+        let active_owners = HookOwners::new(base.resolved_components());
+        let candidate_owners = HookOwners::new(candidate.components());
         let pending = PendingTransition::proposed(
             transition.attempt(),
             base.id(),
@@ -306,8 +308,15 @@ impl AppRuntime {
         recorder.record_displaced(&resolved_plan.structural().retirement_order);
         recorder.enter(TransitionPhase::Proposal);
 
-        fire_gate::<TransitionProposal>(base.hooks(), &pending, &staged, &affected, recorder)
-            .await?;
+        fire_gate::<TransitionProposal>(
+            base.hooks(),
+            &active_owners,
+            &pending,
+            &staged,
+            &affected,
+            recorder,
+        )
+        .await?;
 
         recorder.enter(TransitionPhase::Construct);
 
@@ -316,14 +325,23 @@ impl AppRuntime {
 
         recorder.enter(TransitionPhase::Hooks);
 
-        let hook_reports = staged.run_config_reload_hooks(&hook_manager).await?;
+        let hook_reports = staged
+            .run_config_reload_hooks(&hook_manager, |owner| candidate_owners.id(owner))
+            .await?;
         let pending = pending.decided(&hook_reports);
 
         recorder.record_hooks(hook_reports);
         recorder.enter(TransitionPhase::Decision);
 
-        fire_gate::<TransitionDecision>(&hook_manager, &pending, &staged, &affected, recorder)
-            .await?;
+        fire_gate::<TransitionDecision>(
+            &hook_manager,
+            &candidate_owners,
+            &pending,
+            &staged,
+            &affected,
+            recorder,
+        )
+        .await?;
 
         recorder.enter(TransitionPhase::Commit);
 

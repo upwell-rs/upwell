@@ -176,7 +176,7 @@ pub enum Error {
     TransitionHookRejected {
         /// The hook kind's name.
         kind: &'static str,
-        /// The display name of the component owning the hook.
+        /// The stable ID of the component owning the hook.
         component: &'static str,
         /// The static reason code the hook returned.
         reason: &'static str,
@@ -188,7 +188,7 @@ pub enum Error {
     TransitionHookFailed {
         /// The hook kind's name.
         kind: &'static str,
-        /// The display name of the component owning the hook.
+        /// The stable ID of the component owning the hook.
         component: &'static str,
         /// The hook failure, redacted for panics.
         #[source]

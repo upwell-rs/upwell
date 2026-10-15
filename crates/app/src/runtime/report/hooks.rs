@@ -6,15 +6,16 @@ use super::TransitionPhase;
 ///
 /// Participants appear in registration order, up to and including one that ended the
 /// attempt; observers follow once every participant accepted. Carries the owning
-/// component's display name and redacted categories only, never a hook's error message.
+/// component's stable ID and redacted categories only, never a hook's error message.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[non_exhaustive]
 pub struct TransitionHookReport {
     /// The pre-commit phase the hook ran in.
     pub phase: TransitionPhase,
-    /// The display name of the component owning the hook, as the hook catalog records
-    /// it (its type descriptor name, not its stable component ID).
+    /// The stable ID of the component owning the hook, matching its
+    /// [`ComponentTransitionReport::component`](crate::ComponentTransitionReport::component)
+    /// when the transition affects it.
     pub component: &'static str,
     /// Whether the hook could affect the attempt.
     #[cfg_attr(feature = "serde", serde(serialize_with = "super::serialize::role"))]

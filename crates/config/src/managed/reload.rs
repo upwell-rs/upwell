@@ -200,7 +200,11 @@ pub struct ChangedBinding {
 /// One component's config-reload hook outcome.
 #[derive(Debug, Clone)]
 pub struct ComponentHookReport {
+    /// The component owning the hook, as named by the caller of
+    /// [`StagedReload::run_config_reload_hooks`]: its stable component ID in application
+    /// runtime reports.
     pub component: &'static str,
+    /// The outcome the hook returned.
     pub outcome: HookOutcome,
 }
 
@@ -571,12 +575,16 @@ impl StagedReload {
     /// not run. Observers run once every participant accepted, and their failures are
     /// logged without affecting the reload.
     ///
+    /// `owner_id` names the component owning each hook: reports and errors carry the ID it
+    /// returns for the hook's owner type, so the caller decides the naming scheme.
+    ///
     /// The application runtime's transactional reload runs it against the candidate
-    /// generation's manager before commit.
+    /// generation's manager before commit, naming owners by their stable component IDs.
     #[allow(clippy::result_large_err)]
     pub async fn run_config_reload_hooks(
         &self,
         hooks: &HookManager,
+        owner_id: impl Fn(&TypeDescriptor) -> &'static str,
     ) -> Result<Vec<ComponentHookReport>, ConfigReloadError> {
         if !hooks.has::<ConfigReload>() {
             return Ok(Vec::new());
@@ -599,13 +607,13 @@ impl StagedReload {
         for (component, result) in fired.participants {
             match result {
                 Ok(outcome) => reports.push(ComponentHookReport {
-                    component: component.name,
+                    component: owner_id(&component),
                     outcome,
                 }),
 
                 Err(source) => {
                     return Err(ConfigReloadError::Hook {
-                        component: component.name,
+                        component: owner_id(&component),
                         source: Box::new(source),
                     });
                 }
@@ -617,7 +625,7 @@ impl StagedReload {
                 tracing::warn!(
                     target: "upwell::config",
                     hook = ConfigReload::NAME,
-                    component = component.name,
+                    component = owner_id(&component),
                     %error,
                     "config-reload observer failed"
                 );

@@ -150,6 +150,13 @@ async fn a_committed_reload_reports_affected_components_and_traces_them() {
         committed.field("displaced"),
         Some(report.displaced().len().to_string().as_str())
     );
+    assert!(
+        report
+            .hooks()
+            .iter()
+            .all(|hook| report.component(hook.component).is_some()),
+        "every config-reload hook outcome names its owner by the component ID the plan reports"
+    );
 
     #[cfg(feature = "serde")]
     {
@@ -160,7 +167,7 @@ async fn a_committed_reload_reports_affected_components_and_traces_them() {
         assert_eq!(json["base_generation"], base_generation.get());
         assert_eq!(json["changed"][0]["path"], "probe");
         assert_eq!(json["changed"][0]["type_name"], "ProbeConfig");
-        assert_eq!(json["hooks"][0]["component"], "ProbeComponent");
+        assert_eq!(json["hooks"][0]["component"], "probe_component");
         assert_eq!(json["hooks"][0]["outcome"], "unchanged");
         assert!(json["hooks"][0]["restart_reason"].is_null());
         assert_eq!(json["phases"][0]["phase"], "stage");
@@ -261,7 +268,7 @@ async fn a_value_bearing_hook_rejection_never_reaches_the_report() {
         report,
         TransitionPhase::Hooks,
         TransitionFailure::HookRejected {
-            component: ProbeComponent::NAME,
+            component: ProbeComponent::ID,
         },
     );
     assert!(

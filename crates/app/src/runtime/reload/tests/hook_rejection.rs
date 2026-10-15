@@ -53,14 +53,14 @@ async fn hook_rejection_preserves_config_and_graph() {
         &report,
         crate::TransitionPhase::Hooks,
         crate::TransitionFailure::HookRejected {
-            component: "ProbeComponent",
+            component: "probe_component",
         },
     );
 
     match error {
         crate::Error::ConfigReload(error) => match *error {
             ConfigReloadError::Hook { component, .. } => {
-                assert_eq!(component, "ProbeComponent", "the probe hook rejected");
+                assert_eq!(component, "probe_component", "the probe hook rejected");
             }
             other => panic!("expected a hook rejection, got {other:?}"),
         },
@@ -156,14 +156,14 @@ async fn receiver_mutating_hook_rejection_preserves_the_active_receiver() {
         &report,
         crate::TransitionPhase::Hooks,
         crate::TransitionFailure::HookRejected {
-            component: "ProbeComponent",
+            component: "probe_component",
         },
     );
 
     match error {
         crate::Error::ConfigReload(error) => match *error {
             ConfigReloadError::Hook { component, .. } => {
-                assert_eq!(component, "ProbeComponent", "the probe hook rejected");
+                assert_eq!(component, "probe_component", "the probe hook rejected");
             }
             other => panic!("expected a hook rejection, got {other:?}"),
         },

@@ -5,7 +5,7 @@ use upwell_config::{ReloadProposal, StagedReload};
 use upwell_di::ComponentDescriptor;
 use upwell_hooks::{HookDescriptor, HookKind, HookManager, HookRole};
 
-use super::{PendingTransition, TransitionHookContext, TransitionVerdict};
+use super::{HookOwners, PendingTransition, TransitionHookContext, TransitionVerdict};
 use crate::ComponentTransitionReport;
 use crate::runtime::report::{
     TRANSITION_TARGET, TransitionHookOutcome, TransitionHookReport, TransitionRecorder,
@@ -44,10 +44,12 @@ impl AffectedComponents {
     }
 }
 
-/// Fires one pre-commit phase of kind `K` against `hooks`, records every hook that ran,
-/// and returns the error of the participant that ended the attempt, if any.
+/// Fires one pre-commit phase of kind `K` against `hooks`, records every hook that ran
+/// under its owner's stable ID from `owners`, and returns the error of the participant
+/// that ended the attempt, if any.
 pub(crate) async fn fire_gate<K>(
     hooks: &HookManager,
+    owners: &HookOwners,
     pending: &PendingTransition,
     staged: &StagedReload,
     affected: &AffectedComponents,
@@ -69,19 +71,21 @@ where
     let mut reports = Vec::with_capacity(fired.participants.len() + fired.observers.len());
     let mut rejection = None;
 
-    for (component, outcome) in fired.participants {
-        let (outcome, error) = participant_outcome::<K>(component.name, outcome);
+    for (owner, outcome) in fired.participants {
+        let component = owners.id(&owner);
+        let (outcome, error) = participant_outcome::<K>(component, outcome);
 
         reports.push(TransitionHookReport {
             phase,
-            component: component.name,
+            component,
             role: HookRole::Participant,
             outcome,
         });
         rejection = error.or(rejection);
     }
 
-    for (component, outcome) in fired.observers {
+    for (owner, outcome) in fired.observers {
+        let component = owners.id(&owner);
         let outcome = observer_outcome(outcome);
 
         if outcome != TransitionHookOutcome::Completed {
@@ -90,7 +94,7 @@ where
                 attempt = recorder.attempt().get(),
                 phase = phase.as_str(),
                 hook = K::NAME,
-                component = component.name,
+                component,
                 outcome = ?outcome,
                 "transition observer failed"
             );
@@ -98,7 +102,7 @@ where
 
         reports.push(TransitionHookReport {
             phase,
-            component: component.name,
+            component,
             role: HookRole::Observer,
             outcome,
         });
