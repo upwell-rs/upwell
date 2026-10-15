@@ -248,6 +248,8 @@ async fn main() -> Result<(), upwell::CliError> {
 Both `#[service]`/`#[handlers]`/`#[rpc]` (RPC) and `#[controller]`/`#[handlers]`/`#[get]` (HTTP)
 share the same base machinery: `#[component]` dependencies, `#[config]` values, `Inject<T>`
 route-level DI, and `#[hook(..)]` lifecycle/config-reload hooks.
+Runtime transitions (config reloads that change the component graph) expose proposal, decision,
+outcome and retirement hooks; see the [transition hooks guide](docs/transition-hooks.md).
 
 ## Typed clients
 
