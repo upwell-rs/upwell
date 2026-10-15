@@ -399,3 +399,8 @@ pub struct ConditionDescriptor {
     pub source: DescriptorSource,
     pub predicate: ConditionPredicate,
 }
+
+mod builder;
+
+#[cfg(test)]
+mod tests;

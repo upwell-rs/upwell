@@ -25,7 +25,6 @@ pub fn generate_providers<Ext: ParseKeyed>(
     }
 
     let self_name = LitStr::new(&self_ident.to_string(), self_ident.span());
-    let boxed_component = paths.core("BoxedComponent");
     let distributed_slice = paths.core("linkme::distributed_slice");
     let linkme_crate = paths.core("linkme");
     let provider_descriptor = paths.core("ProviderDescriptor");
@@ -33,8 +32,8 @@ pub fn generate_providers<Ext: ParseKeyed>(
     let runtime_descriptor = paths.core("RuntimeDescriptor");
     let component_descriptor = paths.core("ComponentDescriptor");
     let type_descriptor = paths.core("TypeDescriptor");
-    let live = paths.core("Live");
     let provider_of = paths.core("ProviderOf");
+    let erase_provider = paths.core("erase_provider");
     let provider_order = paths.core("ProviderOrder");
     let provider_order_direction = paths.core("ProviderOrderDirection");
     let descriptor = paths.core("Descriptor");
@@ -121,7 +120,7 @@ pub fn generate_providers<Ext: ParseKeyed>(
         };
     };
 
-    // Per-trait helper items (erase fns, `ProviderOf` marker impls), the
+    // Per-trait helper items (`ProviderOf` upcast impls), the
     // descriptor literals aggregated into the by-type const, and the linkme
     // statics that index back into it. A component provides many traits, so the
     // by-type handle is one-to-many: a single `Descriptor<&[ProviderDescriptor]>`
@@ -135,33 +134,17 @@ pub fn generate_providers<Ext: ParseKeyed>(
         // The trait object as written (`dyn Trait`). Both this provide side and
         // the dependency side spell it identically, so their keys match. The
         // trait must be `Send + Sync` (via supertraits, since components are
-        // shared across threads); otherwise the erase fn's `Box<dyn Any + Send +
-        // Sync>` storage fails to compile, pointing the author at the missing bound.
+        // shared across threads); otherwise the `erase_provider::<Self, dyn Trait>`
+        // bound fails to compile, pointing the author at the missing bound.
         let trait_name = LitStr::new(&dyn_ty.to_token_stream().to_string(), Span::call_site());
-        let assert_provider_ident = format_ident!("__upwell_assert_provider_{}", i);
-        let erase_ident = format_ident!("__upwell_erase_{}", i);
         let provider_ident = format_ident!("__UPWELL_PROVIDER_{}", i);
 
         helpers.push(quote! {
-            impl #provider_of<#dyn_ty> for #self_ident {}
-
-            fn #assert_provider_ident(
-                __concrete: ::std::sync::Arc<#self_ident>,
-            ) -> ::std::sync::Arc<#dyn_ty> {
-                __concrete
-            }
-
-            fn #erase_ident(__concrete: &#boxed_component) -> #boxed_component {
-                let __arc = __concrete
-                    .value
-                    .downcast_ref::<#live<#self_ident>>()
-                    .expect("provider concrete type mismatch")
-                    .snapshot();
-                let __erased = #assert_provider_ident(__arc);
-
-                #boxed_component {
-                    ty: #type_descriptor::of::<#dyn_ty>(#trait_name),
-                    value: ::std::boxed::Box::new(#live::new(__erased)),
+            impl #provider_of<#dyn_ty> for #self_ident {
+                fn upcast(
+                    this: ::std::sync::Arc<Self>,
+                ) -> ::std::sync::Arc<#dyn_ty> {
+                    this
                 }
             }
         });
@@ -174,7 +157,7 @@ pub fn generate_providers<Ext: ParseKeyed>(
                 primary: #primary,
                 priority: #priority,
                 ordering: #ordering,
-                erase: #erase_ident,
+                erase: #erase_provider::<#self_ident, #dyn_ty>,
             }
         });
 
