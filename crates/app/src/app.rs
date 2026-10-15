@@ -287,7 +287,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
     /// Registers every trait mapping component type `T` declares with
     /// `provide = dyn Trait`. Pair it with [`component`](Self::component) when
     /// registering a providing component explicitly instead of through discovery; a
-    /// mapping discovery also registers is kept once.
+    /// mapping that discovery also registers is kept once.
     pub fn provider<T>(mut self) -> Self
     where
         T: Descriptor<&'static [ProviderDescriptor]>,
