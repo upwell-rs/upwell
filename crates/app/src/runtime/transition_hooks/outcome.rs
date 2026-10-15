@@ -16,7 +16,8 @@
 //! generation IDs rather than the runtime's current generation.
 //!
 //! - [`TransitionCommitted`] fires on the **published** generation's hooks, once per
-//!   committed attempt.
+//!   committed attempt, after every displaced component received
+//!   [`ComponentRetired`](crate::ComponentRetired).
 //! - [`TransitionAborted`] fires on the **base** generation's hooks, which stayed active,
 //!   once per rejected attempt.
 //!
@@ -43,6 +44,7 @@ use upwell_core::{
 use upwell_hooks::{HookKind, HookManager, HookParam, HookParticipation};
 
 use super::super::RuntimeView;
+use super::retirement::retire_displaced;
 use crate::RuntimeTransitionReport;
 use crate::runtime::report::TRANSITION_TARGET;
 
@@ -98,8 +100,9 @@ impl<K: HookKind<Cx = TransitionOutcomeContext>> HookParam<K> for RuntimeTransit
     }
 }
 
-/// Fires the outcome observers of one finished attempt: committed observers on the
-/// published generation, aborted observers on the base generation.
+/// Fires the outcome observers of one finished attempt: for a committed attempt, the
+/// displaced components' retirement on the base generation and then committed observers on
+/// the published generation; for a rejected one, aborted observers on the base generation.
 pub(crate) async fn observe_outcome(
     outcome: &crate::Result<RuntimeTransitionReport>,
     base: &RuntimeView,
@@ -107,6 +110,7 @@ pub(crate) async fn observe_outcome(
 ) {
     match (outcome, published) {
         (Ok(report), Some(published)) if report.is_committed() => {
+            retire_displaced(report, base).await;
             fire::<TransitionCommitted>(published.hooks(), report).await;
         }
         (Err(crate::Error::TransitionRejected(rejection)), _) => {

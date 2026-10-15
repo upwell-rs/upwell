@@ -142,6 +142,14 @@ async fn a_committed_reload_reports_affected_components_and_traces_them() {
         Some(report.attempt().get().to_string().as_str())
     );
     assert_eq!(affected.field("action"), Some("Replace"));
+    assert!(
+        report.displaced().contains(&ProbeComponent::ID),
+        "the replaced singleton is displaced"
+    );
+    assert_eq!(
+        committed.field("displaced"),
+        Some(report.displaced().len().to_string().as_str())
+    );
 
     #[cfg(feature = "serde")]
     {
@@ -157,6 +165,12 @@ async fn a_committed_reload_reports_affected_components_and_traces_them() {
         assert!(json["hooks"][0]["restart_reason"].is_null());
         assert_eq!(json["phases"][0]["phase"], "stage");
         assert!(json["phases"][0]["elapsed_us"].is_u64());
+        assert!(
+            json["displaced"]
+                .as_array()
+                .expect("displaced serializes as an array")
+                .contains(&ProbeComponent::ID.into())
+        );
 
         let probe_json = json["components"]
             .as_array()

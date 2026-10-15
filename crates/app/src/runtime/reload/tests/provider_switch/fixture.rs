@@ -32,6 +32,7 @@ use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, FromContainer, Injectable, Live, ProviderDescriptor, Singleton,
 };
+use upwell_hooks::HookDescriptor;
 
 use crate::App;
 
@@ -270,16 +271,23 @@ static FALLBACK_PROVIDER: ProviderDescriptor = ProviderDescriptor {
     erase: erase_fallback,
 };
 
-static PRIMARY_COMPONENT: ComponentDescriptor = ComponentDescriptor {
-    id: PrimaryAuthenticator::ID,
-    name: PrimaryAuthenticator::NAME,
-    ty: TypeDescriptor::of::<PrimaryAuthenticator>(PrimaryAuthenticator::NAME),
-    scope: &Singleton,
-    condition: Some(&PRIMARY_CONDITION),
-    factories: primary_factories,
-    hooks: upwell_hooks::no_hooks,
-    generation_snapshot: None,
-};
+/// The primary provider's descriptor carrying `hooks`.
+pub(super) const fn primary_component(
+    hooks: fn() -> &'static [HookDescriptor],
+) -> ComponentDescriptor {
+    ComponentDescriptor {
+        id: PrimaryAuthenticator::ID,
+        name: PrimaryAuthenticator::NAME,
+        ty: TypeDescriptor::of::<PrimaryAuthenticator>(PrimaryAuthenticator::NAME),
+        scope: &Singleton,
+        condition: Some(&PRIMARY_CONDITION),
+        factories: primary_factories,
+        hooks,
+        generation_snapshot: None,
+    }
+}
+
+static PRIMARY_COMPONENT: ComponentDescriptor = primary_component(upwell_hooks::no_hooks);
 
 static FALLBACK_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     id: FallbackAuthenticator::ID,
@@ -307,6 +315,17 @@ pub(super) async fn build_auth_app_with(
     gate: &'static ComponentDescriptor,
     extra: &[&'static ComponentDescriptor],
 ) -> (TempDir, App<()>) {
+    build_auth_app_from(mode, &PRIMARY_COMPONENT, gate, extra).await
+}
+
+/// Builds the auth app with `primary` as the primary provider descriptor, `gate` as the
+/// fixed consumer descriptor, and `extra` components registered after them.
+pub(super) async fn build_auth_app_from(
+    mode: &str,
+    primary: &'static ComponentDescriptor,
+    gate: &'static ComponentDescriptor,
+    extra: &[&'static ComponentDescriptor],
+) -> (TempDir, App<()>) {
     let dir = tempfile::Builder::new()
         .prefix("upwell-auth-switch-")
         .tempdir()
@@ -323,7 +342,7 @@ pub(super) async fn build_auth_app_with(
         .config_source(manager)
         .config::<AuthConfig>("auth")
         .condition_facts::<AuthConfig>("auth")
-        .component_descriptor(&PRIMARY_COMPONENT)
+        .component_descriptor(primary)
         .component_descriptor(&FALLBACK_COMPONENT)
         .component_descriptor(gate);
 
