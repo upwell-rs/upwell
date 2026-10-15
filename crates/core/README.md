@@ -24,7 +24,7 @@ fn describe<S: StaticScope>() -> &'static str {
 let _ = describe::<Singleton>();
 ```
 
-Component conditions are [`ConditionDescriptor`] trees built with `const` builders (`config_bool`, `config_equals`, `component_eligible`, `provider_eligible`, `all`, `any`, `not`), each recording its call site for diagnostics.
+Component conditions are [`ConditionDescriptor`] trees built with `const` builders (`config_bool`, `config_equals`, `config_matches`, `component_eligible`, `provider_eligible`, `all`, `any`, `not`), each recording its call site for diagnostics.
 
 ## Internal role
 
