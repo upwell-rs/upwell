@@ -131,12 +131,14 @@ pub(super) async fn retire_displaced(report: &RuntimeTransitionReport, base: &Ru
         return;
     }
 
+    let owners = HookOwners::new(base.resolved_components());
+
     for &component in report.displaced() {
         let Some(retirement) = retirement_of(report, component, generation) else {
             continue;
         };
 
-        retire(base, retirement).await;
+        retire(base, &owners, retirement).await;
     }
 }
 
@@ -163,7 +165,7 @@ fn retirement_of(
 /// Fires one component's retirement. A displaced ID missing from the base generation's
 /// descriptors would leave its targeted hooks unselected, so that case is traced rather
 /// than silently skipped; `always` hooks still run.
-async fn retire(base: &RuntimeView, retirement: ComponentRetirement) {
+async fn retire(base: &RuntimeView, owners: &HookOwners, retirement: ComponentRetirement) {
     let ty = component_type(base, retirement.component);
     let cx = RetirementContext { retirement };
 
@@ -184,7 +186,6 @@ async fn retire(base: &RuntimeView, retirement: ComponentRetirement) {
         .hooks()
         .fire::<ComponentRetired>(&cx, |hook| Some(hook.component_ty.type_id) == ty)
         .await;
-    let owners = HookOwners::new(base.resolved_components());
 
     for (owner, outcome) in fired.observers {
         let Err(error) = outcome else {
