@@ -23,7 +23,7 @@ hooks run, and no generation moves.
 
 | # | Phase | Hook kind | Runs on | Can reject |
 |---|---|---|---|:-:|
-| 1 | Stage: re-read config, find changed bindings | – | – | ✓ (config load error) |
+| 1 | Stage: re-read config, find changed bindings | – | – | ✓ (config load or bind error) |
 | 2 | Evaluate conditions, plan the transition | – | – | ✓ (condition or plan error) |
 | 3 | **Proposal** | `TransitionProposal` | active generation | ✓ |
 | 4 | Construct the candidate root | – (component factories) | candidate | ✓ (factory error) |
