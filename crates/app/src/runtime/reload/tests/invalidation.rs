@@ -6,28 +6,24 @@
 //! runtime resolver, so a changed binding reconstructs its config consumer even when
 //! the candidate graph is structurally identical to the active one.
 
-use std::any::{Any, TypeId};
+use std::any::TypeId;
 use std::collections::BTreeSet;
-use std::future::Future;
-use std::pin::Pin;
 
 use serde::Deserialize;
 use upwell_config::{ConfigBinding, ConfigProperties, ConfigReload};
 use upwell_core::{
-    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, ResolverCtx,
-    RuntimeGenerationId, TypeDescriptor,
+    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, RuntimeGenerationId,
+    TypeDescriptor,
 };
-use upwell_di::{
-    BoxedComponent, ComponentConstructionContext, ComponentDescriptor, ComponentFactoryDescriptor,
-    Singleton,
-};
-use upwell_hooks::{HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookDescriptor, HookKind, HookManager};
+use upwell_di::{ComponentDescriptor, Singleton};
+use upwell_hooks::{HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookDescriptor, HookManager};
 
 use super::super::invalidation::invalidated_component_roots;
 use super::fixture::{
     ProbeComponent, build_probe_app, config_dir_of, factory_calls, lock_test_guard, reset_controls,
     write_probe_config,
 };
+use crate::test_support::{unbuilt_factories, uncalled_hook};
 use crate::transition::CandidateGraph;
 use crate::{AppRegistry, ScopeTopology};
 
@@ -74,34 +70,6 @@ impl ConfigProperties for shared_right::SharedConfig {
 // registry collapses descriptors to one per type.
 // ---------------------------------------------------------------------------
 
-struct ConfigConsumer;
-
-struct UnqualifiedConsumer;
-
-struct OtherPathConsumer;
-
-struct OtherTypeConsumer;
-
-struct HookOwner;
-
-struct ManagerConsumer;
-
-struct Unrelated;
-
-struct Dual;
-
-struct AlsoConfig;
-
-struct SharedLeftConsumer;
-
-struct SharedRightConsumer;
-
-fn unreachable_construct(
-    _: &mut ComponentConstructionContext,
-) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
-    Box::pin(async { unreachable!("invalidation tests never construct components") })
-}
-
 fn config_dependency<T: ConfigProperties>(
     qualifier: Option<&'static str>,
 ) -> Vec<DependencyDescriptor> {
@@ -132,287 +100,97 @@ fn hook_manager_dependency() -> Vec<DependencyDescriptor> {
     }]
 }
 
-fn no_dependencies() -> Vec<DependencyDescriptor> {
-    Vec::new()
+/// Declares marker `$ty` and `$descriptor()`: a singleton identified `$id` and named
+/// after `$ty`, whose never-driven `"static"` recipe declares `$deps` and which carries
+/// `$hooks` (none by default).
+macro_rules! planned_component {
+    ($ty:ident, $id:literal, $descriptor:ident, $deps:expr $(, hooks $hooks:expr)?) => {
+        struct $ty;
+
+        fn $descriptor() -> ComponentDescriptor {
+            ComponentDescriptor {
+                id: $id,
+                name: stringify!($ty),
+                ty: TypeDescriptor::of::<$ty>(stringify!($ty)),
+                scope: &Singleton,
+                condition: None,
+                factories: unbuilt_factories!("static", $deps),
+                hooks: planned_component!(@hooks $($hooks)?),
+                generation_snapshot: None,
+            }
+        }
+    };
+    (@hooks) => {
+        upwell_hooks::no_hooks
+    };
+    (@hooks $hooks:expr) => {
+        $hooks
+    };
 }
 
-fn qualified_probe_deps() -> Vec<DependencyDescriptor> {
-    config_dependency::<ReloadConfig>(Some("probe"))
-}
-
-fn unqualified_deps() -> Vec<DependencyDescriptor> {
-    config_dependency::<ReloadConfig>(None)
-}
-
-fn other_path_deps() -> Vec<DependencyDescriptor> {
-    config_dependency::<ReloadConfig>(Some("settings"))
-}
-
-fn other_type_deps() -> Vec<DependencyDescriptor> {
-    config_dependency::<OtherConfig>(Some("probe"))
-}
-
-fn shared_left_deps() -> Vec<DependencyDescriptor> {
-    config_dependency::<shared_left::SharedConfig>(Some("shared"))
-}
-
-fn shared_right_deps() -> Vec<DependencyDescriptor> {
-    config_dependency::<shared_right::SharedConfig>(Some("shared"))
-}
-
-fn manager_deps() -> Vec<DependencyDescriptor> {
-    hook_manager_dependency()
-}
-
-static QUALIFIED_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: unreachable_construct,
-    dependencies: qualified_probe_deps,
-    default: false,
-}];
-
-static UNQUALIFIED_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: unreachable_construct,
-    dependencies: unqualified_deps,
-    default: false,
-}];
-
-static OTHER_PATH_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: unreachable_construct,
-    dependencies: other_path_deps,
-    default: false,
-}];
-
-static OTHER_TYPE_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: unreachable_construct,
-    dependencies: other_type_deps,
-    default: false,
-}];
-
-static SHARED_LEFT_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: unreachable_construct,
-    dependencies: shared_left_deps,
-    default: false,
-}];
-
-static SHARED_RIGHT_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: unreachable_construct,
-    dependencies: shared_right_deps,
-    default: false,
-}];
-
-static MANAGER_CONSUMER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: unreachable_construct,
-    dependencies: manager_deps,
-    default: false,
-}];
-
-static PLAIN_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: unreachable_construct,
-    dependencies: no_dependencies,
-    default: false,
-}];
-
-fn qualified_factories() -> &'static [ComponentFactoryDescriptor] {
-    &QUALIFIED_FACTORY
-}
-
-fn unqualified_factories() -> &'static [ComponentFactoryDescriptor] {
-    &UNQUALIFIED_FACTORY
-}
-
-fn other_path_factories() -> &'static [ComponentFactoryDescriptor] {
-    &OTHER_PATH_FACTORY
-}
-
-fn other_type_factories() -> &'static [ComponentFactoryDescriptor] {
-    &OTHER_TYPE_FACTORY
-}
-
-fn shared_left_factories() -> &'static [ComponentFactoryDescriptor] {
-    &SHARED_LEFT_FACTORY
-}
-
-fn shared_right_factories() -> &'static [ComponentFactoryDescriptor] {
-    &SHARED_RIGHT_FACTORY
-}
-
-fn manager_consumer_factories() -> &'static [ComponentFactoryDescriptor] {
-    &MANAGER_CONSUMER_FACTORY
-}
-
-fn plain_factories() -> &'static [ComponentFactoryDescriptor] {
-    &PLAIN_FACTORY
-}
-
-fn hook_owner_kind_ty() -> TypeId {
-    TypeId::of::<ConfigReload>()
-}
-
-fn hook_owner_hook_dependencies() -> Vec<DependencyDescriptor> {
-    Vec::new()
-}
-
-type HookFuture<'a> =
-    Pin<Box<dyn Future<Output = upwell_hooks::Result<Box<dyn Any + Send>>> + Send + 'a>>;
-
-fn unreachable_hook_call<'a>(
-    _: &'a (dyn ResolverCtx + Send + Sync),
-    _: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
-    Box::pin(async { unreachable!("invalidation tests never invoke hooks") })
-}
-
-static RELOAD_HOOK: HookDescriptor = HookDescriptor::new(
+static RELOAD_HOOKS: [HookDescriptor; 1] = [HookDescriptor::of::<ConfigReload>(
     1,
     TypeDescriptor::of::<HookOwner>("HookOwner"),
-    <ConfigReload as HookKind>::NAME,
-    hook_owner_kind_ty,
-    hook_owner_hook_dependencies,
-    unreachable_hook_call,
+    uncalled_hook,
+)];
+
+planned_component!(ConfigConsumer, "config-consumer", config_consumer, || {
+    config_dependency::<ReloadConfig>(Some("probe"))
+});
+planned_component!(
+    UnqualifiedConsumer,
+    "unqualified-consumer",
+    unqualified_consumer,
+    || config_dependency::<ReloadConfig>(None)
 );
-
-static RELOAD_HOOKS: [HookDescriptor; 1] = [RELOAD_HOOK];
-
-fn reload_hook_hooks() -> &'static [HookDescriptor] {
-    &RELOAD_HOOKS
-}
-
-fn singleton(
-    id: &'static str,
-    name: &'static str,
-    ty: TypeDescriptor,
-    factories: fn() -> &'static [ComponentFactoryDescriptor],
-    hooks: fn() -> &'static [HookDescriptor],
-) -> ComponentDescriptor {
-    ComponentDescriptor {
-        id,
-        name,
-        ty,
-        scope: &Singleton,
-        condition: None,
-        factories,
-        hooks,
-        generation_snapshot: None,
-    }
-}
-
-fn config_consumer() -> ComponentDescriptor {
-    singleton(
-        "config-consumer",
-        "ConfigConsumer",
-        TypeDescriptor::of::<ConfigConsumer>("ConfigConsumer"),
-        qualified_factories,
-        upwell_hooks::no_hooks,
-    )
-}
-
-fn unqualified_consumer() -> ComponentDescriptor {
-    singleton(
-        "unqualified-consumer",
-        "UnqualifiedConsumer",
-        TypeDescriptor::of::<UnqualifiedConsumer>("UnqualifiedConsumer"),
-        unqualified_factories,
-        upwell_hooks::no_hooks,
-    )
-}
-
-fn other_path_consumer() -> ComponentDescriptor {
-    singleton(
-        "other-path-consumer",
-        "OtherPathConsumer",
-        TypeDescriptor::of::<OtherPathConsumer>("OtherPathConsumer"),
-        other_path_factories,
-        upwell_hooks::no_hooks,
-    )
-}
-
-fn other_type_consumer() -> ComponentDescriptor {
-    singleton(
-        "other-type-consumer",
-        "OtherTypeConsumer",
-        TypeDescriptor::of::<OtherTypeConsumer>("OtherTypeConsumer"),
-        other_type_factories,
-        upwell_hooks::no_hooks,
-    )
-}
-
-fn hook_owner() -> ComponentDescriptor {
-    singleton(
-        "hook-owner",
-        "HookOwner",
-        TypeDescriptor::of::<HookOwner>("HookOwner"),
-        plain_factories,
-        reload_hook_hooks,
-    )
-}
-
-fn manager_consumer() -> ComponentDescriptor {
-    singleton(
-        "manager-consumer",
-        "ManagerConsumer",
-        TypeDescriptor::of::<ManagerConsumer>("ManagerConsumer"),
-        manager_consumer_factories,
-        upwell_hooks::no_hooks,
-    )
-}
-
-fn unrelated() -> ComponentDescriptor {
-    singleton(
-        "unrelated",
-        "Unrelated",
-        TypeDescriptor::of::<Unrelated>("Unrelated"),
-        plain_factories,
-        upwell_hooks::no_hooks,
-    )
-}
-
-fn dual() -> ComponentDescriptor {
-    singleton(
-        "dual",
-        "Dual",
-        TypeDescriptor::of::<Dual>("Dual"),
-        qualified_factories,
-        reload_hook_hooks,
-    )
-}
-
-fn also_config() -> ComponentDescriptor {
-    singleton(
-        "also-config",
-        "AlsoConfig",
-        TypeDescriptor::of::<AlsoConfig>("AlsoConfig"),
-        qualified_factories,
-        upwell_hooks::no_hooks,
-    )
-}
-
-fn shared_left_consumer() -> ComponentDescriptor {
-    singleton(
-        "shared-left-consumer",
-        "SharedLeftConsumer",
-        TypeDescriptor::of::<SharedLeftConsumer>("SharedLeftConsumer"),
-        shared_left_factories,
-        upwell_hooks::no_hooks,
-    )
-}
-
-fn shared_right_consumer() -> ComponentDescriptor {
-    singleton(
-        "shared-right-consumer",
-        "SharedRightConsumer",
-        TypeDescriptor::of::<SharedRightConsumer>("SharedRightConsumer"),
-        shared_right_factories,
-        upwell_hooks::no_hooks,
-    )
-}
+planned_component!(
+    OtherPathConsumer,
+    "other-path-consumer",
+    other_path_consumer,
+    || { config_dependency::<ReloadConfig>(Some("settings")) }
+);
+planned_component!(
+    OtherTypeConsumer,
+    "other-type-consumer",
+    other_type_consumer,
+    || { config_dependency::<OtherConfig>(Some("probe")) }
+);
+planned_component!(
+    HookOwner,
+    "hook-owner",
+    hook_owner,
+    Vec::new,
+    hooks || &RELOAD_HOOKS
+);
+planned_component!(
+    ManagerConsumer,
+    "manager-consumer",
+    manager_consumer,
+    hook_manager_dependency
+);
+planned_component!(Unrelated, "unrelated", unrelated, Vec::new);
+planned_component!(
+    Dual,
+    "dual",
+    dual,
+    || config_dependency::<ReloadConfig>(Some("probe")),
+    hooks || &RELOAD_HOOKS
+);
+planned_component!(AlsoConfig, "also-config", also_config, || {
+    config_dependency::<ReloadConfig>(Some("probe"))
+});
+planned_component!(
+    SharedLeftConsumer,
+    "shared-left-consumer",
+    shared_left_consumer,
+    || config_dependency::<shared_left::SharedConfig>(Some("shared"))
+);
+planned_component!(
+    SharedRightConsumer,
+    "shared-right-consumer",
+    shared_right_consumer,
+    || config_dependency::<shared_right::SharedConfig>(Some("shared"))
+);
 
 /// The framework-seeded hook-manager descriptor: typed identity, no factory —
 /// generation-local by contract.

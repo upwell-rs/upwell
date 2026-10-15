@@ -5,15 +5,13 @@
 //! fixture's test guard.
 
 use std::any::Any;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Mutex;
 
 use upwell_core::{ResolverCtx, TypeDescriptor};
 use upwell_di::{Component, ComponentDescriptor, factories};
 use upwell_hooks::{HookDescriptor, HookKind, HookParam};
 
-use crate::test_support::test_component;
+use crate::test_support::{HookFuture, test_component};
 use crate::{
     AppRuntime, RuntimeTransitionReport, TransitionAborted, TransitionCommitted,
     TransitionOutcomeContext,
@@ -64,9 +62,6 @@ fn take_controls() -> OutcomeControls {
         .replace(OutcomeControls::Record)
         .unwrap_or_default()
 }
-
-type HookFuture<'a> =
-    Pin<Box<dyn Future<Output = upwell_hooks::Result<Box<dyn Any + Send>>> + Send + 'a>>;
 
 fn report_of<K>(cx: &(dyn Any + Send + Sync)) -> upwell_hooks::Result<RuntimeTransitionReport>
 where
