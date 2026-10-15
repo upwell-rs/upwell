@@ -55,12 +55,16 @@ unit_component!(
     deps [upwell_di::Dep<dyn LiveService>]
 );
 
-/// The live service mapping of provider `T`, qualified `"live"`.
+/// The live service mapping of provider `T`, qualified `"live"`. Its erase panics, so
+/// a planning regression that erases a provider fails these planning-only tests.
 pub(super) const fn live_service_provider<T>() -> ProviderDescriptor
 where
     T: Component + upwell_di::ProviderOf<dyn LiveService>,
 {
-    ProviderDescriptor::of::<T, dyn LiveService>("dyn LiveService").qualifier("live")
+    ProviderDescriptor {
+        erase: |_| panic!("transition planning must not erase components"),
+        ..ProviderDescriptor::of::<T, dyn LiveService>("dyn LiveService").qualifier("live")
+    }
 }
 
 /// A retainable singleton serving `Svc`, seeded by the framework without a factory.
