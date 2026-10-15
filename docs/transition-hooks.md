@@ -23,8 +23,8 @@ hooks run, and no generation moves.
 
 | # | Phase | Hook kind | Runs on | Can reject |
 |---|---|---|---|:-:|
-| 1 | Stage: re-read config, find changed bindings | – | – | – |
-| 2 | Evaluate conditions, plan the transition | – | – | – |
+| 1 | Stage: re-read config, find changed bindings | – | – | ✓ (config load error) |
+| 2 | Evaluate conditions, plan the transition | – | – | ✓ (condition or plan error) |
 | 3 | **Proposal** | `TransitionProposal` | active generation | ✓ |
 | 4 | Construct the candidate root | – (component factories) | candidate | ✓ (factory error) |
 | 5 | **Config reload** | `ConfigReload` | candidate generation | ✓ |
@@ -90,7 +90,9 @@ receiver is the **candidate** instance. A rejection drops the whole candidate.
 ### `ConfigReload`: accept or reject new config values
 
 This hook kind is unchanged. It runs against the candidate generation, between proposal and
-decision; see the [`upwell-hooks` README](../crates/hooks/README.md).
+decision. Its contract (`HookOutcome`, an `Err` aborting the reload, routing by changed binding
+paths) is documented on `ConfigReload` in
+[`upwell-config`](../crates/config/src/managed/reload.rs).
 
 ### `ComponentRetired`: learn you have been displaced
 
@@ -173,9 +175,11 @@ or no-op returns it from `reload_config()`. A rejection carries it inside
 - per-phase timings.
 
 Reports and hook contexts never contain current or proposed config values, deserializer output,
-error messages, or panic payloads. The one piece of free text is the `&'static str` reason a
-participant passes to `TransitionVerdict::Reject`, which the hook author chooses. That applies to `Debug`, `Display`, serialized output (with the
-`serde` feature), and the structured `upwell::transition` tracing events. The only way to read
+error messages, or panic payloads. That applies to `Debug`, `Display`, serialized output (with
+the `serde` feature), and the structured `upwell::transition` tracing events. The only free text
+they carry is chosen by hook authors as `&'static str`: the reason a participant passes to
+`TransitionVerdict::Reject`, and the reason a config-reload hook passes to
+`HookOutcome::RestartRequired`. The only way to read
 staged values is `CfgNext<T>`, and only for a binding the hook declares. The unredacted error
 behind a rejection is reachable only through `TransitionRejection::error()` and the error source
 chain.
@@ -208,7 +212,11 @@ strictly between the two. A direct `reload_config()` call runs whenever it is ma
 
 `Startup` is a one-time process event: it fires once, on the generation built at startup.
 Components a later reload adds do not receive it; use their factory or `#[init]` instead.
-`Shutdown` fires on the generation that is current at shutdown, so the live instances receive
-it, never instances a reload has already retired. Shutdown pairs with startup by component
-type: a component whose `Startup` gate failed or never ran (because a reload added it) is
-skipped, while one a reload replaced still shuts down through its replacement.
+`Shutdown` fires on the generation that is current when shutdown begins, so the live instances
+receive it rather than instances a reload has already retired. Reload triggers are stopped by
+then, but a direct `reload_config()` from another task is not coordinated with shutdown: if it
+commits while `Shutdown` observers run, they still address the generation pinned when shutdown
+began. Targeted `Shutdown` hooks pair with startup by component type: a component whose
+`Startup` gate failed or never ran (because a reload added it) is skipped, while one a reload
+replaced still shuts down through its replacement. `#[hook(Shutdown, always)]` hooks run
+regardless.

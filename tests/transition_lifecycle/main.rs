@@ -131,9 +131,6 @@ async fn switch_provider(switch: Switch) {
         retirement_of(&committed, switch.removed),
         [(RetirementReason::Removed, switch.from)]
     );
-    assert!(retirement_of(&committed, ChangeFreeze::ID).is_empty());
-    assert!(retirement_of(&committed, TransitionAudit::ID).is_empty());
-
     let Some(Event::Committed(observed)) = committed.last() else {
         unreachable!("the kinds were asserted");
     };
@@ -149,6 +146,11 @@ async fn switch_provider(switch: Switch) {
     assert_eq!(observed.displaced(), report.displaced());
     assert!(observed.displaced().contains(&AuthGate::ID));
     assert!(observed.displaced().contains(&switch.removed));
+    assert!(
+        !observed.displaced().contains(&ChangeFreeze::ID)
+            && !observed.displaced().contains(&TransitionAudit::ID),
+        "unaffected components are never displaced"
+    );
 }
 
 /// Asserts what the proposal, config-reload, and decision hooks of one attempt saw.
