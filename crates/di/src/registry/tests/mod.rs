@@ -82,7 +82,7 @@ fn descriptor_with_factories(
     }
 }
 
-/// The non-primary mapping of `concrete` to the shared `dyn Send` stand-in trait.
+/// The mapping of `concrete` to the shared `dyn Send` stand-in trait, primary when `primary`.
 fn trait_provider(
     concrete: TypeDescriptor,
     qualifier: &'static str,
