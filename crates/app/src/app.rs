@@ -254,7 +254,11 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         let discovered = AppRegistry::collect();
 
         self.registry.components.extend(discovered.components);
-        self.registry.providers.extend(discovered.providers);
+
+        for provider in discovered.providers {
+            self.registry.add_provider(provider);
+        }
+
         self.auto_discovery_enabled = true;
         self.protocol.auto_discover();
 
@@ -282,14 +286,15 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
 
     /// Registers every trait mapping component type `T` declares with
     /// `provide = dyn Trait`. Pair it with [`component`](Self::component) when
-    /// registering a providing component explicitly instead of through discovery.
+    /// registering a providing component explicitly instead of through discovery; a
+    /// mapping discovery also registers is kept once.
     pub fn provider<T>(mut self) -> Self
     where
         T: Descriptor<&'static [ProviderDescriptor]>,
     {
-        self.registry
-            .providers
-            .extend_from_slice(<T as Descriptor<&'static [ProviderDescriptor]>>::DESCRIPTOR);
+        for provider in <T as Descriptor<&'static [ProviderDescriptor]>>::DESCRIPTOR {
+            self.registry.add_provider(*provider);
+        }
 
         self
     }
@@ -297,7 +302,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
     /// Registers a raw provider mapping, such as one built with
     /// [`ProviderDescriptor::of`].
     pub fn provider_descriptor(mut self, descriptor: &'static ProviderDescriptor) -> Self {
-        self.registry.providers.push(*descriptor);
+        self.registry.add_provider(*descriptor);
 
         self
     }
