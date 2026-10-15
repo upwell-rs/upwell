@@ -14,7 +14,8 @@
 //!
 //! [`ComponentRetired`] fires once per displaced singleton, in the report's
 //! [`displaced`](crate::RuntimeTransitionReport::displaced) order: every consumer retires
-//! before the components it depends on. A targeted hook runs only for its own component's
+//! before the components it holds a fixed dependency on, while components linked only
+//! through live dependencies may retire in either order. A targeted hook runs only for its own component's
 //! retirement; an `always` hook observes every component's retirement and reads which one
 //! from its [`ComponentRetirement`]. Retirement runs before the attempt's
 //! [`TransitionCommitted`](crate::TransitionCommitted) observers, outside the reentrancy
@@ -158,9 +159,26 @@ fn retirement_of(
     })
 }
 
+/// Fires one component's retirement. A displaced ID missing from the base generation's
+/// descriptors would leave its targeted hooks unselected, so that case is traced rather
+/// than silently skipped; `always` hooks still run.
 async fn retire(base: &RuntimeView, retirement: ComponentRetirement) {
     let ty = component_type(base, retirement.component);
     let cx = RetirementContext { retirement };
+
+    if ty.is_none() {
+        debug_assert!(
+            false,
+            "a displaced component is missing from its generation"
+        );
+        tracing::warn!(
+            target: TRANSITION_TARGET,
+            attempt = retirement.attempt.get(),
+            component = retirement.component,
+            "displaced component has no descriptor; its targeted retirement hooks are skipped"
+        );
+    }
+
     let fired = base
         .hooks()
         .fire::<ComponentRetired>(&cx, |hook| Some(hook.component_ty.type_id) == ty)
