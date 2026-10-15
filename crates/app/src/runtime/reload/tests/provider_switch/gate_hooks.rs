@@ -6,8 +6,6 @@
 //! hold the fixture's test guard.
 
 use std::any::Any;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Mutex;
 
 use upwell_config::CfgNext;
@@ -17,7 +15,7 @@ use upwell_hooks::{HookDescriptor, HookKind, HookParam, HookRole, HookRouting};
 
 use super::fixture::{AuthConfig, PrimaryAuthenticator, observed_modes};
 use super::gate::{AuthGate, GATE_FACTORIES};
-use crate::test_support::test_component;
+use crate::test_support::{HookFuture, test_component};
 use crate::{
     AppRuntime, PendingTransition, TransitionDecision, TransitionHookContext, TransitionPhase,
     TransitionProposal, TransitionVerdict,
@@ -108,9 +106,6 @@ fn observer_panics() -> bool {
         .as_ref()
         .is_some_and(|controls| controls.observer_panics)
 }
-
-type HookFuture<'a> =
-    Pin<Box<dyn Future<Output = upwell_hooks::Result<Box<dyn Any + Send>>> + Send + 'a>>;
 
 /// Records what the hook saw through the same `HookParam` extraction the `#[hook]` macro
 /// generates.

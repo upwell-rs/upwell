@@ -7,17 +7,15 @@
 //! statics hold the fixture's test guard.
 
 use std::any::Any;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use upwell_core::{ResolverCtx, ResolverCtxExt, TypeDescriptor};
-use upwell_di::{Component, ComponentDescriptor, ComponentSource, factories};
+use upwell_core::{ResolverCtx, TypeDescriptor};
+use upwell_di::{Component, ComponentDescriptor, factories};
 use upwell_hooks::{HookDescriptor, HookParam, HookRouting};
 
 use super::fixture::{PrimaryAuthenticator, primary_component};
 use super::gate::{AuthGate, GATE_FACTORIES};
-use crate::test_support::test_component;
+use crate::test_support::{HookFuture, hook_receiver, test_component};
 use crate::{ComponentRetired, ComponentRetirement, RetirementContext};
 
 /// A panic payload that must never reach a trace.
@@ -65,9 +63,6 @@ pub(super) fn retired_by(owner: &str) -> Vec<Retired> {
         .collect()
 }
 
-type HookFuture<'a> =
-    Pin<Box<dyn Future<Output = upwell_hooks::Result<Box<dyn Any + Send>>> + Send + 'a>>;
-
 /// Resolves the `C` receiver the way the `#[hook]` macro does, records the retirement
 /// under `owner`, then applies the owner's controls.
 async fn retire_as<C>(
@@ -82,10 +77,7 @@ where
         .downcast_ref::<RetirementContext>()
         .expect("retirement context");
     let retirement = <ComponentRetirement as HookParam<ComponentRetired>>::extract(cx, None)?;
-    let receiver = ctx
-        .get_resolver::<ComponentSource>()
-        .and_then(|source| source.component::<C>())
-        .ok_or(upwell_hooks::Error::MissingReceiver(C::NAME))?;
+    let receiver = hook_receiver::<C>(ctx)?;
     let controls = *CONTROLS.lock().expect("controls");
 
     RETIRED.lock().expect("retired").push(Retired {
