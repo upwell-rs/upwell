@@ -17,10 +17,9 @@ pub use upwell_core::*;
 
 /// Component lifetime scopes: the [`Scope`] trait a protocol's topology is built from,
 /// plus the universal marker types. A protocol-scoped component selects a marker from that
-/// protocol's module; a `#[component]` defaults to [`Singleton`](scope::Singleton).
+/// protocol's module; a `#[component]` defaults to [`Singleton`].
 ///
-/// The core defines only the universal anchors [`Singleton`](scope::Singleton) and
-/// [`Transient`](scope::Transient); `Connection` and `Request` are RPC-protocol scopes from
+/// The core defines only the universal anchors [`Singleton`] and [`Transient`]; `Connection` and `Request` are RPC-protocol scopes from
 /// `upwell-rpc`, available with the `daemon` feature.
 #[cfg(not(target_family = "wasm"))]
 pub mod scope {
@@ -45,7 +44,7 @@ pub use upwell_di::{
     topological_sort,
 };
 /// The DI layer's own error/result, exposed under distinct names so macro-generated
-/// **factory** code can name them without colliding with the root [`Error`]/[`Result`].
+/// **factory** code can name them without colliding with another layer's `Error`/`Result`.
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_di::{Error as DiError, Result as DiResult};
 
@@ -58,7 +57,7 @@ pub use upwell_hooks::{
     no_hooks,
 };
 /// The hook layer's own error/result, exposed under distinct names so macro-generated hook
-/// code can name them without colliding with the root [`Error`]/[`Result`].
+/// code can name them without colliding with another layer's `Error`/`Result`.
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_hooks::{Error as HookError, Result as HookResult};
 
@@ -202,10 +201,11 @@ pub mod transport {
     pub use upwell_transport::*;
 }
 
-/// The protocol-agnostic **client** core: the [`ProtocolTransport`](client::ProtocolTransport)
-/// abstraction and the typed [`Client`](client::Client) surface generated clients build on.
-/// Always available (like [`app`]-layer items); a protocol (the RPC `daemon`, …) supplies a
-/// `ProtocolTransport` impl. Generated client code roots here, so it is identical across
+/// The protocol-agnostic **client** core: the [`Transport`](client::Transport) base and the
+/// per-call-shape capability traits ([`Unary`](client::Unary),
+/// [`ServerStreaming`](client::ServerStreaming), …) generated clients build on.
+/// Always available (like [`app`]-layer items); a protocol (the RPC `daemon`, …) implements
+/// the capabilities it supports. Generated client code roots here, so it is identical across
 /// protocols.
 pub mod client {
     pub use upwell_client::*;
@@ -317,7 +317,7 @@ pub mod daemon {
 /// The job scheduler: run `async` methods on an interval or cron schedule as supervised
 /// background tasks, or schedule work at run time.
 ///
-/// A protocol-agnostic [`Plugin`](crate::Plugin) — enable the `jobs` feature and register
+/// A protocol-agnostic [`Plugin`] — enable the `jobs` feature and register
 /// [`JobsPlugin`](jobs::JobsPlugin) alongside any protocol. Mark methods with
 /// `#[job(every = "..")]` / `#[job(cron = "..")]` (the `#[job]` codegen emits
 /// `::upwell::jobs::*` paths), or inject `Arc<JobScheduler>` and call
@@ -389,7 +389,7 @@ pub mod axum {
         pub use super::{WebsocketController, WebsocketProtocol, message};
 
         /// STOMP pub/sub imports (`#[controller(ws = Stomp)]` + `#[topics]`, the typed
-        /// [`Publisher`](super::Publisher) and [`Topic`](super::Topic)), available with the
+        /// [`Publisher`] and [`Topic`]), available with the
         /// `stomp` feature.
         #[cfg(all(feature = "stomp", not(target_family = "wasm")))]
         pub use super::{
