@@ -4,18 +4,16 @@
 //! fail, panic, or request a follow-up reload. Tests sharing these statics hold the
 //! fixture's test guard.
 
-use std::any::{Any, TypeId};
+use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
-use upwell_core::{DependencyDescriptor, ResolverCtx, TypeDescriptor};
-use upwell_di::{
-    BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, Injectable, Singleton,
-};
+use upwell_core::{ResolverCtx, TypeDescriptor};
+use upwell_di::{Component, ComponentDescriptor, factories};
 use upwell_hooks::{HookDescriptor, HookKind, HookParam};
 
+use crate::test_support::test_component;
 use crate::{
     AppRuntime, RuntimeTransitionReport, TransitionAborted, TransitionCommitted,
     TransitionOutcomeContext,
@@ -131,87 +129,24 @@ fn aborted_call<'a>(
     })
 }
 
-fn committed_kind() -> TypeId {
-    TypeId::of::<TransitionCommitted>()
-}
-
-fn aborted_kind() -> TypeId {
-    TypeId::of::<TransitionAborted>()
-}
-
-fn no_dependencies() -> Vec<DependencyDescriptor> {
-    Vec::new()
-}
-
 const OUTCOME_TY: TypeDescriptor = TypeDescriptor::of::<OutcomeLog>(OutcomeLog::NAME);
 
 static OUTCOME_HOOKS: [HookDescriptor; 2] = [
-    HookDescriptor::new(
-        1,
-        OUTCOME_TY,
-        TransitionCommitted::NAME,
-        committed_kind,
-        no_dependencies,
-        committed_call,
-    ),
-    HookDescriptor::new(
-        2,
-        OUTCOME_TY,
-        TransitionAborted::NAME,
-        aborted_kind,
-        no_dependencies,
-        aborted_call,
-    ),
+    HookDescriptor::of::<TransitionCommitted>(1, OUTCOME_TY, committed_call),
+    HookDescriptor::of::<TransitionAborted>(2, OUTCOME_TY, aborted_call),
 ];
-
-fn outcome_hooks() -> &'static [HookDescriptor] {
-    &OUTCOME_HOOKS
-}
 
 /// An operator-owned singleton no auth switch affects, observing every outcome.
 pub(super) struct OutcomeLog;
 
-impl Component for OutcomeLog {
-    type Handle = Arc<Self>;
+test_component!(OutcomeLog, "outcome-log");
 
-    const ID: &'static str = "outcome-log";
-    const NAME: &'static str = "OutcomeLog";
-
-    fn into_handle(self) -> Self::Handle {
-        Arc::new(self)
-    }
-}
-
-type OutcomeFactoryFuture<'a> =
-    Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + 'a>>;
-
-fn construct_outcome_log(_context: &mut ComponentConstructionContext) -> OutcomeFactoryFuture<'_> {
-    Box::pin(async move {
-        Ok(BoxedComponent {
-            ty: OUTCOME_TY,
-            value: Box::new(Injectable::into_stored(Arc::new(OutcomeLog))),
-        })
-    })
-}
-
-fn outcome_factories() -> &'static [ComponentFactoryDescriptor] {
-    &[ComponentFactoryDescriptor {
-        id: "static",
-        construct: construct_outcome_log,
-        dependencies: no_dependencies,
-        default: true,
-    }]
+async fn construct_outcome_log() -> OutcomeLog {
+    OutcomeLog
 }
 
 /// The outcome log's descriptor, retained across generations through its typed snapshot
 /// adapter.
-pub(super) static OUTCOME_COMPONENT: ComponentDescriptor = ComponentDescriptor {
-    id: OutcomeLog::ID,
-    name: OutcomeLog::NAME,
-    ty: OUTCOME_TY,
-    scope: &Singleton,
-    condition: None,
-    factories: outcome_factories,
-    hooks: outcome_hooks,
-    generation_snapshot: ComponentDescriptor::typed_snapshot::<OutcomeLog>(),
-};
+pub(super) static OUTCOME_COMPONENT: ComponentDescriptor = ComponentDescriptor::of::<OutcomeLog>()
+    .with_factories(factories!["static" => construct_outcome_log])
+    .with_hooks(|| &OUTCOME_HOOKS);

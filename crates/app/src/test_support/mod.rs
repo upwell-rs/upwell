@@ -2,8 +2,10 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 mod capture;
+mod component;
 
 pub(crate) use capture::{CapturedEvent, capture_events};
+pub(crate) use component::test_component;
 
 pub(crate) struct TempFixture {
     root: tempfile::TempDir,

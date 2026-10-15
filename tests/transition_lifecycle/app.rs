@@ -3,8 +3,8 @@
 //! [`AuthGate`] consumer, a [`ChangeFreeze`] operator policy, an [`AuthWatcher`]
 //! config-reload hook owner, and a [`TransitionAudit`] observer. Every component is an
 //! ordinary `#[component]` whose hooks are `#[hook(..)]` methods; only the two providers'
-//! conditions and trait mappings are attached through explicit descriptors, until the
-//! condition builder and attribute APIs land (#296, #297).
+//! conditions are attached through the condition builders, until the condition
+//! attributes land (#297).
 //!
 //! Each hook appends what it saw to [`events`]. The statics are per process, and each test
 //! holds [`lock`] so the default `cargo test` threading cannot interleave them.
@@ -17,13 +17,12 @@ use serde::Deserialize;
 use tempfile::TempDir;
 use upwell::config::Toml;
 use upwell::{
-    App, AppError, BoxedComponent, Cfg, CfgNext, Component, ComponentDescriptor, ComponentRetired,
-    ComponentRetirement, ConditionDescriptor, ConditionFacts, ConditionPredicate, ConditionScalar,
-    ConditionScalarKind, ConditionScalarLiteral, ConfigFactDescriptor, ConfigFactId, ConfigManager,
-    ConfigReload, Descriptor, HookOutcome, Injectable, Live, NodeAction, PendingTransition,
-    ProviderDescriptor, RetirementReason, RuntimeTransitionReport, Shutdown, TransitionAborted,
-    TransitionCommitted, TransitionDecision, TransitionProposal, TransitionVerdict, TypeDescriptor,
-    component, config, injectable, methods,
+    App, AppError, Cfg, CfgNext, Component, ComponentDescriptor, ComponentRetired,
+    ComponentRetirement, ConditionDescriptor, ConditionFacts, ConditionScalar, ConditionScalarKind,
+    ConfigFactDescriptor, ConfigFactId, ConfigManager, ConfigReload, Descriptor, HookOutcome,
+    NodeAction, PendingTransition, RetirementReason, RuntimeTransitionReport, Shutdown,
+    TransitionAborted, TransitionCommitted, TransitionDecision, TransitionProposal,
+    TransitionVerdict, component, config, injectable, methods,
 };
 use upwell_config::ResolverChain;
 
@@ -123,7 +122,7 @@ fn actions(pending: &PendingTransition) -> Vec<(&'static str, NodeAction)> {
 }
 
 /// The provider used when `auth.mode` is anything but `"custom"`.
-#[component]
+#[component(provide = dyn Authenticator, primary)]
 pub struct DefaultAuthenticator;
 
 impl Authenticator for DefaultAuthenticator {
@@ -152,7 +151,7 @@ impl DefaultAuthenticator {
 }
 
 /// The application's own provider, enabled by `auth.mode = "custom"`.
-#[component]
+#[component(provide = dyn Authenticator, primary)]
 pub struct CustomAuthenticator;
 
 impl Authenticator for CustomAuthenticator {
@@ -279,59 +278,17 @@ impl TransitionAudit {
     }
 }
 
-static CUSTOM_ON: ConditionDescriptor = ConditionDescriptor {
-    id: "auth-mode-custom",
-    source: upwell::descriptor_source!(),
-    predicate: ConditionPredicate::ConfigEquals {
-        fact: AUTH_MODE,
-        expected: ConditionScalarLiteral::String("custom"),
-    },
-};
+static CUSTOM_ON: ConditionDescriptor =
+    ConditionDescriptor::config_equals("auth-mode-custom", AUTH_MODE, "custom");
 
-static CUSTOM_OFF: ConditionDescriptor = ConditionDescriptor {
-    id: "auth-mode-default",
-    source: upwell::descriptor_source!(),
-    predicate: ConditionPredicate::Not(&CUSTOM_ON),
-};
+static CUSTOM_OFF: ConditionDescriptor = ConditionDescriptor::not("auth-mode-default", &CUSTOM_ON);
 
-static DEFAULT_PROVIDER: ComponentDescriptor = ComponentDescriptor {
-    condition: Some(&CUSTOM_OFF),
-    ..<DefaultAuthenticator as Descriptor<ComponentDescriptor>>::DESCRIPTOR
-};
+static DEFAULT_PROVIDER: ComponentDescriptor =
+    <DefaultAuthenticator as Descriptor<ComponentDescriptor>>::DESCRIPTOR
+        .with_condition(&CUSTOM_OFF);
 
-static CUSTOM_PROVIDER: ComponentDescriptor = ComponentDescriptor {
-    condition: Some(&CUSTOM_ON),
-    ..<CustomAuthenticator as Descriptor<ComponentDescriptor>>::DESCRIPTOR
-};
-
-/// Re-erases a built provider under the `dyn Authenticator` key.
-fn erase<T: Authenticator + 'static>(boxed: &BoxedComponent) -> BoxedComponent {
-    let live = boxed
-        .value
-        .downcast_ref::<Live<T>>()
-        .expect("a provider slot stores its own live handle");
-    let erased: Arc<dyn Authenticator> = live.snapshot();
-
-    BoxedComponent {
-        ty: TypeDescriptor::of::<dyn Authenticator>("dyn Authenticator"),
-        value: Box::new(Injectable::into_stored(erased)),
-    }
-}
-
-const fn provider<T: Authenticator + 'static>(
-    name: &'static str,
-    qualifier: &'static str,
-) -> ProviderDescriptor {
-    ProviderDescriptor {
-        trait_ty: TypeDescriptor::of::<dyn Authenticator>("dyn Authenticator"),
-        concrete_ty: TypeDescriptor::of::<T>(name),
-        qualifier,
-        primary: true,
-        priority: 0,
-        ordering: &[],
-        erase: erase::<T>,
-    }
-}
+static CUSTOM_PROVIDER: ComponentDescriptor =
+    <CustomAuthenticator as Descriptor<ComponentDescriptor>>::DESCRIPTOR.with_condition(&CUSTOM_ON);
 
 pub fn write_mode(config_dir: &Path, mode: &str) {
     fs::write(
@@ -355,7 +312,7 @@ pub async fn build(mode: &str) -> (TempDir, PathBuf, App<()>) {
     let manager =
         ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
             .expect("load config");
-    let mut builder = App::<()>::builder("transition-lifecycle-test")
+    let app = App::<()>::builder("transition-lifecycle-test")
         .config_source(manager)
         .config::<AuthConfig>("auth")
         .condition_facts::<AuthConfig>("auth")
@@ -364,14 +321,12 @@ pub async fn build(mode: &str) -> (TempDir, PathBuf, App<()>) {
         .component::<AuthGate>()
         .component::<ChangeFreeze>()
         .component::<AuthWatcher>()
-        .component::<TransitionAudit>();
-
-    builder.registry_mut().providers.extend([
-        provider::<DefaultAuthenticator>("DefaultAuthenticator", "default"),
-        provider::<CustomAuthenticator>("CustomAuthenticator", "custom"),
-    ]);
-
-    let app = builder.build().await.expect("the auth app builds");
+        .component::<TransitionAudit>()
+        .provider::<DefaultAuthenticator>()
+        .provider::<CustomAuthenticator>()
+        .build()
+        .await
+        .expect("the auth app builds");
 
     freeze(None);
     events();
