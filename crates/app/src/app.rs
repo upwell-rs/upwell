@@ -934,7 +934,7 @@ impl<D: ProtocolDefinition> App<D> {
     /// The agnostic envelope: runs startup hooks, spawns config-reload triggers, bridges
     /// ctrl-c to the shutdown signal, then hands the runtime + shutdown signal to the
     /// protocol's [`Serve`] impl. Shutdown hooks run on the way out, on the generation
-    /// current at that point, so instances a reload retired never receive them.
+    /// current when shutdown begins rather than the one pinned at startup.
     pub async fn serve<E>(
         self,
         endpoint: E,
@@ -1065,10 +1065,13 @@ async fn run_startup(
 /// Fires the observer-only shutdown event for components with no startup gate and for
 /// components whose startup gates all succeeded. Errors are logged and cleanup continues.
 ///
-/// It fires on the generation current at shutdown, so the live instances receive it, not
-/// the ones a reload has since retired. `started` holds component types, so a component a
-/// reload replaced still pairs with its predecessor's startup, while one a reload added
-/// with an unrun startup gate is skipped.
+/// It fires on the generation current when shutdown begins, so the live instances receive
+/// it rather than the ones a reload has since retired. A direct reload committing from
+/// another task while it runs is not coordinated: the observers keep addressing the
+/// generation pinned here. `started` holds component types, so a component a reload
+/// replaced still pairs with its predecessor's startup, while one a reload added with an
+/// unrun startup gate is skipped. `always`-routed hooks bypass that pairing and run
+/// regardless.
 async fn run_shutdown(runtime: &AppRuntime, started: &HashSet<TypeId>) {
     let view = runtime.view();
     let hooks = view.hooks();
