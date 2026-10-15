@@ -15,7 +15,7 @@ fn a_single_recipe_is_named_by_its_path_and_effective() {
 
     assert_eq!(ENGLISH.id, "english");
     assert_eq!(ENGLISH.name, "English");
-    assert_eq!(factory.id, "english");
+    assert_eq!(factory.id, "factory:english");
     assert!(!factory.default);
     assert!(ENGLISH.dependencies().is_empty());
     assert_eq!(

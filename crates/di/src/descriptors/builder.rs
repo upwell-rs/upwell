@@ -58,36 +58,63 @@ use super::component::{
 /// [`ComponentDescriptor`] stores, from async factory functions whose parameters are
 /// all [`FromContainer`](crate::FromContainer) (any [`Factory`](crate::Factory)).
 ///
-/// Each entry is `path` (its ID is the path as written) or `"id" => path`. A single
-/// recipe is the effective one; several need exactly one explicit recipe, as with
-/// `#[init]`, so mark the fallback `default "id" => path`.
+/// Each entry is `path` or `"id" => path`. A bare `path` is identified as
+/// `"factory:<path>"`, the ID `factory = path` generates. A single recipe is the
+/// effective one; several need exactly one explicit recipe, as with `#[init]`, so mark
+/// the one fallback `default "id" => path`. A second `default` is a compile error:
+///
+/// ```compile_fail
+/// # use std::sync::Arc;
+/// # struct Plain;
+/// # impl upwell_di::Component for Plain {
+/// #     type Handle = Arc<Self>;
+/// #     const ID: &'static str = "plain";
+/// #     const NAME: &'static str = "Plain";
+/// #     fn into_handle(self) -> Arc<Self> { Arc::new(self) }
+/// # }
+/// async fn first() -> Plain { Plain }
+/// async fn second() -> Plain { Plain }
+///
+/// let _ = upwell_di::factories![default "first" => first, default "second" => second];
+/// ```
 #[macro_export]
 macro_rules! factories {
     ($($entry:tt)*) => {
-        || const { &$crate::__factory_entries!([] $($entry)*) }
+        || const { &$crate::__factory_entries!([] no $($entry)*) }
     };
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __factory_entries {
-    ([$($done:expr,)*]) => {
+    ([$($done:expr,)*] $default:ident) => {
         [$($done),*]
     };
-    ([$($done:expr,)*] default $id:literal => $factory:path $(, $($rest:tt)*)?) => {
+    ([$($done:expr,)*] yes default $id:literal => $factory:path $(, $($rest:tt)*)?) => {
+        ::core::compile_error!("factories! declares more than one `default` recipe")
+    };
+    ([$($done:expr,)*] no default $id:literal => $factory:path $(, $($rest:tt)*)?) => {
         $crate::__factory_entries!(
-            [$($done,)* $crate::__factory_entry!($id, $factory, true),] $($($rest)*)?
+            [$($done,)* $crate::__factory_entry!($id, $factory, true),] yes $($($rest)*)?
         )
     };
-    ([$($done:expr,)*] $id:literal => $factory:path $(, $($rest:tt)*)?) => {
+    ([$($done:expr,)*] $default:ident $id:literal => $factory:path $(, $($rest:tt)*)?) => {
         $crate::__factory_entries!(
-            [$($done,)* $crate::__factory_entry!($id, $factory, false),] $($($rest)*)?
-        )
-    };
-    ([$($done:expr,)*] $factory:path $(, $($rest:tt)*)?) => {
-        $crate::__factory_entries!(
-            [$($done,)* $crate::__factory_entry!(stringify!($factory), $factory, false),]
+            [$($done,)* $crate::__factory_entry!($id, $factory, false),] $default
             $($($rest)*)?
+        )
+    };
+    ([$($done:expr,)*] $default:ident $factory:path $(, $($rest:tt)*)?) => {
+        $crate::__factory_entries!(
+            [
+                $($done,)*
+                $crate::__factory_entry!(
+                    ::core::concat!("factory:", ::core::stringify!($factory)),
+                    $factory,
+                    false
+                ),
+            ]
+            $default $($($rest)*)?
         )
     };
 }
