@@ -44,7 +44,7 @@ pub use descriptors::{
     Injectable, Live, LiveRef, PROVIDERS, Provide, ProviderDescriptor, ProviderMappingId,
     ProviderOf, ProviderOrder, ProviderOrderDirection, Registration, RegistryFor, ResolutionMode,
     Scope, ScopeId, ServiceComponent, Singleton, StaticScope, Transient, TypeDescriptor,
-    UpwellDescriptor, Wired, Wiring,
+    UpwellDescriptor, Wired, Wiring, erase_provider,
 };
 pub use error::{
     DeferredTransientDependency, Error, InvalidFreshDependency, ProviderComponentMissing,

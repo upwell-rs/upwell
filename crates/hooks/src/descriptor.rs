@@ -5,7 +5,7 @@ use std::pin::Pin;
 
 use upwell_core::{DependencyDescriptor, ResolverCtx, TypeDescriptor, UpwellDescriptor};
 
-use crate::{HookRole, HookRouting, Result};
+use crate::{HookKind, HookRole, HookRouting, Result};
 
 /// The erased call shape every hook is compiled to: resolve the receiver (if the method
 /// takes `&self`) from the resolver context, extract the kind's params from the erased
@@ -77,6 +77,33 @@ impl HookDescriptor {
         }
     }
 
+    /// Builds a targeted participant hook of kind `K` on `component_ty` that takes no
+    /// kind inputs; add them with [`with_dependencies`](Self::with_dependencies).
+    pub const fn of<K: HookKind>(
+        ordinal: u32,
+        component_ty: TypeDescriptor,
+        call: HookCall,
+    ) -> Self {
+        Self::new(
+            ordinal,
+            component_ty,
+            K::NAME,
+            kind_type::<K>,
+            no_dependencies,
+            call,
+        )
+    }
+
+    /// Declares the hook's parameter edges.
+    pub const fn with_dependencies(
+        mut self,
+        dependencies: fn() -> Vec<DependencyDescriptor>,
+    ) -> Self {
+        self.dependencies = dependencies;
+
+        self
+    }
+
     /// Declares the hook's role.
     pub const fn with_role(mut self, role: HookRole) -> Self {
         self.role = role;
@@ -115,6 +142,14 @@ impl fmt::Debug for HookDescriptor {
 pub trait ComponentHooks {
     /// Every hook contributed to this type.
     fn hooks() -> &'static [HookDescriptor];
+}
+
+fn kind_type<K: 'static>() -> TypeId {
+    TypeId::of::<K>()
+}
+
+fn no_dependencies() -> Vec<DependencyDescriptor> {
+    Vec::new()
 }
 
 /// The empty hooks slice for a type that declares none — the default carried by a

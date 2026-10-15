@@ -27,6 +27,25 @@ pub struct Store {
 }
 ```
 
+Without the macros, the same descriptors come from `const` builders: [`ComponentDescriptor::of`] with the `with_*` setters, the [`factories!`] macro over plain async factory functions, and [`ProviderDescriptor::of`] for a type that implements [`ProviderOf<dyn Trait>`](ProviderOf). Register them with the app builder's `component_descriptor` and `provider_descriptor`.
+
+```rust,ignore
+use upwell::{ComponentDescriptor, ConditionDescriptor, ConfigFactId, ProviderDescriptor, factories};
+
+const MODE: ConfigFactId = ConfigFactId::new("AuthConfig", "auth", "mode");
+static CUSTOM_MODE: ConditionDescriptor = ConditionDescriptor::config_equals("auth-custom", MODE, "custom");
+
+async fn custom(db: Db) -> CustomAuthenticator {
+    CustomAuthenticator::new(db)
+}
+
+static CUSTOM: ComponentDescriptor = ComponentDescriptor::of::<CustomAuthenticator>()
+    .with_factories(factories![custom])
+    .with_condition(&CUSTOM_MODE);
+static CUSTOM_AUTH: ProviderDescriptor =
+    ProviderDescriptor::of::<CustomAuthenticator, dyn Authenticator>("dyn Authenticator").primary();
+```
+
 ## Internal role
 
 This is the engine the application layer drives. `upwell-dirs` implements [`Component`]/[`Injectable`] for its `Dir<K>` and `DirectoriesManager` against these traits. `upwell-config` seeds itself as an external resolver reachable via the [`ResolverCtx`], and `upwell-app` plus the protocol crates (`upwell-rpc`, `upwell-axum`) build [`ScopeContainer`]s, seed framework singletons (including the [`HookManager`](upwell_hooks::HookManager)), and resolve components through this crate.

@@ -24,6 +24,8 @@ fn describe<S: StaticScope>() -> &'static str {
 let _ = describe::<Singleton>();
 ```
 
+Component conditions are [`ConditionDescriptor`] trees built with `const` builders (`config_bool`, `config_equals`, `component_eligible`, `provider_eligible`, `all`, `any`, `not`), each recording its call site for diagnostics.
+
 ## Internal role
 
 Every higher crate builds on this vocabulary. `upwell-di` implements the runtime container against the [`ResolverCtx`] abstraction and reuses the descriptor/scope/dependency types. `upwell-hooks` is generic over [`ResolverCtx`] so a hook resolves its receiver without naming the DI container. `upwell-config` plugs in as an *external* [`Resolver`], and `upwell-dirs` and the protocol crates all speak this same type-descriptor language.

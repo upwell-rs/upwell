@@ -45,7 +45,8 @@ pub use upwell_di::{
     Registration, RegistryFor, RootResolver, ScopeContainer, ScopeRegistry, ServiceComponent,
     StaleGraphCandidate, TransitionPlan, TransitionReason, UpwellDescriptor,
     ValidatedConditionEvaluation, Wired, Wiring, dependency_of, dependency_of_observed,
-    dispatch_factory, factory_dependencies, from_boxed, topological_sort,
+    dispatch_factory, erase_provider, factories, factory_dependencies, from_boxed,
+    topological_sort,
 };
 /// The DI layer's own error/result, exposed under distinct names so macro-generated
 /// **factory** code can name them without colliding with the root [`Error`]/[`Result`].

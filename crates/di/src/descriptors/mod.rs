@@ -1,6 +1,9 @@
 //! Component and provider descriptors, and the link-time slices that collect them.
 
+mod builder;
 pub mod component;
+
+pub use builder::erase_provider;
 
 pub use component::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,

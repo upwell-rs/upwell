@@ -19,8 +19,8 @@ use upwell_core::{
     Descriptor, ResolverSet, RuntimeGenerationId, Singleton as SingletonScope, TypeDescriptor,
 };
 use upwell_di::{
-    BoxedComponent, Component, ComponentDescriptor, EffectiveGraph, Injectable, RootResolver,
-    ScopeContainer, ScopeRegistry, root_resolver_descriptor, topological_sort,
+    BoxedComponent, Component, ComponentDescriptor, EffectiveGraph, Injectable, ProviderDescriptor,
+    RootResolver, ScopeContainer, ScopeRegistry, root_resolver_descriptor, topological_sort,
 };
 use upwell_dirs::{Cache, Config, Data, Dir, DirKind, DirectoriesManager, Runtime, State, Tmp};
 use upwell_hooks::{
@@ -276,6 +276,28 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
     /// Manually register a raw component descriptor for construction during build.
     pub fn component_descriptor(mut self, descriptor: &'static ComponentDescriptor) -> Self {
         self.registry.components.push(*descriptor);
+
+        self
+    }
+
+    /// Registers every trait mapping component type `T` declares with
+    /// `provide = dyn Trait`. Pair it with [`component`](Self::component) when
+    /// registering a providing component explicitly instead of through discovery.
+    pub fn provider<T>(mut self) -> Self
+    where
+        T: Descriptor<&'static [ProviderDescriptor]>,
+    {
+        self.registry
+            .providers
+            .extend_from_slice(<T as Descriptor<&'static [ProviderDescriptor]>>::DESCRIPTOR);
+
+        self
+    }
+
+    /// Registers a raw provider mapping, such as one built with
+    /// [`ProviderDescriptor::of`].
+    pub fn provider_descriptor(mut self, descriptor: &'static ProviderDescriptor) -> Self {
+        self.registry.providers.push(*descriptor);
 
         self
     }
