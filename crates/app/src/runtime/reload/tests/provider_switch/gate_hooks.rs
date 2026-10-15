@@ -5,21 +5,19 @@
 //! test drives each hook's verdict through [`set_controls`]. Tests sharing these statics
 //! hold the fixture's test guard.
 
-use std::any::{Any, TypeId};
+use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use upwell_config::CfgNext;
-use upwell_core::{DependencyDescriptor, ResolverCtx, TypeDescriptor};
-use upwell_di::{
-    BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, Injectable, NodeAction, ReasonKind, Singleton,
-};
+use upwell_core::{ResolverCtx, TypeDescriptor};
+use upwell_di::{Component, ComponentDescriptor, NodeAction, ReasonKind, factories};
 use upwell_hooks::{HookDescriptor, HookKind, HookParam, HookRole, HookRouting};
 
 use super::fixture::{AuthConfig, PrimaryAuthenticator, observed_modes};
-use super::gate::{AuthGate, gate_factories};
+use super::gate::{AuthGate, GATE_FACTORIES};
+use crate::test_support::test_component;
 use crate::{
     AppRuntime, PendingTransition, TransitionDecision, TransitionHookContext, TransitionPhase,
     TransitionProposal, TransitionVerdict,
@@ -263,144 +261,44 @@ fn decision_observer_call<'a>(
     Box::pin(observe::<TransitionDecision>("decision-observer", cx))
 }
 
-fn proposal_kind() -> TypeId {
-    TypeId::of::<TransitionProposal>()
-}
-
-fn decision_kind() -> TypeId {
-    TypeId::of::<TransitionDecision>()
-}
-
-fn no_dependencies() -> Vec<DependencyDescriptor> {
-    Vec::new()
-}
-
 const GATE_TY: TypeDescriptor = TypeDescriptor::of::<AuthGate>(AuthGate::NAME);
 const AUDIT_TY: TypeDescriptor = TypeDescriptor::of::<AuditLog>(AuditLog::NAME);
 
 static GATE_HOOKS: [HookDescriptor; 2] = [
-    HookDescriptor::new(
-        1,
-        GATE_TY,
-        TransitionProposal::NAME,
-        proposal_kind,
-        no_dependencies,
-        gate_proposal_call,
-    ),
-    HookDescriptor::new(
-        2,
-        GATE_TY,
-        TransitionDecision::NAME,
-        decision_kind,
-        no_dependencies,
-        gate_decision_call,
-    ),
+    HookDescriptor::of::<TransitionProposal>(1, GATE_TY, gate_proposal_call),
+    HookDescriptor::of::<TransitionDecision>(2, GATE_TY, gate_decision_call),
 ];
 
 static AUDIT_HOOKS: [HookDescriptor; 4] = [
-    HookDescriptor::new(
-        1,
-        AUDIT_TY,
-        TransitionProposal::NAME,
-        proposal_kind,
-        no_dependencies,
-        audit_targeted_call,
-    ),
-    HookDescriptor::new(
-        2,
-        AUDIT_TY,
-        TransitionProposal::NAME,
-        proposal_kind,
-        no_dependencies,
-        policy_call,
-    )
-    .with_routing(HookRouting::Always),
-    HookDescriptor::new(
-        3,
-        AUDIT_TY,
-        TransitionProposal::NAME,
-        proposal_kind,
-        no_dependencies,
-        proposal_observer_call,
-    )
-    .with_role(HookRole::Observer)
-    .with_routing(HookRouting::Always),
-    HookDescriptor::new(
-        4,
-        AUDIT_TY,
-        TransitionDecision::NAME,
-        decision_kind,
-        no_dependencies,
-        decision_observer_call,
-    )
-    .with_role(HookRole::Observer)
-    .with_routing(HookRouting::Always),
+    HookDescriptor::of::<TransitionProposal>(1, AUDIT_TY, audit_targeted_call),
+    HookDescriptor::of::<TransitionProposal>(2, AUDIT_TY, policy_call)
+        .with_routing(HookRouting::Always),
+    HookDescriptor::of::<TransitionProposal>(3, AUDIT_TY, proposal_observer_call)
+        .with_role(HookRole::Observer)
+        .with_routing(HookRouting::Always),
+    HookDescriptor::of::<TransitionDecision>(4, AUDIT_TY, decision_observer_call)
+        .with_role(HookRole::Observer)
+        .with_routing(HookRouting::Always),
 ];
 
-fn gate_hooks() -> &'static [HookDescriptor] {
-    &GATE_HOOKS
-}
-
-fn audit_hooks() -> &'static [HookDescriptor] {
-    &AUDIT_HOOKS
-}
-
 /// The fixed `AuthGate` consumer with participant hooks in both pre-commit phases.
-pub(super) static HOOKED_GATE_COMPONENT: ComponentDescriptor = ComponentDescriptor {
-    id: AuthGate::ID,
-    name: AuthGate::NAME,
-    ty: GATE_TY,
-    scope: &Singleton,
-    condition: None,
-    factories: gate_factories,
-    hooks: gate_hooks,
-    generation_snapshot: None,
-};
+pub(super) static HOOKED_GATE_COMPONENT: ComponentDescriptor =
+    ComponentDescriptor::of::<AuthGate>()
+        .with_factories(GATE_FACTORIES)
+        .with_hooks(|| &GATE_HOOKS)
+        .without_retention();
 
 /// An operator-owned singleton no auth switch affects.
 pub(super) struct AuditLog;
 
-impl Component for AuditLog {
-    type Handle = Arc<Self>;
+test_component!(AuditLog, "audit-log");
 
-    const ID: &'static str = "audit-log";
-    const NAME: &'static str = "AuditLog";
-
-    fn into_handle(self) -> Self::Handle {
-        Arc::new(self)
-    }
-}
-
-type AuditFactoryFuture<'a> =
-    Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + 'a>>;
-
-fn construct_audit(_context: &mut ComponentConstructionContext) -> AuditFactoryFuture<'_> {
-    Box::pin(async move {
-        Ok(BoxedComponent {
-            ty: AUDIT_TY,
-            value: Box::new(Injectable::into_stored(Arc::new(AuditLog))),
-        })
-    })
-}
-
-fn audit_factories() -> &'static [ComponentFactoryDescriptor] {
-    &[ComponentFactoryDescriptor {
-        id: "static",
-        construct: construct_audit,
-        dependencies: no_dependencies,
-        default: true,
-    }]
+async fn construct_audit() -> AuditLog {
+    AuditLog
 }
 
 /// The audit log's descriptor: unaffected by every auth switch, so it is retained across
 /// generations through its typed snapshot adapter.
-pub(super) static AUDIT_COMPONENT: ComponentDescriptor = ComponentDescriptor {
-    id: AuditLog::ID,
-    name: AuditLog::NAME,
-    ty: AUDIT_TY,
-    scope: &Singleton,
-    condition: None,
-    factories: audit_factories,
-    hooks: audit_hooks,
-    generation_snapshot: ComponentDescriptor::typed_snapshot::<AuditLog>(),
-};
+pub(super) static AUDIT_COMPONENT: ComponentDescriptor = ComponentDescriptor::of::<AuditLog>()
+    .with_factories(factories!["static" => construct_audit])
+    .with_hooks(|| &AUDIT_HOOKS);

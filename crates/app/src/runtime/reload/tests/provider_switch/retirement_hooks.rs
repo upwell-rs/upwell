@@ -6,20 +6,18 @@
 //! [`set_retirement_controls`] makes one owner's hook fail or panic. Tests sharing these
 //! statics hold the fixture's test guard.
 
-use std::any::{Any, TypeId};
+use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use upwell_core::{DependencyDescriptor, ResolverCtx, ResolverCtxExt, TypeDescriptor};
-use upwell_di::{
-    BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, ComponentSource, Injectable, Singleton,
-};
-use upwell_hooks::{HookDescriptor, HookKind, HookParam, HookRouting};
+use upwell_core::{ResolverCtx, ResolverCtxExt, TypeDescriptor};
+use upwell_di::{Component, ComponentDescriptor, ComponentSource, factories};
+use upwell_hooks::{HookDescriptor, HookParam, HookRouting};
 
 use super::fixture::{PrimaryAuthenticator, primary_component};
-use super::gate::{AuthGate, gate_factories};
+use super::gate::{AuthGate, GATE_FACTORIES};
+use crate::test_support::test_component;
 use crate::{ComponentRetired, ComponentRetirement, RetirementContext};
 
 /// A panic payload that must never reach a trace.
@@ -124,27 +122,12 @@ fn audit_always_call<'a>(
     Box::pin(retire_as::<RetirementAudit>(AUDIT_ALWAYS, ctx, cx))
 }
 
-fn retired_kind() -> TypeId {
-    TypeId::of::<ComponentRetired>()
-}
-
-fn no_dependencies() -> Vec<DependencyDescriptor> {
-    Vec::new()
-}
-
 const fn retirement_hook(
     ordinal: u32,
     owner: TypeDescriptor,
     call: upwell_hooks::HookCall,
 ) -> HookDescriptor {
-    HookDescriptor::new(
-        ordinal,
-        owner,
-        ComponentRetired::NAME,
-        retired_kind,
-        no_dependencies,
-        call,
-    )
+    HookDescriptor::of::<ComponentRetired>(ordinal, owner, call)
 }
 
 const PRIMARY_TY: TypeDescriptor =
@@ -163,78 +146,29 @@ static AUDIT_HOOKS: [HookDescriptor; 2] = [
     retirement_hook(2, AUDIT_TY, audit_always_call).with_routing(HookRouting::Always),
 ];
 
-fn primary_hooks() -> &'static [HookDescriptor] {
-    &PRIMARY_HOOKS
-}
-
-fn gate_hooks() -> &'static [HookDescriptor] {
-    &GATE_HOOKS
-}
-
-fn audit_hooks() -> &'static [HookDescriptor] {
-    &AUDIT_HOOKS
-}
-
 /// The primary provider, retiring itself when a switch removes it.
 pub(super) static RETIRING_PRIMARY_COMPONENT: ComponentDescriptor =
-    primary_component(primary_hooks);
+    primary_component(|| &PRIMARY_HOOKS);
 
 /// The fixed gate consumer, retiring itself when a switch reconstructs it.
-pub(super) static RETIRING_GATE_COMPONENT: ComponentDescriptor = ComponentDescriptor {
-    id: AuthGate::ID,
-    name: AuthGate::NAME,
-    ty: GATE_TY,
-    scope: &Singleton,
-    condition: None,
-    factories: gate_factories,
-    hooks: gate_hooks,
-    generation_snapshot: None,
-};
+pub(super) static RETIRING_GATE_COMPONENT: ComponentDescriptor =
+    ComponentDescriptor::of::<AuthGate>()
+        .with_factories(GATE_FACTORIES)
+        .with_hooks(|| &GATE_HOOKS)
+        .without_retention();
 
 /// An operator-owned singleton no auth switch affects, auditing every retirement.
 pub(super) struct RetirementAudit;
 
-impl Component for RetirementAudit {
-    type Handle = Arc<Self>;
+test_component!(RetirementAudit, "retirement-audit");
 
-    const ID: &'static str = "retirement-audit";
-    const NAME: &'static str = "RetirementAudit";
-
-    fn into_handle(self) -> Self::Handle {
-        Arc::new(self)
-    }
-}
-
-type AuditFactoryFuture<'a> =
-    Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + 'a>>;
-
-fn construct_audit(_context: &mut ComponentConstructionContext) -> AuditFactoryFuture<'_> {
-    Box::pin(async move {
-        Ok(BoxedComponent {
-            ty: AUDIT_TY,
-            value: Box::new(Injectable::into_stored(Arc::new(RetirementAudit))),
-        })
-    })
-}
-
-fn audit_factories() -> &'static [ComponentFactoryDescriptor] {
-    &[ComponentFactoryDescriptor {
-        id: "static",
-        construct: construct_audit,
-        dependencies: no_dependencies,
-        default: true,
-    }]
+async fn construct_audit() -> RetirementAudit {
+    RetirementAudit
 }
 
 /// The retirement audit's descriptor, retained across generations through its typed
 /// snapshot adapter.
-pub(super) static AUDIT_COMPONENT: ComponentDescriptor = ComponentDescriptor {
-    id: RetirementAudit::ID,
-    name: RetirementAudit::NAME,
-    ty: AUDIT_TY,
-    scope: &Singleton,
-    condition: None,
-    factories: audit_factories,
-    hooks: audit_hooks,
-    generation_snapshot: ComponentDescriptor::typed_snapshot::<RetirementAudit>(),
-};
+pub(super) static AUDIT_COMPONENT: ComponentDescriptor =
+    ComponentDescriptor::of::<RetirementAudit>()
+        .with_factories(factories!["static" => construct_audit])
+        .with_hooks(|| &AUDIT_HOOKS);
