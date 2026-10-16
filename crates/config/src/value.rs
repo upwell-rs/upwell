@@ -68,6 +68,20 @@ pub struct ConfigStr {
 }
 
 impl ConfigStr {
+    /// A string whose placeholders were already rendered to `text`. A templated source keeps
+    /// its kind, so it still only satisfies string targets exactly as before rendering.
+    pub(crate) fn rendered(text: String, source: StrKind) -> Self {
+        let kind = match source {
+            StrKind::Templated => StrKind::Templated,
+            StrKind::Literal | StrKind::FullPlaceholder => StrKind::Literal,
+        };
+
+        Self {
+            segments: vec![Segment::Literal(text)],
+            kind,
+        }
+    }
+
     /// Parses one raw source string into classified segments. Errors only on a
     /// structurally invalid template (an unterminated `${`).
     pub fn parse(raw: &str) -> Result<Self, TemplateError> {

@@ -34,7 +34,8 @@ pub(super) fn evaluate_conditions(
             staged
                 .staged()
                 .iter()
-                .map(|entry| (entry.type_id(), entry.path(), entry.value())),
+                .map(|entry| (entry.type_id(), entry.path(), entry.shared_value())),
+            |path| staged.resolve_raw(path),
         )?;
         let facts = catalog
             .condition_facts

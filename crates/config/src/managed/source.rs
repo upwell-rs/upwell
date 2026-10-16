@@ -6,6 +6,7 @@ use serde::de::DeserializeOwned;
 use tracing::{debug, info, instrument, trace};
 use upwell_dirs::DirectoriesManager;
 
+use crate::condition::ResolvedConfig;
 use crate::resolve::{ResolveCtx, ResolvedDependency};
 use crate::{ConfigValue, Resolver, ResolverChain, from_value_in};
 
@@ -333,6 +334,27 @@ impl<F> ConfigManager<F> {
         trace!(target: "upwell::config", "config subtree deserialized");
 
         Ok(value)
+    }
+
+    /// Renders the subtree at `path` for a component condition's raw `resolve` read,
+    /// or `None` when the path is absent.
+    pub fn resolve_raw(&self, path: &str) -> Result<Option<ResolvedConfig>, ConfigError> {
+        self.resolve_raw_in(&self.root, path)
+    }
+
+    /// [`resolve_raw`](Self::resolve_raw) against an explicit base tree, so a reload can
+    /// resolve raw condition inputs from its candidate tree before adopting it.
+    pub(crate) fn resolve_raw_in(
+        &self,
+        base: &ConfigValue,
+        path: &str,
+    ) -> Result<Option<ResolvedConfig>, ConfigError> {
+        ResolvedConfig::render(base, path, &self.resolvers).map_err(|source| {
+            ConfigError::Substitution {
+                path: path.to_string(),
+                source,
+            }
+        })
     }
 
     /// Like [`get`](Self::get), but for a [`ConfigProperties`] type: its `#[default = ".."]`

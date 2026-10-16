@@ -20,6 +20,7 @@ use upwell_di::BoxedComponent;
 use upwell_hooks::{HookKind, HookManager, HookParam};
 
 use crate::ConfigValue;
+use crate::condition::ResolvedConfig;
 
 use super::{Cfg, CfgNext, ConfigError, ConfigManager, ConfigProperties, ConfigStore};
 
@@ -79,6 +80,12 @@ impl StagedConfig {
     /// The staged binding's property path.
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// The staged value as a shared handle. An unchanged binding stages its committed
+    /// value, so handle identity tells condition re-evaluation whether the binding changed.
+    pub fn shared_value(&self) -> &Arc<dyn Any + Send + Sync> {
+        &self.value
     }
 
     /// The erased staged value. Values stored in an `Arc<T>` are unsized into
@@ -500,6 +507,14 @@ impl StagedReload {
     /// The bindings whose source changed and are ready to re-publish.
     pub fn changed(&self) -> &[ChangedBinding] {
         &self.changed
+    }
+
+    /// Renders the candidate tree's subtree at `path` for a component condition's raw
+    /// `resolve` read, or `None` when the path is absent.
+    pub fn resolve_raw(&self, path: &str) -> Result<Option<ResolvedConfig>, ConfigError> {
+        self.reloader
+            .lock_manager()
+            .resolve_raw_in(&self.new_root, path)
     }
 
     /// The staged typed entries of exactly the changed bindings, in binding order.

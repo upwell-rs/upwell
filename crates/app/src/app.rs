@@ -437,7 +437,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         // Evaluate the startup conditions from the staged config values, with the same
         // evaluator the transactional reload uses. An app with no condition facts gets an
         // empty-facts evaluation, which leaves every unconditional component eligible.
-        let evaluation = evaluate_startup_conditions(&registry, &reload_slots)?;
+        let evaluation = evaluate_startup_conditions(&registry, &tree, &reload_slots)?;
 
         // Retain the full catalog with the evaluation for this and future generations.
         let condition = Arc::new(AppConditionState::new(
@@ -840,6 +840,7 @@ fn seed_dir<K: DirKind>(
 /// while ordinary errors pass through unchanged.
 fn evaluate_startup_conditions(
     registry: &AppRegistry,
+    tree: &ConfigManager,
     reload_slots: &[Box<dyn ReloadableConfig>],
 ) -> crate::Result<AppConditionEvaluation> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -847,13 +848,12 @@ fn evaluate_startup_conditions(
             .iter()
             .map(|slot| slot.stage_current())
             .collect();
-        let snapshot = registry
-            .condition_snapshot(
-                staged
-                    .iter()
-                    .map(|entry| (entry.type_id(), entry.path(), entry.value())),
-            )
-            .map_err(Error::from)?;
+        let snapshot = registry.condition_snapshot(
+            staged
+                .iter()
+                .map(|entry| (entry.type_id(), entry.path(), entry.shared_value())),
+            |path| tree.resolve_raw(path),
+        )?;
         let facts = registry
             .condition_facts
             .iter()

@@ -7,6 +7,7 @@
 //! failure or cancellation before the terminal commit leaves the complete previous
 //! generation, config values included, active.
 
+mod callback_inputs;
 mod cancellation;
 mod candidate_failure;
 mod concurrency;

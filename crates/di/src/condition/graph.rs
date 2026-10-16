@@ -1,18 +1,79 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use upwell_core::{
-    AvailabilityTarget, ConditionDescriptor, ConditionPredicate, ConditionPredicateKind,
-    ConfigFactId, ProviderMappingId,
+    ConditionDescriptor, ConditionInputId, ConditionPredicate, ConditionPredicateKind,
+    ConfigBindingId, ConfigFactId, ProviderMappingId,
 };
 
 use super::{ConditionCatalog, ConditionError};
+use crate::{ComponentDescriptor, ComponentRegistry};
 
 /// One fact whose change can invalidate a component's condition decision.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ConditionDependency {
     Config(ConfigFactId),
+    Binding(ConfigBindingId),
+    Raw(&'static str),
     Component(&'static str),
     Provider(ProviderMappingId),
+}
+
+impl From<ConditionInputId> for ConditionDependency {
+    fn from(input: ConditionInputId) -> Self {
+        match input {
+            ConditionInputId::Fact(fact) => Self::Config(fact),
+            ConditionInputId::Binding(binding) => Self::Binding(binding),
+            ConditionInputId::Raw(path) => Self::Raw(path),
+            ConditionInputId::Component(component) => Self::Component(component),
+            ConditionInputId::ProviderMapping(provider) => Self::Provider(provider),
+        }
+    }
+}
+
+impl ComponentRegistry {
+    /// The typed bindings and raw paths read by any registered condition callback, which a
+    /// [`ConditionFactSnapshot`](super::ConditionFactSnapshot) must supply.
+    pub fn condition_config_inputs(&self) -> BTreeSet<ConditionInputId> {
+        config_inputs(&self.components)
+    }
+}
+
+/// The declared binding and raw-path callback inputs of `components`' conditions.
+pub(super) fn config_inputs<'a>(
+    components: impl IntoIterator<Item = &'a ComponentDescriptor>,
+) -> BTreeSet<ConditionInputId> {
+    let mut inputs = BTreeSet::new();
+
+    for component in components {
+        if let Some(root) = component.condition {
+            collect_config_inputs(root, &mut inputs);
+        }
+    }
+
+    inputs
+}
+
+fn collect_config_inputs(
+    node: &'static ConditionDescriptor,
+    inputs: &mut BTreeSet<ConditionInputId>,
+) {
+    match node.predicate {
+        ConditionPredicate::Callback(callback) => {
+            inputs.extend(callback.inputs.iter().filter(|input| {
+                matches!(
+                    input,
+                    ConditionInputId::Binding(_) | ConditionInputId::Raw(_)
+                )
+            }))
+        }
+        ConditionPredicate::All(children) | ConditionPredicate::Any(children) => {
+            for child in children {
+                collect_config_inputs(child, inputs);
+            }
+        }
+        ConditionPredicate::Not(child) => collect_config_inputs(child, inputs),
+        _ => {}
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -106,7 +167,7 @@ fn collect_edges(
             .expect("validated owner")
             .push(AvailabilityEdge {
                 from: owner,
-                to: target_component(target),
+                to: target,
                 condition_id: node.id,
                 predicate: node.predicate.kind(),
                 negated,
@@ -138,24 +199,14 @@ fn collect_dependencies(
         ConditionPredicate::ProviderMappingEligible(provider) => {
             dependencies.insert(ConditionDependency::Provider(provider));
         }
-        ConditionPredicate::ConfigCallback(callback) => {
+        ConditionPredicate::Callback(callback) => {
             dependencies.extend(
                 callback
                     .inputs
                     .iter()
                     .copied()
-                    .map(ConditionDependency::Config),
+                    .map(ConditionDependency::from),
             );
-        }
-        ConditionPredicate::AvailabilityCallback(callback) => {
-            dependencies.extend(callback.inputs.iter().copied().map(|target| match target {
-                AvailabilityTarget::Component(component) => {
-                    ConditionDependency::Component(component)
-                }
-                AvailabilityTarget::ProviderMapping(provider) => {
-                    ConditionDependency::Provider(provider)
-                }
-            }));
         }
         ConditionPredicate::All(children) | ConditionPredicate::Any(children) => {
             for child in children {
@@ -166,23 +217,22 @@ fn collect_dependencies(
     }
 }
 
-fn availability_targets(predicate: ConditionPredicate) -> Vec<AvailabilityTarget> {
+fn availability_targets(predicate: ConditionPredicate) -> Vec<&'static str> {
     match predicate {
-        ConditionPredicate::ComponentEligible(component) => {
-            vec![AvailabilityTarget::Component(component)]
-        }
-        ConditionPredicate::ProviderMappingEligible(provider) => {
-            vec![AvailabilityTarget::ProviderMapping(provider)]
-        }
-        ConditionPredicate::AvailabilityCallback(callback) => callback.inputs.to_vec(),
+        ConditionPredicate::ComponentEligible(component) => vec![component],
+        ConditionPredicate::ProviderMappingEligible(provider) => vec![provider.component],
+        ConditionPredicate::Callback(callback) => callback
+            .inputs
+            .iter()
+            .filter_map(|input| match input {
+                ConditionInputId::Component(component) => Some(*component),
+                ConditionInputId::ProviderMapping(provider) => Some(provider.component),
+                ConditionInputId::Fact(_)
+                | ConditionInputId::Binding(_)
+                | ConditionInputId::Raw(_) => None,
+            })
+            .collect(),
         _ => Vec::new(),
-    }
-}
-
-fn target_component(target: AvailabilityTarget) -> &'static str {
-    match target {
-        AvailabilityTarget::Component(component) => component,
-        AvailabilityTarget::ProviderMapping(provider) => provider.component,
     }
 }
 

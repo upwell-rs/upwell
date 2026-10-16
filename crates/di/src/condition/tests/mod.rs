@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
+use upwell_core::condition::scope::{self, ConditionInputRejection};
 use upwell_core::{
-    AvailabilityConditionCallback, AvailabilityConditionContext, AvailabilityTarget,
-    ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
-    ConfigConditionCallback, ConfigConditionContext, ConfigFactDescriptor, ConfigFactId,
-    DependencyObservation, DescriptorSource, ProviderMappingId, Singleton, Transient,
-    TypeDescriptor,
+    ConditionCallback, ConditionContext, ConditionDescriptor, ConditionExpression,
+    ConditionInputId, ConditionInputRead, ConditionScalar, ConditionScalarKind, ConfigBindingId,
+    ConfigFactDescriptor, ConfigFactId, DependencyObservation, DescriptorSource, ProviderMappingId,
+    Singleton, Transient, TypeDescriptor,
 };
 
 use super::*;
@@ -72,6 +72,13 @@ fn facts() -> [ConfigFactDescriptor; 2] {
     ]
 }
 
+fn registry(components: Vec<ComponentDescriptor>) -> ComponentRegistry {
+    ComponentRegistry {
+        components,
+        providers: Vec::new(),
+    }
+}
+
 fn snapshot(enabled: bool, mode: &str) -> ConditionFactSnapshot {
     ConditionFactSnapshot::new([
         (ENABLED, ConditionScalar::Bool(enabled)),
@@ -95,6 +102,7 @@ fn _live_is_not_an_injectable_factory_argument(_: Live<ComponentA>) {}
 
 mod callbacks;
 mod composition;
+mod config_inputs;
 mod cycles;
 mod incremental;
 mod providers;

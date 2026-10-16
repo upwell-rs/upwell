@@ -6,7 +6,7 @@ Part of the [Upwell](../../README.md) framework — the config layer, sitting ab
 
 ## Role
 
-This crate owns two layers. The **parser** is the format-agnostic core: a normalized [`ConfigValue`] tree, a placeholder grammar (`${KEY}` / `${KEY:default}`), a [`Resolver`] chain, and a [`from_value`] deserializer that resolves placeholders *while* deserializing. The **managed** layer integrates that parser with dependency injection: [`Cfg<T>`] injectables, the [`ConfigManager`] that loads and merges files, the [`ConfigStore`] resolver the DI container reaches config through, and the [`ConfigReloader`] staging engine that the application runtime's transactional reload drives. Substitution failures surface as [`TemplateError`]; load/bind failures as [`ConfigError`].
+This crate owns two layers. The **parser** is the format-agnostic core: a normalized [`ConfigValue`] tree, a placeholder grammar (`${KEY}` / `${KEY:default}`), a [`Resolver`] chain, and a [`from_value`] deserializer that resolves placeholders *while* deserializing. The **managed** layer integrates that parser with dependency injection: [`Cfg<T>`] injectables, the [`ConfigManager`] that loads and merges files, the [`ConfigStore`] resolver the DI container reaches config through, and the [`ConfigReloader`] staging engine that the application runtime's transactional reload drives. Substitution failures surface as [`TemplateError`]; load/bind failures as [`ConfigError`]. The `condition` module provides [`resolve`](condition::resolve), the raw config read component condition callbacks may make, over [`ResolvedConfig`](condition::ResolvedConfig) subtrees the application renders from the candidate config.
 
 ## Usage
 
