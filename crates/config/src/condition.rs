@@ -13,7 +13,8 @@ use crate::{ConfigStr, ConfigValue, ResolverChain, TemplateError, from_value};
 
 /// A config subtree with every placeholder rendered, as supplied to condition callbacks.
 ///
-/// Rendering keeps each string's placeholder kind, so deserializing a resolved subtree
+/// Rendering keeps templated strings templated and turns literals and full placeholders into
+/// literals, which both coerce from their rendered text, so deserializing a resolved subtree
 /// coerces exactly like deserializing the source subtree. Values compare structurally,
 /// which is how an unchanged raw input is recognised across reloads.
 #[derive(Clone, PartialEq)]
