@@ -11,6 +11,7 @@
 //! The parser's substitution failure type is [`TemplateError`]; the managed layer's
 //! load/bind failure type is [`ConfigError`].
 
+pub mod condition;
 mod de;
 mod defaults;
 mod error;

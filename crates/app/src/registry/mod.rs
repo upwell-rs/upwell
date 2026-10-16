@@ -4,32 +4,18 @@ use std::fmt;
 use std::fmt::Write;
 
 use upwell_config::{CONFIG_BINDINGS, ConditionFactSource, ConfigBinding};
-use upwell_core::{ConfigFactDescriptor, DependencyDescriptor};
+use upwell_core::DependencyDescriptor;
 use upwell_di::{
-    COMPONENTS, Component, ComponentDescriptor, ComponentRegistry, ConditionCatalog,
-    ConditionEvaluation, ConditionFactSnapshot, PROVIDERS, ProviderDescriptor,
+    COMPONENTS, Component, ComponentDescriptor, ComponentRegistry, PROVIDERS, ProviderDescriptor,
     ProviderSelectionModel,
 };
 
 use crate::error::Error;
 use crate::scope::PreparedScopeTopology;
 
-/// A condition evaluation bound to one application's DI and config catalogs.
-#[derive(Clone, Debug)]
-pub struct AppConditionEvaluation {
-    evaluation: ConditionEvaluation,
-    bindings: HashMap<(TypeId, String), usize>,
-}
+mod condition;
 
-impl AppConditionEvaluation {
-    pub fn evaluation(&self) -> &ConditionEvaluation {
-        &self.evaluation
-    }
-
-    pub(crate) fn belongs_to(&self, registry: &AppRegistry) -> bool {
-        self.bindings == registry.condition_identity()
-    }
-}
+pub use condition::AppConditionEvaluation;
 
 /// Holds the *agnostic* component, provider, and config-binding descriptors of an app —
 /// declarations only. Runtime instances live in the
@@ -109,70 +95,6 @@ impl AppRegistry {
     /// Collapses the registered descriptors to one per type (delegated to the DI engine).
     pub fn resolved_components(&self) -> crate::Result<Vec<ComponentDescriptor>> {
         Ok(self.component_registry().resolved_components()?)
-    }
-
-    /// Evaluates static eligibility from an already validated typed fact snapshot.
-    ///
-    /// This does not load configuration or construct ordinary components. The returned registry
-    /// contains eligible declarations and still requires ordinary scope-aware graph validation.
-    pub fn evaluate_conditions(
-        &self,
-        facts: impl IntoIterator<Item = ConfigFactDescriptor>,
-        snapshot: &ConditionFactSnapshot,
-    ) -> Result<AppConditionEvaluation, upwell_di::ConditionError> {
-        let evaluation =
-            ConditionCatalog::new(&self.component_registry(), facts)?.evaluate(snapshot)?;
-
-        Ok(AppConditionEvaluation {
-            evaluation,
-            bindings: self.condition_identity(),
-        })
-    }
-
-    /// Extracts the condition-fact scalars of every registered fact source from a
-    /// staged reload's values, producing a validated fact snapshot.
-    ///
-    /// Each staged value is its binding's `(TypeId, path, erased value)`. A source whose
-    /// binding has no staged value contributes nothing — the transactional reload stages
-    /// every binding, changed or not, so registered sources always resolve.
-    pub fn condition_snapshot<'a>(
-        &self,
-        staged: impl IntoIterator<Item = (TypeId, &'a str, &'a dyn std::any::Any)>,
-    ) -> Result<ConditionFactSnapshot, upwell_di::ConditionError> {
-        let staged = staged.into_iter().collect::<Vec<_>>();
-        let mut scalars = Vec::new();
-
-        for source in &self.condition_facts {
-            for (type_id, path, value) in &staged {
-                if *type_id == source.ty.type_id && *path == source.path {
-                    scalars.extend((source.facts.scalars)(source.path, *value));
-                }
-            }
-        }
-
-        ConditionFactSnapshot::new(scalars)
-    }
-
-    /// Incrementally re-evaluates conditions while preserving this application's catalog identity.
-    pub fn evaluate_changed_conditions(
-        &self,
-        facts: impl IntoIterator<Item = ConfigFactDescriptor>,
-        previous: &AppConditionEvaluation,
-        snapshot: &ConditionFactSnapshot,
-    ) -> crate::Result<AppConditionEvaluation> {
-        let bindings = self.condition_identity();
-
-        if previous.bindings != bindings {
-            return Err(Error::ConditionEvaluationApplicationMismatch);
-        }
-
-        let evaluation = ConditionCatalog::new(&self.component_registry(), facts)?
-            .evaluate_changed(&previous.evaluation, snapshot)?;
-
-        Ok(AppConditionEvaluation {
-            evaluation,
-            bindings,
-        })
     }
 
     /// Returns the effective descriptor registered for component type `T`.
@@ -296,18 +218,6 @@ impl AppRegistry {
         }
 
         Ok(())
-    }
-
-    fn condition_identity(&self) -> HashMap<(TypeId, String), usize> {
-        let mut identity = HashMap::new();
-
-        for binding in &self.config_bindings {
-            *identity
-                .entry((binding.ty.type_id, binding.path.clone()))
-                .or_default() += 1;
-        }
-
-        identity
     }
 
     fn write_components(&self, f: &mut impl Write) -> fmt::Result {

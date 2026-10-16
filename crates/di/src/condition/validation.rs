@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use upwell_core::{
-    AvailabilityTarget, ConditionDescriptor, ConditionPredicate, ConditionScalarKind,
-    ConfigFactDescriptor, ConfigFactId, StaticScope,
+    ConditionCallback, ConditionDescriptor, ConditionInputId, ConditionPredicate,
+    ConditionScalarKind, ConfigFactDescriptor, ConfigFactId, StaticScope,
 };
 
 use super::{ConditionCatalog, ConditionError, ConditionFactSnapshot};
@@ -66,8 +66,10 @@ impl ConditionCatalog {
             .provider_order(&components.values().copied().collect::<Vec<_>>())
             .map_err(ConditionError::Registry)?;
         let identity = super::CatalogIdentity::new(registry, &facts)?;
+        let config_inputs = super::graph::config_inputs(components.values());
         let catalog = Self {
             identity,
+            config_inputs,
             registry_order,
             component_order: components.keys().copied().collect(),
             components,
@@ -105,6 +107,14 @@ impl ConditionCatalog {
             if !self.facts.contains_key(id) {
                 return Err(ConditionError::UnknownFactValue(*id));
             }
+        }
+
+        if let Some(id) = self
+            .config_inputs
+            .iter()
+            .find(|id| !snapshot.config.contains_key(id))
+        {
+            return Err(ConditionError::MissingConfigInput(*id));
         }
 
         Ok(())
@@ -165,32 +175,8 @@ impl ConditionCatalog {
             ConditionPredicate::ProviderMappingEligible(provider) => {
                 self.require_provider(provider, owner, node.id)?;
             }
-            ConditionPredicate::ConfigCallback(callback) => {
-                self.require_callback_kind(callback.kind, owner, node.id)?;
-
-                for fact in callback.inputs {
-                    self.facts
-                        .get(fact)
-                        .ok_or(ConditionError::MissingFactReference {
-                            component_id: owner,
-                            condition_id: node.id,
-                            fact: *fact,
-                        })?;
-                }
-            }
-            ConditionPredicate::AvailabilityCallback(callback) => {
-                self.require_callback_kind(callback.kind, owner, node.id)?;
-
-                for target in callback.inputs {
-                    match target {
-                        AvailabilityTarget::Component(component) => {
-                            self.require_component(component, owner, node.id)?;
-                        }
-                        AvailabilityTarget::ProviderMapping(provider) => {
-                            self.require_provider(*provider, owner, node.id)?;
-                        }
-                    }
-                }
+            ConditionPredicate::Callback(callback) => {
+                self.validate_callback(callback, owner, node.id)?;
             }
             ConditionPredicate::All(children) | ConditionPredicate::Any(children) => {
                 let mut children = children.iter().collect::<Vec<_>>();
@@ -203,6 +189,53 @@ impl ConditionCatalog {
             ConditionPredicate::Not(child) => {
                 self.validate_node(owner, child, condition_ids)?;
             }
+        }
+
+        Ok(())
+    }
+
+    fn validate_callback(
+        &self,
+        callback: &'static ConditionCallback,
+        component_id: &'static str,
+        condition_id: &'static str,
+    ) -> Result<(), ConditionError> {
+        self.require_callback_kind(callback.kind, component_id, condition_id)?;
+
+        for input in callback.inputs {
+            match *input {
+                ConditionInputId::Fact(fact) => {
+                    self.facts
+                        .get(&fact)
+                        .ok_or(ConditionError::MissingFactReference {
+                            component_id,
+                            condition_id,
+                            fact,
+                        })?;
+                }
+                ConditionInputId::Component(component) => {
+                    self.require_component(component, component_id, condition_id)?;
+                }
+                ConditionInputId::ProviderMapping(provider) => {
+                    self.require_provider(provider, component_id, condition_id)?;
+                }
+                ConditionInputId::Binding(_) | ConditionInputId::Raw(_) => {}
+            }
+        }
+
+        let reads = callback
+            .expression
+            .map_or(&[][..], |expression| expression.reads);
+
+        if let Some(read) = reads
+            .iter()
+            .find(|read| !callback.inputs.contains(&read.input))
+        {
+            return Err(ConditionError::UndeclaredExpressionRead {
+                component_id,
+                condition_id,
+                input: read.input,
+            });
         }
 
         Ok(())

@@ -1,12 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use upwell_core::{
-    AvailabilityConditionContext, AvailabilityTarget, ConditionDescriptor, ConditionPredicate,
-    ConfigConditionContext, StaticScope,
-};
+use upwell_core::{ConditionDescriptor, ConditionPredicate, StaticScope};
 
 use super::{
-    ConditionCatalog, ConditionDecision, ConditionError, ConditionEvaluation,
+    ConditionCatalog, ConditionDecision, ConditionDependency, ConditionError, ConditionEvaluation,
     ConditionFactSnapshot, ValidatedConditionEvaluation,
 };
 use crate::{ComponentRegistry, ProviderSelectionModel, Singleton};
@@ -38,12 +35,19 @@ impl ConditionCatalog {
             return Err(ConditionError::EvaluationCatalogMismatch);
         }
 
-        let changed = self
+        let mut changed = self
             .facts
             .keys()
             .filter(|id| previous.facts.facts.get(id) != snapshot.facts.get(id))
-            .copied()
+            .map(|id| ConditionDependency::Config(*id))
             .collect::<BTreeSet<_>>();
+
+        changed.extend(
+            snapshot
+                .changed_config(&previous.facts, &self.config_inputs)
+                .into_iter()
+                .map(ConditionDependency::from),
+        );
 
         if changed.is_empty() {
             return Ok(previous.clone());
@@ -113,7 +117,7 @@ impl ConditionCatalog {
 
     fn invalidated_components(
         &self,
-        changed: &BTreeSet<upwell_core::ConfigFactId>,
+        changed: &BTreeSet<ConditionDependency>,
     ) -> Result<BTreeSet<&'static str>, ConditionError> {
         let dependencies = self
             .component_order
@@ -126,9 +130,9 @@ impl ConditionCatalog {
         let mut invalidated = dependencies
             .iter()
             .filter(|(_, dependencies)| {
-                dependencies.iter().any(|dependency| {
-                    matches!(dependency, super::ConditionDependency::Config(fact) if changed.contains(fact))
-                })
+                dependencies
+                    .iter()
+                    .any(|dependency| changed.contains(dependency))
             })
             .map(|(component, _)| *component)
             .collect::<BTreeSet<_>>();
@@ -138,11 +142,11 @@ impl ConditionCatalog {
 
             for (component, dependencies) in &dependencies {
                 if dependencies.iter().any(|dependency| match dependency {
-                    super::ConditionDependency::Component(target) => invalidated.contains(target),
-                    super::ConditionDependency::Provider(target) => {
-                        invalidated.contains(target.component)
-                    }
-                    super::ConditionDependency::Config(_) => false,
+                    ConditionDependency::Component(target) => invalidated.contains(target),
+                    ConditionDependency::Provider(target) => invalidated.contains(target.component),
+                    ConditionDependency::Config(_)
+                    | ConditionDependency::Binding(_)
+                    | ConditionDependency::Raw(_) => false,
                 }) {
                     invalidated.insert(*component);
                 }
@@ -194,7 +198,7 @@ impl ConditionCatalog {
         })
     }
 
-    fn evaluate_component(
+    pub(super) fn evaluate_component(
         &self,
         component_id: &'static str,
         snapshot: &ConditionFactSnapshot,
@@ -237,40 +241,8 @@ impl ConditionCatalog {
             ConditionPredicate::ProviderMappingEligible(provider) => {
                 self.evaluate_component(provider.component, snapshot, states, decisions)?
             }
-            ConditionPredicate::ConfigCallback(callback) => {
-                let mut input_ids = callback.inputs.to_vec();
-                input_ids.sort_unstable();
-                input_ids.dedup();
-                let inputs = input_ids
-                    .iter()
-                    .map(|id| (*id, &snapshot.facts[id]))
-                    .collect::<Vec<_>>();
-
-                (callback.evaluate)(ConfigConditionContext::new(&inputs))
-            }
-            ConditionPredicate::AvailabilityCallback(callback) => {
-                let mut targets = callback.inputs.to_vec();
-                targets.sort_unstable();
-                targets.dedup();
-                let mut inputs = Vec::with_capacity(targets.len());
-
-                for target in targets {
-                    let eligible = match target {
-                        AvailabilityTarget::Component(component) => {
-                            self.evaluate_component(component, snapshot, states, decisions)?
-                        }
-                        AvailabilityTarget::ProviderMapping(provider) => self.evaluate_component(
-                            provider.component,
-                            snapshot,
-                            states,
-                            decisions,
-                        )?,
-                    };
-
-                    inputs.push((target, eligible));
-                }
-
-                (callback.evaluate)(AvailabilityConditionContext::new(&inputs))
+            ConditionPredicate::Callback(callback) => {
+                self.evaluate_callback(owner, node.id, callback, snapshot, states, decisions)?
             }
             ConditionPredicate::All(children) => {
                 let mut outcomes = Vec::with_capacity(children.len());
@@ -304,8 +276,7 @@ impl ConditionCatalog {
             condition_id: node.id,
             predicate: node.predicate.kind(),
             callback_kind: match node.predicate {
-                ConditionPredicate::ConfigCallback(callback) => Some(callback.kind),
-                ConditionPredicate::AvailabilityCallback(callback) => Some(callback.kind),
+                ConditionPredicate::Callback(callback) => Some(callback.kind),
                 _ => None,
             },
             source: node.source,

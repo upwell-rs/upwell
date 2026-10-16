@@ -1,57 +1,23 @@
 use std::any::TypeId;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use upwell_core::{
-    ConditionScalar, ConfigFactDescriptor, ConfigFactId, ProviderMappingId, ScopeId,
+    ConditionInputId, ConfigFactDescriptor, ConfigFactId, ProviderMappingId, ScopeId,
 };
 
 use crate::{ComponentDescriptor, ComponentRegistry, ProviderDescriptor, ProviderSelectionModel};
 
+mod callback;
 mod error;
 mod evaluation;
 mod graph;
+mod snapshot;
 mod validation;
 
 pub use error::ConditionError;
 pub use graph::{AvailabilityEdge, ConditionDependency};
-
-/// Typed config facts supplied to one catalog evaluation.
-#[derive(Clone, Default)]
-pub struct ConditionFactSnapshot {
-    pub(super) facts: BTreeMap<ConfigFactId, ConditionScalar>,
-}
-
-impl ConditionFactSnapshot {
-    pub fn new(
-        facts: impl IntoIterator<Item = (ConfigFactId, ConditionScalar)>,
-    ) -> Result<Self, ConditionError> {
-        let mut snapshot = Self::default();
-
-        for (id, value) in facts {
-            if snapshot.facts.insert(id, value).is_some() {
-                return Err(ConditionError::DuplicateFactValue(id));
-            }
-        }
-
-        Ok(snapshot)
-    }
-}
-
-impl fmt::Debug for ConditionFactSnapshot {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let facts = self
-            .facts
-            .iter()
-            .map(|(id, value)| (*id, value.kind()))
-            .collect::<Vec<_>>();
-
-        formatter
-            .debug_struct("ConditionFactSnapshot")
-            .field("facts", &facts)
-            .finish()
-    }
-}
+pub use snapshot::ConditionFactSnapshot;
 
 /// One redacted condition-node outcome.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -86,6 +52,11 @@ impl ConditionEvaluation {
 
     pub fn provider_eligible(&self, id: ProviderMappingId) -> Option<bool> {
         self.providers.get(&id).copied()
+    }
+
+    /// Whether `other` makes exactly the same components and provider mappings eligible.
+    pub fn same_eligibility(&self, other: &Self) -> bool {
+        self.components == other.components && self.providers == other.providers
     }
 
     pub fn decisions(&self) -> &[ConditionDecision] {
@@ -286,6 +257,7 @@ pub struct ConditionCatalog {
     pub(super) component_order: Vec<&'static str>,
     pub(super) providers: Vec<(ProviderMappingId, ProviderDescriptor)>,
     pub(super) facts: BTreeMap<ConfigFactId, ConfigFactDescriptor>,
+    pub(super) config_inputs: BTreeSet<ConditionInputId>,
     pub(super) provider_order: HashMap<TypeId, HashMap<TypeId, usize>>,
 }
 

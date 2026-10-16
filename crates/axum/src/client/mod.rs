@@ -154,6 +154,10 @@ pub(crate) fn redirect_error<E>(
     }
 }
 
+#[cfg(any(
+    feature = "reqwest",
+    all(feature = "hyper", not(target_family = "wasm"))
+))]
 fn unexpected_response<E>(
     response: HttpResponse<Vec<u8>>,
 ) -> upwell_client::ClientError<http::StatusCode, E> {

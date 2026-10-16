@@ -31,9 +31,9 @@ use upwell_config::{
     ReloadProposal, ResolverChain, Toml,
 };
 use upwell_core::{
-    ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
-    ConfigConditionCallback, ConfigConditionContext, ConfigFactDescriptor, ConfigFactId,
-    DependencyDescriptor, ResolverCtx, TypeDescriptor,
+    ConditionCallback, ConditionContext, ConditionDescriptor, ConditionInputId, ConditionPredicate,
+    ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId, DependencyDescriptor,
+    ResolverCtx, TypeDescriptor,
 };
 use upwell_di::{Component, ComponentDescriptor, factories};
 use upwell_hooks::{HookDescriptor, HookKind, HookManager, HookParam};
@@ -51,27 +51,28 @@ const PROBE_ENABLED: ConfigFactId = ConfigFactId::new("test::ProbeConfig", "prob
 /// fact, and its default outcome matches the `ConfigBool` predicate it replaces — the
 /// fact must be present and true. Under test control it panics instead, so a test can
 /// prove the reload's incremental evaluation is panic-contained.
-fn probe_condition_evaluate(context: ConfigConditionContext<'_>) -> bool {
+fn probe_condition_evaluate(context: ConditionContext<'_>) -> bool {
     if CONDITION_PANIC.load(Ordering::SeqCst) {
         panic!("config condition callback panicked");
     }
 
     context
-        .get(PROBE_ENABLED)
+        .fact(PROBE_ENABLED)
         .and_then(ConditionScalar::as_bool)
         .unwrap_or(false)
 }
 
-static PROBE_CONDITION_CALLBACK: ConfigConditionCallback = ConfigConditionCallback {
+static PROBE_CONDITION_CALLBACK: ConditionCallback = ConditionCallback {
     kind: "test/probe-enabled",
-    inputs: &[PROBE_ENABLED],
+    inputs: &[ConditionInputId::Fact(PROBE_ENABLED)],
+    expression: None,
     evaluate: probe_condition_evaluate,
 };
 
 static PROBE_CONDITION: ConditionDescriptor = ConditionDescriptor {
     id: "probe-enabled",
     source: upwell_core::descriptor_source!(),
-    predicate: ConditionPredicate::ConfigCallback(&PROBE_CONDITION_CALLBACK),
+    predicate: ConditionPredicate::Callback(&PROBE_CONDITION_CALLBACK),
 };
 
 pub(super) struct ProbeConfig {

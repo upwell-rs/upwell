@@ -1,4 +1,5 @@
-use upwell_core::{ConditionScalarKind, ConfigFactId, ProviderMappingId};
+use upwell_core::condition::scope::ConditionInputRejection;
+use upwell_core::{ConditionInputId, ConditionScalarKind, ConfigFactId, ProviderMappingId};
 
 use super::AvailabilityEdge;
 
@@ -27,6 +28,10 @@ pub enum ConditionError {
     MissingFactValue(ConfigFactId),
     #[error("unknown supplied config fact: {0:?}")]
     UnknownFactValue(ConfigFactId),
+    #[error("duplicate supplied config input: {0:?}")]
+    DuplicateConfigInput(ConditionInputId),
+    #[error("missing supplied config input: {0:?}")]
+    MissingConfigInput(ConditionInputId),
     #[error("the previous condition evaluation belongs to another catalog")]
     EvaluationCatalogMismatch,
     #[error("config fact kind mismatch for {fact:?}: expected {expected:?}, found {actual:?}")]
@@ -68,6 +73,20 @@ pub enum ConditionError {
     EmptyCallbackKind {
         component_id: &'static str,
         condition_id: &'static str,
+    },
+    #[error(
+        "condition callback on '{component_id}' at '{condition_id}' describes a read of undeclared input {input:?}"
+    )]
+    UndeclaredExpressionRead {
+        component_id: &'static str,
+        condition_id: &'static str,
+        input: ConditionInputId,
+    },
+    #[error("condition callback on '{component_id}' at '{condition_id}' failed: {rejection}")]
+    CallbackInputRejected {
+        component_id: &'static str,
+        condition_id: &'static str,
+        rejection: ConditionInputRejection,
     },
     #[error("conditional component '{component_id}' uses unsupported scope '{scope}'")]
     UnsupportedScope {

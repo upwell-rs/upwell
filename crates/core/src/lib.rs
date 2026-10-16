@@ -19,10 +19,11 @@ pub mod scope;
 pub mod types;
 
 pub use condition::{
-    AvailabilityConditionCallback, AvailabilityConditionContext, AvailabilityTarget,
-    ConditionDescriptor, ConditionPredicate, ConditionPredicateKind, ConditionScalar,
-    ConditionScalarKind, ConditionScalarLiteral, ConfigConditionCallback, ConfigConditionContext,
-    ConfigFactDescriptor, ConfigFactId, DescriptorSource, ProviderMappingId,
+    ConditionCallback, ConditionContext, ConditionDescriptor, ConditionExpression, ConditionInput,
+    ConditionInputId, ConditionInputRead, ConditionInputValue, ConditionPredicate,
+    ConditionPredicateKind, ConditionScalar, ConditionScalarKind, ConditionScalarLiteral,
+    ConfigBindingId, ConfigFactDescriptor, ConfigFactId, DescriptorSource, Eligibility,
+    ProviderMappingId,
 };
 pub use dependency::{Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode};
 pub use descriptor::{Descriptor, DescriptorFor, RegistryFor, RuntimeDescriptor, UpwellDescriptor};

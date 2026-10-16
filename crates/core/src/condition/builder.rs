@@ -16,8 +16,8 @@
 use std::panic::Location;
 
 use super::{
-    ConditionDescriptor, ConditionPredicate, ConditionScalarLiteral, ConfigFactId,
-    DescriptorSource, ProviderMappingId,
+    ConditionCallback, ConditionDescriptor, ConditionPredicate, ConditionScalarLiteral,
+    ConfigFactId, DescriptorSource, ProviderMappingId,
 };
 
 impl DescriptorSource {
@@ -77,6 +77,12 @@ impl ConditionDescriptor {
     #[track_caller]
     pub const fn provider_eligible(id: &'static str, mapping: ProviderMappingId) -> Self {
         Self::new(id, ConditionPredicate::ProviderMappingEligible(mapping))
+    }
+
+    /// Holds when the trusted `callback` returns `true` for its declared inputs.
+    #[track_caller]
+    pub const fn callback(id: &'static str, callback: &'static ConditionCallback) -> Self {
+        Self::new(id, ConditionPredicate::Callback(callback))
     }
 
     /// Holds when every node in `all` holds.

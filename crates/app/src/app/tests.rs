@@ -9,9 +9,9 @@ use upwell_config::{
     ConfigStore, Toml,
 };
 use upwell_core::{
-    ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
-    ConfigConditionCallback, ConfigConditionContext, ConfigFactDescriptor, ConfigFactId,
-    ResolverSet, TypeDescriptor,
+    ConditionCallback, ConditionContext, ConditionDescriptor, ConditionInputId, ConditionPredicate,
+    ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId, ResolverSet,
+    TypeDescriptor,
 };
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
@@ -686,27 +686,28 @@ const CALLBACK_FLAG: ConfigFactId =
 /// only by [`panic_callback_evaluate`] and armed only by the callback test.
 static CALLBACK_PANIC: AtomicBool = AtomicBool::new(false);
 
-fn panic_callback_evaluate(context: ConfigConditionContext<'_>) -> bool {
+fn panic_callback_evaluate(context: ConditionContext<'_>) -> bool {
     if CALLBACK_PANIC.load(Ordering::SeqCst) {
         panic!("startup config condition callback panicked");
     }
 
     context
-        .get(CALLBACK_FLAG)
+        .fact(CALLBACK_FLAG)
         .and_then(ConditionScalar::as_bool)
         .unwrap_or(false)
 }
 
-static PANIC_CONDITION_CALLBACK: ConfigConditionCallback = ConfigConditionCallback {
+static PANIC_CONDITION_CALLBACK: ConditionCallback = ConditionCallback {
     kind: "test/panic-callback-enabled",
-    inputs: &[CALLBACK_FLAG],
+    inputs: &[ConditionInputId::Fact(CALLBACK_FLAG)],
+    expression: None,
     evaluate: panic_callback_evaluate,
 };
 
 static PANIC_CALLBACK_CONDITION: ConditionDescriptor = ConditionDescriptor {
     id: "panic-callback-enabled",
     source: upwell_core::descriptor_source!(),
-    predicate: ConditionPredicate::ConfigCallback(&PANIC_CONDITION_CALLBACK),
+    predicate: ConditionPredicate::Callback(&PANIC_CONDITION_CALLBACK),
 };
 
 #[derive(serde::Deserialize)]
@@ -799,7 +800,7 @@ fn panicking_condition_scalar_extraction_returns_the_redacted_preparation_error(
         .condition_facts
         .push(ConditionFactSource::of::<PanicScalarsConfig>("flags"));
 
-    let error = super::evaluate_startup_conditions(&registry, &slots)
+    let error = super::evaluate_startup_conditions(&registry, &manager, &slots)
         .expect_err("the armed fact extraction must abort the condition stage");
 
     assert!(
@@ -823,7 +824,7 @@ fn panicking_condition_fact_descriptors_return_the_redacted_preparation_error() 
         .condition_facts
         .push(ConditionFactSource::of::<PanicDescriptorsConfig>("flags"));
 
-    let error = super::evaluate_startup_conditions(&registry, &slots)
+    let error = super::evaluate_startup_conditions(&registry, &manager, &slots)
         .expect_err("the armed descriptor callback must abort the condition stage");
 
     assert!(
@@ -848,7 +849,7 @@ fn panicking_config_condition_callback_returns_the_redacted_preparation_error() 
         .condition_facts
         .push(ConditionFactSource::of::<PanicCallbackConfig>("flags"));
 
-    let error = super::evaluate_startup_conditions(&registry, &slots)
+    let error = super::evaluate_startup_conditions(&registry, &manager, &slots)
         .expect_err("the armed condition callback must abort the condition stage");
 
     assert!(
@@ -870,7 +871,7 @@ fn ordinary_condition_errors_are_preserved_not_redacted_as_preparation_panics() 
     let mut registry = AppRegistry::default();
     registry.components.push(FLAG_COMPONENT);
 
-    let error = super::evaluate_startup_conditions(&registry, &slots)
+    let error = super::evaluate_startup_conditions(&registry, &manager, &slots)
         .expect_err("the unsupplied condition fact must fail the condition stage");
 
     assert!(

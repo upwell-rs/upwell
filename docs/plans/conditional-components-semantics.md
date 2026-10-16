@@ -20,8 +20,8 @@ model is:
 - equality between a typed config fact and a scalar boolean, integer, string, or enum-token literal;
 - eligibility of a component by stable component ID;
 - eligibility of one exact provider mapping by stable mapping ID;
-- a trusted config callback over a statically declared set of typed facts;
-- a trusted availability callback over statically declared component or provider-mapping inputs;
+- a trusted callback over one statically declared input list mixing typed facts, whole typed
+  config bindings, raw config paths, and component or provider-mapping eligibility (#323);
 - `all`, `any`, and `not` composition.
 
 Every expression node has an owner-scoped stable condition ID and source metadata. References use
@@ -186,8 +186,9 @@ This issue does not define user-facing condition macro syntax, typed config fact
 condition tooling facets, protocol-role validation, graph diffs, transition strategies, or runtime
 publication. Those remain owned by #208, #205, #207, #209, and #206 respectively.
 
-Condition descriptors may also use metadata-complete config or availability callbacks. Their
-contexts expose only statically declared scalar facts or eligibility inputs through the framework;
+Condition descriptors may also use metadata-complete callbacks. Their contexts expose only
+statically declared facts, typed bindings, eligibility inputs, and (through `resolve`) raw config
+paths resolved from the candidate config; reading an undeclared raw path fails the evaluation;
 the declared inputs, not callback execution paths, remain authoritative for validation, cycle
 detection, invalidation, tooling, and deterministic input ordering. Callbacks receive no resolver,
 component, factory, selected-provider, filesystem, or mutation capability from Upwell. They remain

@@ -258,7 +258,9 @@ impl AppRuntime {
     ///
     /// Lock order is fixed by the caller: the config reloader's serialization lock first,
     /// then the runtime transition writer. An unchanged source is a true no-op, with no
-    /// evaluation, construction, hooks, or generation movement.
+    /// evaluation, construction, hooks, or generation movement. When conditions read raw
+    /// config paths, a reload without binding changes still re-evaluates them and is a
+    /// no-op only while eligibility is unchanged.
     async fn run_reload(
         &self,
         transition: RuntimeTransition,
@@ -272,7 +274,7 @@ impl AppRuntime {
 
         recorder.record_changed(staged.changed());
 
-        if staged.is_empty() {
+        if staged.is_empty() && !base.condition().catalog().reads_raw_config() {
             transition.finish_noop();
 
             return Ok((TransitionCompletion::NoOp, None));
@@ -281,6 +283,16 @@ impl AppRuntime {
         recorder.enter(TransitionPhase::Evaluate);
 
         let evaluation = evaluate_conditions(&base, &staged)?;
+
+        if staged.is_empty()
+            && evaluation
+                .evaluation()
+                .same_eligibility(base.condition().evaluation().evaluation())
+        {
+            transition.finish_noop();
+
+            return Ok((TransitionCompletion::NoOp, None));
+        }
 
         recorder.enter(TransitionPhase::Plan);
 

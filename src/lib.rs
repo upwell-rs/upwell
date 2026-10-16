@@ -30,6 +30,14 @@ pub mod scope {
     pub use upwell_rpc::scope::{Connection, Request}; // should not be here, should be in crate::daemon with the rest of the daemon related items
 }
 
+/// Component condition descriptors, callback inputs, and [`resolve`](condition::resolve),
+/// the raw config read a condition callback may make.
+#[cfg(not(target_family = "wasm"))]
+pub mod condition {
+    pub use upwell_config::condition::{ResolvedConfig, resolve};
+    pub use upwell_core::condition::*;
+}
+
 // ---------------------------------------------------------------------------
 // DI engine: descriptors, container, factories, registry.
 // ---------------------------------------------------------------------------

@@ -41,67 +41,160 @@ fn fact_values_and_literals_are_redacted() {
     }));
 }
 
-fn config_callback(context: ConfigConditionContext<'_>) -> bool {
+fn fact_and_eligibility(context: ConditionContext<'_>) -> bool {
     context
-        .get(ENABLED)
+        .fact(ENABLED)
         .and_then(ConditionScalar::as_bool)
         .unwrap_or(false)
-        && context.get(MODE).is_none()
+        && context.eligible("a").unwrap_or(false)
+        && context.fact(MODE).is_none()
 }
 
-static CONFIG_CALLBACK: ConfigConditionCallback = ConfigConditionCallback {
-    kind: "test/config-enabled",
-    inputs: &[ENABLED],
-    evaluate: config_callback,
+static FACT_AND_ELIGIBILITY: ConditionCallback = ConditionCallback {
+    kind: "test/enabled-and-a",
+    inputs: &[
+        ConditionInputId::Fact(ENABLED),
+        ConditionInputId::Component("a"),
+    ],
+    expression: None,
+    evaluate: fact_and_eligibility,
 };
 
-fn availability_callback(context: AvailabilityConditionContext<'_>) -> bool {
-    context
-        .eligible(AvailabilityTarget::Component("a"))
-        .unwrap_or(false)
-}
-
-static AVAILABILITY_CALLBACK: AvailabilityConditionCallback = AvailabilityConditionCallback {
-    kind: "test/component-a",
-    inputs: &[AvailabilityTarget::Component("a")],
-    evaluate: availability_callback,
-};
-
-static CONFIG_CALLBACK_CONDITION: ConditionDescriptor = ConditionDescriptor::new(
-    "config-callback",
-    ConditionPredicate::ConfigCallback(&CONFIG_CALLBACK),
-);
-
-static AVAILABILITY_CALLBACK_CONDITION: ConditionDescriptor = ConditionDescriptor::new(
-    "availability-callback",
-    ConditionPredicate::AvailabilityCallback(&AVAILABILITY_CALLBACK),
-);
+static FACT_AND_ELIGIBILITY_CONDITION: ConditionDescriptor =
+    ConditionDescriptor::callback("enabled-and-a", &FACT_AND_ELIGIBILITY);
 
 #[test]
-fn callbacks_can_read_only_declared_metadata_inputs() {
-    let registry = ComponentRegistry {
-        components: vec![
-            component::<ComponentA>("a", Some(&CONFIG_CALLBACK_CONDITION)),
-            component::<ComponentB>("b", Some(&AVAILABILITY_CALLBACK_CONDITION)),
-        ],
-        providers: Vec::new(),
-    };
+fn callbacks_read_declared_facts_and_eligibility_in_one_expression() {
+    let registry = registry(vec![
+        component::<ComponentA>("a", None),
+        component::<ComponentB>("b", Some(&FACT_AND_ELIGIBILITY_CONDITION)),
+    ]);
     let catalog = ConditionCatalog::new(&registry, facts()).expect("catalog validates");
 
-    let evaluation = catalog
+    let enabled = catalog
         .evaluate(&snapshot(true, "hidden-from-callback"))
         .expect("callbacks evaluate");
+    let disabled = catalog
+        .evaluate(&snapshot(false, "hidden-from-callback"))
+        .expect("callbacks evaluate");
 
-    assert_eq!(evaluation.component_eligible("a"), Some(true));
-    assert_eq!(evaluation.component_eligible("b"), Some(true));
-    assert_eq!(
-        catalog.dependencies("a").expect("component is known"),
-        [ConditionDependency::Config(ENABLED)]
-    );
+    assert_eq!(enabled.component_eligible("b"), Some(true));
+    assert_eq!(disabled.component_eligible("b"), Some(false));
     assert_eq!(
         catalog.dependencies("b").expect("component is known"),
-        [ConditionDependency::Component("a")]
+        [
+            ConditionDependency::Config(ENABLED),
+            ConditionDependency::Component("a")
+        ]
     );
+}
+
+fn reads_undeclared_path(_: ConditionContext<'_>) -> bool {
+    scope::raw_input("features.hidden").is_none()
+}
+
+static UNDECLARED_READ: ConditionCallback = ConditionCallback {
+    kind: "test/undeclared-read",
+    inputs: &[],
+    expression: None,
+    evaluate: reads_undeclared_path,
+};
+
+static UNDECLARED_READ_CONDITION: ConditionDescriptor =
+    ConditionDescriptor::callback("undeclared-read", &UNDECLARED_READ);
+
+#[test]
+fn reading_an_undeclared_raw_path_fails_the_evaluation() {
+    let registry = registry(vec![component::<ComponentA>(
+        "a",
+        Some(&UNDECLARED_READ_CONDITION),
+    )]);
+    let catalog = ConditionCatalog::new(&registry, facts()).expect("catalog validates");
+
+    let error = catalog
+        .evaluate(&snapshot(true, "safe"))
+        .expect_err("an undeclared read rejects the candidate");
+
+    assert!(matches!(
+        error,
+        ConditionError::CallbackInputRejected {
+            component_id: "a",
+            condition_id: "undeclared-read",
+            rejection: ConditionInputRejection::Undeclared("features.hidden"),
+        }
+    ));
+}
+
+static DESCRIBED_EXPRESSION: ConditionExpression = ConditionExpression {
+    text: "AuthConfig.mode == \"custom\"",
+    reads: &[ConditionInputRead {
+        input: ConditionInputId::Fact(MODE),
+        field: "",
+        source: SOURCE,
+    }],
+};
+
+static MISDESCRIBED: ConditionCallback = ConditionCallback {
+    kind: "test/misdescribed",
+    inputs: &[ConditionInputId::Fact(ENABLED)],
+    expression: Some(&DESCRIBED_EXPRESSION),
+    evaluate: fact_and_eligibility,
+};
+
+static MISDESCRIBED_CONDITION: ConditionDescriptor =
+    ConditionDescriptor::callback("misdescribed", &MISDESCRIBED);
+
+#[test]
+fn expression_reads_must_be_declared_inputs() {
+    let registry = registry(vec![component::<ComponentA>(
+        "a",
+        Some(&MISDESCRIBED_CONDITION),
+    )]);
+
+    let error = match ConditionCatalog::new(&registry, facts()) {
+        Ok(_) => panic!("an undeclared expression read validates"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        error,
+        ConditionError::UndeclaredExpressionRead {
+            component_id: "a",
+            condition_id: "misdescribed",
+            input: ConditionInputId::Fact(MODE),
+        }
+    ));
+}
+
+fn eligible_b(context: ConditionContext<'_>) -> bool {
+    context.eligible("b").unwrap_or(false)
+}
+
+static READS_B: ConditionCallback = ConditionCallback {
+    kind: "test/reads-b",
+    inputs: &[ConditionInputId::Component("b")],
+    expression: None,
+    evaluate: eligible_b,
+};
+
+static READS_B_CONDITION: ConditionDescriptor = ConditionDescriptor::callback("reads-b", &READS_B);
+static B_READS_A: ConditionDescriptor = ConditionDescriptor::component_eligible("b-reads-a", "a");
+
+#[test]
+fn eligibility_inputs_of_callbacks_join_the_availability_graph() {
+    let registry = registry(vec![
+        component::<ComponentA>("a", Some(&READS_B_CONDITION)),
+        component::<ComponentB>("b", Some(&B_READS_A)),
+    ]);
+
+    let error = match ConditionCatalog::new(&registry, facts()) {
+        Ok(_) => panic!("a cycle through a callback validates"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(error, ConditionError::AvailabilityCycle(_)));
+    assert!(error.to_string().contains("reads-b"));
+    assert!(error.to_string().contains("b-reads-a"));
 }
 
 #[test]

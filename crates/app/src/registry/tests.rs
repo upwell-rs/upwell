@@ -1,6 +1,7 @@
 use std::any::TypeId;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use upwell_config::{ConditionFactSource, ConditionFacts, ConfigBinding, ConfigProperties};
 use upwell_core::{
@@ -190,23 +191,26 @@ fn condition_snapshot_extracts_scalars_from_staged_values() {
     let unrelated = TestConfig;
 
     let snapshot = registry
-        .condition_snapshot([
-            (
-                TypeId::of::<FlagConfig>(),
-                "flags",
-                &enabled as &dyn std::any::Any,
-            ),
-            (
-                TypeId::of::<FlagConfig>(),
-                "other",
-                &disabled as &dyn std::any::Any,
-            ),
-            (
-                TypeId::of::<TestConfig>(),
-                "flags",
-                &unrelated as &dyn std::any::Any,
-            ),
-        ])
+        .condition_snapshot(
+            [
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "flags",
+                    &(Arc::new(enabled) as Arc<dyn std::any::Any + Send + Sync>),
+                ),
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "other",
+                    &(Arc::new(disabled) as Arc<dyn std::any::Any + Send + Sync>),
+                ),
+                (
+                    TypeId::of::<TestConfig>(),
+                    "flags",
+                    &(Arc::new(unrelated) as Arc<dyn std::any::Any + Send + Sync>),
+                ),
+            ],
+            |_| Ok(None),
+        )
         .expect("snapshot validates");
 
     registry
@@ -260,18 +264,21 @@ fn condition_snapshot_distinguishes_two_bindings_of_one_type() {
     let shadow = FlagConfig { enabled: false };
 
     let snapshot = registry
-        .condition_snapshot([
-            (
-                TypeId::of::<FlagConfig>(),
-                "flags",
-                &primary as &dyn std::any::Any,
-            ),
-            (
-                TypeId::of::<FlagConfig>(),
-                "toggles",
-                &shadow as &dyn std::any::Any,
-            ),
-        ])
+        .condition_snapshot(
+            [
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "flags",
+                    &(Arc::new(primary) as Arc<dyn std::any::Any + Send + Sync>),
+                ),
+                (
+                    TypeId::of::<FlagConfig>(),
+                    "toggles",
+                    &(Arc::new(shadow) as Arc<dyn std::any::Any + Send + Sync>),
+                ),
+            ],
+            |_| Ok(None),
+        )
         .expect("each binding contributes its own fact");
 
     let facts = registry
