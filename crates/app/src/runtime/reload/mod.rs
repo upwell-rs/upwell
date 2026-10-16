@@ -195,7 +195,9 @@ impl AppRuntime {
     ///
     /// An unchanged source is a true no-op: no evaluation, construction, hooks, runtime
     /// or config generation movement, or root replacement. It still consumes an attempt
-    /// ID and reports [`TransitionOutcome::NoOp`](crate::TransitionOutcome::NoOp).
+    /// ID and reports [`TransitionOutcome::NoOp`](crate::TransitionOutcome::NoOp). When a
+    /// condition reads raw config paths, a reload without binding changes still
+    /// re-evaluates conditions, and is a no-op only while eligibility is unchanged.
     ///
     /// # Reentrancy
     ///

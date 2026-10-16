@@ -18,7 +18,8 @@ impl ConditionCatalog {
         self.evaluate_from(snapshot, BTreeMap::new(), Vec::new())
     }
 
-    /// Re-evaluates only conditions reachable from changed config facts.
+    /// Re-evaluates only conditions reachable from changed config inputs: scalar facts,
+    /// typed bindings (by shared value identity), and raw config paths (by rendered value).
     ///
     /// The returned evaluation is still complete and is suitable for ordinary graph
     /// validation. `previous` must have been produced by this catalog. Trusted callbacks
