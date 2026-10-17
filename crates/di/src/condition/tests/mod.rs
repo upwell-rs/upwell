@@ -9,7 +9,7 @@ use upwell_core::{
 };
 
 use super::*;
-use crate::test_support::{no_dependencies, planned, planned_provider, unbuilt_factories};
+use crate::test_support::{component, no_dependencies, provider, unbuilt_factories};
 use crate::{ComponentFactoryDescriptor, Dep, FromContainer, Live, ProviderOrder};
 
 const ENABLED: ConfigFactId = ConfigFactId::new("AuthConfig", "auth", "custom.enabled");
@@ -30,31 +30,6 @@ fn factory() -> &'static [ComponentFactoryDescriptor] {
 
 fn missing_factory() -> &'static [ComponentFactoryDescriptor] {
     unbuilt_factories!("static", missing_dependencies, true)()
-}
-
-fn component<T: 'static>(
-    id: &'static str,
-    condition: Option<&'static ConditionDescriptor>,
-) -> ComponentDescriptor {
-    ComponentDescriptor {
-        condition,
-        ..planned(id, TypeDescriptor::of::<T>(id), factory)
-    }
-}
-
-fn provider<T: 'static>(
-    trait_ty: TypeDescriptor,
-    qualifier: &'static str,
-    primary: bool,
-) -> ProviderDescriptor {
-    ProviderDescriptor {
-        primary,
-        ..planned_provider(
-            trait_ty,
-            TypeDescriptor::of::<T>(std::any::type_name::<T>()),
-            qualifier,
-        )
-    }
 }
 
 fn facts() -> [ConfigFactDescriptor; 2] {

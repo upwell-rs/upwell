@@ -51,14 +51,12 @@ fn provider_lookup_uses_the_prebuilt_concrete_index() {
 }
 
 fn test_provider(name: &'static str, qualifier: &'static str, primary: bool) -> ProviderDescriptor {
-    ProviderDescriptor {
+    planned_provider(
+        TypeDescriptor::of::<dyn Send>("dyn Send"),
+        TypeDescriptor::of::<u8>(name),
+        qualifier,
         primary,
-        ..planned_provider(
-            TypeDescriptor::of::<dyn Send>("dyn Send"),
-            TypeDescriptor::of::<u8>(name),
-            qualifier,
-        )
-    }
+    )
 }
 
 #[test]

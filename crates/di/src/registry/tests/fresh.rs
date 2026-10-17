@@ -15,14 +15,14 @@ static SINGLETON_FRESH_REQUEST: [DependencyDescriptor; 1] = [dependency(
 
 static SINGLETON_FRESH_SHARED_COLLECTION: [DependencyDescriptor; 1] = [dependency(
     "SharedTrait",
-    TypeDescriptor::of::<dyn Send>("SharedTrait"),
+    SHARED_TRAIT,
     Cardinality::Collection,
     ResolutionMode::Fresh,
 )];
 
 static SINGLETON_FRESH_SHARED_KEYED: [DependencyDescriptor; 1] = [dependency(
     "SharedTrait",
-    TypeDescriptor::of::<dyn Send>("SharedTrait"),
+    SHARED_TRAIT,
     Cardinality::Keyed,
     ResolutionMode::Fresh,
 )];
@@ -36,7 +36,7 @@ static REQUEST_FRESH_CONNECTION_TARGET: [DependencyDescriptor; 1] = [dependency(
 
 static CONNECTION_TARGET_DEP_ON_SHARED: [DependencyDescriptor; 1] = [dependency(
     "SharedTrait",
-    TypeDescriptor::of::<dyn Send>("SharedTrait"),
+    SHARED_TRAIT,
     Cardinality::One,
     ResolutionMode::Eager,
 )];

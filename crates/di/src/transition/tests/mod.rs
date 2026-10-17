@@ -4,8 +4,8 @@ use upwell_core::{
 };
 
 use super::*;
-use crate::test_support::{no_dependencies, planned, planned_provider, unbuilt_factories};
-use crate::{ComponentFactoryDescriptor, ProviderDescriptor};
+use crate::ComponentFactoryDescriptor;
+use crate::test_support::{component, no_dependencies, provider, unbuilt_factories};
 
 struct DefaultAuthenticator;
 struct CustomAuthenticator;
@@ -19,6 +19,8 @@ struct Unrelated;
 struct RequestScope;
 
 trait Authenticator: Send + Sync {}
+
+const AUTHENTICATOR: TypeDescriptor = TypeDescriptor::of::<dyn Authenticator>("Authenticator");
 
 impl upwell_core::StaticScope for RequestScope {
     const ID: upwell_core::ScopeId =
@@ -89,24 +91,6 @@ fn changed_empty_factory() -> &'static [ComponentFactoryDescriptor] {
     unbuilt_factories!("changed-empty", no_dependencies)()
 }
 
-fn component<T: 'static>(
-    id: &'static str,
-    factories: fn() -> &'static [ComponentFactoryDescriptor],
-) -> ComponentDescriptor {
-    planned(id, TypeDescriptor::of::<T>(id), factories)
-}
-
-fn provider<T: 'static>(qualifier: &'static str, primary: bool) -> ProviderDescriptor {
-    ProviderDescriptor {
-        primary,
-        ..planned_provider(
-            TypeDescriptor::of::<dyn Authenticator>("Authenticator"),
-            TypeDescriptor::of::<T>(std::any::type_name::<T>()),
-            qualifier,
-        )
-    }
-}
-
 fn registry(custom: bool) -> ComponentRegistry {
     let mut components = vec![
         component::<DefaultAuthenticator>("default-authenticator", empty_factory),
@@ -121,14 +105,22 @@ fn registry(custom: bool) -> ComponentRegistry {
         component::<FixedDependent>("fixed-dependent", dependent_factory),
         component::<Unrelated>("unrelated", empty_factory),
     ];
-    let mut providers = vec![provider::<DefaultAuthenticator>("default", !custom)];
+    let mut providers = vec![provider::<DefaultAuthenticator>(
+        AUTHENTICATOR,
+        "default",
+        !custom,
+    )];
 
     if custom {
         components.insert(
             1,
             component::<CustomAuthenticator>("custom-authenticator", empty_factory),
         );
-        providers.push(provider::<CustomAuthenticator>("custom", true));
+        providers.push(provider::<CustomAuthenticator>(
+            AUTHENTICATOR,
+            "custom",
+            true,
+        ));
     }
 
     ComponentRegistry {

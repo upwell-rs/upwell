@@ -10,8 +10,9 @@ static DEFAULT_BEFORE_CUSTOM: [ProviderOrder; 1] = [ProviderOrder {
 
 #[test]
 fn provider_fallback_uses_existing_selection_after_filtering() {
-    let default = component::<DefaultAuthenticator>("default-authenticator", None);
-    let custom = component::<CustomAuthenticator>("custom-authenticator", Some(&CUSTOM_ENABLED));
+    let default = component::<DefaultAuthenticator>("default-authenticator", factory);
+    let custom = component::<CustomAuthenticator>("custom-authenticator", factory)
+        .with_condition(&CUSTOM_ENABLED);
     let providers = vec![
         provider::<DefaultAuthenticator>(
             TypeDescriptor::of::<dyn Authenticator>("Authenticator"),
@@ -72,8 +73,9 @@ fn provider_fallback_uses_existing_selection_after_filtering() {
 
 #[test]
 fn ordering_constraints_to_inactive_components_do_not_invalidate_the_candidate() {
-    let default = component::<DefaultAuthenticator>("default-authenticator", None);
-    let custom = component::<CustomAuthenticator>("custom-authenticator", Some(&CUSTOM_ENABLED));
+    let default = component::<DefaultAuthenticator>("default-authenticator", factory);
+    let custom = component::<CustomAuthenticator>("custom-authenticator", factory)
+        .with_condition(&CUSTOM_ENABLED);
     let mut default_provider = provider::<DefaultAuthenticator>(
         TypeDescriptor::of::<dyn Authenticator>("Authenticator"),
         "default",
@@ -106,8 +108,8 @@ fn ordering_constraints_to_inactive_components_do_not_invalidate_the_candidate()
 
 #[test]
 fn inactive_dependencies_are_ignored_but_active_dependencies_still_validate() {
-    let mut conditional =
-        component::<CustomAuthenticator>("custom-authenticator", Some(&CUSTOM_ENABLED));
+    let mut conditional = component::<CustomAuthenticator>("custom-authenticator", factory)
+        .with_condition(&CUSTOM_ENABLED);
     conditional.factories = missing_factory;
     let registry = ComponentRegistry {
         components: vec![conditional],

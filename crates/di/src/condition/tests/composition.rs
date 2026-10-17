@@ -24,7 +24,7 @@ fn dependency_observation_distinguishes_fixed_and_live_handles() {
 
 #[test]
 fn provider_mapping_identity_is_structural_and_unambiguous() {
-    let component = component::<CustomAuthenticator>("custom:auth", None);
+    let component = component::<CustomAuthenticator>("custom:auth", factory);
     let provider = provider::<CustomAuthenticator>(
         TypeDescriptor::of::<dyn Authenticator>("Authenticator"),
         "qualified:value",
@@ -55,7 +55,7 @@ fn all_and_any_evaluate_every_child_in_stable_order() {
     static CHILDREN: [ConditionDescriptor; 2] = [FALSE, TRUE];
     static ROOT: ConditionDescriptor = ConditionDescriptor::all("root", &CHILDREN);
     let registry = ComponentRegistry {
-        components: vec![component::<ComponentA>("a", Some(&ROOT))],
+        components: vec![component::<ComponentA>("a", factory).with_condition(&ROOT)],
         providers: Vec::new(),
     };
     let catalog = ConditionCatalog::new(&registry, facts()).expect("catalog validates");
@@ -86,11 +86,11 @@ fn empty_all_and_any_have_boolean_identity_values() {
     static ALL: ConditionDescriptor = ConditionDescriptor::all("empty-all", &EMPTY);
     static ANY: ConditionDescriptor = ConditionDescriptor::any("empty-any", &EMPTY);
     let all_registry = ComponentRegistry {
-        components: vec![component::<ComponentA>("all", Some(&ALL))],
+        components: vec![component::<ComponentA>("all", factory).with_condition(&ALL)],
         providers: Vec::new(),
     };
     let any_registry = ComponentRegistry {
-        components: vec![component::<ComponentB>("any", Some(&ANY))],
+        components: vec![component::<ComponentB>("any", factory).with_condition(&ANY)],
         providers: Vec::new(),
     };
 
@@ -110,7 +110,7 @@ fn empty_all_and_any_have_boolean_identity_values() {
 #[test]
 fn fact_snapshot_rejects_missing_unknown_duplicate_and_wrong_kind_values() {
     let registry = ComponentRegistry {
-        components: vec![component::<ComponentA>("a", Some(&CUSTOM_ENABLED))],
+        components: vec![component::<ComponentA>("a", factory).with_condition(&CUSTOM_ENABLED)],
         providers: Vec::new(),
     };
     let catalog = ConditionCatalog::new(&registry, facts()).expect("catalog validates");

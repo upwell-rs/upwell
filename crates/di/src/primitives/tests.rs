@@ -1,11 +1,12 @@
-use std::{any::TypeId, collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::{any::TypeId, collections::HashMap, sync::Arc};
 
 use upwell_core::{ResolverSet, ScopeId, StaticScope, Transient, TypeDescriptor};
 
 use super::*;
+use crate::test_support::test_component;
 use crate::{
-    BoxedComponent, ComponentDescriptor, ComponentFactoryDescriptor, ScopeRegistry,
-    descriptors::component::from_boxed,
+    BoxedComponent, Component, ComponentDescriptor, ProviderDescriptor, ProviderOf, ScopeRegistry,
+    factories,
 };
 
 const VISIBLE_SCOPE_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/fresh-visible");
@@ -70,178 +71,48 @@ impl BranchProvider for SiblingSeedProvider {
     }
 }
 
-fn no_dependencies() -> Vec<DependencyDescriptor> {
-    Vec::new()
+test_component!(VisibleProvider, "visible-provider", provides dyn BranchProvider);
+test_component!(SiblingPrimaryProvider, "sibling-primary-provider", provides dyn BranchProvider);
+test_component!(TransientProvider, "transient-provider", provides dyn BranchProvider);
+test_component!(SiblingSeedProvider, "sibling-seed-provider", provides dyn BranchProvider);
+
+async fn visible() -> VisibleProvider {
+    VisibleProvider
 }
 
-fn visible_factory<'a>(
-    _: &'a mut ComponentConstructionContext,
-) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + 'a>> {
-    Box::pin(async {
-        let handle = Arc::new(VisibleProvider);
-
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<VisibleProvider>("VisibleProvider"),
-            value: Box::new(Injectable::into_stored(handle)),
-        })
-    })
+async fn sibling() -> SiblingPrimaryProvider {
+    SiblingPrimaryProvider
 }
 
-fn sibling_factory<'a>(
-    _: &'a mut ComponentConstructionContext,
-) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + 'a>> {
-    Box::pin(async {
-        let handle = Arc::new(SiblingPrimaryProvider);
-
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<SiblingPrimaryProvider>("SiblingPrimaryProvider"),
-            value: Box::new(Injectable::into_stored(handle)),
-        })
-    })
-}
-
-fn transient_factory<'a>(
-    _: &'a mut ComponentConstructionContext,
-) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + 'a>> {
-    Box::pin(async {
-        let handle = Arc::new(TransientProvider);
-
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<TransientProvider>("TransientProvider"),
-            value: Box::new(Injectable::into_stored(handle)),
-        })
-    })
-}
-
-static VISIBLE_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: visible_factory,
-    dependencies: no_dependencies,
-    default: false,
-}];
-
-static SIBLING_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: sibling_factory,
-    dependencies: no_dependencies,
-    default: false,
-}];
-
-static TRANSIENT_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: transient_factory,
-    dependencies: no_dependencies,
-    default: false,
-}];
-
-fn visible_factories() -> &'static [ComponentFactoryDescriptor] {
-    &VISIBLE_FACTORY
-}
-
-fn sibling_factories() -> &'static [ComponentFactoryDescriptor] {
-    &SIBLING_FACTORY
-}
-
-fn transient_factories() -> &'static [ComponentFactoryDescriptor] {
-    &TRANSIENT_FACTORY
+async fn transient() -> TransientProvider {
+    TransientProvider
 }
 
 fn visible_descriptor() -> ComponentDescriptor {
-    ComponentDescriptor {
-        id: "visible-provider",
-        name: "VisibleProvider",
-        ty: TypeDescriptor::of::<VisibleProvider>("VisibleProvider"),
-        scope: &VisibleScope,
-        condition: None,
-        factories: visible_factories,
-        hooks: upwell_hooks::no_hooks,
-        generation_snapshot: None,
-    }
+    ComponentDescriptor::of::<VisibleProvider>()
+        .with_scope(&VisibleScope)
+        .with_factories(factories!["static" => visible])
 }
 
 fn sibling_descriptor() -> ComponentDescriptor {
-    ComponentDescriptor {
-        id: "sibling-primary-provider",
-        name: "SiblingPrimaryProvider",
-        ty: TypeDescriptor::of::<SiblingPrimaryProvider>("SiblingPrimaryProvider"),
-        scope: &SiblingScope,
-        condition: None,
-        factories: sibling_factories,
-        hooks: upwell_hooks::no_hooks,
-        generation_snapshot: None,
-    }
+    ComponentDescriptor::of::<SiblingPrimaryProvider>()
+        .with_scope(&SiblingScope)
+        .with_factories(factories!["static" => sibling])
 }
 
 fn transient_descriptor() -> ComponentDescriptor {
-    ComponentDescriptor {
-        id: "transient-provider",
-        name: "TransientProvider",
-        ty: TypeDescriptor::of::<TransientProvider>("TransientProvider"),
-        scope: &Transient,
-        condition: None,
-        factories: transient_factories,
-        hooks: upwell_hooks::no_hooks,
-        generation_snapshot: None,
-    }
+    ComponentDescriptor::of::<TransientProvider>()
+        .with_scope(&Transient)
+        .with_factories(factories!["static" => transient])
 }
 
-fn erase_visible(component: &BoxedComponent) -> BoxedComponent {
-    let concrete = from_boxed::<Arc<VisibleProvider>>(component).expect("visible provider stored");
-    let erased: Arc<dyn BranchProvider> = concrete;
-
-    BoxedComponent {
-        ty: TypeDescriptor::of::<dyn BranchProvider>("dyn BranchProvider"),
-        value: Box::new(Injectable::into_stored(erased)),
-    }
-}
-
-fn erase_sibling(component: &BoxedComponent) -> BoxedComponent {
-    let concrete =
-        from_boxed::<Arc<SiblingPrimaryProvider>>(component).expect("sibling provider stored");
-    let erased: Arc<dyn BranchProvider> = concrete;
-
-    BoxedComponent {
-        ty: TypeDescriptor::of::<dyn BranchProvider>("dyn BranchProvider"),
-        value: Box::new(Injectable::into_stored(erased)),
-    }
-}
-
-fn erase_transient(component: &BoxedComponent) -> BoxedComponent {
-    let concrete =
-        from_boxed::<Arc<TransientProvider>>(component).expect("transient provider stored");
-    let erased: Arc<dyn BranchProvider> = concrete;
-
-    BoxedComponent {
-        ty: TypeDescriptor::of::<dyn BranchProvider>("dyn BranchProvider"),
-        value: Box::new(Injectable::into_stored(erased)),
-    }
-}
-
-fn erase_sibling_seed(component: &BoxedComponent) -> BoxedComponent {
-    let concrete =
-        from_boxed::<Arc<SiblingSeedProvider>>(component).expect("sibling seed provider stored");
-    let erased: Arc<dyn BranchProvider> = concrete;
-
-    BoxedComponent {
-        ty: TypeDescriptor::of::<dyn BranchProvider>("dyn BranchProvider"),
-        value: Box::new(Injectable::into_stored(erased)),
-    }
-}
-
-fn branch_provider(
-    concrete_ty: TypeDescriptor,
-    primary: bool,
-    erase: fn(&BoxedComponent) -> BoxedComponent,
-) -> ProviderDescriptor {
-    ProviderDescriptor {
-        trait_ty: TypeDescriptor::of::<dyn BranchProvider>("dyn BranchProvider"),
-        concrete_ty,
-        qualifier: "shared",
-        primary,
-        priority: 0,
-        ordering: &[],
-        erase,
-    }
+/// The non-primary mapping of `T` to `dyn BranchProvider` under the repeated `"shared"`
+/// qualifier.
+fn branch_provider<T>() -> ProviderDescriptor
+where
+    T: Component + ProviderOf<dyn BranchProvider>,
+{
+    ProviderDescriptor::of::<T, dyn BranchProvider>("dyn BranchProvider").qualifier("shared")
 }
 
 async fn sibling_branches() -> (Arc<ScopeContainer>, Arc<ScopeContainer>) {
@@ -258,9 +129,9 @@ async fn sibling_branches() -> (Arc<ScopeContainer>, Arc<ScopeContainer>) {
         .map(|descriptor| (descriptor.ty.type_id, descriptor))
         .collect::<HashMap<TypeId, ComponentDescriptor>>();
     let providers = vec![
-        branch_provider(sibling.ty, true, erase_sibling),
-        branch_provider(visible.ty, false, erase_visible),
-        branch_provider(sibling_seed.ty, false, erase_sibling_seed),
+        branch_provider::<SiblingPrimaryProvider>().primary(),
+        branch_provider::<VisibleProvider>(),
+        branch_provider::<SiblingSeedProvider>(),
     ];
     let registry = Arc::new(
         ScopeRegistry::new(HashMap::new(), components, providers, HashMap::new())
@@ -295,8 +166,8 @@ async fn transient_and_inaccessible_provider() -> Arc<ScopeContainer> {
         .map(|descriptor| (descriptor.ty.type_id, descriptor))
         .collect();
     let providers = vec![
-        branch_provider(sibling.ty, true, erase_sibling),
-        branch_provider(transient.ty, false, erase_transient),
+        branch_provider::<SiblingPrimaryProvider>().primary(),
+        branch_provider::<TransientProvider>(),
     ];
     let registry = Arc::new(
         ScopeRegistry::new(
@@ -325,7 +196,7 @@ async fn accessible_factoryless_provider() -> Arc<ScopeContainer> {
         &VisibleScope,
     );
     let components = [(manual.ty.type_id, manual)].into_iter().collect();
-    let providers = vec![branch_provider(manual.ty, false, erase_sibling_seed)];
+    let providers = vec![branch_provider::<SiblingSeedProvider>()];
     let registry = Arc::new(
         ScopeRegistry::new(HashMap::new(), components, providers, HashMap::new())
             .expect("scope registry validates"),
@@ -334,10 +205,7 @@ async fn accessible_factoryless_provider() -> Arc<ScopeContainer> {
         ScopeContainer::build_root(&[], Vec::new(), ResolverSet::new(), Arc::clone(&registry))
             .await
             .expect("root builds");
-    let seed = BoxedComponent {
-        ty: manual.ty,
-        value: Box::new(Injectable::into_stored(Arc::new(SiblingSeedProvider))),
-    };
+    let seed = BoxedComponent::new(SiblingSeedProvider);
 
     ScopeContainer::open_child(&VisibleScope, root, registry, &[], vec![seed])
         .await

@@ -11,8 +11,8 @@ static B_TO_A_TARGET: ConditionDescriptor =
 fn availability_cycles_are_rejected_with_canonical_edges() {
     let first = ComponentRegistry {
         components: vec![
-            component::<ComponentB>("b", Some(&B_TO_A)),
-            component::<ComponentA>("a", Some(&A_TO_B)),
+            component::<ComponentB>("b", factory).with_condition(&B_TO_A),
+            component::<ComponentA>("a", factory).with_condition(&A_TO_B),
         ],
         providers: Vec::new(),
     };
@@ -39,7 +39,7 @@ fn availability_cycles_are_rejected_with_canonical_edges() {
 fn self_cycles_are_rejected() {
     static SELF: ConditionDescriptor = ConditionDescriptor::component_eligible("self", "self");
     let registry = ComponentRegistry {
-        components: vec![component::<ComponentA>("self", Some(&SELF))],
+        components: vec![component::<ComponentA>("self", factory).with_condition(&SELF)],
         providers: Vec::new(),
     };
 
@@ -68,7 +68,8 @@ fn manual_and_non_singleton_conditions_are_rejected() {
         components: vec![manual],
         providers: Vec::new(),
     };
-    let mut transient = component::<ComponentB>("transient", Some(&CUSTOM_ENABLED));
+    let mut transient =
+        component::<ComponentB>("transient", factory).with_condition(&CUSTOM_ENABLED);
     transient.scope = &Transient;
     let transient_registry = ComponentRegistry {
         components: vec![transient],
@@ -90,7 +91,8 @@ fn manual_and_non_singleton_conditions_are_rejected() {
 
 #[test]
 fn manual_registration_cannot_silently_replace_a_conditional_factory() {
-    let conditional = component::<ComponentA>("conditional", Some(&CUSTOM_ENABLED));
+    let conditional =
+        component::<ComponentA>("conditional", factory).with_condition(&CUSTOM_ENABLED);
     let manual = ComponentDescriptor::manual(
         "manual",
         "manual",

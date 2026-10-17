@@ -30,6 +30,7 @@ fn provider_as<T: 'static, P: ?Sized + 'static>(
         TypeDescriptor::of::<P>("provider trait"),
         TypeDescriptor::of::<T>(name),
         qualifier,
+        false,
     )
     .ordering(ordering)
 }

@@ -4,8 +4,9 @@ use super::*;
 
 #[test]
 fn changed_facts_reuse_unrelated_condition_decisions() {
-    let default = component::<DefaultAuthenticator>("default-authenticator", None);
-    let custom = component::<CustomAuthenticator>("custom-authenticator", Some(&CUSTOM_ENABLED));
+    let default = component::<DefaultAuthenticator>("default-authenticator", factory);
+    let custom = component::<CustomAuthenticator>("custom-authenticator", factory)
+        .with_condition(&CUSTOM_ENABLED);
     let registry = ComponentRegistry {
         components: vec![custom, default],
         providers: Vec::new(),
@@ -31,8 +32,9 @@ fn changed_facts_reuse_unrelated_condition_decisions() {
 
 #[test]
 fn incremental_evaluation_rejects_a_different_catalog_with_the_same_component_ids() {
-    let default = component::<DefaultAuthenticator>("default-authenticator", None);
-    let custom = component::<CustomAuthenticator>("custom-authenticator", Some(&CUSTOM_ENABLED));
+    let default = component::<DefaultAuthenticator>("default-authenticator", factory);
+    let custom = component::<CustomAuthenticator>("custom-authenticator", factory)
+        .with_condition(&CUSTOM_ENABLED);
     let registry = ComponentRegistry {
         components: vec![custom, default],
         providers: Vec::new(),

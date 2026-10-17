@@ -8,10 +8,10 @@ static MODE_EQUALS: ConditionDescriptor =
 #[test]
 fn fact_values_and_literals_are_redacted() {
     let registry = ComponentRegistry {
-        components: vec![component::<CustomAuthenticator>(
-            "custom-authenticator",
-            Some(&MODE_EQUALS),
-        )],
+        components: vec![
+            component::<CustomAuthenticator>("custom-authenticator", factory)
+                .with_condition(&MODE_EQUALS),
+        ],
         providers: Vec::new(),
     };
     let catalog = ConditionCatalog::new(&registry, facts()).expect("catalog validates");
@@ -66,8 +66,8 @@ static FACT_AND_ELIGIBILITY_CONDITION: ConditionDescriptor =
 #[test]
 fn callbacks_read_declared_facts_and_eligibility_in_one_expression() {
     let registry = registry(vec![
-        component::<ComponentA>("a", None),
-        component::<ComponentB>("b", Some(&FACT_AND_ELIGIBILITY_CONDITION)),
+        component::<ComponentA>("a", factory),
+        component::<ComponentB>("b", factory).with_condition(&FACT_AND_ELIGIBILITY_CONDITION),
     ]);
     let catalog = ConditionCatalog::new(&registry, facts()).expect("catalog validates");
 
@@ -105,10 +105,9 @@ static UNDECLARED_READ_CONDITION: ConditionDescriptor =
 
 #[test]
 fn reading_an_undeclared_raw_path_fails_the_evaluation() {
-    let registry = registry(vec![component::<ComponentA>(
-        "a",
-        Some(&UNDECLARED_READ_CONDITION),
-    )]);
+    let registry = registry(vec![
+        component::<ComponentA>("a", factory).with_condition(&UNDECLARED_READ_CONDITION),
+    ]);
     let catalog = ConditionCatalog::new(&registry, facts()).expect("catalog validates");
 
     let error = catalog
@@ -146,10 +145,9 @@ static MISDESCRIBED_CONDITION: ConditionDescriptor =
 
 #[test]
 fn expression_reads_must_be_declared_inputs() {
-    let registry = registry(vec![component::<ComponentA>(
-        "a",
-        Some(&MISDESCRIBED_CONDITION),
-    )]);
+    let registry = registry(vec![
+        component::<ComponentA>("a", factory).with_condition(&MISDESCRIBED_CONDITION),
+    ]);
 
     let error = match ConditionCatalog::new(&registry, facts()) {
         Ok(_) => panic!("an undeclared expression read validates"),
@@ -183,8 +181,8 @@ static B_READS_A: ConditionDescriptor = ConditionDescriptor::component_eligible(
 #[test]
 fn eligibility_inputs_of_callbacks_join_the_availability_graph() {
     let registry = registry(vec![
-        component::<ComponentA>("a", Some(&READS_B_CONDITION)),
-        component::<ComponentB>("b", Some(&B_READS_A)),
+        component::<ComponentA>("a", factory).with_condition(&READS_B_CONDITION),
+        component::<ComponentB>("b", factory).with_condition(&B_READS_A),
     ]);
 
     let error = match ConditionCatalog::new(&registry, facts()) {

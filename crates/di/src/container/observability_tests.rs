@@ -1,48 +1,20 @@
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 
-use upwell_core::{Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode};
+use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode};
 
 use super::*;
-use crate::{
-    BoxedComponent, ComponentConstructionContext, ComponentFactoryDescriptor, ComponentRegistry,
-};
-
-fn panic_factory(
-    _: &mut ComponentConstructionContext,
-) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + '_>> {
-    panic!("observability tests do not construct components")
-}
+use crate::test_support::{component, unbuilt_factories};
+use crate::{ComponentFactoryDescriptor, ComponentRegistry};
 
 fn dependency<T: 'static>(resolution: ResolutionMode) -> DependencyDescriptor {
-    DependencyDescriptor {
-        name: std::any::type_name::<T>(),
-        ty: upwell_core::TypeDescriptor::of::<T>(std::any::type_name::<T>()),
-        cardinality: Cardinality::One,
-        optional: false,
-        dynamic: false,
-        qualifier: None,
-        config: false,
-        resolution,
-        observation: DependencyObservation::Snapshot,
-    }
-}
+    let name = std::any::type_name::<T>();
 
-fn descriptor<T: 'static>(
-    id: &'static str,
-    factories: fn() -> &'static [ComponentFactoryDescriptor],
-) -> ComponentDescriptor {
-    ComponentDescriptor {
-        id,
-        name: id,
-        ty: upwell_core::TypeDescriptor::of::<T>(id),
-        scope: &Singleton,
-        condition: None,
-        factories,
-        hooks: upwell_hooks::no_hooks,
-        generation_snapshot: None,
-    }
+    crate::test_support::dependency(
+        name,
+        upwell_core::TypeDescriptor::of::<T>(name),
+        Cardinality::One,
+        resolution,
+    )
 }
 
 struct A;
@@ -86,85 +58,36 @@ fn a_to_b_and_c_dependencies() -> Vec<DependencyDescriptor> {
     ]
 }
 
-static A_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: panic_factory,
-    dependencies: a_dependencies,
-    default: true,
-}];
-static B_EAGER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: panic_factory,
-    dependencies: b_eager_dependencies,
-    default: true,
-}];
-static B_DEFERRED_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: panic_factory,
-    dependencies: b_deferred_dependencies,
-    default: true,
-}];
-static C_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: panic_factory,
-    dependencies: c_dependencies,
-    default: true,
-}];
-static C_TO_D_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: panic_factory,
-    dependencies: c_to_d_dependencies,
-    default: true,
-}];
-static D_TO_C_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: panic_factory,
-    dependencies: d_to_c_dependencies,
-    default: true,
-}];
-static E_TO_A_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: panic_factory,
-    dependencies: e_to_a_dependencies,
-    default: true,
-}];
-static A_TO_B_AND_C_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: panic_factory,
-    dependencies: a_to_b_and_c_dependencies,
-    default: true,
-}];
-
 fn a_factory() -> &'static [ComponentFactoryDescriptor] {
-    &A_FACTORY
+    unbuilt_factories!("static", a_dependencies, true)()
 }
 
 fn b_eager_factory() -> &'static [ComponentFactoryDescriptor] {
-    &B_EAGER_FACTORY
+    unbuilt_factories!("static", b_eager_dependencies, true)()
 }
 
 fn b_deferred_factory() -> &'static [ComponentFactoryDescriptor] {
-    &B_DEFERRED_FACTORY
+    unbuilt_factories!("static", b_deferred_dependencies, true)()
 }
 
 fn c_factory() -> &'static [ComponentFactoryDescriptor] {
-    &C_FACTORY
+    unbuilt_factories!("static", c_dependencies, true)()
 }
 
 fn c_to_d_factory() -> &'static [ComponentFactoryDescriptor] {
-    &C_TO_D_FACTORY
+    unbuilt_factories!("static", c_to_d_dependencies, true)()
 }
 
 fn d_to_c_factory() -> &'static [ComponentFactoryDescriptor] {
-    &D_TO_C_FACTORY
+    unbuilt_factories!("static", d_to_c_dependencies, true)()
 }
 
 fn e_to_a_factory() -> &'static [ComponentFactoryDescriptor] {
-    &E_TO_A_FACTORY
+    unbuilt_factories!("static", e_to_a_dependencies, true)()
 }
 
 fn a_to_b_and_c_factory() -> &'static [ComponentFactoryDescriptor] {
-    &A_TO_B_AND_C_FACTORY
+    unbuilt_factories!("static", a_to_b_and_c_dependencies, true)()
 }
 
 fn selection(components: &[ComponentDescriptor]) -> ProviderSelectionModel {
@@ -179,8 +102,8 @@ fn selection(components: &[ComponentDescriptor]) -> ProviderSelectionModel {
 #[test]
 fn deferred_edges_are_reported_as_cycle_breaks() {
     let components = [
-        descriptor::<A>("a", a_factory),
-        descriptor::<B>("b", b_deferred_factory),
+        component::<A>("a", a_factory),
+        component::<B>("b", b_deferred_factory),
     ];
     let selection = selection(&components);
 
@@ -209,9 +132,9 @@ fn deferred_edges_are_reported_as_cycle_breaks() {
 #[test]
 fn eager_cycles_distinguish_members_from_blocked_components() {
     let components = [
-        descriptor::<C>("c", c_factory),
-        descriptor::<B>("b", b_eager_factory),
-        descriptor::<A>("a", a_factory),
+        component::<C>("c", c_factory),
+        component::<B>("b", b_eager_factory),
+        component::<A>("a", a_factory),
     ];
     let selection = selection(&components);
 
@@ -247,11 +170,11 @@ fn eager_cycles_distinguish_members_from_blocked_components() {
 #[test]
 fn independent_eager_cycles_have_separate_cycle_identities() {
     let components = [
-        descriptor::<E>("e", e_to_a_factory),
-        descriptor::<D>("d", d_to_c_factory),
-        descriptor::<B>("b", b_eager_factory),
-        descriptor::<C>("c", c_to_d_factory),
-        descriptor::<A>("a", a_factory),
+        component::<E>("e", e_to_a_factory),
+        component::<D>("d", d_to_c_factory),
+        component::<B>("b", b_eager_factory),
+        component::<C>("c", c_to_d_factory),
+        component::<A>("a", a_factory),
     ];
     let selection = selection(&components);
 
@@ -294,10 +217,10 @@ fn independent_eager_cycles_have_separate_cycle_identities() {
 #[test]
 fn members_of_one_cycle_are_not_blocked_members_of_another() {
     let components = [
-        descriptor::<D>("d", d_to_c_factory),
-        descriptor::<B>("b", b_eager_factory),
-        descriptor::<C>("c", c_to_d_factory),
-        descriptor::<A>("a", a_to_b_and_c_factory),
+        component::<D>("d", d_to_c_factory),
+        component::<B>("b", b_eager_factory),
+        component::<C>("c", c_to_d_factory),
+        component::<A>("a", a_to_b_and_c_factory),
     ];
     let selection = selection(&components);
 
