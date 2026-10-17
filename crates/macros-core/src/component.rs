@@ -26,7 +26,13 @@ pub fn expand<Ext: ComponentExt>(
     paths: &Paths,
 ) -> syn::Result<TokenStream> {
     let self_ident = item.ident.clone();
-    let whens = when::take(&mut item.attrs)?;
+    let condition = match when::take(&mut item.attrs)
+        .and_then(|whens| Condition::lower(whens, args.scope.as_ref(), paths))
+    {
+        Ok(condition) => condition,
+
+        Err(error) => return Ok(condition_failed(error, &item)),
+    };
 
     if args.retainable {
         for field in &item.fields {
@@ -46,7 +52,6 @@ pub fn expand<Ext: ComponentExt>(
     let injectable = &handle.injectable;
     let provide_impl = di::provide_impl(&self_ident, paths);
     let condition_input = when::component_input(&self_ident, paths);
-    let condition = Condition::lower(whens, args.scope.as_ref(), paths)?;
     let condition_items = &condition.items;
 
     let id = args
@@ -171,6 +176,18 @@ pub fn expand<Ext: ComponentExt>(
 
         #ext
     })
+}
+
+/// Reports a malformed `#[when]` while keeping the item, so its lowered `#[when]` markers still
+/// use the attribute import and the error is not buried under unused-import warnings.
+fn condition_failed(error: syn::Error, item: &ItemStruct) -> TokenStream {
+    let error = error.into_compile_error();
+
+    quote! {
+        #error
+
+        #item
+    }
 }
 
 fn contains_live_slot(ty: &Type) -> bool {

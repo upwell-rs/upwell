@@ -15,11 +15,3 @@ error: duplicate `#[when]` condition id `when`; give each condition a distinct e
    |
 14 | #[when(id = "when", true)]
    |             ^^^^^^
-
-warning: unused import: `when`
- --> tests/ui/when/duplicate_ids.rs:1:25
-  |
-1 | use upwell::{component, when};
-  |                         ^^^^
-  |
-  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
