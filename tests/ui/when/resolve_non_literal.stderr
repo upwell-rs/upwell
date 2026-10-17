@@ -5,12 +5,10 @@ error: `resolve` takes one string-literal config path, so the condition declares
   |                ^^^^
 
 error: `resolve` takes one string-literal config path, so the condition declares it statically
-  --> tests/ui/when/resolve_non_literal.rs:10:1
+  --> tests/ui/when/resolve_non_literal.rs:11:8
    |
-10 | #[component]
-   | ^^^^^^^^^^^^
-   |
-   = note: this error originates in the attribute macro `component` (in Nightly builds, run with -Z macro-backtrace for more info)
+11 | #[when(resolve::<bool>() == Some(true))]
+   |        ^^^^^^^^^^^^^^^^^
 
 warning: unused import: `upwell::condition::resolve`
  --> tests/ui/when/resolve_non_literal.rs:1:5

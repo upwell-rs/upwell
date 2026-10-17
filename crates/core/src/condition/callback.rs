@@ -222,7 +222,8 @@ pub struct ConditionExpression {
 #[derive(Clone, Copy, Debug)]
 pub struct ConditionInputRead {
     pub input: ConditionInputId,
-    /// The dotted field path read from a config input; empty for whole-value reads.
+    /// The dotted field path read from a typed config input; empty for whole-value reads,
+    /// eligibility reads and raw `resolve` paths, whose declared path is the read.
     pub field: &'static str,
     pub source: DescriptorSource,
 }

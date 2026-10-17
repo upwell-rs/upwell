@@ -156,6 +156,9 @@ priority = 50
 
 [profile.ci-critical]
 inherits = "default"
+# The trybuild UI suite compiles a fresh project against the registry, so it cannot run from an
+# offline test archive; `just test-ui` and the archive-building CI job run it from source.
+default-filter = "not binary_id(=upwell::when_ui)"
 slow-timeout = { period = "30s", terminate-after = 4, grace-period = "10s", on-timeout = "fail" }
 global-timeout = "20m"
 
@@ -168,6 +171,9 @@ flaky-fail-status = "failure"
 
 [profile.ci-extended]
 inherits = "default"
+# The trybuild UI suite compiles a fresh project against the registry, so it cannot run from an
+# offline test archive; `just test-ui` and the archive-building CI job run it from source.
+default-filter = "not binary_id(=upwell::when_ui)"
 slow-timeout = { period = "60s", terminate-after = 5, grace-period = "10s", on-timeout = "fail" }
 global-timeout = "40m"
 
