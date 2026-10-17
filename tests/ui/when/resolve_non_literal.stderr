@@ -19,9 +19,3 @@ warning: unused import: `upwell::condition::resolve`
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
   |
   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-
-warning: unused import: `when`
- --> tests/ui/when/resolve_non_literal.rs:2:25
-  |
-2 | use upwell::{component, when};
-  |                         ^^^^

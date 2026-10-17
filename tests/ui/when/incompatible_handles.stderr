@@ -1,0 +1,13 @@
+error[E0609]: no field `enabled` on type `Eligibility`
+  --> tests/ui/when/incompatible_handles.rs:17:23
+   |
+17 | #[when(AuditTransport.enabled)]
+   |                       ^^^^^^^ unknown field
+   |
+   = note: available field is: `0`
+
+error[E0599]: no method named `eligible` found for reference `&AuditConfig` in the current scope
+  --> tests/ui/when/incompatible_handles.rs:21:20
+   |
+21 | #[when(AuditConfig.eligible())]
+   |                    ^^^^^^^^ method not found in `&AuditConfig`
