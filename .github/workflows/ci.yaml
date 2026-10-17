@@ -166,7 +166,8 @@ jobs:
       - name: Upload nextest archive
         uses: actions/upload-artifact@v4
         with:
-          name: nextest-archive-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          name: nextest-archive-linux-${{ github.run_id }}
+          overwrite: true
           path: nextest-linux.tar.zst
           compression-level: 0
           if-no-files-found: error
@@ -196,7 +197,8 @@ jobs:
       - name: Upload nextest archive
         uses: actions/upload-artifact@v4
         with:
-          name: nextest-archive-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          name: nextest-archive-windows-${{ github.run_id }}
+          overwrite: true
           path: nextest-windows.tar.zst
           compression-level: 0
           if-no-files-found: error
@@ -223,7 +225,7 @@ jobs:
       - name: Download nextest archive
         uses: actions/download-artifact@v5
         with:
-          name: nextest-archive-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          name: nextest-archive-linux-${{ github.run_id }}
           path: nextest-archive
       - name: Run critical tests
         env:
@@ -240,7 +242,8 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: junit-critical-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          name: junit-critical-linux-${{ github.run_id }}
+          overwrite: true
           path: target/nextest/ci-critical/junit.xml
           if-no-files-found: error
 
@@ -266,7 +269,7 @@ jobs:
       - name: Download nextest archive
         uses: actions/download-artifact@v5
         with:
-          name: nextest-archive-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          name: nextest-archive-linux-${{ github.run_id }}
           path: nextest-archive
       - name: Run extended tests
         env:
@@ -283,7 +286,8 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: junit-extended-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          name: junit-extended-linux-${{ github.run_id }}
+          overwrite: true
           path: target/nextest/ci-extended/junit.xml
           if-no-files-found: error
 
@@ -309,7 +313,7 @@ jobs:
       - name: Download nextest archive
         uses: actions/download-artifact@v5
         with:
-          name: nextest-archive-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          name: nextest-archive-windows-${{ github.run_id }}
           path: nextest-archive
       - name: Run critical tests
         env:
@@ -326,7 +330,8 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: junit-critical-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          name: junit-critical-windows-${{ github.run_id }}
+          overwrite: true
           path: target/nextest/ci-critical/junit.xml
           if-no-files-found: error
 
@@ -352,7 +357,7 @@ jobs:
       - name: Download nextest archive
         uses: actions/download-artifact@v5
         with:
-          name: nextest-archive-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          name: nextest-archive-windows-${{ github.run_id }}
           path: nextest-archive
       - name: Run extended tests
         env:
@@ -369,7 +374,8 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: junit-extended-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          name: junit-extended-windows-${{ github.run_id }}
+          overwrite: true
           path: target/nextest/ci-extended/junit.xml
           if-no-files-found: error
 
@@ -392,7 +398,7 @@ jobs:
       - name: Download JUnit reports
         uses: actions/download-artifact@v5
         with:
-          pattern: junit-*-${{ github.run_id }}-${{ github.run_attempt }}
+          pattern: junit-*-${{ github.run_id }}
           path: test-results
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
