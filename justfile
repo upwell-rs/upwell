@@ -72,6 +72,7 @@ critical_filter := '''
 test:
     just test-critical
     just test-extended
+    just test-ui
     just test-doc
 
 test-critical:
@@ -99,6 +100,9 @@ test-extended:
         --locked \
         --profile ci-extended \
         --filterset 'all() - ({{ critical_filter }})'
+
+test-ui:
+    cargo nextest run -p upwell --all-features --locked --test when_ui
 
 test-doc:
     cargo test --doc --workspace --all-features --locked

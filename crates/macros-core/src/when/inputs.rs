@@ -155,10 +155,14 @@ impl Lowering {
             })) if call.args.len() == 1 => path.clone(),
 
             _ => {
-                self.error(syn::Error::new_spanned(
-                    &call.args,
-                    "`resolve` takes one string-literal config path, so the condition declares it statically",
-                ));
+                let message = "`resolve` takes one string-literal config path, so the condition declares it statically";
+                let error = if call.args.is_empty() {
+                    syn::Error::new_spanned(call, message)
+                } else {
+                    syn::Error::new_spanned(&call.args, message)
+                };
+
+                self.error(error);
 
                 return;
             }

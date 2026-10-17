@@ -55,7 +55,7 @@ fn assert_source(source: DescriptorSource, needle: &str) {
     let (line, column) = location(needle);
 
     assert!(
-        source.file.ends_with(FIXTURE_FILE),
+        source.file.replace('\\', "/").ends_with(FIXTURE_FILE),
         "the source names the fixture, got {}",
         source.file
     );

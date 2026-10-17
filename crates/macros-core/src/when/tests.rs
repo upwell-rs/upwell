@@ -176,15 +176,19 @@ fn malformed_attributes_are_rejected() {
 
 #[test]
 fn content_ids_ignore_formatting() {
-    let compact: Expr = parse_quote!(AuthConfig.audit && AuditTransport.eligible());
-    let spaced: Expr = parse_quote!(AuthConfig.audit && AuditTransport.eligible());
-    let other: Expr = parse_quote!(AuthConfig.audit || AuditTransport.eligible());
+    let compact = "AuthConfig.audit&&AuditTransport.eligible()";
+    let spaced = "AuthConfig . audit\n    && AuditTransport.eligible( )";
+    let other = "AuthConfig.audit || AuditTransport.eligible()";
 
-    let id = |expr: &Expr| content_id(&expr.to_token_stream().to_string());
+    let id = |source: &str| {
+        let expr = syn::parse_str::<Expr>(source).expect("the expression parses");
 
-    assert_eq!(id(&compact), id(&spaced));
-    assert_ne!(id(&compact), id(&other));
-    assert!(id(&compact).starts_with("when-"));
+        content_id(&expr.to_token_stream().to_string())
+    };
+
+    assert_eq!(id(compact), id(spaced));
+    assert_ne!(id(compact), id(other));
+    assert!(id(compact).starts_with("when-"));
 }
 
 #[test]
