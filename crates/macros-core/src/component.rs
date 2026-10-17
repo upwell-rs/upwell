@@ -17,6 +17,7 @@ use syn::{GenericArgument, ItemStruct, LitStr, PathArguments, Type};
 use crate::attr::ComponentArgs;
 use crate::extend::{ComponentContext, ComponentExt};
 use crate::paths::Paths;
+use crate::when::{self, Condition};
 use crate::{di, handle, inject, provide};
 
 pub fn expand<Ext: ComponentExt>(
@@ -25,6 +26,13 @@ pub fn expand<Ext: ComponentExt>(
     paths: &Paths,
 ) -> syn::Result<TokenStream> {
     let self_ident = item.ident.clone();
+    let condition = match when::take(&mut item.attrs)
+        .and_then(|whens| Condition::lower(whens, args.scope.as_ref(), paths))
+    {
+        Ok(condition) => condition,
+
+        Err(error) => return Ok(condition_failed(error, &item)),
+    };
 
     if args.retainable {
         for field in &item.fields {
@@ -43,6 +51,8 @@ pub fn expand<Ext: ComponentExt>(
     let handle_method = &handle.method;
     let injectable = &handle.injectable;
     let provide_impl = di::provide_impl(&self_ident, paths);
+    let condition_input = when::component_input(&self_ident, paths);
+    let condition_items = &condition.items;
 
     let id = args
         .id
@@ -104,6 +114,7 @@ pub fn expand<Ext: ComponentExt>(
         &scope_path,
         &registrations_slice,
         emit_default,
+        &condition.root,
         paths,
     );
     let component = paths.core("Component");
@@ -139,9 +150,13 @@ pub fn expand<Ext: ComponentExt>(
 
         #provide_impl
 
+        #condition_input
+
         #registrations_infra
 
         const _: () = {
+            #condition_items
+
             #factory
 
             #explicit
@@ -161,6 +176,18 @@ pub fn expand<Ext: ComponentExt>(
 
         #ext
     })
+}
+
+/// Reports a malformed `#[when]` while keeping the item, so its lowered `#[when]` markers still
+/// use the attribute import and the error is not buried under unused-import warnings.
+fn condition_failed(error: syn::Error, item: &ItemStruct) -> TokenStream {
+    let error = error.into_compile_error();
+
+    quote! {
+        #error
+
+        #item
+    }
 }
 
 fn contains_live_slot(ty: &Type) -> bool {

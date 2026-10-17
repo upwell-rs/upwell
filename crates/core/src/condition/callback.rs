@@ -169,12 +169,31 @@ impl<'a> ConditionContext<'a> {
 
 /// A type that names one condition input, so generated callbacks can declare and read it
 /// by type: a config type yields its staged value, a component yields its [`Eligibility`].
+///
+/// `#[config(path = ..)]` and the component macros implement it; a `#[when]` expression may
+/// only use implementing types as field or method receivers.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be read by a component condition",
+    label = "not a condition input",
+    note = "a `#[when]` receiver must be a `#[config(path = ..)]` type or a component; read other config paths with `resolve(\"<path>\")`"
+)]
 pub trait ConditionInput: 'static {
     type Value<'a>;
 
     const INPUT: ConditionInputId;
 
     fn read<'a>(context: ConditionContext<'a>) -> Option<Self::Value<'a>>;
+}
+
+/// Unwraps a declared input read through [`ConditionInput::read`].
+///
+/// # Panics
+///
+/// Panics when the input is absent. Condition evaluation validates every declared input
+/// before running a callback, so generated callbacks that declare the input never panic here.
+#[doc(hidden)]
+pub fn read_input<T>(value: Option<T>) -> T {
+    value.expect("condition evaluation supplies every declared input")
 }
 
 /// Whether one component or provider mapping is eligible in the candidate generation.
@@ -203,7 +222,8 @@ pub struct ConditionExpression {
 #[derive(Clone, Copy, Debug)]
 pub struct ConditionInputRead {
     pub input: ConditionInputId,
-    /// The dotted field path read from a config input; empty for whole-value reads.
+    /// The dotted field path read from a typed config input; empty for whole-value reads,
+    /// eligibility reads and raw `resolve` paths, whose declared path is the read.
     pub field: &'static str,
     pub source: DescriptorSource,
 }

@@ -2,9 +2,8 @@
 //! custom provider whose availability keys on opposite values of `auth.mode`, a fixed
 //! [`AuthGate`] consumer, a [`ChangeFreeze`] operator policy, an [`AuthWatcher`]
 //! config-reload hook owner, and a [`TransitionAudit`] observer. Every component is an
-//! ordinary `#[component]` whose hooks are `#[hook(..)]` methods; only the two providers'
-//! conditions are attached through the condition builders, until the condition
-//! attributes land (#297).
+//! ordinary `#[component]` whose hooks are `#[hook(..)]` methods, and the two providers'
+//! conditions are `#[when]` attributes.
 //!
 //! Each hook appends what it saw to [`events`]. The statics are per process, and each test
 //! holds [`lock`] so the default `cargo test` threading cannot interleave them.
@@ -17,12 +16,10 @@ use serde::Deserialize;
 use tempfile::TempDir;
 use upwell::config::Toml;
 use upwell::{
-    App, AppError, Cfg, CfgNext, Component, ComponentDescriptor, ComponentRetired,
-    ComponentRetirement, ConditionDescriptor, ConditionFacts, ConditionScalar, ConditionScalarKind,
-    ConfigFactDescriptor, ConfigFactId, ConfigManager, ConfigReload, Descriptor, HookOutcome,
-    NodeAction, PendingTransition, RetirementReason, RuntimeTransitionReport, Shutdown,
-    TransitionAborted, TransitionCommitted, TransitionDecision, TransitionProposal,
-    TransitionVerdict, component, config, injectable, methods,
+    App, AppError, Cfg, CfgNext, Component, ComponentRetired, ComponentRetirement, ConfigManager,
+    ConfigReload, HookOutcome, NodeAction, PendingTransition, RetirementReason,
+    RuntimeTransitionReport, Shutdown, TransitionAborted, TransitionCommitted, TransitionDecision,
+    TransitionProposal, TransitionVerdict, component, config, injectable, methods, when,
 };
 use upwell_config::ResolverChain;
 
@@ -36,28 +33,6 @@ pub trait Authenticator: Send + Sync {
 #[derive(Deserialize)]
 pub struct AuthConfig {
     pub mode: String,
-}
-
-const AUTH_MODE: ConfigFactId = ConfigFactId::new("AuthConfig", "auth", "mode");
-
-impl ConditionFacts for AuthConfig {
-    fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor> {
-        vec![ConfigFactDescriptor {
-            id: ConfigFactId::new("AuthConfig", binding_path, "mode"),
-            kind: ConditionScalarKind::String,
-            source: upwell::descriptor_source!(),
-        }]
-    }
-
-    fn condition_scalars(
-        &self,
-        binding_path: &'static str,
-    ) -> Vec<(ConfigFactId, ConditionScalar)> {
-        vec![(
-            ConfigFactId::new("AuthConfig", binding_path, "mode"),
-            ConditionScalar::string(self.mode.clone()),
-        )]
-    }
 }
 
 /// What one hook observed.
@@ -123,6 +98,7 @@ fn actions(pending: &PendingTransition) -> Vec<(&'static str, NodeAction)> {
 
 /// The provider used when `auth.mode` is anything but `"custom"`.
 #[component(provide = dyn Authenticator, primary)]
+#[when(AuthConfig.mode != "custom")]
 pub struct DefaultAuthenticator;
 
 impl Authenticator for DefaultAuthenticator {
@@ -152,6 +128,7 @@ impl DefaultAuthenticator {
 
 /// The application's own provider, enabled by `auth.mode = "custom"`.
 #[component(provide = dyn Authenticator, primary)]
+#[when(AuthConfig.mode == "custom")]
 pub struct CustomAuthenticator;
 
 impl Authenticator for CustomAuthenticator {
@@ -278,18 +255,6 @@ impl TransitionAudit {
     }
 }
 
-static CUSTOM_ON: ConditionDescriptor =
-    ConditionDescriptor::config_equals("auth-mode-custom", AUTH_MODE, "custom");
-
-static CUSTOM_OFF: ConditionDescriptor = ConditionDescriptor::not("auth-mode-default", &CUSTOM_ON);
-
-static DEFAULT_PROVIDER: ComponentDescriptor =
-    <DefaultAuthenticator as Descriptor<ComponentDescriptor>>::DESCRIPTOR
-        .with_condition(&CUSTOM_OFF);
-
-static CUSTOM_PROVIDER: ComponentDescriptor =
-    <CustomAuthenticator as Descriptor<ComponentDescriptor>>::DESCRIPTOR.with_condition(&CUSTOM_ON);
-
 pub fn write_mode(config_dir: &Path, mode: &str) {
     fs::write(
         config_dir.join("application.toml"),
@@ -315,9 +280,8 @@ pub async fn build(mode: &str) -> (TempDir, PathBuf, App<()>) {
     let app = App::<()>::builder("transition-lifecycle-test")
         .config_source(manager)
         .config::<AuthConfig>("auth")
-        .condition_facts::<AuthConfig>("auth")
-        .component_descriptor(&DEFAULT_PROVIDER)
-        .component_descriptor(&CUSTOM_PROVIDER)
+        .component::<DefaultAuthenticator>()
+        .component::<CustomAuthenticator>()
         .component::<AuthGate>()
         .component::<ChangeFreeze>()
         .component::<AuthWatcher>()

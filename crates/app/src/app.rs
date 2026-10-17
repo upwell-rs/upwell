@@ -415,6 +415,10 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             tree.register_binding(binding);
         }
 
+        for binding in registry.condition_bindings() {
+            tree.register_binding(binding);
+        }
+
         registry.config_bindings = tree.bindings().to_vec();
 
         let scope_topology = Arc::new(D::SCOPE_TOPOLOGY.prepare().map_err(Error::from)?);
