@@ -82,20 +82,16 @@ fn descriptor_with_factories(
     }
 }
 
-/// The mapping of `concrete` to the shared `dyn Send` stand-in trait, primary when `primary`.
+/// The `dyn Send` stand-in trait the registry tests map providers to.
+const SHARED_TRAIT: TypeDescriptor = TypeDescriptor::of::<dyn Send>("SharedTrait");
+
+/// The mapping of `concrete` to the [`SHARED_TRAIT`] stand-in, primary when `primary`.
 fn trait_provider(
     concrete: TypeDescriptor,
     qualifier: &'static str,
     primary: bool,
 ) -> ProviderDescriptor {
-    ProviderDescriptor {
-        primary,
-        ..planned_provider(
-            TypeDescriptor::of::<dyn Send>("SharedTrait"),
-            concrete,
-            qualifier,
-        )
-    }
+    planned_provider(SHARED_TRAIT, concrete, qualifier, primary)
 }
 
 mod captive;

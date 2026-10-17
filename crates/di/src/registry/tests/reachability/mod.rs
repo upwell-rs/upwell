@@ -10,6 +10,9 @@ const CONNECTION_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/connec
 const MESSAGE_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/message");
 const SIBLING_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/sibling");
 
+/// The `dyn Send` stand-in trait the reachability tests map providers to.
+const SELECTED_TRAIT: TypeDescriptor = TypeDescriptor::of::<dyn Send>("SelectedTrait");
+
 /// A standalone request branch with the same display label as [`MessageScope`].
 struct HttpScope;
 
@@ -87,19 +90,13 @@ fn reaches(consumer: ScopeId, dependency: ScopeId) -> bool {
         || (consumer == MESSAGE_ID && dependency == CONNECTION_ID)
 }
 
+/// The mapping of `concrete` to the [`SELECTED_TRAIT`] stand-in, primary when `primary`.
 fn provider(
-    concrete_ty: TypeDescriptor,
+    concrete: TypeDescriptor,
     qualifier: &'static str,
     primary: bool,
 ) -> ProviderDescriptor {
-    ProviderDescriptor {
-        primary,
-        ..planned_provider(
-            TypeDescriptor::of::<dyn Send>("SelectedTrait"),
-            concrete_ty,
-            qualifier,
-        )
-    }
+    planned_provider(SELECTED_TRAIT, concrete, qualifier, primary)
 }
 
 fn provider_dependency(
@@ -110,7 +107,7 @@ fn provider_dependency(
         qualifier,
         ..dependency(
             "SelectedTrait",
-            TypeDescriptor::of::<dyn Send>("SelectedTrait"),
+            SELECTED_TRAIT,
             cardinality,
             ResolutionMode::Eager,
         )

@@ -59,7 +59,7 @@ fn validate_allows_duplicate_provider_qualifier_across_scopes() {
 fn validate_allows_deferred_trait_with_scoped_provider_beside_transient_primary() {
     static SINGLETON_DEFERRED_SHARED: [DependencyDescriptor; 1] = [DependencyDescriptor {
         name: "SharedTrait",
-        ty: TypeDescriptor::of::<dyn Send>("SharedTrait"),
+        ty: SHARED_TRAIT,
         cardinality: Cardinality::One,
         optional: false,
         dynamic: false,
@@ -106,7 +106,7 @@ fn validate_allows_deferred_trait_with_scoped_provider_beside_transient_primary(
 
 static SINGLETON_DEFERRED_SHARED: [DependencyDescriptor; 1] = [dependency(
     "SharedTrait",
-    TypeDescriptor::of::<dyn Send>("SharedTrait"),
+    SHARED_TRAIT,
     Cardinality::One,
     ResolutionMode::Deferred,
 )];
@@ -159,7 +159,7 @@ fn validate_rejects_ambiguous_deferred_candidates() {
 fn validate_selects_deferred_candidates_scope_locally() {
     static REQUEST_DEFERRED_SHARED: [DependencyDescriptor; 1] = [DependencyDescriptor {
         name: "SharedTrait",
-        ty: TypeDescriptor::of::<dyn Send>("SharedTrait"),
+        ty: SHARED_TRAIT,
         cardinality: Cardinality::One,
         optional: false,
         dynamic: false,
@@ -210,7 +210,7 @@ fn validate_selects_deferred_candidates_scope_locally() {
 fn validate_walks_deferred_candidates_in_scope_chain_order() {
     static REQUEST_DEFERRED_CHAIN: [DependencyDescriptor; 1] = [DependencyDescriptor {
         name: "SharedTrait",
-        ty: TypeDescriptor::of::<dyn Send>("SharedTrait"),
+        ty: SHARED_TRAIT,
         cardinality: Cardinality::One,
         optional: false,
         dynamic: false,
@@ -270,7 +270,7 @@ fn validate_walks_deferred_candidates_in_scope_chain_order() {
 fn validate_groups_deferred_candidates_by_scope_identity_not_rank() {
     static REQUEST_DEFERRED_SIBLINGS: [DependencyDescriptor; 1] = [DependencyDescriptor {
         name: "SharedTrait",
-        ty: TypeDescriptor::of::<dyn Send>("SharedTrait"),
+        ty: SHARED_TRAIT,
         cardinality: Cardinality::One,
         optional: false,
         dynamic: false,

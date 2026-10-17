@@ -1,25 +1,15 @@
 //! Tests for the hidden typed generation-snapshot metadata on
 //! [`ComponentDescriptor`].
 
-use std::sync::Arc;
-
 use upwell_core::{Singleton, TypeDescriptor};
 
 use super::*;
+use crate::test_support::test_component;
 
 /// Minimal typed component used to probe descriptor metadata.
 struct MetadataProbe;
 
-impl Component for MetadataProbe {
-    type Handle = Arc<Self>;
-
-    const ID: &'static str = "metadata-probe";
-    const NAME: &'static str = "MetadataProbe";
-
-    fn into_handle(self) -> Arc<Self> {
-        Arc::new(self)
-    }
-}
+test_component!(MetadataProbe, "metadata-probe");
 
 #[test]
 fn typed_descriptors_carry_the_generation_snapshot_adapter() {

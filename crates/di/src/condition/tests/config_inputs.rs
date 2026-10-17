@@ -64,7 +64,9 @@ fn config_snapshot(
 }
 
 fn catalog_for(condition: &'static ConditionDescriptor) -> ConditionCatalog {
-    let registry = registry(vec![component::<ComponentA>("a", Some(condition))]);
+    let registry = registry(vec![
+        component::<ComponentA>("a", factory).with_condition(condition),
+    ]);
 
     ConditionCatalog::new(&registry, facts()).expect("catalog validates")
 }
@@ -97,7 +99,10 @@ fn callbacks_read_typed_bindings_and_raw_paths() {
         ]
     );
     assert_eq!(
-        registry(vec![component::<ComponentA>("a", Some(&CONDITION))]).condition_config_inputs(),
+        registry(vec![
+            component::<ComponentA>("a", factory).with_condition(&CONDITION)
+        ])
+        .condition_config_inputs(),
         [ConditionInputId::Binding(AUTH), ConditionInputId::Raw(BETA)].into()
     );
 }
