@@ -1,0 +1,7 @@
+error: `#[when]` must be placed below a component macro (`#[component]`, `#[service]` or `#[controller]`), which reads it
+ --> tests/ui/when/above_component.rs:3:1
+  |
+3 | #[when(true)]
+  | ^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `when` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -108,7 +108,10 @@ pub fn expand(args: ConfigArgs, mut item: DeriveInput, paths: &Paths) -> syn::Re
     // `ConfigManager::auto_discover`). Without a path the binding is made explicitly at the
     // manager/builder (the multi-path case), so no descriptor is emitted.
     let registration = match args.path {
-        Some(path) => quote! {
+        Some(path) => {
+            let condition_input = crate::when::config_input(&ident, &path, paths);
+
+            quote! {
             impl #descriptor<#config_binding_descriptor> for #ident {
                 const DESCRIPTOR: #config_binding_descriptor = #config_binding_descriptor {
                     ty: #type_descriptor::of::<#ident>(#name),
@@ -126,7 +129,10 @@ pub fn expand(args: ConfigArgs, mut item: DeriveInput, paths: &Paths) -> syn::Re
                 static __UPWELL_CONFIG_BINDING: #config_binding_descriptor =
                     <#ident as #descriptor<#config_binding_descriptor>>::DESCRIPTOR;
             };
-        },
+
+            #condition_input
+            }
+        }
 
         None => quote!(),
     };

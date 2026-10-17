@@ -11,8 +11,8 @@ This is a `proc-macro = true` crate whose entry points are thin shims: each forw
 streams to the matching `expand` function in [`upwell-macros-core`](../macros-core), the ordinary
 library that holds all the parsing and codegen (a proc-macro crate can only export proc-macros).
 It exposes the framework's core, protocol-agnostic macros — `#[component]`, `#[config]`,
-`#[methods]`, `#[injectable]`, and `app!` — which span
-components/DI, configuration, and lifecycle. Protocol-specific macros (`#[service]`, `#[handlers]`,
+`#[methods]`, `#[injectable]`, `#[when]`, and `app!` — which span
+components/DI, conditional availability, configuration, and lifecycle. Protocol-specific macros (`#[service]`, `#[handlers]`,
 `#[rpc]`) live in their own crates; only the core stays here. Errors surface as `compile_error!` via
 the core, never a panic.
 
@@ -44,6 +44,17 @@ impl Pool {
     #[init]
     async fn connect(config: Cfg<DbConfig>) -> Self { /* ... */ }
 }
+```
+
+`#[when(<bool expr>)]`, placed below a component macro, makes the component eligible only while
+the expression holds. The expression is ordinary Rust. A `#[config(path = ..)]` type used as a
+receiver reads its staged value, a component used as a receiver reads its eligibility, and
+`resolve("<path>")` reads a raw config path:
+
+```rust
+#[component(provide = dyn Authenticator, primary)]
+#[when(AuthConfig.mode == AuthMode::Custom)]
+struct CustomAuthenticator;
 ```
 
 `app!` defines a named lifecycle host and its configured builder, selecting a protocol via its

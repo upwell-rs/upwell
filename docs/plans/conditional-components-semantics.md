@@ -36,6 +36,16 @@ There is no float coercion, string-to-boolean coercion, arbitrary `PartialEq`, o
 with undeclared framework inputs in v1. Callback descriptors are static function pointers rather
 than capturing closures and follow the trusted-code contract described below.
 
+The `#[when(<bool expr>)]` attribute (#297) lowers to these callbacks. It sits below a component
+macro, and its body is an ordinary Rust `bool` expression with no mini-language. The inputs are
+derived from the syntax: an UpperCamelCase type used as a field or method receiver reads that type's
+`ConditionInput` (a `#[config(path = ..)]` type's staged value, or a component's eligibility), and
+`resolve("<literal>")` declares a raw path. Each attribute is one callback node, and stacked
+attributes combine under `All`. Node ids hash the expression's tokens, or come from an explicit
+`id = ".."`, and nodes are ordered by id, so declaration order cannot change the descriptor. Each
+node carries its source text and per-input reads for tooling. A config type a condition reads is
+bound at its declared path even when no component injects it.
+
 ## Eligibility and provider selection
 
 The following states are distinct:

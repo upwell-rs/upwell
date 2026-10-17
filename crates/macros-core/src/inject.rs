@@ -159,6 +159,7 @@ pub fn field_injection_component(
     scope_path: &syn::Path,
     registrations_slice: &syn::Ident,
     emit_default_factory: bool,
+    condition: &TokenStream,
     paths: &Paths,
 ) -> TokenStream {
     let self_ident = item.ident.clone();
@@ -325,7 +326,7 @@ pub fn field_injection_component(
                 name: #name,
                 ty: #type_descriptor::of::<#self_ident>(#name),
                 scope: &#scope_path,
-                condition: ::core::option::Option::None,
+                condition: #condition,
                 factories: <#self_ident as #component_factories>::factories,
                 hooks: <#self_ident as #component_hooks>::hooks,
                 generation_snapshot: #component_descriptor::typed_snapshot::<#self_ident>(),

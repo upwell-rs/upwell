@@ -1,0 +1,5 @@
+error[E0616]: field `enabled` of struct `AuditConfig` is private
+  --> tests/ui/when/private_field.rs:16:20
+   |
+16 | #[when(AuditConfig.enabled)]
+   |                    ^^^^^^^ private field
