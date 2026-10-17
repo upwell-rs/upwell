@@ -27,16 +27,19 @@ macro_rules! test_component {
 pub(crate) use test_component;
 
 /// Declares the one never-driven recipe `$id` declaring `$dependencies`, as the
-/// `fn() -> &'static [..]` a descriptor stores.
+/// `fn() -> &'static [..]` a descriptor stores; `default` marks it the fallback recipe.
 macro_rules! unbuilt_factories {
     ($id:literal, $dependencies:expr) => {
+        $crate::test_support::unbuilt_factories!($id, $dependencies, false)
+    };
+    ($id:literal, $dependencies:expr, $default:literal) => {
         || {
             const {
                 &[::upwell_di::ComponentFactoryDescriptor {
                     id: $id,
                     construct: $crate::test_support::unbuilt,
                     dependencies: $dependencies,
-                    default: false,
+                    default: $default,
                 }]
             }
         }
