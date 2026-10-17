@@ -4,8 +4,8 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use upwell_config::ConfigError;
 use upwell_config::condition::ResolvedConfig;
+use upwell_config::{CONFIG_BINDINGS, ConfigBinding, ConfigError};
 use upwell_core::{ConditionInputId, ConfigFactDescriptor};
 use upwell_di::{ConditionCatalog, ConditionEvaluation, ConditionFactSnapshot};
 
@@ -98,6 +98,29 @@ impl AppRegistry {
         }
 
         Ok(snapshot)
+    }
+
+    /// The link-time-declared binding of every config type a condition callback reads, so a
+    /// type that only conditions reference is still bound at its declared
+    /// `#[config(path = ..)]` path. Inputs with no declared binding are left to the
+    /// missing-input diagnostic.
+    pub fn condition_bindings(&self) -> Vec<ConfigBinding> {
+        let inputs = self.component_registry().condition_config_inputs();
+
+        CONFIG_BINDINGS
+            .iter()
+            .filter(|descriptor| {
+                inputs.iter().any(|input| {
+                    matches!(
+                        input,
+                        ConditionInputId::Binding(binding)
+                            if binding.type_id == descriptor.ty.type_id
+                                && binding.path == descriptor.path
+                    )
+                })
+            })
+            .map(|descriptor| descriptor.to_binding())
+            .collect()
     }
 
     /// Whether any condition callback reads a raw config path. Such a condition can change

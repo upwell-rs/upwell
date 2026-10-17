@@ -32,6 +32,7 @@ mod case;
 mod component;
 mod config;
 mod injectable;
+mod when;
 
 pub use client::{Capability, ClientMethod};
 pub use extend::{
@@ -104,6 +105,12 @@ pub fn methods(attr: TokenStream, item: TokenStream) -> TokenStream {
     let paths = args.paths(Paths::upwell());
 
     run::<ItemImpl, _>(item, |item| methods::expand(args, item, &paths))
+}
+
+/// `#[when]` expansion entry point: passes through an attribute a component macro already
+/// lowered, and reports a placement error otherwise.
+pub fn when(attr: TokenStream, item: TokenStream) -> TokenStream {
+    when::expand_attr(attr, item)
 }
 
 /// `#[injectable]` expansion entry point.

@@ -17,6 +17,7 @@ use syn::{GenericArgument, ItemStruct, LitStr, PathArguments, Type};
 use crate::attr::ComponentArgs;
 use crate::extend::{ComponentContext, ComponentExt};
 use crate::paths::Paths;
+use crate::when::{self, Condition};
 use crate::{di, handle, inject, provide};
 
 pub fn expand<Ext: ComponentExt>(
@@ -25,6 +26,7 @@ pub fn expand<Ext: ComponentExt>(
     paths: &Paths,
 ) -> syn::Result<TokenStream> {
     let self_ident = item.ident.clone();
+    let whens = when::take(&mut item.attrs)?;
 
     if args.retainable {
         for field in &item.fields {
@@ -43,6 +45,9 @@ pub fn expand<Ext: ComponentExt>(
     let handle_method = &handle.method;
     let injectable = &handle.injectable;
     let provide_impl = di::provide_impl(&self_ident, paths);
+    let condition_input = when::component_input(&self_ident, paths);
+    let condition = Condition::lower(whens, args.scope.as_ref(), paths)?;
+    let condition_items = &condition.items;
 
     let id = args
         .id
@@ -104,6 +109,7 @@ pub fn expand<Ext: ComponentExt>(
         &scope_path,
         &registrations_slice,
         emit_default,
+        &condition.root,
         paths,
     );
     let component = paths.core("Component");
@@ -139,9 +145,13 @@ pub fn expand<Ext: ComponentExt>(
 
         #provide_impl
 
+        #condition_input
+
         #registrations_infra
 
         const _: () = {
+            #condition_items
+
             #factory
 
             #explicit

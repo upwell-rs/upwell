@@ -650,3 +650,51 @@ pub fn app(input: TokenStream) -> TokenStream {
 pub fn injectable(attr: TokenStream, item: TokenStream) -> TokenStream {
     upwell_macros_core::injectable(attr.into(), item.into()).into()
 }
+
+/// Makes a component eligible only while a boolean condition holds.
+///
+/// Place `#[when(<expr>)]` **below** `#[component]`, `#[service]` or `#[controller]`; the
+/// component macro reads it. The body is an ordinary Rust expression of type `bool`, kept
+/// with its exact semantics (short-circuiting included), and may call any function. Its
+/// inputs are derived from the syntax:
+///
+/// - An UpperCamelCase type used as a field or method receiver is an input. A
+///   `#[config(path = ..)]` type reads as its staged value (`AuthConfig.mode`); a component
+///   reads as its eligibility (`AuditTransport.eligible()`). Any other type is a compile
+///   error at that token. `Type::Variant` paths are left alone.
+/// - `resolve::<T>("<path>")` (from `upwell::condition`) reads a config path that no type
+///   binds. The path must be a string literal. A missing key gives `None`; a value that
+///   does not deserialize into `T` rejects the candidate.
+///
+/// Evaluation answers only these declared inputs, so a helper function that reads another
+/// input fails the evaluation instead of creating a hidden dependency. Inputs follow Rust
+/// privacy: read `pub`/`pub(crate)` fields or getters.
+///
+/// Stacked `#[when]`s combine with AND. Each condition's id is derived from its expression,
+/// or set with `#[when(id = "..", <expr>)]`, so declaration order never changes selection.
+/// Conditions apply to singleton components only.
+///
+/// ```ignore
+/// use upwell::condition::resolve;
+/// use upwell::{component, when};
+///
+/// #[component(provide = dyn Authenticator)]
+/// pub struct DefaultAuthenticator;
+///
+/// #[component(provide = dyn Authenticator, primary)]
+/// #[when(AuthConfig.mode == AuthMode::Custom)]
+/// pub struct CustomAuthenticator;
+///
+/// #[component]
+/// #[when(AuthConfig.audit && AuditTransport.eligible())]
+/// #[when(resolve("features.audit_export") == Some(true))]
+/// pub struct AuditExporter;
+/// ```
+///
+/// # Errors
+///
+/// Used without a component macro, or above one, the attribute emits a `compile_error!`.
+#[proc_macro_attribute]
+pub fn when(attr: TokenStream, item: TokenStream) -> TokenStream {
+    upwell_macros_core::when(attr.into(), item.into()).into()
+}

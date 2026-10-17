@@ -33,6 +33,7 @@ filter = '''
   | binary_id(=cargo-upwell::init)
   | binary_id(=cargo-upwell::probe)
   | binary_id(=upwell::tooling_probe_process)
+  | binary_id(=upwell::when_ui)
 '''
 test-group = "cargo-integration"
 slow-timeout = { period = "300s", terminate-after = 2, grace-period = "10s", on-timeout = "fail" }

@@ -1,0 +1,25 @@
+error: duplicate `#[when]` condition id `enabled`; give each condition a distinct expression or `id = ".."`
+ --> tests/ui/when/duplicate_ids.rs:5:13
+  |
+5 | #[when(id = "enabled", !false)]
+  |             ^^^^^^^^^
+
+error: duplicate `#[when]` condition id `when-5b5c98ef514dbfa5`; give each condition a distinct expression or `id = ".."`
+  --> tests/ui/when/duplicate_ids.rs:10:1
+   |
+10 | #[when(true)]
+   | ^
+
+error: duplicate `#[when]` condition id `when`; give each condition a distinct expression or `id = ".."`
+  --> tests/ui/when/duplicate_ids.rs:14:13
+   |
+14 | #[when(id = "when", true)]
+   |             ^^^^^^
+
+warning: unused import: `when`
+ --> tests/ui/when/duplicate_ids.rs:1:25
+  |
+1 | use upwell::{component, when};
+  |                         ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

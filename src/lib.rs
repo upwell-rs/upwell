@@ -185,7 +185,7 @@ pub use upwell_transport::{
 // always available; the RPC daemon macros (`service`/`handlers`/`rpc`) live in the `daemon`
 // module behind the `daemon` feature.
 // ---------------------------------------------------------------------------
-pub use upwell_macros::{app, component, config, injectable, methods};
+pub use upwell_macros::{app, component, config, injectable, methods, when};
 
 /// Re-exported so macro-generated code can reference the `#[distributed_slice]` attribute
 /// through the facade crate without user crates depending on `linkme` directly. The generated
@@ -424,7 +424,7 @@ pub mod axum {
 pub mod prelude {
     // The macros are built for the host and usable from any target (their generated server code is
     // gated out on wasm); the framework *types* are the daemon-stack surface, compiled out on wasm.
-    pub use crate::{app, component, config, injectable, methods};
+    pub use crate::{app, component, config, injectable, methods, when};
 
     #[cfg(not(target_family = "wasm"))]
     pub use crate::{

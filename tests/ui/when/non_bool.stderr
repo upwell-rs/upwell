@@ -1,0 +1,9 @@
+error[E0308]: mismatched types
+  --> tests/ui/when/non_bool.rs:11:8
+   |
+10 | #[component]
+   | ------------ in this attribute macro expansion
+11 | #[when(ServerConfig.port)]
+   |        ^^^^^^^^^^^^ expected `bool`, found `u16`
+   |
+   = note: this error originates in the attribute macro `component` (in Nightly builds, run with -Z macro-backtrace for more info)
