@@ -6,7 +6,7 @@ use upwell_config::{ConfigManager, Toml};
 use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, ComponentConstructionContext, ComponentDescriptor, ComponentFactoryDescriptor,
-    ProviderDescriptor, Singleton,
+    ComponentFactoryRole, ProviderDescriptor, Singleton,
 };
 use upwell_tooling_schema::{DocumentIdentity, Relationship, RelationshipKind, ToolingDocument};
 
@@ -61,14 +61,14 @@ static PROVIDER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDe
     id: "static",
     construct: fake_factory,
     dependencies: no_dependencies,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 
 static CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: fake_factory,
     dependencies: aggregate_dependencies,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 
 fn provider_factories() -> &'static [ComponentFactoryDescriptor] {

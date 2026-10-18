@@ -1,4 +1,5 @@
-use std::collections::HashSet;
+use std::any::TypeId;
+use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
@@ -18,11 +19,17 @@ impl ScopeContainer {
     /// Retained instances must be reboxed into generation-local storage by the caller. Candidate
     /// factories resolve only from these retained instances, components built earlier in `order`,
     /// and the explicitly supplied external resolvers. An active root is never used as a parent.
+    ///
+    /// `previous` holds generation-local snapshots of active instances being replaced. A
+    /// component in `order` with a previous instance is built by its replacement factory,
+    /// which reads that snapshot through [`Previous`](crate::Previous); every other one
+    /// uses its ordinary effective factory.
     #[doc(hidden)]
     #[instrument(skip_all, fields(count = order.len()))]
     pub async fn build_candidate_root(
         order: &[&'static str],
         retained: Vec<BoxedComponent>,
+        previous: Vec<BoxedComponent>,
         externals: ResolverSet,
         registry: Arc<ScopeRegistry>,
     ) -> crate::Result<Arc<ScopeContainer>> {
@@ -32,6 +39,10 @@ impl ScopeContainer {
 
         let order = catch_unwind(AssertUnwindSafe(|| {
             validate_candidate_inputs(order, &retained, &registry)
+        }))
+        .map_err(|_| Error::CandidateMetadataPanicked)??;
+        let mut previous = catch_unwind(AssertUnwindSafe(|| {
+            validate_previous_inputs(&order, previous)
         }))
         .map_err(|_| Error::CandidateMetadataPanicked)??;
 
@@ -65,18 +76,14 @@ impl ScopeContainer {
         for descriptor in order {
             debug!(component = %descriptor.name, "constructing candidate component");
 
-            let component = AssertUnwindSafe(async {
-                let factory = descriptor
-                    .effective_factory()?
-                    .ok_or(Error::MissingComponent(descriptor.name))?;
-
-                (factory.construct)(&mut context).await
-            })
-            .catch_unwind()
-            .await
-            .map_err(|_| Error::CandidateFactoryPanicked {
-                component: descriptor.id,
-            })??;
+            let replaced = previous.remove(&descriptor.ty.type_id);
+            let component =
+                AssertUnwindSafe(construct_candidate(&mut context, descriptor, replaced))
+                    .catch_unwind()
+                    .await
+                    .map_err(|_| Error::CandidateFactoryPanicked {
+                        component: descriptor.id,
+                    })??;
 
             validate_factory_output(descriptor, &component)?;
 
@@ -163,6 +170,59 @@ fn validate_candidate_inputs(
     }
 
     Ok(descriptors)
+}
+
+/// Runs the replacement factory when `previous` is present, the ordinary effective
+/// factory otherwise. The previous snapshot is visible only while its own replacement
+/// factory runs.
+async fn construct_candidate(
+    context: &mut ComponentConstructionContext,
+    descriptor: ComponentDescriptor,
+    previous: Option<BoxedComponent>,
+) -> crate::Result<BoxedComponent> {
+    let factory = if previous.is_some() {
+        descriptor.replacement_factory()?
+    } else {
+        descriptor.effective_factory()?
+    };
+    let factory = factory.ok_or(Error::MissingComponent(descriptor.name))?;
+
+    context.set_previous(previous);
+
+    let component = (factory.construct)(context).await;
+
+    context.set_previous(None);
+
+    component
+}
+
+/// Keys previous snapshots by type, accepting only one per component in `order` whose
+/// descriptor declares a replacement factory.
+fn validate_previous_inputs(
+    order: &[ComponentDescriptor],
+    previous: Vec<BoxedComponent>,
+) -> crate::Result<HashMap<TypeId, BoxedComponent>> {
+    let mut keyed = HashMap::with_capacity(previous.len());
+
+    for component in previous {
+        let type_id = component.ty.type_id;
+        let replaceable = order
+            .iter()
+            .find(|descriptor| descriptor.ty.type_id == type_id);
+        let accepted = match replaceable {
+            Some(descriptor) => descriptor.replacement_factory()?.is_some(),
+
+            None => false,
+        };
+
+        if !accepted || keyed.insert(type_id, component).is_some() {
+            return Err(Error::CandidateComponentMismatch {
+                component: replaceable.map_or("<previous>", |descriptor| descriptor.id),
+            });
+        }
+    }
+
+    Ok(keyed)
 }
 
 fn validate_factory_output(

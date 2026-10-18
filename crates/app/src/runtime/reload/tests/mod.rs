@@ -19,6 +19,7 @@ mod manager_consumer;
 mod noop;
 mod provider_switch;
 mod publication;
+mod replacement;
 mod report;
 mod runtime_reloader;
 mod trigger;

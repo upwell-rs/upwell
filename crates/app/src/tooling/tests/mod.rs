@@ -8,8 +8,8 @@ use upwell_config::{ConfigProperties, ConfigReload};
 use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, StaticScope, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, Injectable, ProviderDescriptor, ProviderOrder,
-    ProviderOrderDirection, Singleton,
+    ComponentFactoryDescriptor, ComponentFactoryRole, Injectable, ProviderDescriptor,
+    ProviderOrder, ProviderOrderDirection, Singleton,
 };
 use upwell_tooling_schema::{
     BinaryTargetIdentity, DocumentIdentity, PackageIdentity, ProbeEnvelope, RelationshipKind,

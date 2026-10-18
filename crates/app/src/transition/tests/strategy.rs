@@ -1,6 +1,7 @@
 //! Component transition decisions and the resolved plan they produce.
 
 use super::*;
+use crate::transition::strategy::validate_decision;
 
 #[test]
 fn retained_live_rebinding_requires_restart_until_bindings_can_be_applied() {
@@ -159,7 +160,7 @@ async fn resolved_plan_builds_only_the_candidate_factory() {
         .expect("ordinary reconstruction is supported");
 
     let (root, scopes) = resolved
-        .build_candidate_root(&candidate, Vec::new(), ResolverSet::new())
+        .build_candidate_root(&candidate, Vec::new(), Vec::new(), ResolverSet::new())
         .await
         .expect("resolved plan constructs candidate root");
 
@@ -182,7 +183,7 @@ async fn resolved_plan_cannot_build_another_candidate() {
         .expect("ordinary reconstruction is supported");
 
     let result = resolved
-        .build_candidate_root(&other_candidate, Vec::new(), ResolverSet::new())
+        .build_candidate_root(&other_candidate, Vec::new(), Vec::new(), ResolverSet::new())
         .await;
     let Err(error) = result else {
         panic!("resolved plan is bound to its candidate");
@@ -214,7 +215,7 @@ async fn retained_values_must_match_complete_plan_dispositions() {
         .expect("unchanged component receives retain disposition");
 
     let result = resolved
-        .build_candidate_root(&candidate, Vec::new(), ResolverSet::new())
+        .build_candidate_root(&candidate, Vec::new(), Vec::new(), ResolverSet::new())
         .await;
     let Err(error) = result else {
         panic!("missing retained value is rejected");

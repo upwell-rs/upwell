@@ -230,6 +230,23 @@ pub enum Error {
     #[error("component '{component}' registers duplicate factory identity '{factory}'")]
     DuplicateFactoryId { component: String, factory: String },
 
+    #[error("component '{0}' declares more than one replacement factory")]
+    AmbiguousReplacementFactory(String),
+
+    #[error("component '{0}' declares a replacement factory but no ordinary factory")]
+    ReplacementWithoutFactory(String),
+
+    #[error(
+        "replacement factory for component '{component}' resolves '{dependency}', which its ordinary factory does not declare"
+    )]
+    UndeclaredReplacementDependency {
+        component: String,
+        dependency: String,
+    },
+
+    #[error("component '{component}' has no previous instance for its replacement factory")]
+    PreviousUnavailable { component: &'static str },
+
     #[error("missing dependency for component '{component}': {dependency}")]
     MissingDependency {
         /// Human-readable component name.

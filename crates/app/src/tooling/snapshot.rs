@@ -2,7 +2,10 @@ use std::any::TypeId;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use upwell_core::{DependencyDescriptor, ScopeId, Singleton, StaticScope};
-use upwell_di::{BoxedComponent, ComponentDescriptor, ProviderSelectionModel, SelectedDependency};
+use upwell_di::{
+    BoxedComponent, ComponentDescriptor, ComponentFactoryRole, ProviderSelectionModel,
+    SelectedDependency,
+};
 
 use crate::scope::{PreparedScopeTopology, SeedDestination};
 
@@ -115,13 +118,18 @@ impl ComponentSnapshot {
         seed_destinations: &HashMap<TypeId, SeedDestination>,
     ) -> upwell_di::Result<Self> {
         let factories = (descriptor.factories)();
-        let factory_explicit_count = factories.iter().filter(|factory| !factory.default).count();
+        let factory_explicit_count = factories
+            .iter()
+            .filter(|factory| factory.role == ComponentFactoryRole::Explicit)
+            .count();
         let factory = descriptor
             .effective_factory()
             .expect("validated component factory remains unambiguous");
         let factory_selection = match factory {
             None => FactorySelection::Manual,
-            Some(factory) if factory.default => FactorySelection::Default,
+            Some(factory) if factory.role == ComponentFactoryRole::Default => {
+                FactorySelection::Default
+            }
             Some(_) => FactorySelection::Explicit,
         };
         let dependencies = factory.map_or_else(

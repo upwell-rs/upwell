@@ -11,7 +11,7 @@ use upwell_core::{
 };
 
 use crate::descriptors::component::from_boxed;
-use crate::{ComponentFactoryDescriptor, Injectable};
+use crate::{ComponentFactoryDescriptor, ComponentFactoryRole, Injectable};
 
 use super::*;
 use crate::registry::selection::select_single_provider;
@@ -160,19 +160,19 @@ static TARGET_PROVIDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFact
     id: "static",
     construct: target_provider_factory,
     dependencies: no_dependencies,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 static OWNER_PROVIDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: owner_provider_factory,
     dependencies: no_dependencies,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 static FRESH_TARGET_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: fresh_target_factory,
     dependencies: fresh_target_dependencies,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 
 fn target_provider_factories() -> &'static [ComponentFactoryDescriptor] {

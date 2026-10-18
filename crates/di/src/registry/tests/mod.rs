@@ -1,9 +1,9 @@
 use std::cell::Cell;
 
 use super::*;
-use crate::descriptors::{ComponentDescriptor, ComponentFactoryDescriptor};
+use crate::descriptors::{ComponentDescriptor, ComponentFactoryDescriptor, ComponentFactoryRole};
 use crate::test_support::{
-    dependency, no_dependencies, planned, planned_provider, unbuilt, unbuilt_factories,
+    dependency, no_dependencies, planned, planned_provider, unbuilt_factories,
 };
 use upwell_core::{Cardinality, DependencyDescriptor, StaticScope, Transient, TypeDescriptor};
 

@@ -13,7 +13,7 @@ async fn active_replaceable() -> Replaceable {
     Replaceable { label: "active" }
 }
 
-async fn candidate_replaceable() -> Replaceable {
+pub(super) async fn candidate_replaceable() -> Replaceable {
     Replaceable { label: "candidate" }
 }
 

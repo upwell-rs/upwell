@@ -169,6 +169,7 @@ pub fn field_injection_component(
     let component_factories = paths.core("ComponentFactories");
     let component_hooks = paths.core("ComponentHooks");
     let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
+    let component_factory_role = paths.core("ComponentFactoryRole");
     let components_slice = paths.core("COMPONENTS");
     let dependency_descriptor = paths.core("DependencyDescriptor");
     let component = paths.core("Component");
@@ -254,7 +255,7 @@ pub fn field_injection_component(
                 id: "default",
                 construct: __upwell_factory,
                 dependencies: __upwell_deps,
-                default: true,
+                role: #component_factory_role::Default,
             }
         };
         let register_default = crate::backend::dual_backend(
@@ -356,6 +357,7 @@ pub fn explicit_factory(
 ) -> TokenStream {
     let component_construction_context = paths.core("ComponentConstructionContext");
     let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
+    let component_factory_role = paths.core("ComponentFactoryRole");
     let dependency_descriptor = paths.core("DependencyDescriptor");
     let dispatch_factory = paths.core("dispatch_factory");
     let factory_dependencies = paths.core("factory_dependencies");
@@ -372,7 +374,7 @@ pub fn explicit_factory(
             id: concat!("factory:", stringify!(#factory_path)),
             construct: __upwell_explicit_factory,
             dependencies: __upwell_explicit_deps,
-            default: false,
+            role: #component_factory_role::Explicit,
         }
     };
     let register = crate::backend::dual_backend(

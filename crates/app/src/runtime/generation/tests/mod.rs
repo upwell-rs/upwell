@@ -36,7 +36,7 @@ static GENERATION_COMPONENT: ComponentDescriptor = ComponentDescriptor::manual(
     &Singleton,
 )
 .with_condition(&GENERATION_CONDITION)
-.with_factories(unbuilt_factories!("static", Vec::new, true));
+.with_factories(unbuilt_factories!("static", Vec::new, Default));
 
 fn condition_facts() -> [ConfigFactDescriptor; 1] {
     [ConfigFactDescriptor {

@@ -66,19 +66,19 @@ static TRANSIENT_SEED_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFacto
     id: "seed",
     construct: construct_transient_seed,
     dependencies: no_dependencies,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 static ACTIVE_HOLDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "holder-active",
     construct: construct_fresh_holder,
     dependencies: no_dependencies,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 static CANDIDATE_HOLDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "holder-candidate",
     construct: construct_fresh_holder,
     dependencies: no_dependencies,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 
 fn transient_seed_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -142,7 +142,7 @@ async fn candidate_registry_keeps_factory_backed_transients_fresh_resolvable() {
         .expect("holder reconstruction is supported");
 
     let (root, _) = resolved
-        .build_candidate_root(&candidate, Vec::new(), ResolverSet::new())
+        .build_candidate_root(&candidate, Vec::new(), Vec::new(), ResolverSet::new())
         .await
         .expect("resolved plan constructs candidate root");
     let holder = root

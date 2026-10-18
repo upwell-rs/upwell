@@ -242,6 +242,7 @@ fn generate_init(
     let marked = &info.ident;
     let component_construction_context = paths.core("ComponentConstructionContext");
     let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
+    let component_factory_role = paths.core("ComponentFactoryRole");
     let dependency_descriptor = paths.core("DependencyDescriptor");
     let dispatch_factory = paths.core("dispatch_factory");
     let factory_dependencies = paths.core("factory_dependencies");
@@ -287,7 +288,7 @@ fn generate_init(
             id: concat!("init:", stringify!(#marked)),
             construct: __upwell_init_factory,
             dependencies: __upwell_init_deps,
-            default: false,
+            role: #component_factory_role::Explicit,
         }
     };
     // The explicit `#[init]` factory, appended to the type's registrations; it overrides the

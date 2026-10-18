@@ -13,7 +13,7 @@ use std::sync::Arc;
 use upwell_core::{Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, DependencyDescriptor, Injectable,
+    ComponentFactoryDescriptor, ComponentFactoryRole, DependencyDescriptor, Injectable,
 };
 use upwell_hooks::no_hooks;
 use upwell_transport::CodecError;
@@ -167,7 +167,7 @@ fn topic_bus_factories<P: PubSubProtocol>() -> &'static [ComponentFactoryDescrip
         id: "static",
         construct: construct_topic_bus::<P>,
         dependencies: topic_bus_dependencies,
-        default: true,
+        role: ComponentFactoryRole::Default,
     }]
 }
 

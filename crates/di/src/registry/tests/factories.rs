@@ -1,48 +1,50 @@
-//! Factory recipe identity and explicit-over-default selection.
+//! Factory recipe identity, explicit-over-default selection, and the replacement
+//! factory contract.
 
 use super::*;
+use crate::test_support::unbuilt_recipe;
+
+use ComponentFactoryRole::{Default, Explicit, Replacement};
+
+/// Resolves a registry holding one component built by `factories`.
+fn resolve(
+    factories: fn() -> &'static [ComponentFactoryDescriptor],
+) -> crate::Result<Vec<ComponentDescriptor>> {
+    ComponentRegistry {
+        components: vec![descriptor_with_factories(factories)],
+        providers: Vec::new(),
+    }
+    .resolved_components()
+}
+
+/// One required eager edge on marker type `T`, named `name`.
+fn edge<T: 'static>(name: &'static str) -> Vec<DependencyDescriptor> {
+    vec![dependency(
+        name,
+        TypeDescriptor::of::<T>(name),
+        Cardinality::One,
+        ResolutionMode::Eager,
+    )]
+}
+
+fn one_u8() -> Vec<DependencyDescriptor> {
+    edge::<u8>("u8")
+}
+
+fn one_u16() -> Vec<DependencyDescriptor> {
+    edge::<u16>("u16")
+}
 
 #[test]
 fn factory_ids_are_validated_during_registry_resolution() {
-    static EMPTY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-        id: "",
-        construct: unbuilt,
-        dependencies: no_dependencies,
-        default: false,
-    }];
+    static EMPTY: [ComponentFactoryDescriptor; 1] = [unbuilt_recipe("", Explicit, no_dependencies)];
     static DUPLICATE: [ComponentFactoryDescriptor; 2] = [
-        ComponentFactoryDescriptor {
-            id: "duplicate",
-            construct: unbuilt,
-            dependencies: no_dependencies,
-            default: false,
-        },
-        ComponentFactoryDescriptor {
-            id: "duplicate",
-            construct: unbuilt,
-            dependencies: no_dependencies,
-            default: true,
-        },
+        unbuilt_recipe("duplicate", Explicit, no_dependencies),
+        unbuilt_recipe("duplicate", Default, no_dependencies),
     ];
-    fn empty() -> &'static [ComponentFactoryDescriptor] {
-        &EMPTY
-    }
-    fn duplicate() -> &'static [ComponentFactoryDescriptor] {
-        &DUPLICATE
-    }
 
-    let empty_error = ComponentRegistry {
-        components: vec![descriptor_with_factories(empty)],
-        providers: Vec::new(),
-    }
-    .resolved_components()
-    .expect_err("empty factory ID is invalid");
-    let duplicate_error = ComponentRegistry {
-        components: vec![descriptor_with_factories(duplicate)],
-        providers: Vec::new(),
-    }
-    .resolved_components()
-    .expect_err("duplicate factory ID is invalid");
+    let empty_error = resolve(|| &EMPTY).expect_err("empty factory ID is invalid");
+    let duplicate_error = resolve(|| &DUPLICATE).expect_err("duplicate factory ID is invalid");
 
     assert!(matches!(empty_error, Error::EmptyFactoryId(_)));
     assert!(matches!(duplicate_error, Error::DuplicateFactoryId { .. }));
@@ -51,36 +53,13 @@ fn factory_ids_are_validated_during_registry_resolution() {
 #[test]
 fn explicit_factory_still_wins_over_multiple_defaults() {
     static FACTORIES: [ComponentFactoryDescriptor; 3] = [
-        ComponentFactoryDescriptor {
-            id: "default-a",
-            construct: unbuilt,
-            dependencies: no_dependencies,
-            default: true,
-        },
-        ComponentFactoryDescriptor {
-            id: "explicit",
-            construct: unbuilt,
-            dependencies: no_dependencies,
-            default: false,
-        },
-        ComponentFactoryDescriptor {
-            id: "default-b",
-            construct: unbuilt,
-            dependencies: no_dependencies,
-            default: true,
-        },
+        unbuilt_recipe("default-a", Default, no_dependencies),
+        unbuilt_recipe("explicit", Explicit, no_dependencies),
+        unbuilt_recipe("default-b", Default, no_dependencies),
     ];
-    fn factories() -> &'static [ComponentFactoryDescriptor] {
-        &FACTORIES
-    }
 
-    let descriptor = descriptor_with_factories(factories);
-    let resolved = ComponentRegistry {
-        components: vec![descriptor],
-        providers: Vec::new(),
-    }
-    .resolved_components()
-    .expect("multiple defaults remain valid when one explicit factory exists");
+    let resolved = resolve(|| &FACTORIES)
+        .expect("multiple defaults remain valid when one explicit factory exists");
 
     assert_eq!(
         resolved[0]
@@ -90,4 +69,58 @@ fn explicit_factory_still_wins_over_multiple_defaults() {
             .id,
         "explicit"
     );
+}
+
+#[test]
+fn replacement_factories_never_take_part_in_ordinary_selection() {
+    static FACTORIES: [ComponentFactoryDescriptor; 2] = [
+        unbuilt_recipe("replace", Replacement, one_u8),
+        unbuilt_recipe("default", Default, one_u8),
+    ];
+
+    let resolved = resolve(|| &FACTORIES).expect("a replacement beside its default is valid");
+    let descriptor = resolved[0];
+
+    assert_eq!(
+        descriptor
+            .effective_factory()
+            .expect("factory selection succeeds")
+            .expect("the default factory exists")
+            .id,
+        "default"
+    );
+    assert_eq!(
+        descriptor
+            .replacement_factory()
+            .expect("replacement selection succeeds")
+            .expect("the replacement factory exists")
+            .id,
+        "replace"
+    );
+}
+
+#[test]
+fn the_replacement_contract_is_validated_during_registry_resolution() {
+    static AMBIGUOUS: [ComponentFactoryDescriptor; 3] = [
+        unbuilt_recipe("default", Default, no_dependencies),
+        unbuilt_recipe("first", Replacement, no_dependencies),
+        unbuilt_recipe("second", Replacement, no_dependencies),
+    ];
+    static ORPHANED: [ComponentFactoryDescriptor; 1] =
+        [unbuilt_recipe("replace", Replacement, no_dependencies)];
+    static UNDECLARED: [ComponentFactoryDescriptor; 2] = [
+        unbuilt_recipe("default", Default, one_u8),
+        unbuilt_recipe("replace", Replacement, one_u16),
+    ];
+
+    let ambiguous = resolve(|| &AMBIGUOUS).expect_err("two replacements are ambiguous");
+    let orphaned = resolve(|| &ORPHANED).expect_err("a replacement needs an ordinary factory");
+    let undeclared = resolve(|| &UNDECLARED).expect_err("a replacement cannot widen the graph");
+
+    assert!(matches!(ambiguous, Error::AmbiguousReplacementFactory(_)));
+    assert!(matches!(orphaned, Error::ReplacementWithoutFactory(_)));
+    assert!(matches!(
+        undeclared,
+        Error::UndeclaredReplacementDependency { ref dependency, .. } if dependency == "u16"
+    ));
 }
