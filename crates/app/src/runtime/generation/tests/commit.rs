@@ -145,7 +145,3 @@ async fn commit_with_publishes_before_the_compat_callback_and_holds_the_writer_t
     assert_eq!(second.attempt(), TransitionAttemptId(2));
     assert_eq!(second.base().id(), committed.id());
 }
-
-// ---------------------------------------------------------------------------
-// Generation-local hook-manager routing.
-// ---------------------------------------------------------------------------

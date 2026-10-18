@@ -1,5 +1,12 @@
 //! Config-fact conditions at the initial build, and redaction of panicking condition
 //! inputs.
+//!
+//! Startup condition preparation runs application extension points — fact-scalar
+//! extraction, fact-descriptor callbacks, and config condition callbacks — so each panic
+//! site under test owns its config type and control static, and drives
+//! `evaluate_startup_conditions` directly over an isolated registry and config slots. No
+//! control is read by more than one test, so concurrent runs cannot arm another test's
+//! panic path.
 
 use super::*;
 
@@ -110,13 +117,6 @@ async fn initial_build_includes_components_whose_config_fact_is_true() {
         Some(true)
     );
 }
-
-// Startup condition preparation runs application extension points — fact-scalar
-// extraction, fact-descriptor callbacks, and config condition callbacks — so each
-// panic site under test owns its config type and control static, and drives
-// `evaluate_startup_conditions` directly over an isolated registry and config slots.
-// No control is read by more than one test, so concurrent runs cannot arm another
-// test's panic path.
 
 /// Whether the scalar fixture's fact extraction panics when invoked. Read only by
 /// [`PanicScalarsConfig::condition_scalars`] and armed only by the scalar test.
