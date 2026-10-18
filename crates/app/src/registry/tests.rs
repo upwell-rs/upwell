@@ -1,6 +1,4 @@
 use std::any::TypeId;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use upwell_config::{ConditionFactSource, ConditionFacts, ConfigBinding, ConfigProperties};
@@ -8,13 +6,11 @@ use upwell_core::{
     Cardinality, ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId,
     DependencyDescriptor, TypeDescriptor,
 };
-use upwell_di::{
-    BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, Singleton,
-};
+use upwell_di::{Component, ComponentDescriptor, Singleton};
 
 use super::AppRegistry;
 use crate::Error;
+use crate::test_support::{test_component, unbuilt_factories};
 
 #[derive(serde::Deserialize)]
 struct TestConfig;
@@ -25,22 +21,7 @@ impl ConfigProperties for TestConfig {
 
 struct RegisteredComponent;
 
-impl Component for RegisteredComponent {
-    type Handle = std::sync::Arc<Self>;
-
-    const ID: &'static str = "registered";
-    const NAME: &'static str = "RegisteredComponent";
-
-    fn into_handle(self) -> Self::Handle {
-        std::sync::Arc::new(self)
-    }
-}
-
-fn fake_factory<'a>(
-    _: &'a mut ComponentConstructionContext,
-) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + 'a>> {
-    Box::pin(async { unreachable!("registry validation does not construct components") })
-}
+test_component!(RegisteredComponent, "registered");
 
 fn config_deps() -> Vec<DependencyDescriptor> {
     vec![DependencyDescriptor {
@@ -56,28 +37,14 @@ fn config_deps() -> Vec<DependencyDescriptor> {
     }]
 }
 
-static CONFIG_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
-    id: "static",
-    construct: fake_factory,
-    dependencies: config_deps,
-    default: false,
-}];
-
-fn config_factories() -> &'static [ComponentFactoryDescriptor] {
-    &CONFIG_FACTORY
-}
-
 fn component() -> ComponentDescriptor {
-    ComponentDescriptor {
-        id: "needs_config",
-        name: "NeedsConfig",
-        ty: TypeDescriptor::of::<()>("NeedsConfig"),
-        scope: &Singleton,
-        condition: None,
-        factories: config_factories,
-        hooks: upwell_hooks::no_hooks,
-        generation_snapshot: None,
-    }
+    ComponentDescriptor::manual(
+        "needs_config",
+        "NeedsConfig",
+        TypeDescriptor::of::<()>("NeedsConfig"),
+        &Singleton,
+    )
+    .with_factories(unbuilt_factories!("static", config_deps))
 }
 
 #[test]
