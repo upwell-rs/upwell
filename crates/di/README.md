@@ -46,7 +46,7 @@ static CUSTOM_AUTH: ProviderDescriptor =
     ProviderDescriptor::of::<CustomAuthenticator, dyn Authenticator>("dyn Authenticator").primary();
 ```
 
-A singleton that keeps state across a runtime transition declares a static replacement factory with a `replace` entry. Its first parameter is [`Previous<Self>`](Previous), an immutable snapshot of the instance being replaced. Every other parameter resolves from the candidate generation and must also be a dependency of the ordinary factory. When a config change replaces the component, the runtime calls this factory instead of the ordinary one. If it fails or panics, the previous instance stays active.
+A singleton that keeps state across a runtime transition declares a static replacement factory with a `replace` entry. Its first parameter is [`Previous<Self>`](Previous), an immutable snapshot of the instance being replaced. Every other parameter resolves from the candidate generation and must match a dependency of the ordinary factory: the same target, resolution mode and dynamic exemption, and never required where the ordinary factory is optional. When a config change replaces the component, the runtime calls this factory instead of the ordinary one. If it fails or panics, the previous instance stays active.
 
 ```rust,ignore
 async fn carry(previous: Previous<Cache>, db: Db) -> Cache {

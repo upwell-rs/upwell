@@ -188,7 +188,7 @@ impl ComponentDescriptor {
         let declared = (ordinary.dependencies)();
 
         for dependency in (replacement.dependencies)() {
-            if !declared.iter().any(|edge| same_edge(edge, &dependency)) {
+            if !declared.iter().any(|edge| stands_in_for(edge, &dependency)) {
                 return Err(crate::Error::UndeclaredReplacementDependency {
                     component: self.name.to_string(),
                     dependency: dependency.name.to_string(),
@@ -200,12 +200,19 @@ impl ComponentDescriptor {
     }
 }
 
-/// Whether two edges select the same target, so one stands in for the other in the
-/// planned graph. Observation is ignored: a replacement may read a `Dep<T>` edge as a
-/// fixed `Arc<T>` or the reverse.
-fn same_edge(left: &DependencyDescriptor, right: &DependencyDescriptor) -> bool {
-    left.ty.type_id == right.ty.type_id
-        && left.qualifier == right.qualifier
-        && left.cardinality == right.cardinality
-        && left.config == right.config
+/// Whether the replacement edge `replacement` is covered by the ordinary edge `ordinary`
+/// in the planned graph, so the replacement demands nothing the planner did not schedule.
+///
+/// The target (`ty`, `qualifier`, `cardinality`, `config`), the `resolution` mode and the
+/// `dynamic` validation exemption must match. A replacement may treat a required edge as
+/// optional, never the reverse. `name` is display-only and `observation` is ignored: a
+/// replacement may read a `Dep<T>` edge as a fixed `Arc<T>` or the reverse.
+fn stands_in_for(ordinary: &DependencyDescriptor, replacement: &DependencyDescriptor) -> bool {
+    ordinary.ty.type_id == replacement.ty.type_id
+        && ordinary.qualifier == replacement.qualifier
+        && ordinary.cardinality == replacement.cardinality
+        && ordinary.config == replacement.config
+        && ordinary.resolution == replacement.resolution
+        && ordinary.dynamic == replacement.dynamic
+        && (replacement.optional || !ordinary.optional)
 }
