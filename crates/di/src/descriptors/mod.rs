@@ -7,9 +7,9 @@ pub use builder::erase_provider;
 
 pub use component::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, Dep, Dynamic, Injectable,
-    Live, LiveRef, Provide, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
-    Registration, ServiceComponent, Wired, Wiring,
+    ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole, Dep,
+    Dynamic, Injectable, Live, LiveRef, Provide, ProviderDescriptor, ProviderOf, ProviderOrder,
+    ProviderOrderDirection, Registration, ServiceComponent, Wired, Wiring,
 };
 
 pub use upwell_core::{

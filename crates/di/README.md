@@ -46,6 +46,17 @@ static CUSTOM_AUTH: ProviderDescriptor =
     ProviderDescriptor::of::<CustomAuthenticator, dyn Authenticator>("dyn Authenticator").primary();
 ```
 
+A singleton that keeps state across a runtime transition declares a static replacement factory with a `replace` entry. Its first parameter is [`Previous<Self>`](Previous), an immutable snapshot of the instance being replaced. Every other parameter resolves from the candidate generation and must also be a dependency of the ordinary factory. When a config change replaces the component, the runtime calls this factory instead of the ordinary one. If it fails or panics, the previous instance stays active.
+
+```rust,ignore
+async fn carry(previous: Previous<Cache>, db: Db) -> Cache {
+    Cache::with_entries(db, previous.entries())
+}
+
+static CACHE: ComponentDescriptor = ComponentDescriptor::of::<Cache>()
+    .with_factories(factories!["fresh" => Cache::new, replace "carry" => carry]);
+```
+
 ## Internal role
 
 This is the engine the application layer drives. `upwell-dirs` implements [`Component`]/[`Injectable`] for its `Dir<K>` and `DirectoriesManager` against these traits. `upwell-config` seeds itself as an external resolver reachable via the [`ResolverCtx`], and `upwell-app` plus the protocol crates (`upwell-rpc`, `upwell-axum`) build [`ScopeContainer`]s, seed framework singletons (including the [`HookManager`](upwell_hooks::HookManager)), and resolve components through this crate.

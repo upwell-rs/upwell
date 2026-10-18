@@ -10,7 +10,7 @@ use upwell_config::{ConfigManager, Dynamic};
 use upwell_core::{StaticScope, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, Injectable, Singleton,
+    ComponentFactoryDescriptor, ComponentFactoryRole, Injectable, Singleton,
 };
 
 use super::{Rpc, RpcAppBuilder};
@@ -54,7 +54,7 @@ static SENTINEL_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDe
     id: "static",
     construct: construct_sentinel,
     dependencies: no_dependencies,
-    default: true,
+    role: ComponentFactoryRole::Default,
 }];
 
 fn sentinel_factories() -> &'static [ComponentFactoryDescriptor] {

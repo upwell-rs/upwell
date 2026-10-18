@@ -4,7 +4,7 @@ use std::sync::Arc;
 use upwell_core::Transient;
 
 use super::*;
-use crate::{Cardinality, from_boxed};
+use crate::{Cardinality, ComponentFactoryRole, from_boxed};
 
 #[test]
 fn a_single_recipe_is_named_by_its_path_and_effective() {
@@ -16,7 +16,7 @@ fn a_single_recipe_is_named_by_its_path_and_effective() {
     assert_eq!(ENGLISH.id, "english");
     assert_eq!(ENGLISH.name, "English");
     assert_eq!(factory.id, "factory:english");
-    assert!(!factory.default);
+    assert_eq!(factory.role, ComponentFactoryRole::Explicit);
     assert!(ENGLISH.dependencies().is_empty());
     assert_eq!(
         ENGLISH.condition.map(|condition| condition.id),
@@ -90,4 +90,37 @@ fn erase_provider_stores_the_instance_under_its_trait() {
     assert_eq!(concrete.ty.type_id, TypeId::of::<Swedish>());
     assert_eq!(erased.ty.type_id, TypeId::of::<dyn Greeter>());
     assert_eq!(greeter.greet(), "hej");
+}
+
+async fn english_again(previous: crate::Previous<English>, _swedish: Arc<Swedish>) -> English {
+    let _ = previous.greet();
+
+    English
+}
+
+#[test]
+fn a_replace_entry_declares_the_replacement_beside_the_ordinary_recipe() {
+    let descriptor = ComponentDescriptor::of::<English>().with_factories(factories![
+        replace "again" => english_again,
+        "from-swedish" => english_from,
+    ]);
+    let ordinary = descriptor
+        .effective_factory()
+        .expect("one explicit recipe is unambiguous")
+        .expect("a recipe is declared");
+    let replacement = descriptor
+        .replacement_factory()
+        .expect("one replacement is unambiguous")
+        .expect("a replacement is declared");
+    let dependencies = (replacement.dependencies)();
+
+    assert_eq!(ordinary.id, "from-swedish");
+    assert_eq!(replacement.id, "again");
+    assert_eq!(replacement.role, ComponentFactoryRole::Replacement);
+    assert_eq!(
+        dependencies.len(),
+        1,
+        "the previous instance is not a dependency"
+    );
+    assert_eq!(dependencies[0].ty.type_id, TypeId::of::<Swedish>());
 }

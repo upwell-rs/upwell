@@ -59,35 +59,35 @@ fn a_to_b_and_c_dependencies() -> Vec<DependencyDescriptor> {
 }
 
 fn a_factory() -> &'static [ComponentFactoryDescriptor] {
-    unbuilt_factories!("static", a_dependencies, true)()
+    unbuilt_factories!("static", a_dependencies, Default)()
 }
 
 fn b_eager_factory() -> &'static [ComponentFactoryDescriptor] {
-    unbuilt_factories!("static", b_eager_dependencies, true)()
+    unbuilt_factories!("static", b_eager_dependencies, Default)()
 }
 
 fn b_deferred_factory() -> &'static [ComponentFactoryDescriptor] {
-    unbuilt_factories!("static", b_deferred_dependencies, true)()
+    unbuilt_factories!("static", b_deferred_dependencies, Default)()
 }
 
 fn c_factory() -> &'static [ComponentFactoryDescriptor] {
-    unbuilt_factories!("static", c_dependencies, true)()
+    unbuilt_factories!("static", c_dependencies, Default)()
 }
 
 fn c_to_d_factory() -> &'static [ComponentFactoryDescriptor] {
-    unbuilt_factories!("static", c_to_d_dependencies, true)()
+    unbuilt_factories!("static", c_to_d_dependencies, Default)()
 }
 
 fn d_to_c_factory() -> &'static [ComponentFactoryDescriptor] {
-    unbuilt_factories!("static", d_to_c_dependencies, true)()
+    unbuilt_factories!("static", d_to_c_dependencies, Default)()
 }
 
 fn e_to_a_factory() -> &'static [ComponentFactoryDescriptor] {
-    unbuilt_factories!("static", e_to_a_dependencies, true)()
+    unbuilt_factories!("static", e_to_a_dependencies, Default)()
 }
 
 fn a_to_b_and_c_factory() -> &'static [ComponentFactoryDescriptor] {
-    unbuilt_factories!("static", a_to_b_and_c_dependencies, true)()
+    unbuilt_factories!("static", a_to_b_and_c_dependencies, Default)()
 }
 
 fn selection(components: &[ComponentDescriptor]) -> ProviderSelectionModel {

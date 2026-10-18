@@ -61,7 +61,10 @@ use super::component::{
 /// Each entry is `path` or `"id" => path`. A bare `path` is identified as
 /// `"factory:<path>"`, the ID `factory = path` generates. A single recipe is the
 /// effective one; several need exactly one explicit recipe, as with `#[init]`, so mark
-/// the one fallback `default "id" => path`. A second `default` is a compile error:
+/// the one fallback `default "id" => path`. A static state-aware replacement, whose
+/// first parameter is [`Previous<Self>`](crate::Previous), is declared as
+/// `replace "id" => path`; it never takes part in the ordinary choice. A second
+/// `default` is a compile error:
 ///
 /// ```compile_fail
 /// # use std::sync::Arc;
@@ -95,12 +98,17 @@ macro_rules! __factory_entries {
     };
     ([$($done:expr,)*] no default $id:literal => $factory:path $(, $($rest:tt)*)?) => {
         $crate::__factory_entries!(
-            [$($done,)* $crate::__factory_entry!($id, $factory, true),] yes $($($rest)*)?
+            [$($done,)* $crate::__factory_entry!($id, $factory, Default),] yes $($($rest)*)?
+        )
+    };
+    ([$($done:expr,)*] $default:ident replace $id:literal => $factory:path $(, $($rest:tt)*)?) => {
+        $crate::__factory_entries!(
+            [$($done,)* $crate::__replacement_entry!($id, $factory),] $default $($($rest)*)?
         )
     };
     ([$($done:expr,)*] $default:ident $id:literal => $factory:path $(, $($rest:tt)*)?) => {
         $crate::__factory_entries!(
-            [$($done,)* $crate::__factory_entry!($id, $factory, false),] $default
+            [$($done,)* $crate::__factory_entry!($id, $factory, Explicit),] $default
             $($($rest)*)?
         )
     };
@@ -111,7 +119,7 @@ macro_rules! __factory_entries {
                 $crate::__factory_entry!(
                     ::core::concat!("factory:", ::core::stringify!($factory)),
                     $factory,
-                    false
+                    Explicit
                 ),
             ]
             $default $($($rest)*)?
@@ -122,12 +130,25 @@ macro_rules! __factory_entries {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __factory_entry {
-    ($id:expr, $factory:path, $default:literal) => {
+    ($id:expr, $factory:path, $role:ident) => {
         $crate::ComponentFactoryDescriptor {
             id: $id,
             construct: |cx| $crate::dispatch_factory($factory, cx),
             dependencies: || $crate::factory_dependencies($factory),
-            default: $default,
+            role: $crate::ComponentFactoryRole::$role,
+        }
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __replacement_entry {
+    ($id:expr, $factory:path) => {
+        $crate::ComponentFactoryDescriptor {
+            id: $id,
+            construct: |cx| $crate::dispatch_replacement($factory, cx),
+            dependencies: || $crate::replacement_dependencies($factory),
+            role: $crate::ComponentFactoryRole::Replacement,
         }
     };
 }

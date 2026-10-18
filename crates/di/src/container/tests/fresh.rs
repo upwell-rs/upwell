@@ -134,7 +134,7 @@ async fn fresh_reconstructs_a_transient_against_the_requesting_scope() {
         id: "static",
         construct: transient_leaf_factory,
         dependencies: no_dependencies,
-        default: false,
+        role: ComponentFactoryRole::Explicit,
     }];
 
     let bound = ComponentDescriptor::manual(

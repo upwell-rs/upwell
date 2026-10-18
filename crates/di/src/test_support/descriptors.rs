@@ -11,23 +11,23 @@ use upwell_core::{
 
 use crate::descriptors::{
     BoxedComponent, ComponentConstructionContext, ComponentDescriptor, ComponentFactoryDescriptor,
-    ProviderDescriptor,
+    ComponentFactoryRole, ProviderDescriptor,
 };
 
 /// Declares the one never-driven recipe `$id` declaring `$dependencies` as the
-/// `fn() -> &'static [..]` a descriptor stores; `default` marks it the fallback recipe.
+/// `fn() -> &'static [..]` a descriptor stores, in role `$role` (`Explicit` when omitted).
 macro_rules! unbuilt_factories {
     ($id:literal, $dependencies:expr) => {
-        $crate::test_support::unbuilt_factories!($id, $dependencies, false)
+        $crate::test_support::unbuilt_factories!($id, $dependencies, Explicit)
     };
-    ($id:literal, $dependencies:expr, $default:literal) => {
+    ($id:literal, $dependencies:expr, $role:ident) => {
         || {
             const {
                 &[$crate::descriptors::ComponentFactoryDescriptor {
                     id: $id,
                     construct: $crate::test_support::unbuilt,
                     dependencies: $dependencies,
-                    default: $default,
+                    role: $crate::descriptors::ComponentFactoryRole::$role,
                 }]
             }
         }
@@ -35,6 +35,20 @@ macro_rules! unbuilt_factories {
 }
 
 pub(crate) use unbuilt_factories;
+
+/// A never-driven recipe `id` in `role` declaring `dependencies`.
+pub(crate) const fn unbuilt_recipe(
+    id: &'static str,
+    role: ComponentFactoryRole,
+    dependencies: fn() -> Vec<DependencyDescriptor>,
+) -> ComponentFactoryDescriptor {
+    ComponentFactoryDescriptor {
+        id,
+        construct: unbuilt,
+        dependencies,
+        role,
+    }
+}
 
 /// The factory callback of a recipe that planning and validation never drive.
 pub(crate) fn unbuilt(

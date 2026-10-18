@@ -71,7 +71,7 @@ impl ComponentRegistry {
         let mut positions: HashMap<TypeId, usize> = HashMap::new();
 
         for component in &self.components {
-            component.validate_factory_ids()?;
+            component.validate_factories()?;
 
             let type_id = component.ty.type_id;
             let new_manual = component.effective_factory()?.is_none();

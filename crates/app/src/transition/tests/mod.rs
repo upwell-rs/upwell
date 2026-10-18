@@ -12,15 +12,15 @@ use upwell_core::{
 };
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, EffectiveGraph, EffectiveNodeRole, Fresh, FromContainer,
-    Injectable, NodeAction, PlannedNode, ProviderDescriptor, RootResolver, ScopeContainer,
-    ScopeRegistry, Singleton, root_resolver_descriptor,
+    ComponentFactoryDescriptor, ComponentFactoryRole, EffectiveGraph, EffectiveNodeRole, Fresh,
+    FromContainer, Injectable, NodeAction, PlannedNode, ProviderDescriptor, RootResolver,
+    ScopeContainer, ScopeRegistry, Singleton, root_resolver_descriptor,
 };
 use upwell_hooks::{HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookDescriptor, HookKind, HookManager};
 
 use super::{
     CandidateGraph, ComponentTransitionDecision, ComponentTransitionStrategy,
-    ResolvedTransitionPlan, RestartReason, RestartRequired, validate_decision,
+    ResolvedTransitionPlan, RestartReason, RestartRequired,
 };
 use crate::runtime::{AppConditionState, AppRuntime, PreparedRuntimeGeneration, RuntimeScopePlan};
 use crate::test_support::test_component;
@@ -203,5 +203,6 @@ mod live_invalidation;
 mod live_resolver;
 mod live_retarget;
 mod overrides;
+mod replacement;
 mod retention;
 mod strategy;

@@ -35,8 +35,8 @@ use tracing::info;
 use upwell_core::{DependencyDescriptor, ResolverCtx, ResolverCtxExt, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, ComponentSource, Result as DiResult, RootResolver, Singleton,
-    dispatch_factory, factory_dependencies,
+    ComponentFactoryDescriptor, ComponentFactoryRole, ComponentSource, Result as DiResult,
+    RootResolver, Singleton, dispatch_factory, factory_dependencies,
 };
 use upwell_hooks::{Error as HookError, HookDescriptor, HookKind, Result as HookResult, Startup};
 
@@ -437,7 +437,7 @@ static SCHEDULER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryD
     id: "static",
     construct: scheduler_construct,
     dependencies: scheduler_deps,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 
 fn scheduler_factories() -> &'static [ComponentFactoryDescriptor] {

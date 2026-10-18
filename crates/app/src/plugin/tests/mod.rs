@@ -52,12 +52,12 @@ static PLUGIN_PROVIDER: ProviderDescriptor = planned_provider(
 
 static PROTOCOL_COMPONENT: ComponentDescriptor =
     ComponentDescriptor::of::<ProtocolPluginComponent>()
-        .with_factories(unbuilt_factories!("static", Vec::new, true))
+        .with_factories(unbuilt_factories!("static", Vec::new, Default))
         .without_retention();
 
 static APPLICATION_COMPONENT: ComponentDescriptor =
     ComponentDescriptor::of::<ApplicationPluginComponent>()
-        .with_factories(unbuilt_factories!("static", Vec::new, true))
+        .with_factories(unbuilt_factories!("static", Vec::new, Default))
         .without_retention();
 
 impl upwell_core::Descriptor<ComponentDescriptor> for ApplicationPluginComponent {

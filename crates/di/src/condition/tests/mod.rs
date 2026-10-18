@@ -25,11 +25,11 @@ fn missing_dependencies() -> Vec<upwell_core::DependencyDescriptor> {
 }
 
 fn factory() -> &'static [ComponentFactoryDescriptor] {
-    unbuilt_factories!("static", no_dependencies, true)()
+    unbuilt_factories!("static", no_dependencies, Default)()
 }
 
 fn missing_factory() -> &'static [ComponentFactoryDescriptor] {
-    unbuilt_factories!("static", missing_dependencies, true)()
+    unbuilt_factories!("static", missing_dependencies, Default)()
 }
 
 fn facts() -> [ConfigFactDescriptor; 2] {

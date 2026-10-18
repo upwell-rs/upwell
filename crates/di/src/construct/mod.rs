@@ -27,6 +27,12 @@ use crate::descriptors::{
 };
 use crate::error::Error;
 
+mod replacement;
+
+pub use replacement::{
+    Previous, ReplacementFactory, dispatch_replacement, replacement_dependencies,
+};
+
 /// The short, human-readable type name (the final `::` segment of the full path),
 /// borrowed from the `'static` full name — so it allocates nothing.
 pub fn short_name<T: ?Sized + 'static>() -> &'static str {

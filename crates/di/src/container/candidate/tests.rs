@@ -79,6 +79,7 @@ async fn root_resolves_only_candidate_components() {
     let candidate = ScopeContainer::build_candidate_root(
         &[dependency.id, consumer.id],
         Vec::new(),
+        Vec::new(),
         ResolverSet::new(),
         registry([dependency, consumer]),
     )
@@ -115,6 +116,7 @@ async fn root_never_falls_back_to_an_active_parent() {
     let result = ScopeContainer::build_candidate_root(
         &[consumer.id],
         Vec::new(),
+        Vec::new(),
         ResolverSet::new(),
         registry([consumer]),
     )
@@ -144,6 +146,7 @@ async fn root_rejects_active_component_source() {
     let result = ScopeContainer::build_candidate_root(
         &[],
         Vec::new(),
+        Vec::new(),
         active.resolvers().clone(),
         registry([]),
     )
@@ -162,6 +165,7 @@ async fn factory_output_must_match_its_descriptor() {
     let result = ScopeContainer::build_candidate_root(
         &[descriptor.id],
         Vec::new(),
+        Vec::new(),
         ResolverSet::new(),
         registry([descriptor]),
     )
@@ -179,6 +183,7 @@ async fn factory_panics_are_redacted() {
         component::<CandidateDependency>("candidate-dependency", panicking_candidate_factories);
     let result = ScopeContainer::build_candidate_root(
         &[descriptor.id],
+        Vec::new(),
         Vec::new(),
         ResolverSet::new(),
         registry([descriptor]),
@@ -202,6 +207,7 @@ async fn builder_uses_the_candidate_registry_descriptor() {
     let root = ScopeContainer::build_candidate_root(
         &[active.id],
         Vec::new(),
+        Vec::new(),
         ResolverSet::new(),
         registry([candidate]),
     )
@@ -223,6 +229,7 @@ async fn builder_rejects_an_incomplete_candidate_root() {
 
     let result = ScopeContainer::build_candidate_root(
         &[],
+        Vec::new(),
         Vec::new(),
         ResolverSet::new(),
         registry([dependency]),
@@ -246,6 +253,7 @@ async fn builder_rejects_a_retained_root_resolver() {
     let result = ScopeContainer::build_candidate_root(
         &[],
         vec![retained],
+        Vec::new(),
         ResolverSet::new(),
         registry([descriptor]),
     )
@@ -274,6 +282,7 @@ async fn builder_recreates_and_attaches_the_root_resolver() {
     let root = ScopeContainer::build_candidate_root(
         &[],
         vec![retained],
+        Vec::new(),
         ResolverSet::new(),
         registry([target, resolver]),
     )
@@ -287,4 +296,71 @@ async fn builder_recreates_and_attaches_the_root_resolver() {
         .expect("resolver uses candidate root");
 
     assert_eq!(target.0, "candidate");
+}
+
+async fn carried_dependency(previous: crate::Previous<CandidateDependency>) -> CandidateDependency {
+    CandidateDependency(previous.0)
+}
+
+fn replaceable_dependency_factories() -> &'static [ComponentFactoryDescriptor] {
+    factories![
+        "candidate" => candidate_dependency,
+        replace "carry" => carried_dependency,
+    ]()
+}
+
+#[tokio::test]
+async fn previous_instances_are_built_by_their_replacement_factory() {
+    let dependency =
+        component::<CandidateDependency>("candidate-dependency", replaceable_dependency_factories);
+    let consumer =
+        component::<CandidateConsumer>("candidate-consumer", candidate_consumer_factories);
+
+    let candidate = ScopeContainer::build_candidate_root(
+        &[dependency.id, consumer.id],
+        Vec::new(),
+        vec![BoxedComponent::new(CandidateDependency("previous"))],
+        ResolverSet::new(),
+        registry([dependency, consumer]),
+    )
+    .await
+    .expect("candidate root builds");
+    let consumer = candidate
+        .get::<CandidateConsumer>()
+        .expect("candidate consumer exists");
+
+    assert_eq!(
+        consumer.dependency.0, "previous",
+        "the replacement carried the previous instance; the consumer used its ordinary factory"
+    );
+}
+
+#[tokio::test]
+async fn previous_instances_need_a_replacement_factory_in_the_construction_order() {
+    let replaceable =
+        component::<CandidateDependency>("candidate-dependency", replaceable_dependency_factories);
+    let ordinary =
+        component::<CandidateDependency>("candidate-dependency", candidate_dependency_factories);
+
+    for (previous, descriptor) in [
+        (BoxedComponent::new(WrongCandidate), replaceable),
+        (
+            BoxedComponent::new(CandidateDependency("previous")),
+            ordinary,
+        ),
+    ] {
+        let result = ScopeContainer::build_candidate_root(
+            &[descriptor.id],
+            Vec::new(),
+            vec![previous],
+            ResolverSet::new(),
+            registry([descriptor]),
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(Error::CandidateComponentMismatch { .. })),
+            "an unusable previous instance is rejected before construction"
+        );
+    }
 }
