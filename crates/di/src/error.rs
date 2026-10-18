@@ -237,7 +237,7 @@ pub enum Error {
     ReplacementWithoutFactory(String),
 
     #[error(
-        "replacement factory for component '{component}' resolves '{dependency}', which its ordinary factory does not declare"
+        "replacement factory for component '{component}' resolves '{dependency}' in a way its ordinary factory does not declare"
     )]
     UndeclaredReplacementDependency {
         component: String,

@@ -35,6 +35,26 @@ fn one_u16() -> Vec<DependencyDescriptor> {
     edge::<u16>("u16")
 }
 
+fn optional_u8() -> Vec<DependencyDescriptor> {
+    edge::<u8>("u8")
+        .into_iter()
+        .map(|dependency| DependencyDescriptor {
+            optional: true,
+            ..dependency
+        })
+        .collect()
+}
+
+fn lazy_u8() -> Vec<DependencyDescriptor> {
+    edge::<u8>("u8")
+        .into_iter()
+        .map(|dependency| DependencyDescriptor {
+            resolution: ResolutionMode::Lazy,
+            ..dependency
+        })
+        .collect()
+}
+
 #[test]
 fn factory_ids_are_validated_during_registry_resolution() {
     static EMPTY: [ComponentFactoryDescriptor; 1] = [unbuilt_recipe("", Explicit, no_dependencies)];
@@ -122,5 +142,35 @@ fn the_replacement_contract_is_validated_during_registry_resolution() {
     assert!(matches!(
         undeclared,
         Error::UndeclaredReplacementDependency { ref dependency, .. } if dependency == "u16"
+    ));
+}
+
+#[test]
+fn a_replacement_edge_may_be_no_stricter_than_its_ordinary_edge() {
+    static RELAXED: [ComponentFactoryDescriptor; 2] = [
+        unbuilt_recipe("default", Default, one_u8),
+        unbuilt_recipe("replace", Replacement, optional_u8),
+    ];
+    static TIGHTENED: [ComponentFactoryDescriptor; 2] = [
+        unbuilt_recipe("default", Default, optional_u8),
+        unbuilt_recipe("replace", Replacement, one_u8),
+    ];
+    static EAGER_OVER_LAZY: [ComponentFactoryDescriptor; 2] = [
+        unbuilt_recipe("default", Default, lazy_u8),
+        unbuilt_recipe("replace", Replacement, one_u8),
+    ];
+
+    resolve(|| &RELAXED).expect("a replacement may treat a required edge as optional");
+
+    let tightened = resolve(|| &TIGHTENED).expect_err("an optional edge cannot become required");
+    let eager = resolve(|| &EAGER_OVER_LAZY).expect_err("a lazy edge cannot be resolved eagerly");
+
+    assert!(matches!(
+        tightened,
+        Error::UndeclaredReplacementDependency { .. }
+    ));
+    assert!(matches!(
+        eager,
+        Error::UndeclaredReplacementDependency { .. }
     ));
 }
