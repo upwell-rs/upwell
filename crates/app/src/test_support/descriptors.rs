@@ -1,4 +1,6 @@
-use upwell_core::TypeDescriptor;
+use upwell_core::{
+    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, TypeDescriptor,
+};
 use upwell_di::{BoxedComponent, ProviderDescriptor};
 
 /// The erase callback of a provider mapping that planning tests register but never erase.
@@ -22,5 +24,25 @@ pub(crate) const fn planned_provider(
         priority: 0,
         ordering: &[],
         erase: unerased,
+    }
+}
+
+/// A required, unqualified, non-config snapshot dependency on `ty` named `name`.
+pub(crate) const fn dependency(
+    name: &'static str,
+    ty: TypeDescriptor,
+    cardinality: Cardinality,
+    resolution: ResolutionMode,
+) -> DependencyDescriptor {
+    DependencyDescriptor {
+        name,
+        ty,
+        cardinality,
+        optional: false,
+        dynamic: false,
+        qualifier: None,
+        config: false,
+        resolution,
+        observation: DependencyObservation::Snapshot,
     }
 }
