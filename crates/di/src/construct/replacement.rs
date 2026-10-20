@@ -22,7 +22,7 @@ use crate::descriptors::{BoxedComponent, Component, ComponentConstructionContext
 /// across a transition is read through shared references (or interior mutability the
 /// component already owns). Readers holding the previous instance keep observing it
 /// until they drop it.
-pub struct Previous<C: Component>(C::Handle);
+pub struct Previous<C: Component>(pub(super) C::Handle);
 
 impl<C: Component> Previous<C> {
     /// The previous instance's handle.

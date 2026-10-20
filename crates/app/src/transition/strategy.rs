@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use upwell_di::{EffectiveNodeRole, NodeAction, PlannedNode, TransitionPlan};
+use upwell_di::{EffectiveNodeRole, NodeAction, PlannedNode, ReasonKind, TransitionPlan};
 
 use super::CandidateGraph;
 
@@ -24,6 +24,35 @@ pub enum ComponentTransitionStrategy {
     /// is read through the same generation-snapshot seam as `Retain`, so a descriptor
     /// without a snapshot adapter cannot be replaced from its previous instance.
     Replace,
+    /// Let the candidate descriptor's transition handler select a one-shot factory for
+    /// this planned change, falling back to `Replace` when the component declares a
+    /// replacement factory and to `Reconstruct` otherwise when the handler declines.
+    ///
+    /// The one-shot factory may read the previous instance and may resolve only the
+    /// dependencies the ordinary factory declares. Valid for singleton `Replace` and
+    /// `RebindLive` nodes whose component declares a transition handler.
+    Transition,
+    /// Keep the active instance and update it in place through the candidate
+    /// descriptor's explicit hot-update preparation.
+    ///
+    /// Preparation reads the instance and candidate dependencies before commit and
+    /// never mutates it; the prepared action applies during the terminal publication,
+    /// and a failed or rejected transition drops it unapplied. Valid for singleton
+    /// `Replace` and `RebindLive` nodes whose component declares a hot update and whose
+    /// identity, factory and dependency contract are unchanged.
+    HotUpdate,
+}
+
+impl ComponentTransitionStrategy {
+    /// Whether the active instance carries into the candidate generation.
+    pub(crate) fn retains_instance(self) -> bool {
+        matches!(self, Self::Retain | Self::HotUpdate)
+    }
+
+    /// Whether candidate construction reads a snapshot of the active instance.
+    pub(crate) fn reads_previous(self) -> bool {
+        matches!(self, Self::Replace | Self::Transition)
+    }
 }
 
 /// One component-owned strategy decision for a transition attempt.
@@ -56,6 +85,9 @@ pub enum RestartReason {
     FactoryUnavailable,
     ReplacementUnavailable,
     PreviousUnavailable,
+    TransitionHandlerUnavailable,
+    HotUpdateUnavailable,
+    HotUpdateIncompatible,
 }
 
 impl fmt::Display for RestartReason {
@@ -80,6 +112,13 @@ impl fmt::Display for RestartReason {
                 "the candidate component declares no replacement factory"
             }
             Self::PreviousUnavailable => "the component has no active instance to replace",
+            Self::TransitionHandlerUnavailable => {
+                "the candidate component declares no transition handler"
+            }
+            Self::HotUpdateUnavailable => "the candidate component declares no hot update",
+            Self::HotUpdateIncompatible => {
+                "the component's identity, factory or dependency contract changed, so its instance cannot update in place"
+            }
         };
 
         formatter.write_str(reason)
@@ -105,7 +144,7 @@ pub(super) fn validate_decision(
     node: &PlannedNode,
     strategy: Option<ComponentTransitionStrategy>,
 ) -> crate::Result<()> {
-    use ComponentTransitionStrategy::{Reconstruct, Replace, Retain};
+    use ComponentTransitionStrategy::{HotUpdate, Reconstruct, Replace, Retain, Transition};
 
     if node.role != EffectiveNodeRole::Singleton {
         return restart(node, RestartReason::NonSingleton);
@@ -120,26 +159,59 @@ pub(super) fn validate_decision(
         (NodeAction::Replace, Some(Retain)) => restart(node, RestartReason::StaleRetention),
         (NodeAction::Retain, Some(Retain)) => Ok(()),
         (NodeAction::Add | NodeAction::Replace | NodeAction::RebindLive, Some(Reconstruct)) => {
-            require_factory(candidate, node, Reconstruct)
+            require_factory(candidate, node, strategy)
         }
-        (NodeAction::Replace | NodeAction::RebindLive, Some(Replace)) => {
-            require_factory(candidate, node, Replace)
+        (NodeAction::Replace | NodeAction::RebindLive, Some(Replace | Transition)) => {
+            require_factory(candidate, node, strategy)
         }
-        (NodeAction::Add, Some(Replace)) => restart(node, RestartReason::PreviousUnavailable),
+        (NodeAction::Replace | NodeAction::RebindLive, Some(HotUpdate))
+            if !updates_in_place(node) =>
+        {
+            restart(node, RestartReason::HotUpdateIncompatible)
+        }
+        (NodeAction::Replace | NodeAction::RebindLive, Some(HotUpdate)) => {
+            require_factory(candidate, node, strategy)
+        }
+        (NodeAction::Add, Some(Replace | Transition | HotUpdate)) => {
+            restart(node, RestartReason::PreviousUnavailable)
+        }
         _ => restart(node, RestartReason::MissingDecision),
     }
 }
 
-/// Requires the candidate descriptor to declare the factory `strategy` invokes.
+/// Whether `node`'s reasons leave its instance updatable in place: its identity,
+/// factory and dependency contract are unchanged.
+pub(super) fn updates_in_place(node: &PlannedNode) -> bool {
+    node.reasons.iter().all(|reason| {
+        !matches!(
+            reason.kind,
+            ReasonKind::FactoryChanged
+                | ReasonKind::IdentityChanged
+                | ReasonKind::DependencyContractChanged
+        )
+    })
+}
+
+/// Requires the candidate descriptor to declare the recipe `strategy` invokes.
 fn require_factory(
     candidate: &CandidateGraph,
     node: &PlannedNode,
-    strategy: ComponentTransitionStrategy,
+    strategy: Option<ComponentTransitionStrategy>,
 ) -> crate::Result<()> {
+    use ComponentTransitionStrategy::{HotUpdate, Replace, Transition};
+
     let (factory, reason) = match (candidate.component(node.component), strategy) {
-        (Some(component), ComponentTransitionStrategy::Replace) => (
+        (Some(component), Some(Replace)) => (
             component.replacement_factory()?,
             RestartReason::ReplacementUnavailable,
+        ),
+        (Some(component), Some(Transition)) => (
+            component.transition_handler()?,
+            RestartReason::TransitionHandlerUnavailable,
+        ),
+        (Some(component), Some(HotUpdate)) => (
+            component.hot_update_factory()?,
+            RestartReason::HotUpdateUnavailable,
         ),
         (Some(component), _) => (
             component.effective_factory()?,

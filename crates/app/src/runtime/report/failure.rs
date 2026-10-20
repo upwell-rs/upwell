@@ -123,7 +123,8 @@ impl TransitionFailure {
             | upwell_di::Error::CandidateProviderPanicked { .. }
             | upwell_di::Error::CandidateFinalizationPanicked
             | upwell_di::Error::CandidateMetadataPanicked
-            | upwell_di::Error::SnapshotPanicked { .. } => Self::Panicked,
+            | upwell_di::Error::SnapshotPanicked { .. }
+            | upwell_di::Error::HotUpdatePanicked { .. } => Self::Panicked,
             _ if phase == TransitionPhase::Construct => Self::ConstructionFailed,
             _ => Self::GraphInvalid,
         }

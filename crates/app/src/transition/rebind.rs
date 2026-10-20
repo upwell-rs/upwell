@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use upwell_di::{DependencyDemand, DependencyDemandId, LiveCell, LiveRebind, ScopeContainer};
 
-use super::{CandidateGraph, ComponentTransitionStrategy, ResolvedTransitionPlan, RestartReason};
+use super::resolved::SeedKind;
+use super::{CandidateGraph, ResolvedTransitionPlan, RestartReason};
 use crate::RuntimeView;
 
 /// The live cells retained singleton consumers hold, keyed by dependency demand.
@@ -26,12 +27,6 @@ pub(crate) struct HeldLiveCells {
     cells: Arc<BTreeMap<DependencyDemandId, Option<LiveCell>>>,
 }
 
-/// The prepared republications one commit applies, in no particular order.
-#[derive(Default)]
-pub(crate) struct LiveRebinds {
-    rebinds: Vec<LiveRebind>,
-}
-
 impl HeldLiveCells {
     /// The cell `demand`'s consumer holds in the generation owning this map.
     fn held(&self, root: &ScopeContainer, demand: &DependencyDemand) -> Option<LiveCell> {
@@ -43,33 +38,24 @@ impl HeldLiveCells {
     }
 }
 
-impl LiveRebinds {
-    /// Publishes every prepared value into its held cell.
-    pub(crate) fn commit(self) {
-        for rebind in self.rebinds {
-            rebind.commit();
-        }
-    }
-}
-
 impl ResolvedTransitionPlan {
     /// Records the live cells every retained consumer holds and prepares the in-place
     /// rebinds the plan requires, reading values from the built candidate root.
     ///
     /// A rebind whose held or candidate cell cannot be identified, or whose cells hold
     /// different types, is rejected with [`RestartReason::LiveRebindUnsupported`]. No
-    /// cell is touched here; the returned [`LiveRebinds`] apply at commit.
+    /// cell is touched here; the returned rebinds apply at commit.
     pub(crate) fn prepare_live_rebinds(
         &self,
         candidate: &CandidateGraph,
         active: &RuntimeView,
         candidate_root: &ScopeContainer,
-    ) -> crate::Result<(HeldLiveCells, LiveRebinds)> {
+    ) -> crate::Result<(HeldLiveCells, Vec<LiveRebind>)> {
         let active_held = active.held_live_cells();
         let mut cells = BTreeMap::new();
         let mut rebinds = Vec::new();
 
-        for decision in self.decisions_with(ComponentTransitionStrategy::Retain) {
+        for decision in self.decisions_seeding(SeedKind::Retained) {
             let (Some(before), Some(after)) = (
                 active.effective_graph().node(decision.component),
                 candidate.graph.node(decision.component),
@@ -106,7 +92,7 @@ impl ResolvedTransitionPlan {
             cells: Arc::new(cells),
         };
 
-        Ok((held, LiveRebinds { rebinds }))
+        Ok((held, rebinds))
     }
 
     fn rebinds_binding(&self, demand: DependencyDemandId) -> bool {

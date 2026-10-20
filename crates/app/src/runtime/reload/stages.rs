@@ -13,7 +13,7 @@ use super::super::generation::RuntimeTransition;
 use super::super::report::TransitionCompletion;
 use super::super::{AppConditionState, PreparedRuntimeGeneration, RuntimeView};
 use crate::registry::AppConditionEvaluation;
-use crate::transition::{CandidateGraph, ResolvedTransitionPlan};
+use crate::transition::{CandidateGraph, CommitActions, ResolvedTransitionPlan};
 
 /// Snapshots the staged condition facts and incrementally re-evaluates conditions against
 /// the base generation's catalog.
@@ -81,7 +81,8 @@ pub(super) fn plan_transition(
 /// manager built from the candidate descriptors.
 ///
 /// The prepared generation also carries the live rebinds for retained consumers whose
-/// live dependencies changed; they apply only inside its terminal publication.
+/// live dependencies changed and the prepared hot updates; they apply only inside its
+/// terminal publication.
 ///
 /// The candidate root seeds that manager through a generation override, so candidate
 /// hooks resolve through the candidate root only and the active manager is never reused.
@@ -113,6 +114,7 @@ pub(super) async fn construct_candidate(
         .await?;
     let (held_live_cells, live_rebinds) =
         resolved_plan.prepare_live_rebinds(&candidate, base, &root)?;
+    let hot_updates = resolved_plan.prepare_hot_updates(&candidate, &root).await?;
     let (resolved, scope_plan, graph) = candidate.into_runtime_parts(&topology);
     let prepared = PreparedRuntimeGeneration::new(
         root,
@@ -122,7 +124,10 @@ pub(super) async fn construct_candidate(
         graph,
         Arc::new(AppConditionState::new(Arc::clone(catalog), evaluation)),
     )
-    .with_live_rebinds(held_live_cells, live_rebinds);
+    .with_commit_actions(
+        held_live_cells,
+        CommitActions::new(live_rebinds, hot_updates),
+    );
 
     Ok((prepared, hook_manager))
 }
