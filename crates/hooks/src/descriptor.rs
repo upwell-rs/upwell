@@ -3,7 +3,9 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
-use upwell_core::{DependencyDescriptor, ResolverCtx, TypeDescriptor, UpwellDescriptor};
+use upwell_core::{
+    DependencyDescriptor, ItemSource, ResolverCtx, TypeDescriptor, UpwellDescriptor,
+};
 
 use crate::{HookKind, HookRole, HookRouting, Result};
 
@@ -50,6 +52,8 @@ pub struct HookDescriptor {
     pub role: HookRole,
     /// Whether the hook runs only when its firing site selects it.
     pub routing: HookRouting,
+    /// The hook method's declaration, when the registering macro recorded it.
+    pub source: Option<ItemSource>,
 }
 
 impl HookDescriptor {
@@ -74,6 +78,7 @@ impl HookDescriptor {
             call,
             role: HookRole::Participant,
             routing: HookRouting::Targeted,
+            source: None,
         }
     }
 
@@ -114,6 +119,13 @@ impl HookDescriptor {
     /// Declares the hook's routing.
     pub const fn with_routing(mut self, routing: HookRouting) -> Self {
         self.routing = routing;
+
+        self
+    }
+
+    /// Records the hook method's declaration.
+    pub const fn with_source(mut self, source: ItemSource) -> Self {
+        self.source = Some(source);
 
         self
     }

@@ -388,6 +388,7 @@ fn diagnostic_validation_requires_message_and_source_file() {
         file: String::from(" "),
         line: None,
         column: None,
+        rust_path: None,
     });
 
     assert!(matches!(
@@ -410,6 +411,7 @@ fn diagnostic_and_provenance_sources_require_one_based_coordinates() {
             file: String::from("src/main.rs"),
             line: Some(0),
             column: Some(1),
+            rust_path: None,
         }],
         ..Diagnostic::default()
     });
@@ -429,6 +431,7 @@ fn diagnostic_and_provenance_sources_require_one_based_coordinates() {
             file: String::from("src/main.rs"),
             line: Some(1),
             column: Some(0),
+            rust_path: None,
         }),
         ..Provenance::default()
     });
@@ -460,11 +463,13 @@ fn diagnostic_nested_permutations_and_all_fields_canonicalize_stably() {
         file: String::from("src/first.rs"),
         line: Some(1),
         column: Some(2),
+        rust_path: None,
     };
     let second_source = SourceLocation {
         file: String::from("src/second.rs"),
         line: Some(3),
         column: Some(4),
+        rust_path: None,
     };
     let mut left = fixture();
     let mut right = fixture();
@@ -531,7 +536,9 @@ fn probe_envelopes_round_trip_target_identity_for_success_and_failure() {
             file: String::from("src/main.rs"),
             line: Some(17),
             column: Some(5),
+            rust_path: None,
         }),
+        workspace_root: None,
     };
     let success = ProbeEnvelope::success(fixture(), identity.clone());
     let failure = ProbeEnvelope::failure(
@@ -662,6 +669,7 @@ fn probe_identity_rejects_invalid_optional_metadata_and_source_coordinates() {
             file: String::from("src/main.rs"),
             line,
             column,
+            rust_path: None,
         });
 
         assert!(
@@ -742,6 +750,7 @@ fn failure_diagnostics_allow_resources_absent_without_a_success_document() {
         file: String::from("src/main.rs"),
         line: Some(10),
         column: None,
+        rust_path: None,
     }];
 
     ProbeEnvelope::failure(probe_identity(), failure)
@@ -764,7 +773,9 @@ fn probe_identity() -> DocumentIdentity {
             file: String::from("src/main.rs"),
             line: Some(17),
             column: Some(5),
+            rust_path: None,
         }),
+        workspace_root: None,
     }
 }
 

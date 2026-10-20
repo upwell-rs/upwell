@@ -118,6 +118,11 @@ fn emit_http(handlers: &AxumHandlers, cx: &super::HandlerContext, out: &mut Toke
     );
     let route_descriptors = handlers.routes.iter().map(|route| {
         let handler = route.handler_name.to_string();
+        let source = upwell_macros_core::source::item_source(
+            route.handler_name.span(),
+            &upwell_macros_core::source::associated_item(self_ty, &route.handler_name),
+            paths,
+        );
         let method = route.verb.to_string().to_ascii_uppercase();
         let path = &route.path;
         let input_descriptors = route.inputs.iter().map(|input| {
@@ -177,6 +182,7 @@ fn emit_http(handlers: &AxumHandlers, cx: &super::HandlerContext, out: &mut Toke
                     shape: #http_output_shape::#output_shape,
                     responses: &[#(#responses),*],
                 },
+                source: ::core::option::Option::Some(#source),
             }
         }
     });

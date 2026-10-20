@@ -18,6 +18,7 @@ fn provider_lookup_uses_the_prebuilt_concrete_index() {
         name: "Counted",
         type_name: std::any::type_name::<u8>,
         type_id: counted_concrete_id(),
+        source: None,
     };
     let provider = ProviderDescriptor {
         trait_ty: TypeDescriptor::of::<dyn Send>("dyn Send"),

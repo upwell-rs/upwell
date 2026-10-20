@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{quote, quote_spanned};
 use syn::{Expr, Ident};
 
 use crate::paths::Paths;
@@ -18,6 +18,10 @@ pub(super) fn expand(
         _ => return Err(literal_name_error(application_name)),
     };
     let probe_target_identity = paths.core("tooling::ProbeTargetIdentity");
+    let ident_name = ident.to_string();
+    let file = quote_spanned!(ident.span()=> ::core::file!());
+    let line = quote_spanned!(ident.span()=> ::core::line!());
+    let column = quote_spanned!(ident.span()=> ::core::column!());
     let source_location = paths.core("tooling::SourceLocation");
     let probe_envelope = paths.core("tooling::ProbeEnvelope");
     let identity_error = paths.core("tooling::IdentityValidationError");
@@ -65,9 +69,12 @@ pub(super) fn expand(
                 let identity = target.document_identity(
                     (#application_name).to_string(),
                     #source_location {
-                        file: ::std::file!().to_string(),
-                        line: ::core::option::Option::Some(::std::line!()),
-                        column: ::core::option::Option::Some(::std::column!()),
+                        file: #file.to_string(),
+                        line: ::core::option::Option::Some(#line),
+                        column: ::core::option::Option::Some(#column),
+                        rust_path: ::core::option::Option::Some(
+                            ::std::format!("{}::{}", ::core::module_path!(), #ident_name),
+                        ),
                     },
                 )?;
                 let panic_identity = identity.clone();

@@ -8,6 +8,7 @@
 //! - **Building blocks** — attribute parsing ([`attr`]), the extension seams ([`extend`]),
 //!   crate-path resolution ([`paths`]), field-injection ([`inject`]), hooks ([`hook`]), the
 //!   DI assertions ([`di`]), provider wiring ([`provide`]), the handle helper ([`handle`]),
+//!   descriptor source positions ([`source`]),
 //!   and the base impl-macro state machine ([`methods`]) — are **public**, so a plugin's macro
 //!   crate (e.g. `upwell-rpc-macros`) reuses them to build its own macros (`#[service]`,
 //!   `#[handlers]`, …) without forking the codegen.
@@ -26,6 +27,7 @@ pub mod inject;
 pub mod methods;
 pub mod paths;
 pub mod provide;
+pub mod source;
 
 mod app;
 mod case;

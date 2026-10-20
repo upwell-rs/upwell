@@ -153,7 +153,7 @@ impl<T: ComponentExt> ToTokens for Router<T> {
         let service_descriptor = paths.plugin("ServiceDescriptor");
         let service_rpcs = paths.plugin("ServiceRpcs");
         let services_slice = paths.plugin("SERVICES");
-        let type_descriptor = paths.core("TypeDescriptor");
+        let declared_ty = upwell_macros_core::source::declared_type(ident, ident, type_name, paths);
         let inner = &self.inner;
 
         // The service's own RPC groups — a single-kind per-type registry (no `Registration` merge),
@@ -212,7 +212,7 @@ impl<T: ComponentExt> ToTokens for Router<T> {
                     #service_descriptor {
                         id: #id,
                         name: #name,
-                        ty: #type_descriptor::of::<#ident>(#type_name),
+                        ty: #declared_ty,
                         version: #version,
                         rpcs: <#ident as #service_rpcs>::rpc_groups,
                     };

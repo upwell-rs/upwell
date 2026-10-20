@@ -24,7 +24,7 @@ use futures::future::BoxFuture;
 use tokio::time::Duration;
 use upwell_app::{AppRegistry, AppRuntime};
 use upwell_config::ContainerConfigExt;
-use upwell_core::TypeDescriptor;
+use upwell_core::{ItemSource, TypeDescriptor};
 use upwell_di::{BoxedComponent, ScopeContainer};
 
 /// How long the framework waits for a WS close handshake to flush before abandoning the socket.
@@ -178,6 +178,8 @@ pub struct WsMessageDescriptor {
     pub reply: Option<TypeDescriptor>,
     /// Codec used symmetrically for payload and reply bodies.
     pub codec: TypeDescriptor,
+    /// The handler method's declaration, when the registering macro recorded it.
+    pub source: Option<ItemSource>,
 }
 
 impl WsRouteDescriptor {

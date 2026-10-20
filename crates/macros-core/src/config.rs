@@ -96,7 +96,6 @@ pub fn expand(args: ConfigArgs, mut item: DeriveInput, paths: &Paths) -> syn::Re
     let descriptor = paths.core("Descriptor");
     let distributed_slice = paths.core("linkme::distributed_slice");
     let linkme_crate = paths.core("linkme");
-    let type_descriptor = paths.core("TypeDescriptor");
 
     // Collect (and strip) the field-level `#[default = ".."]` attributes, then build the
     // `const DEFAULTS`. Stripping is required so the sibling `#[derive(Deserialize)]`
@@ -109,12 +108,13 @@ pub fn expand(args: ConfigArgs, mut item: DeriveInput, paths: &Paths) -> syn::Re
     // manager/builder (the multi-path case), so no descriptor is emitted.
     let registration = match args.path {
         Some(path) => {
+            let declared_ty = crate::source::declared_type(&ident, &ident, &name, paths);
             let condition_input = crate::when::config_input(&ident, &path, paths);
 
             quote! {
             impl #descriptor<#config_binding_descriptor> for #ident {
                 const DESCRIPTOR: #config_binding_descriptor = #config_binding_descriptor {
-                    ty: #type_descriptor::of::<#ident>(#name),
+                    ty: #declared_ty,
                     path: #path,
                     bind: <#ident as #config_properties>::bind,
                     slot: <#ident as #config_properties>::slot,

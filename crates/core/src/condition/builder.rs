@@ -13,22 +13,10 @@
 //! static DEFAULT: ConditionDescriptor = ConditionDescriptor::not("default", &CUSTOM);
 //! ```
 
-use std::panic::Location;
-
 use super::{
     ConditionCallback, ConditionDescriptor, ConditionPredicate, ConditionScalarLiteral,
     ConfigFactId, DescriptorSource, ProviderMappingId,
 };
-
-impl DescriptorSource {
-    /// The location of the caller, through any chain of `#[track_caller]` functions.
-    #[track_caller]
-    pub const fn caller() -> Self {
-        let location = Location::caller();
-
-        Self::new(location.file(), location.line(), location.column())
-    }
-}
 
 impl ConditionDescriptor {
     /// A node with `predicate`, sourced at the caller.

@@ -221,6 +221,7 @@ impl DependencySnapshot {
 pub(crate) struct HookSnapshot {
     pub(crate) ordinal: u32,
     pub(crate) kind: &'static str,
+    pub(crate) source: Option<upwell_core::ItemSource>,
     pub(crate) dependencies: Vec<DependencySnapshot>,
 }
 
@@ -234,6 +235,7 @@ impl HookSnapshot {
         Ok(Self {
             ordinal: descriptor.ordinal,
             kind: descriptor.kind,
+            source: descriptor.source,
             dependencies: (descriptor.dependencies)()
                 .into_iter()
                 .map(|dependency| {

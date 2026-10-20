@@ -151,7 +151,7 @@ pub fn run_probe_with_options(
         target: Box::new(target.clone()),
         source: Box::new(source),
     })?;
-    let probe = execute_probe(
+    let mut probe = execute_probe(
         &build.executable,
         &workspace.target_directory,
         &target,
@@ -162,6 +162,10 @@ pub fn run_probe_with_options(
         target: Box::new(target.clone()),
         source: Box::new(source),
     })?;
+
+    probe
+        .envelope
+        .set_workspace_root(workspace.workspace_root.display().to_string());
 
     let probe = ToolingProbe {
         workspace,

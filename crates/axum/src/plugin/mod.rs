@@ -67,6 +67,8 @@ type WsMount = Box<
 #[cfg(feature = "ws")]
 struct WsRegistration {
     path: String,
+    #[cfg(feature = "tooling")]
+    source: upwell_core::DescriptorSource,
     protocol: std::any::TypeId,
     protocol_name: &'static str,
     mount: WsMount,
@@ -80,6 +82,8 @@ struct PreparedWsRegistration {
     path: String,
     #[cfg(feature = "tooling")]
     protocol_name: &'static str,
+    #[cfg(feature = "tooling")]
+    source: upwell_core::DescriptorSource,
     controllers: Vec<crate::ws::WsControllerDescriptor>,
     mount: WsMount,
 }
@@ -92,6 +96,8 @@ pub struct PreparedAxum {
     base_prefix: String,
     #[cfg(feature = "ws")]
     ws_registrations: Vec<PreparedWsRegistration>,
+    #[cfg(feature = "tooling")]
+    mounted_routes: Vec<tooling::MountedRoute>,
 }
 
 impl ProtocolDefinition for Axum {
@@ -182,6 +188,8 @@ impl ProtocolDefinition for Axum {
                     path: registration.path,
                     #[cfg(feature = "tooling")]
                     protocol_name: registration.protocol_name,
+                    #[cfg(feature = "tooling")]
+                    source: registration.source,
                     controllers,
                     mount: registration.mount,
                 });
@@ -200,6 +208,9 @@ impl ProtocolDefinition for Axum {
             crate::openapi::validate_config(&config)?;
         }
 
+        #[cfg(feature = "tooling")]
+        let mounted_routes = tooling::mounted_routes(_context);
+
         Ok(PreparedAxum {
             controllers: self.controllers,
             middleware: self.middleware,
@@ -207,6 +218,8 @@ impl ProtocolDefinition for Axum {
             base_prefix,
             #[cfg(feature = "ws")]
             ws_registrations,
+            #[cfg(feature = "tooling")]
+            mounted_routes,
         })
     }
 
@@ -358,351 +371,7 @@ impl PreparedProtocol for PreparedAxum {
 
     #[cfg(feature = "tooling")]
     fn tooling(&self, contributions: &mut upwell_app::ToolingContributions) {
-        use std::collections::BTreeMap;
-
-        use upwell_app::{ResourceDisplay, ToolingEndpoint, ToolingRelationshipKind};
-
-        contributions.display(ResourceDisplay {
-            label: Some(String::from("Axum HTTP")),
-            group: Some(String::from("Protocols")),
-            summary: Some(format!(
-                "{} controllers, {} middleware layers",
-                self.controllers.len(),
-                self.middleware.len()
-            )),
-            details: BTreeMap::from([(
-                String::from("base-path"),
-                if self.base_prefix.is_empty() {
-                    String::from("/")
-                } else {
-                    self.base_prefix.clone()
-                },
-            )]),
-        });
-
-        contributions.facet(
-            "summary",
-            1,
-            upwell_app::tooling_schema::JsonValue::Object(
-                [
-                    (
-                        String::from("controller_count"),
-                        self.controllers.len().into(),
-                    ),
-                    (
-                        String::from("middleware_count"),
-                        self.middleware.len().into(),
-                    ),
-                    #[cfg(feature = "ws")]
-                    (
-                        String::from("websocket_endpoint_count"),
-                        self.ws_registrations.len().into(),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
-            ),
-        );
-
-        for controller in &self.controllers {
-            let id = format!("controller/{}", controller.id);
-
-            contributions.resource_with_labels(
-                &id,
-                controller.name,
-                BTreeMap::from([
-                    (String::from("base-path"), controller.base.to_string()),
-                    (String::from("kind"), String::from("http-controller")),
-                    (
-                        String::from("rust-type"),
-                        (controller.ty.type_name)().to_string(),
-                    ),
-                ]),
-            );
-            contributions.resource_display(
-                &id,
-                ResourceDisplay {
-                    label: Some(controller.name.to_string()),
-                    group: Some(String::from("HTTP controllers")),
-                    summary: Some(format!("mounted at {}", controller.base)),
-                    details: BTreeMap::from([
-                        (String::from("base-path"), controller.base.to_string()),
-                        (
-                            String::from("rust-type"),
-                            (controller.ty.type_name)().to_string(),
-                        ),
-                    ]),
-                },
-            );
-            contributions.relationship(
-                ToolingRelationshipKind::Contains,
-                ToolingEndpoint::Owner,
-                ToolingEndpoint::Resource(&id),
-            );
-
-            for route in (controller.routes)() {
-                let route_id = format!(
-                    "route/{}/{}/{}/{}",
-                    controller.id,
-                    route.method.to_ascii_lowercase(),
-                    route.path,
-                    route.handler
-                );
-                let path = join_http_paths(&self.base_prefix, controller.base, route.path);
-
-                contributions.resource_with_labels(
-                    &route_id,
-                    route.handler,
-                    BTreeMap::from([(String::from("kind"), String::from("http-route"))]),
-                );
-                let mut details = BTreeMap::from([
-                    (String::from("handler"), route.handler.to_string()),
-                    (String::from("method"), route.method.to_string()),
-                    (
-                        String::from("output"),
-                        route
-                            .output
-                            .ty
-                            .map(|output| (output.type_name)().to_string())
-                            .unwrap_or_else(|| route.output.declared.to_string()),
-                    ),
-                    (
-                        String::from("output-shape"),
-                        format!("{:?}", route.output.shape),
-                    ),
-                    (String::from("path"), path.clone()),
-                ]);
-                let responses = route
-                    .output
-                    .responses
-                    .iter()
-                    .map(|response| {
-                        let mut value = response.status.to_string();
-
-                        if let Some(redirect) = response.redirect {
-                            value.push_str(" redirect ");
-                            value.push_str(redirect);
-                        }
-
-                        match response.body {
-                            crate::HttpResponseBodyDescriptor::Empty => value.push_str(" empty"),
-                            crate::HttpResponseBodyDescriptor::Typed(body) => {
-                                value.push_str(" body ");
-                                value.push_str((body.type_name)());
-                            }
-                            crate::HttpResponseBodyDescriptor::Opaque => value.push_str(" opaque"),
-                        }
-
-                        value
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let inputs = route
-                    .inputs
-                    .iter()
-                    .map(|input| {
-                        format!(
-                            "{} ({:?}): {}",
-                            input.name,
-                            input.source,
-                            (input.ty.type_name)()
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let path_parameters = route
-                    .path_parameters
-                    .iter()
-                    .map(|parameter| {
-                        if parameter.catch_all {
-                            format!("*{}", parameter.name)
-                        } else {
-                            parameter.name.to_string()
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-
-                if !inputs.is_empty() {
-                    details.insert(String::from("inputs"), inputs);
-                }
-
-                if !path_parameters.is_empty() {
-                    details.insert(String::from("path-parameters"), path_parameters);
-                }
-
-                if !responses.is_empty() {
-                    details.insert(String::from("responses"), responses);
-                }
-
-                contributions.resource_display(
-                    &route_id,
-                    ResourceDisplay {
-                        label: Some(format!("{} {path}", route.method)),
-                        group: Some(format!("HTTP · {}", controller.name)),
-                        summary: Some(format!("handler {}", route.handler)),
-                        details,
-                    },
-                );
-                contributions.relationship(
-                    ToolingRelationshipKind::Contains,
-                    ToolingEndpoint::Resource(&id),
-                    ToolingEndpoint::Resource(&route_id),
-                );
-            }
-        }
-
-        #[cfg(feature = "ws")]
-        for (ordinal, endpoint) in self.ws_registrations.iter().enumerate() {
-            let id = format!("websocket/{ordinal}");
-
-            contributions.resource_with_labels(
-                &id,
-                endpoint.protocol_name,
-                BTreeMap::from([
-                    (String::from("kind"), String::from("websocket-endpoint")),
-                    (String::from("path"), endpoint.path.clone()),
-                    (
-                        String::from("protocol-name"),
-                        endpoint.protocol_name.to_string(),
-                    ),
-                    (
-                        String::from("protocol-type"),
-                        endpoint.protocol_name.to_string(),
-                    ),
-                    (
-                        String::from("controller-count"),
-                        endpoint.controllers.len().to_string(),
-                    ),
-                ]),
-            );
-            contributions.resource_display(
-                &id,
-                ResourceDisplay {
-                    label: Some(format!("WebSocket {}", endpoint.protocol_name)),
-                    group: Some(String::from("WebSocket endpoints")),
-                    summary: Some(format!("mounted at {}", endpoint.path)),
-                    details: BTreeMap::from([
-                        (String::from("path"), endpoint.path.clone()),
-                        (
-                            String::from("controllers"),
-                            endpoint.controllers.len().to_string(),
-                        ),
-                    ]),
-                },
-            );
-            contributions.relationship(
-                ToolingRelationshipKind::Contains,
-                ToolingEndpoint::Owner,
-                ToolingEndpoint::Resource(&id),
-            );
-
-            for controller in &endpoint.controllers {
-                let controller_id = format!("websocket/{ordinal}/controller/{}", controller.id);
-
-                contributions.resource_with_labels(
-                    &controller_id,
-                    controller.name,
-                    BTreeMap::from([(String::from("kind"), String::from("websocket-controller"))]),
-                );
-                contributions.resource_display(
-                    &controller_id,
-                    ResourceDisplay {
-                        label: Some(controller.name.to_string()),
-                        group: Some(format!("WebSocket · {}", endpoint.protocol_name)),
-                        summary: Some(format!("{} message handlers", controller.routes().len())),
-                        details: BTreeMap::from([(
-                            String::from("rust-type"),
-                            (controller.ty.type_name)().to_string(),
-                        )]),
-                    },
-                );
-                contributions.relationship(
-                    ToolingRelationshipKind::Contains,
-                    ToolingEndpoint::Resource(&id),
-                    ToolingEndpoint::Resource(&controller_id),
-                );
-
-                for route in controller.routes() {
-                    let message_id = format!(
-                        "websocket/{ordinal}/controller/{}/message/{}",
-                        controller.id,
-                        route.destination()
-                    );
-                    let message = route.message();
-
-                    contributions.resource_with_labels(
-                        &message_id,
-                        route.destination(),
-                        BTreeMap::from([(String::from("kind"), String::from("websocket-message"))]),
-                    );
-                    contributions.resource_display(
-                        &message_id,
-                        ResourceDisplay {
-                            label: Some(format!("message {}", route.destination())),
-                            group: Some(format!("WebSocket · {}", controller.name)),
-                            summary: Some(
-                                message
-                                    .map(|message| {
-                                        format!(
-                                            "{:?} via {}",
-                                            message.mode,
-                                            (message.codec.type_name)()
-                                        )
-                                    })
-                                    .unwrap_or_else(|| String::from("custom message handler")),
-                            ),
-                            details: message
-                                .map(|message| {
-                                    BTreeMap::from([
-                                        (String::from("handler"), message.handler.to_string()),
-                                        (String::from("mode"), format!("{:?}", message.mode)),
-                                        (
-                                            String::from("payload"),
-                                            message
-                                                .payload
-                                                .map(|payload| (payload.type_name)().to_string())
-                                                .unwrap_or_else(|| String::from("none")),
-                                        ),
-                                        (
-                                            String::from("reply"),
-                                            message
-                                                .reply
-                                                .map(|reply| (reply.type_name)().to_string())
-                                                .unwrap_or_else(|| String::from("none")),
-                                        ),
-                                        (
-                                            String::from("codec"),
-                                            (message.codec.type_name)().to_string(),
-                                        ),
-                                    ])
-                                })
-                                .unwrap_or_default(),
-                        },
-                    );
-                    contributions.relationship(
-                        ToolingRelationshipKind::Contains,
-                        ToolingEndpoint::Resource(&controller_id),
-                        ToolingEndpoint::Resource(&message_id),
-                    );
-                }
-            }
-        }
-    }
-}
-
-#[cfg(feature = "tooling")]
-fn join_http_paths(global: &str, controller: &str, route: &str) -> String {
-    let segments = [global, controller, route]
-        .into_iter()
-        .flat_map(|path| path.split('/'))
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-
-    if segments.is_empty() {
-        String::from("/")
-    } else {
-        format!("/{}", segments.join("/"))
+        tooling::project(self, contributions);
     }
 }
 
@@ -734,6 +403,9 @@ fn normalize_base_path(base_path: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(feature = "tooling")]
+pub(crate) mod tooling;
 
 /// Configured serving for a built axum app.
 ///
@@ -858,6 +530,7 @@ impl AxumAppBuilder for AppBuilder<Axum> {
     }
 
     #[cfg(feature = "ws")]
+    #[track_caller]
     fn register_ws<P>(self, path: impl Into<String>) -> Self
     where
         P: crate::ws::WebsocketProtocol,
@@ -867,6 +540,7 @@ impl AxumAppBuilder for AppBuilder<Axum> {
     }
 
     #[cfg(feature = "ws")]
+    #[track_caller]
     fn register_ws_with<P>(mut self, path: impl Into<String>, options: P::Options) -> Self
     where
         P: crate::ws::WebsocketProtocol,
@@ -882,6 +556,8 @@ impl AxumAppBuilder for AppBuilder<Axum> {
 
         self.protocol_mut().ws_registrations.push(WsRegistration {
             path,
+            #[cfg(feature = "tooling")]
+            source: upwell_core::DescriptorSource::caller(),
             protocol: std::any::TypeId::of::<P>(),
             protocol_name: std::any::type_name::<P>(),
             mount,

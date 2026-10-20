@@ -49,7 +49,9 @@ fn probe_identity() -> DocumentIdentity {
             file: String::from(file!()),
             line: None,
             column: None,
+            rust_path: None,
         }),
+        workspace_root: None,
     }
 }
 

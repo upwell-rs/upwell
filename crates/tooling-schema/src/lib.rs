@@ -112,6 +112,12 @@ pub struct SourceLocation {
     pub line: Option<u32>,
     /// One-based source column when known.
     pub column: Option<u32>,
+    /// Canonical Rust path of the declared item (`my_app::http::Users::list`), when known.
+    ///
+    /// Lets an IDE resolve the exact symbol (and its type information) even when `file` and
+    /// `line` drift from the current buffer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rust_path: Option<String>,
 }
 
 /// Application and selected Cargo target identity.
@@ -125,6 +131,10 @@ pub struct DocumentIdentity {
     pub binary: Option<BinaryTargetIdentity>,
     /// Application declaration source, when supplied by generated target metadata.
     pub source: Option<SourceLocation>,
+    /// Absolute Cargo workspace root that relative [`SourceLocation::file`] paths of workspace
+    /// members resolve against, when supplied by the Cargo-side invoker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<String>,
 }
 
 /// Package and binary identity supplied by the Cargo-side probe invoker.
@@ -168,6 +178,7 @@ impl ProbeTargetIdentity {
             package: Some(self.package.clone()),
             binary: Some(self.binary.clone()),
             source: Some(source),
+            workspace_root: None,
         };
 
         validate_document_identity(&identity)?;
@@ -278,6 +289,19 @@ impl ProbeEnvelope {
             identity,
             outcome: ProbeOutcome::Failure { failure },
         }
+    }
+
+    /// Records the Cargo workspace root on the envelope and its document identity.
+    ///
+    /// Set by the Cargo-side invoker, which alone knows the workspace the target was built in.
+    pub fn set_workspace_root(&mut self, workspace_root: impl Into<String>) {
+        let workspace_root = workspace_root.into();
+
+        if let ProbeOutcome::Success { document } = &mut self.outcome {
+            document.identity.workspace_root = Some(workspace_root.clone());
+        }
+
+        self.identity.workspace_root = Some(workspace_root);
     }
 
     /// Whether the target prepared and projected successfully.

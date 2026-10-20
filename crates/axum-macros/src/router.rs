@@ -187,7 +187,7 @@ impl<T: ComponentExt> AxumRouter<T> {
             .unwrap_or_else(|| format_ident!("{}Routes", ident));
 
         let descriptor_trait = paths.core("Descriptor");
-        let type_descriptor = paths.core("TypeDescriptor");
+        let declared_ty = upwell_macros_core::source::declared_type(ident, ident, type_name, paths);
         let distributed_slice = paths.core("linkme::distributed_slice");
         let linkme_crate = paths.core("linkme");
         let inventory = paths.core("inventory");
@@ -305,7 +305,7 @@ impl<T: ComponentExt> AxumRouter<T> {
                     #controller_descriptor {
                         id: #id,
                         name: #name,
-                        ty: #type_descriptor::of::<#ident>(#type_name),
+                        ty: #declared_ty,
                         base: #base,
                         router: <#ident as #controller_trait>::router,
                         routes: || {
@@ -359,7 +359,7 @@ impl<T: ComponentExt> AxumRouter<T> {
             .unwrap_or_else(|| format_ident!("{}WsRoutes", ident));
 
         let descriptor_trait = paths.core("Descriptor");
-        let type_descriptor = paths.core("TypeDescriptor");
+        let declared_ty = upwell_macros_core::source::declared_type(ident, ident, type_name, paths);
         let distributed_slice = paths.core("linkme::distributed_slice");
         let linkme_crate = paths.core("linkme");
         let inventory = paths.core("inventory");
@@ -437,7 +437,7 @@ impl<T: ComponentExt> AxumRouter<T> {
                     #ws_descriptor {
                         id: #id,
                         name: #name,
-                        ty: #type_descriptor::of::<#ident>(#type_name),
+                        ty: #declared_ty,
                         protocol: || ::std::any::TypeId::of::<#protocol>(),
                         protocol_name: || ::std::any::type_name::<#protocol>(),
                         routes: __upwell_ws_routes,

@@ -3,39 +3,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-/// Captures the call site's source location for descriptor diagnostics.
-#[macro_export]
-macro_rules! descriptor_source {
-    () => {
-        $crate::DescriptorSource::new(file!(), line!(), column!())
-    };
-}
-
-/// Static source location for descriptor diagnostics.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct DescriptorSource {
-    pub file: &'static str,
-    pub line: u32,
-    pub column: u32,
-}
-
-impl Default for DescriptorSource {
-    fn default() -> Self {
-        Self::UNKNOWN
-    }
-}
-
-impl DescriptorSource {
-    pub const UNKNOWN: Self = Self {
-        file: "<unknown>",
-        line: 0,
-        column: 0,
-    };
-
-    pub const fn new(file: &'static str, line: u32, column: u32) -> Self {
-        Self { file, line, column }
-    }
-}
+use crate::source::DescriptorSource;
 
 /// Stable identity of one typed scalar config fact.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

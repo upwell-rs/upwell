@@ -16,14 +16,14 @@ pub mod generation;
 pub mod id;
 pub mod resolver;
 pub mod scope;
+pub mod source;
 pub mod types;
 
 pub use condition::{
     ConditionCallback, ConditionContext, ConditionDescriptor, ConditionExpression, ConditionInput,
     ConditionInputId, ConditionInputRead, ConditionInputValue, ConditionPredicate,
     ConditionPredicateKind, ConditionScalar, ConditionScalarKind, ConditionScalarLiteral,
-    ConfigBindingId, ConfigFactDescriptor, ConfigFactId, DescriptorSource, Eligibility,
-    ProviderMappingId,
+    ConfigBindingId, ConfigFactDescriptor, ConfigFactId, Eligibility, ProviderMappingId,
 };
 pub use dependency::{Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode};
 pub use descriptor::{Descriptor, DescriptorFor, RegistryFor, RuntimeDescriptor, UpwellDescriptor};
@@ -33,4 +33,5 @@ pub use resolver::{Resolver, ResolverCtx, ResolverCtxExt, ResolverSet};
 pub use scope::{
     InvalidScopeId, InvalidScopeIdReason, Scope, ScopeId, Singleton, StaticScope, Transient,
 };
+pub use source::{DescriptorSource, ItemSource};
 pub use types::{TypeDescriptor, type_id_of};

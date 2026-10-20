@@ -318,6 +318,8 @@ pub fn field_injection_component(
         crate::di::wired_impl(&self_ident, &[], paths)
     };
 
+    let declared_ty = crate::source::declared_type(&self_ident, &self_ident, &name, paths);
+
     quote! {
         #default_factory
 
@@ -325,7 +327,7 @@ pub fn field_injection_component(
             #component_descriptor {
                 id: #id,
                 name: #name,
-                ty: #type_descriptor::of::<#self_ident>(#name),
+                ty: #declared_ty,
                 scope: &#scope_path,
                 condition: #condition,
                 factories: <#self_ident as #component_factories>::factories,

@@ -4,7 +4,7 @@ use std::{fmt, future::Future, pin::Pin, sync::Mutex};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use upwell_core::{ResolverCtx, TypeDescriptor};
+use upwell_core::{ItemSource, ResolverCtx, TypeDescriptor};
 use upwell_di::{Component, ScopeContainer};
 
 use crate::extract::ErrorResponse;
@@ -153,6 +153,8 @@ pub struct RpcDescriptor {
     pub parameters: &'static [ParameterDescriptor],
     pub output: TypeDescriptor,
     pub handler: RpcHandler,
+    /// The handler method's declaration, when the registering macro recorded it.
+    pub source: Option<ItemSource>,
 }
 
 impl fmt::Debug for RpcDescriptor {

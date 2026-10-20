@@ -204,6 +204,11 @@ pub fn generate_hook(
     // in source order on the `inventory` backend (which does not preserve registration order) just
     // as they do on `linkme`.
     let ordinal = quote_spanned!(method.span()=> ::core::line!());
+    let source = crate::source::item_source(
+        method.span(),
+        &crate::source::associated_item(self_ty, method),
+        paths,
+    );
     let hook_literal = quote! {
         #hook_descriptor::new(
             #ordinal,
@@ -215,6 +220,7 @@ pub fn generate_hook(
         )
         #role
         #routing
+        .with_source(#source)
     };
     // The hook, appended to the type's registrations.
     let register = crate::backend::dual_backend(

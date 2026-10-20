@@ -29,6 +29,7 @@ mod panic;
 mod relationship;
 mod resources;
 mod snapshot;
+mod source;
 
 pub(crate) use contribution::ToolingContributionSet;
 pub use contribution::{
@@ -40,6 +41,7 @@ pub use output::{
 };
 pub use panic::install_process_probe_panic_hook;
 pub(crate) use snapshot::ProjectionSnapshot;
+pub(crate) use source::{item_location, type_location, with_source};
 pub use upwell_tooling_schema::ResourceDisplay;
 
 /// A typed failure while projecting an already prepared application.
@@ -672,17 +674,32 @@ impl<'a, D: ProtocolDefinition> Projection<'a, D> {
         });
     }
 
-    fn type_resource(&mut self, rust_type: &str, name: &str) -> String {
+    /// The type's graph endpoint, declared on first use. A later descriptor that recorded the
+    /// type's declaration backfills the source of an endpoint first seen only by reference.
+    fn type_resource(&mut self, ty: &upwell_core::TypeDescriptor) -> String {
+        let rust_type = (ty.type_name)();
         let id = type_id(rust_type);
+        let source = type_location(ty);
 
         if self.type_resources.insert(id.clone()) {
             self.resource(
                 &id,
                 ResourceKind::Type,
-                name,
-                None,
+                ty.name,
+                with_source(None, source),
                 BTreeMap::from([(String::from("rust-type"), rust_type.to_string())]),
             );
+        } else if source.is_some() {
+            let resource = self
+                .document
+                .resources
+                .iter_mut()
+                .find(|resource| resource.id == id)
+                .expect("declared type resource exists");
+
+            if resource.provenance.is_none() {
+                resource.provenance = with_source(None, source);
+            }
         }
 
         id

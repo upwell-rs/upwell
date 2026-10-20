@@ -148,7 +148,7 @@ impl Node {
         let reads = self.lowering.reads.iter().map(|read| {
             let input = read.input;
             let field = &read.field;
-            let source = descriptor_source(read.span, paths);
+            let source = crate::source::descriptor_source(read.span, paths);
 
             quote! {
                 #read_ty {
@@ -221,7 +221,7 @@ fn root_descriptor(
 fn node_descriptor(id: &str, span: Span, predicate: TokenStream, paths: &Paths) -> TokenStream {
     let descriptor_ty = paths.core("ConditionDescriptor");
     let predicate_ty = paths.core("ConditionPredicate");
-    let source = descriptor_source(span, paths);
+    let source = crate::source::descriptor_source(span, paths);
 
     quote! {
         #descriptor_ty {
@@ -230,13 +230,6 @@ fn node_descriptor(id: &str, span: Span, predicate: TokenStream, paths: &Paths) 
             predicate: #predicate_ty::#predicate,
         }
     }
-}
-
-/// The source location of `span`, resolved by the compiler at the user's token.
-fn descriptor_source(span: Span, paths: &Paths) -> TokenStream {
-    let source_ty = paths.core("DescriptorSource");
-
-    quote_spanned!(span=> #source_ty::new(::core::file!(), ::core::line!(), ::core::column!()))
 }
 
 /// Rejects two nodes with one id (including the stacked `All` root's), which would make the

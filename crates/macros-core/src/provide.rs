@@ -25,6 +25,7 @@ pub fn generate_providers<Ext: ParseKeyed>(
     }
 
     let self_name = LitStr::new(&self_ident.to_string(), self_ident.span());
+    let concrete_ty = crate::source::declared_type(self_ident, self_ident, &self_name, paths);
     let distributed_slice = paths.core("linkme::distributed_slice");
     let linkme_crate = paths.core("linkme");
     let provider_descriptor = paths.core("ProviderDescriptor");
@@ -152,7 +153,7 @@ pub fn generate_providers<Ext: ParseKeyed>(
         descriptor_literals.push(quote! {
             #provider_descriptor {
                 trait_ty: #type_descriptor::of::<#dyn_ty>(#trait_name),
-                concrete_ty: #type_descriptor::of::<#self_ident>(#self_name),
+                concrete_ty: #concrete_ty,
                 qualifier: #qualifier,
                 primary: #primary,
                 priority: #priority,

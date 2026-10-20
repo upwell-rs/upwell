@@ -1,8 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use upwell_core::ItemSource;
 use upwell_tooling_schema::{
     Facet, Provenance, Relationship, RelationshipKind, Resource, ResourceDisplay, ResourceKind,
+    SourceLocation,
 };
+
+pub use error::ToolingContributionError;
+
+use pending::{
+    PendingAttribute, PendingEndpoint, PendingFacet, PendingRelationship, PendingResource, qualify,
+    validate_endpoint, validate_local_id, validate_owner, validate_relationship_endpoints,
+};
+
+mod error;
+mod pending;
 
 /// One endpoint in an owner-scoped tooling relationship.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -48,7 +60,8 @@ pub struct ToolingContributions {
     resources: Vec<PendingResource>,
     relationships: Vec<PendingRelationship>,
     facets: Vec<PendingFacet>,
-    displays: Vec<PendingDisplay>,
+    displays: Vec<PendingAttribute<ResourceDisplay>>,
+    sources: Vec<PendingAttribute<SourceLocation>>,
     owner_display: Option<ResourceDisplay>,
 }
 
@@ -60,6 +73,7 @@ impl ToolingContributions {
             relationships: Vec::new(),
             facets: Vec::new(),
             displays: Vec::new(),
+            sources: Vec::new(),
             owner_display: None,
         }
     }
@@ -71,10 +85,21 @@ impl ToolingContributions {
 
     /// Declares presentation for one owner-local resource.
     pub fn resource_display(&mut self, resource: impl Into<String>, display: ResourceDisplay) {
-        self.displays.push(PendingDisplay {
+        self.displays.push(PendingAttribute {
             resource: resource.into(),
-            display,
+            value: display,
         });
+    }
+
+    /// Declares the Rust item one owner-local resource was declared by, so tooling can
+    /// navigate to it. Unknown positions (a zero line) are ignored.
+    pub fn resource_source(&mut self, resource: impl Into<String>, source: ItemSource) {
+        if let Some(location) = crate::tooling::item_location(&source) {
+            self.sources.push(PendingAttribute {
+                resource: resource.into(),
+                value: location,
+            });
+        }
     }
 
     /// Declares an owner-local contribution resource without scalar labels.
@@ -195,29 +220,27 @@ impl ToolingContributions {
             });
         }
 
-        let mut display_identities = BTreeSet::new();
-
-        for display in self.displays {
-            validate_local_id(&display.resource)?;
-
-            if !identities.contains(&display.resource) {
-                return Err(ToolingContributionError::UnknownEndpoint {
-                    id: display.resource,
-                });
-            }
-
-            if !display_identities.insert(display.resource.clone()) {
-                return Err(ToolingContributionError::DuplicateDisplay {
-                    id: display.resource,
-                });
-            }
-
-            resources
-                .iter_mut()
-                .find(|resource| resource.id == qualify(&self.owner, &display.resource))
-                .expect("validated contributed resource exists")
-                .display = Some(display.display);
-        }
+        attach(
+            &self.owner,
+            &identities,
+            &mut resources,
+            self.displays,
+            |id| ToolingContributionError::DuplicateDisplay { id },
+            |resource, display| resource.display = Some(display),
+        )?;
+        attach(
+            &self.owner,
+            &identities,
+            &mut resources,
+            self.sources,
+            |id| ToolingContributionError::DuplicateSource { id },
+            |resource, source| {
+                resource
+                    .provenance
+                    .get_or_insert_with(Provenance::default)
+                    .source = Some(source);
+            },
+        )?;
 
         let mut relationship_identities = BTreeSet::new();
         let mut relationships = Vec::with_capacity(self.relationships.len());
@@ -304,86 +327,6 @@ impl ToolingContributions {
     }
 }
 
-/// A structural error in one owner-scoped tooling contribution set.
-#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-#[non_exhaustive]
-pub enum ToolingContributionError {
-    /// A resource, facet, or relationship endpoint has no owner-local identity.
-    #[error("tooling contribution contains an empty owner-local identity")]
-    EmptyId,
-    /// An extension attempted to use a framework/core identity as an owner-local identity.
-    #[error("tooling contribution identity '{id}' is reserved by the framework")]
-    ReservedId {
-        /// Invalid identity.
-        id: String,
-    },
-    /// The collector owner is not a protocol or plugin resource identity.
-    #[error("tooling contribution owner '{id}' is not a protocol or plugin identity")]
-    InvalidOwner {
-        /// Invalid owner identity.
-        id: String,
-    },
-    /// A structurally valid protocol or plugin owner was not projected.
-    #[error("tooling contribution owner '{id}' does not exist in the prepared projection")]
-    UnknownOwner {
-        /// Missing owner identity.
-        id: String,
-    },
-    /// A contributed resource has no display name.
-    #[error("tooling resource '{id}' has no name")]
-    EmptyResourceName {
-        /// Owner-local resource identity.
-        id: String,
-    },
-    /// A contributed facet has no positive schema version.
-    #[error("tooling facet '{id}' has schema version zero")]
-    InvalidFacetVersion {
-        /// Owner-local facet identity.
-        id: String,
-    },
-    /// One collector declared the same owner-local resource more than once.
-    #[error("tooling resource '{id}' is declared more than once")]
-    DuplicateResource {
-        /// Duplicated owner-local identity.
-        id: String,
-    },
-    /// One collector declared the same fully qualified facet more than once.
-    #[error("tooling facet '{id}' is declared more than once")]
-    DuplicateFacet {
-        /// Duplicated fully qualified identity.
-        id: String,
-    },
-    /// One collector declared the same relationship more than once.
-    #[error("tooling relationship from '{from}' to '{to}' is declared more than once")]
-    DuplicateRelationship {
-        /// Qualified source identity.
-        from: String,
-        /// Qualified target identity.
-        to: String,
-    },
-    /// A relationship or resource facet refers to an undeclared owner-local resource.
-    #[error("tooling contribution refers to undeclared owner-local resource '{id}'")]
-    UnknownEndpoint {
-        /// Missing owner-local identity.
-        id: String,
-    },
-    /// A supported extension relationship uses endpoints incompatible with its semantics.
-    #[error("tooling contribution relationship has invalid owner-local endpoints")]
-    InvalidRelationshipEndpoints,
-    /// A protocol did not provide its required declarative presentation.
-    #[error("protocol '{id}' did not provide tooling display metadata")]
-    MissingProtocolDisplay {
-        /// Protocol resource identity.
-        id: String,
-    },
-    /// One collector declared presentation for the same owner-local resource more than once.
-    #[error("tooling resource '{id}' has more than one display declaration")]
-    DuplicateDisplay {
-        /// Duplicated owner-local identity.
-        id: String,
-    },
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 /// Validated owner-qualified resources, relationships, and facets ready for projection.
 pub(crate) struct ToolingContributionSet {
@@ -394,162 +337,41 @@ pub(crate) struct ToolingContributionSet {
     pub(crate) owner_display: Option<ResourceDisplay>,
 }
 
-#[derive(Debug)]
-/// One owner-local resource awaiting validation and qualification.
-struct PendingResource {
-    id: String,
-    name: String,
-    labels: BTreeMap<String, String>,
-}
-
-#[derive(Debug)]
-struct PendingDisplay {
-    resource: String,
-    display: ResourceDisplay,
-}
-
-#[derive(Debug)]
-/// One owner-local relationship awaiting endpoint validation and qualification.
-struct PendingRelationship {
-    kind: RelationshipKind,
-    from: PendingEndpoint,
-    to: PendingEndpoint,
-    labels: BTreeMap<String, String>,
-}
-
-#[derive(Debug)]
-/// One owner-local facet awaiting target validation and qualification.
-struct PendingFacet {
-    resource: Option<String>,
-    id: String,
-    facet: Facet,
-}
-
-#[derive(Debug)]
-/// Internal owned form of a public tooling endpoint.
-enum PendingEndpoint {
-    Owner,
-    Resource(String),
-}
-
-impl PendingEndpoint {
-    fn qualify(&self, owner: &str) -> String {
-        match self {
-            Self::Owner => owner.to_string(),
-            Self::Resource(id) => qualify(owner, id),
-        }
-    }
-}
-
-impl From<ToolingEndpoint<'_>> for PendingEndpoint {
-    fn from(endpoint: ToolingEndpoint<'_>) -> Self {
-        match endpoint {
-            ToolingEndpoint::Owner => Self::Owner,
-            ToolingEndpoint::Resource(id) => Self::Resource(id.to_string()),
-        }
-    }
-}
-
-fn validate_endpoint(
-    endpoint: &PendingEndpoint,
-    resources: &BTreeSet<String>,
+/// Applies owner-local resource attributes to their validated resources, rejecting unknown
+/// targets and a second attribute for one resource.
+fn attach<T>(
+    owner: &str,
+    identities: &BTreeSet<String>,
+    resources: &mut [Resource],
+    attributes: Vec<PendingAttribute<T>>,
+    duplicate: fn(String) -> ToolingContributionError,
+    apply: fn(&mut Resource, T),
 ) -> Result<(), ToolingContributionError> {
-    let PendingEndpoint::Resource(id) = endpoint else {
-        return Ok(());
-    };
+    let mut attached = BTreeSet::new();
 
-    validate_local_id(id)?;
+    for attribute in attributes {
+        validate_local_id(&attribute.resource)?;
 
-    if !resources.contains(id) {
-        return Err(ToolingContributionError::UnknownEndpoint { id: id.clone() });
+        if !identities.contains(&attribute.resource) {
+            return Err(ToolingContributionError::UnknownEndpoint {
+                id: attribute.resource,
+            });
+        }
+
+        if !attached.insert(attribute.resource.clone()) {
+            return Err(duplicate(attribute.resource));
+        }
+
+        let qualified = qualify(owner, &attribute.resource);
+        let resource = resources
+            .iter_mut()
+            .find(|resource| resource.id == qualified)
+            .expect("validated contributed resource exists");
+
+        apply(resource, attribute.value);
     }
 
     Ok(())
-}
-
-fn validate_relationship_endpoints(
-    kind: &RelationshipKind,
-    from: &PendingEndpoint,
-    to: &PendingEndpoint,
-) -> Result<(), ToolingContributionError> {
-    let valid = match kind {
-        RelationshipKind::Contains => matches!(
-            (from, to),
-            (
-                PendingEndpoint::Owner | PendingEndpoint::Resource(_),
-                PendingEndpoint::Resource(_)
-            )
-        ),
-        RelationshipKind::DependsOn
-        | RelationshipKind::OrdersBefore
-        | RelationshipKind::OrdersAfter => matches!(
-            (from, to),
-            (PendingEndpoint::Resource(_), PendingEndpoint::Resource(_))
-        ),
-        _ => false,
-    };
-
-    if !valid {
-        return Err(ToolingContributionError::InvalidRelationshipEndpoints);
-    }
-
-    Ok(())
-}
-
-fn validate_local_id(id: &str) -> Result<(), ToolingContributionError> {
-    if id.trim().is_empty() {
-        return Err(ToolingContributionError::EmptyId);
-    }
-
-    if id == "framework"
-        || id == "application"
-        || [
-            "component:",
-            "config-binding:",
-            "contribution:",
-            "hook:",
-            "lifecycle:",
-            "plugin:",
-            "plugin-slot:",
-            "protocol:",
-            "provider:",
-            "scope:",
-            "type:",
-        ]
-        .iter()
-        .any(|prefix| id.starts_with(prefix))
-    {
-        return Err(ToolingContributionError::ReservedId { id: id.to_string() });
-    }
-
-    Ok(())
-}
-
-fn validate_owner(owner: &str) -> Result<(), ToolingContributionError> {
-    let valid = ["plugin:", "protocol:"].iter().any(|prefix| {
-        owner.strip_prefix(prefix).is_some_and(|id| {
-            let mut parts = id.split('/');
-
-            matches!(
-                (parts.next(), parts.next()),
-                (Some(namespace), Some(name)) if !namespace.is_empty() && !name.is_empty()
-            )
-        })
-    });
-
-    if !valid {
-        return Err(ToolingContributionError::InvalidOwner {
-            id: owner.to_string(),
-        });
-    }
-
-    Ok(())
-}
-
-fn qualify(owner: &str, local: &str) -> String {
-    let local = local.replace('%', "%25").replace('/', "%2F");
-
-    format!("{owner}/tooling/{local}")
 }
 
 #[cfg(test)]

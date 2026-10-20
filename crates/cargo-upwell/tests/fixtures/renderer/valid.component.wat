@@ -3,7 +3,7 @@
 ;; neither an installed Wasm target nor cargo-component/wasm-tools.
 (component
   (core module $renderer
-    (memory (export "memory") 1)
+    (memory (export "memory") 64)
     (data (i32.const 1024) "customtext/plainresource:onefixture output")
     (global $heap (mut i32) (i32.const 4096))
 

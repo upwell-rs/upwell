@@ -469,6 +469,11 @@ fn expand_method(
         }
     };
 
+    let source = upwell_macros_core::source::item_source(
+        method_ident.span(),
+        &upwell_macros_core::source::associated_item(self_ty, method_ident),
+        paths,
+    );
     let descriptor = quote! {
         #rpc_descriptor {
             name: #method_name,
@@ -476,6 +481,7 @@ fn expand_method(
             parameters: &[],
             output: #type_descriptor::of::<#output_ty>(#output_name),
             handler: #wrapper_ident,
+            source: ::core::option::Option::Some(#source),
         }
     };
 

@@ -347,6 +347,11 @@ fn generate_job(
     let type_descriptor = paths.core("TypeDescriptor");
 
     let method_ident = &method.sig.ident;
+    let source = upwell_macros_core::source::item_source(
+        method_ident.span(),
+        &upwell_macros_core::source::associated_item(self_ty, method_ident),
+        paths,
+    );
     let kind_variant = format_ident!("{}", kind.variant());
 
     let call_fn = format_ident!("__upwell_job_{index}_call");
@@ -426,6 +431,7 @@ fn generate_job(
             kind: #schedule_kind::#kind_variant,
             call: #call_fn,
             options: #options,
+            source: #source,
         };
     })
 }
