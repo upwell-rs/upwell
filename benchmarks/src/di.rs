@@ -139,6 +139,7 @@ where
         priority: 0,
         ordering: &[],
         erase: erase::<T>,
+        live: upwell_di::provider_live_cell::<dyn Svc>,
     }
 }
 

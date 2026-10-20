@@ -113,6 +113,7 @@ fn build_router(routes: usize) -> RpcRouter {
                 parameters: &[],
                 output: TypeDescriptor::of::<()>("()"),
                 handler: bench_handler,
+                source: None,
             }))
         })
         .collect();

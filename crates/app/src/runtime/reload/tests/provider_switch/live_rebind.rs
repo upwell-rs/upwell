@@ -179,7 +179,7 @@ async fn failed_switch_leaves_the_live_consumer_on_the_previous_provider() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn concurrent_readers_observe_one_whole_provider_per_read() {
+async fn concurrent_readers_observe_each_switch_exactly_once() {
     const SWITCHES: usize = 6;
 
     let _guard = lock_test_guard().await;
@@ -187,47 +187,54 @@ async fn concurrent_readers_observe_one_whole_provider_per_read() {
     let runtime = app.runtime();
     let original = watcher(runtime);
     let stop = Arc::new(AtomicBool::new(false));
+    let fallback_seen = Arc::new(AtomicBool::new(false));
     let reader = {
         let watcher = Arc::clone(&original);
         let stop = Arc::clone(&stop);
+        let fallback_seen = Arc::clone(&fallback_seen);
 
         tokio::spawn(async move {
-            let mut reads = 0_usize;
+            let mut last = "primary";
+            let mut transitions = 0_usize;
 
             while !stop.load(Ordering::SeqCst) {
                 let scheme = watcher.authenticator.get().scheme();
 
-                assert!(
-                    matches!(scheme, "primary" | "fallback"),
-                    "a read observed a torn provider: {scheme}"
-                );
+                if scheme != last {
+                    transitions += 1;
+                    last = scheme;
+                }
 
-                reads += 1;
+                fallback_seen.store(scheme == "fallback", Ordering::SeqCst);
                 tokio::task::yield_now().await;
             }
 
-            reads
+            transitions
         })
     };
 
     for round in 0..SWITCHES {
-        let mode = if round % 2 == 0 {
-            "fallback"
-        } else {
-            "primary"
-        };
+        let fallback = round % 2 == 0;
+        let mode = if fallback { "fallback" } else { "primary" };
 
         switch(&dir, runtime, mode).await;
 
-        assert_eq!(original.authenticator.get().scheme(), mode);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while fallback_seen.load(Ordering::SeqCst) != fallback {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the concurrent reader observes the committed provider");
     }
 
     stop.store(true, Ordering::SeqCst);
 
-    let reads = reader
-        .await
-        .expect("the reader never observes a torn provider");
+    let transitions = reader.await.expect("the reader task completes");
 
-    assert!(reads > 0, "the reader ran concurrently with the switches");
+    assert_eq!(
+        transitions, SWITCHES,
+        "the reader saw every switch exactly once, never reverting to a previous provider"
+    );
     assert!(Arc::ptr_eq(&original, &watcher(runtime)));
 }
