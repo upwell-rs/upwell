@@ -3,7 +3,7 @@
 use std::net::{IpAddr, SocketAddr};
 
 use serde::Deserialize;
-use upwell_config::{ConfigProperties, DefaultSpec};
+use upwell_macros::config;
 
 /// Validates a configured static Axum mount path before router construction.
 pub(crate) fn validate_mount_path(label: &str, path: &str) -> crate::Result<()> {
@@ -32,19 +32,6 @@ pub(crate) fn validate_mount_path(label: &str, path: &str) -> crate::Result<()> 
     Ok(())
 }
 
-#[cfg(test)]
-mod path_tests {
-    use super::validate_mount_path;
-
-    #[test]
-    fn static_absolute_mount_paths_are_required() {
-        assert!(validate_mount_path("test path", "/api/v1").is_ok());
-        assert!(validate_mount_path("test path", "api").is_err());
-        assert!(validate_mount_path("test path", "/{*tail}").is_err());
-        assert!(validate_mount_path("test path", "/api//v1").is_err());
-    }
-}
-
 /// The property path the [`Axum`](crate::Axum) always binds.
 pub const AXUM_CONFIG_PATH: &str = "axum";
 
@@ -59,57 +46,71 @@ pub const AXUM_CONFIG_PATH: &str = "axum";
 /// bind = "0.0.0.0"
 /// port = 8080
 /// ```
+#[config(upwell = ::upwell_config)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct AxumConfig {
     /// The IP address on which the HTTP listener accepts connections.
+    #[default = "${AXUM_BIND:127.0.0.1}"]
     pub bind: IpAddr,
 
     /// The TCP port on which the HTTP listener accepts connections.
+    #[default = "${AXUM_PORT:3000}"]
     pub port: u16,
 
     /// A global path prefix every route is served under. Empty (or `"/"`) mounts routes at the
     /// root; `"/api"` mounts the whole application (controllers and any OpenAPI routes) under
     /// `/api`. Surfaced in the OpenAPI document as a `server` URL so documented paths stay relative.
+    #[default = "${AXUM_BASE_PATH:}"]
     pub base_path: String,
 
     /// Maximum request body accepted by Axum's buffered body extractors, in bytes.
+    #[default = "${AXUM_MAX_REQUEST_BODY_BYTES:2097152}"]
     pub max_request_body_bytes: usize,
 
     /// Maximum total bytes accepted by a streamed NDJSON request body. A value of `0` disables
     /// this limit; the per-line limit remains enforced.
+    #[default = "${AXUM_MAX_STREAM_REQUEST_BYTES:16777216}"]
     pub max_stream_request_bytes: usize,
 
     /// Maximum number of decoded items accepted from one streamed NDJSON request. A value of `0`
     /// disables this limit.
+    #[default = "${AXUM_MAX_STREAM_REQUEST_ITEMS:100000}"]
     pub max_stream_request_items: usize,
 
     /// Maximum lifetime of a streamed NDJSON request body, in milliseconds. A value of `0`
     /// disables this stream-specific deadline (the global request timeout can still apply).
+    #[default = "${AXUM_STREAM_REQUEST_TIMEOUT_MS:30000}"]
     pub stream_request_timeout_ms: u64,
 
     /// Maximum WebSocket message size, in bytes. This is applied during the upgrade before any
     /// protocol attempts to decode the message.
+    #[default = "${AXUM_MAX_WEBSOCKET_MESSAGE_BYTES:262144}"]
     pub max_websocket_message_bytes: usize,
 
     /// Maximum individual WebSocket frame size, in bytes. Fragmented messages remain subject to
     /// [`max_websocket_message_bytes`](Self::max_websocket_message_bytes).
+    #[default = "${AXUM_MAX_WEBSOCKET_FRAME_BYTES:65536}"]
     pub max_websocket_frame_bytes: usize,
 
     /// Maximum number of live WebSocket connections across each mounted endpoint. A value of `0`
     /// disables admission limiting for deployments that enforce it upstream.
+    #[default = "${AXUM_MAX_WEBSOCKET_CONNECTIONS:1024}"]
     pub max_websocket_connections: usize,
 
     /// How long a WebSocket may remain silent before the server probes it, in milliseconds. The
     /// peer then has one more interval to answer the ping before the connection is dropped. A value
     /// of `0` disables idle probing.
+    #[default = "${AXUM_WEBSOCKET_IDLE_TIMEOUT_MS:60000}"]
     pub websocket_idle_timeout_ms: u64,
 
     /// Maximum time allowed for routing, middleware, and handler execution, in milliseconds.
     /// A value of `0` disables the request deadline.
+    #[default = "${AXUM_REQUEST_TIMEOUT_MS:30000}"]
     pub request_timeout_ms: u64,
 
     /// Time allowed for in-flight requests to finish after shutdown starts, in milliseconds.
     /// Once elapsed, remaining connections are forcibly dropped. A value of `0` waits forever.
+    #[default = "${AXUM_GRACEFUL_SHUTDOWN_TIMEOUT_MS:30000}"]
     pub graceful_shutdown_timeout_ms: u64,
 }
 
@@ -140,138 +141,11 @@ impl Default for AxumConfig {
     }
 }
 
-impl ConfigProperties for AxumConfig {
-    const NAME: &'static str = "AxumConfig";
-    const DEFAULTS: DefaultSpec = DefaultSpec::Fields(&[
-        ("bind", "${AXUM_BIND:127.0.0.1}"),
-        ("port", "${AXUM_PORT:3000}"),
-        ("base_path", "${AXUM_BASE_PATH:}"),
-        (
-            "max_request_body_bytes",
-            "${AXUM_MAX_REQUEST_BODY_BYTES:2097152}",
-        ),
-        (
-            "max_stream_request_bytes",
-            "${AXUM_MAX_STREAM_REQUEST_BYTES:16777216}",
-        ),
-        (
-            "max_stream_request_items",
-            "${AXUM_MAX_STREAM_REQUEST_ITEMS:100000}",
-        ),
-        (
-            "stream_request_timeout_ms",
-            "${AXUM_STREAM_REQUEST_TIMEOUT_MS:30000}",
-        ),
-        (
-            "max_websocket_message_bytes",
-            "${AXUM_MAX_WEBSOCKET_MESSAGE_BYTES:262144}",
-        ),
-        (
-            "max_websocket_frame_bytes",
-            "${AXUM_MAX_WEBSOCKET_FRAME_BYTES:65536}",
-        ),
-        (
-            "max_websocket_connections",
-            "${AXUM_MAX_WEBSOCKET_CONNECTIONS:1024}",
-        ),
-        (
-            "websocket_idle_timeout_ms",
-            "${AXUM_WEBSOCKET_IDLE_TIMEOUT_MS:60000}",
-        ),
-        ("request_timeout_ms", "${AXUM_REQUEST_TIMEOUT_MS:30000}"),
-        (
-            "graceful_shutdown_timeout_ms",
-            "${AXUM_GRACEFUL_SHUTDOWN_TIMEOUT_MS:30000}",
-        ),
-    ]);
-}
-
-/// The property path the [`Axum`](crate::Axum) binds the OpenAPI settings at, under the
-/// `openapi` feature. A subtree of `[axum]`, bound separately so its own field defaults apply.
 #[cfg(feature = "openapi")]
-pub const AXUM_OPENAPI_CONFIG_PATH: &str = "axum.openapi";
-
-/// Which bundled OpenAPI UI the server mounts. Each non-`None` choice also requires its crate
-/// feature (`openapi-swagger-ui`, `openapi-redoc`, `openapi-rapidoc`, `openapi-scalar`) to be
-/// compiled; a choice whose feature is absent falls back to serving JSON only (with a warning).
-#[cfg(feature = "openapi")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum OpenApiUi {
-    /// Serve only `/openapi.json`, no UI.
-    None,
-
-    /// Swagger UI (`utoipa-swagger-ui`).
-    Swagger,
-
-    /// Redoc (`utoipa-redoc`).
-    Redoc,
-
-    /// RapiDoc (`utoipa-rapidoc`).
-    Rapidoc,
-
-    /// Scalar (`utoipa-scalar`).
-    Scalar,
-}
-
-/// OpenAPI generation and serving settings, bound at [`AXUM_OPENAPI_CONFIG_PATH`].
-///
-/// Disabled by default: a build with the `openapi` feature still serves nothing until
-/// `enabled = true`, so turning the spec on is an explicit deployment choice.
-///
-/// ```toml
-/// [axum.openapi]
-/// enabled = true
-/// ui = "swagger"
-/// ```
-#[cfg(feature = "openapi")]
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
-pub struct OpenApiConfig {
-    /// Whether to assemble the document and mount the routes at all.
-    pub enabled: bool,
-
-    /// The path the JSON document is served at.
-    pub json_path: String,
-
-    /// Which bundled UI to mount (or [`None`](OpenApiUi::None) for JSON only).
-    pub ui: OpenApiUi,
-
-    /// The path the UI is mounted at (ignored when `ui = none`).
-    pub ui_path: String,
-
-    /// The document title (OpenAPI `info.title`).
-    pub title: String,
-
-    /// The document version (OpenAPI `info.version`).
-    pub version: String,
-}
+mod openapi;
 
 #[cfg(feature = "openapi")]
-impl Default for OpenApiConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            json_path: String::from("/openapi.json"),
-            ui: OpenApiUi::None,
-            ui_path: String::from("/docs"),
-            title: String::from("API"),
-            version: String::from("0.0.0"),
-        }
-    }
-}
-
-#[cfg(feature = "openapi")]
-impl ConfigProperties for OpenApiConfig {
-    const NAME: &'static str = "OpenApiConfig";
-    const DEFAULTS: DefaultSpec = DefaultSpec::Fields(&[
-        ("enabled", "${AXUM_OPENAPI_ENABLED:false}"),
-        ("json_path", "${AXUM_OPENAPI_JSON_PATH:/openapi.json}"),
-        ("ui", "${AXUM_OPENAPI_UI:none}"),
-        ("ui_path", "${AXUM_OPENAPI_UI_PATH:/docs}"),
-        ("title", "${AXUM_OPENAPI_TITLE:API}"),
-        ("version", "${AXUM_OPENAPI_VERSION:0.0.0}"),
-    ]);
-}
+pub use openapi::{AXUM_OPENAPI_CONFIG_PATH, OpenApiConfig, OpenApiUi};
 
 #[cfg(test)]
 mod tests;

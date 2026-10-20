@@ -4423,6 +4423,7 @@ dependencies = [
  "upwell-core",
  "upwell-di",
  "upwell-hooks",
+ "upwell-macros",
  "upwell-test-utils",
  "upwell-transport",
  "utoipa",

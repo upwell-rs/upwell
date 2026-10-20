@@ -2,7 +2,7 @@ use std::net::{IpAddr, SocketAddr};
 
 use upwell_config::{ConfigManager, ResolverChain, Toml};
 
-use super::{AXUM_CONFIG_PATH, AxumConfig};
+use super::{AXUM_CONFIG_PATH, AxumConfig, validate_mount_path};
 
 #[test]
 fn defaults_materialize_without_an_axum_subtree() {
@@ -122,4 +122,31 @@ fn openapi_config_selects_ui() {
 
     assert!(config.enabled);
     assert_eq!(config.ui, OpenApiUi::Swagger);
+}
+
+#[test]
+fn static_absolute_mount_paths_are_required() {
+    assert!(validate_mount_path("test path", "/api/v1").is_ok());
+    assert!(validate_mount_path("test path", "api").is_err());
+    assert!(validate_mount_path("test path", "/{*tail}").is_err());
+    assert!(validate_mount_path("test path", "/api//v1").is_err());
+}
+
+#[test]
+fn protocol_configs_declare_their_documented_fields_for_tooling() {
+    use upwell_config::ConfigProperties;
+    use upwell_config::schema::ConfigShape;
+
+    let ConfigShape::Struct(fields) = AxumConfig::SCHEMA.shape else {
+        panic!("AxumConfig declares a struct schema");
+    };
+    let port = fields
+        .iter()
+        .find(|field| field.name == "port")
+        .expect("the port field is declared");
+
+    assert_eq!(port.declared_type, "u16");
+    assert_eq!(port.default, Some("${AXUM_PORT:3000}"));
+    assert!(port.docs.starts_with("The TCP port"));
+    assert!(AxumConfig::SCHEMA.source.is_some());
 }
