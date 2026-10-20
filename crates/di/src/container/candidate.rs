@@ -390,6 +390,7 @@ fn freeze_candidate(
                 resolvers: std::sync::OnceLock::from(resolvers),
                 slot: slot.clone(),
                 generation_lease: None,
+                drop_guard: std::sync::OnceLock::new(),
             }
         });
 

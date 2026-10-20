@@ -71,11 +71,12 @@ pub use protocol::{
 pub use registry::{AppConditionEvaluation, AppRegistry};
 pub use runtime::{
     AppConditionState, AppRuntime, ComponentRetired, ComponentRetirement,
-    ComponentTransitionReport, PendingTransition, PhaseTiming, RetirementContext, RetirementReason,
-    RuntimeTransitionReport, RuntimeView, TransitionAborted, TransitionAttemptId,
-    TransitionCommitted, TransitionDecision, TransitionFailure, TransitionHookContext,
-    TransitionHookOutcome, TransitionHookReport, TransitionOutcome, TransitionOutcomeContext,
-    TransitionPhase, TransitionProposal, TransitionRejection, TransitionVerdict,
+    ComponentTransitionReport, DisplacedGeneration, PendingTransition, PhaseTiming,
+    RetirementContext, RetirementReason, RuntimeTransitionReport, RuntimeView, TransitionAborted,
+    TransitionAttemptId, TransitionCommitted, TransitionDecision, TransitionFailure,
+    TransitionHookContext, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,
+    TransitionOutcomeContext, TransitionPhase, TransitionProposal, TransitionRejection,
+    TransitionVerdict,
 };
 pub use scope::{
     PreparedScopeTopology, ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError,

@@ -33,12 +33,15 @@ async fn mixed_retain_and_reconstruct_builds_a_complete_candidate_root() {
         ],
     )
     .await;
-    let foreign = runtime_view(
-        Arc::clone(&active_root),
-        Arc::clone(&active_scopes),
-        active.components.clone(),
-        active_graph(&active),
-    );
+    let foreign = active_view(
+        &active,
+        vec![
+            seed_retainable(&active_instance),
+            seed_root_resolver(),
+            seed_hook_manager(&HookManager::new(Vec::new())),
+        ],
+    )
+    .await;
     let active = runtime_view(
         Arc::clone(&active_root),
         active_scopes,

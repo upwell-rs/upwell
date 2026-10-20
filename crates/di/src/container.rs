@@ -388,6 +388,7 @@ pub struct ScopeContainer {
     resolvers: std::sync::OnceLock<ResolverSet>,
     slot: ScopeResolverSlot,
     generation_lease: Option<Arc<dyn Any + Send + Sync>>,
+    drop_guard: std::sync::OnceLock<Box<dyn Any + Send + Sync>>,
 }
 
 impl ResolverCtx for ScopeContainer {
@@ -460,6 +461,19 @@ impl ScopeContainer {
     #[doc(hidden)]
     pub fn generation_lease<T: Any + Send + Sync>(&self) -> Option<Arc<T>> {
         Arc::clone(self.generation_lease.as_ref()?).downcast().ok()
+    }
+
+    /// Retains `guard` until this container is dropped, then drops it after the
+    /// container's own instances, so its `Drop` observes the scope's final release.
+    ///
+    /// A container retains at most one guard; a second one is handed back unchanged.
+    #[doc(hidden)]
+    pub fn retain_drop_guard<T: Any + Send + Sync>(&self, guard: T) -> Result<(), T> {
+        self.drop_guard.set(Box::new(guard)).map_err(|rejected| {
+            *rejected
+                .downcast::<T>()
+                .expect("a rejected drop guard is the guard just offered")
+        })
     }
 
     pub(crate) fn can_access(&self, scope: &'static dyn Scope) -> bool {
@@ -572,6 +586,7 @@ impl ScopeContainer {
                 resolvers: std::sync::OnceLock::new(),
                 slot: ScopeResolverSlot::attached(container.clone()),
                 generation_lease,
+                drop_guard: std::sync::OnceLock::new(),
             }));
         }
 
@@ -658,6 +673,7 @@ impl ScopeContainer {
                 resolvers: std::sync::OnceLock::from(resolvers),
                 slot: slot.clone(),
                 generation_lease,
+                drop_guard: std::sync::OnceLock::new(),
             }
         });
         slot.attach(&container)?;
