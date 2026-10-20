@@ -52,6 +52,29 @@
 //! a pinned view of an earlier generation observes the new value through that slot once
 //! a retained consumer rebinds it.
 //!
+//! # Transition handlers and hot updates
+//!
+//! A replaced or rebound singleton uses the most instance-preserving recipe its
+//! component declares, in this order: an explicit hot update, a transition handler, a
+//! replacement factory, then ordinary reconstruction.
+//!
+//! - A **transition handler** receives the component's planned change and returns a
+//!   one-shot factory for this transition only, or declines so the next recipe applies.
+//!   The one-shot factory runs at most once during candidate construction, may read the
+//!   previous instance, and may resolve only dependencies the ordinary factory declares;
+//!   any other dependency rejects the transition. It is dropped with its attempt, so a
+//!   later transition asks the handler again.
+//! - A **hot update** keeps the instance. Its preparation reads the instance and
+//!   candidate dependencies after the candidate root is built and returns an owned
+//!   commit action without mutating anything. The action applies during the terminal
+//!   publication, after the live rebinds, and a failed or rejected attempt drops it
+//!   unapplied. Because the instance is shared, every holder — snapshots, pinned views,
+//!   and the retained live slot that keeps pointing at it — observes the update only
+//!   once it commits. Hot updates apply only when the component's identity, factory and
+//!   dependency contract are unchanged, and its fixed dependents still reconstruct as
+//!   planned. A hot-updated component is not displaced, so it receives no
+//!   [`ComponentRetired`](crate::ComponentRetired).
+//!
 //! # Reentrancy
 //!
 //! Transition hooks, config-reload hooks, and candidate factories run to completion

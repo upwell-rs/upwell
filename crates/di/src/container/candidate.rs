@@ -236,7 +236,7 @@ async fn select_one_shot(
 
     let selected = take_selection(selection?).ok_or(Error::CandidateFactoryTypeMismatch {
         component: descriptor.id,
-        expected: "TransitionSelection",
+        expected: "transition selection",
         actual: "<component>",
     })?;
     let Some(one_shot) = selected else {

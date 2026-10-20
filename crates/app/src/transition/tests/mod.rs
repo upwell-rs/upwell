@@ -203,6 +203,7 @@ mod live_invalidation;
 mod live_resolver;
 mod live_retarget;
 mod overrides;
+mod recipes;
 mod replacement;
 mod retention;
 mod strategy;

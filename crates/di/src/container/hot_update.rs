@@ -46,7 +46,7 @@ impl ScopeContainer {
 
         HotUpdateCommit::take(prepared).ok_or(Error::CandidateFactoryTypeMismatch {
             component: descriptor.id,
-            expected: "PreparedHotUpdate",
+            expected: "hot-update commit",
             actual: "<component>",
         })
     }
