@@ -27,6 +27,15 @@ mod trigger;
 
 use crate::{RuntimeTransitionReport, TransitionFailure, TransitionOutcome, TransitionPhase};
 
+/// The `config` directory inside a fixture's temp dir, created on first use.
+fn config_dir_of(dir: &tempfile::TempDir) -> std::path::PathBuf {
+    let config_dir = dir.path().join("config");
+
+    std::fs::create_dir_all(&config_dir).expect("create config dir");
+
+    config_dir
+}
+
 /// Splits a rejected reload's error into its redacted report and the original error.
 fn rejected(error: crate::Error) -> (RuntimeTransitionReport, crate::Error) {
     match error {

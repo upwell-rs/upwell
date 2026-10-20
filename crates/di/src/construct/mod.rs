@@ -27,6 +27,7 @@ use crate::descriptors::{
 };
 use crate::error::Error;
 
+mod handoff;
 mod hot_update;
 mod one_shot;
 mod replacement;

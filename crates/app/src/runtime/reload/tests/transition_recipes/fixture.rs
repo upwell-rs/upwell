@@ -10,7 +10,7 @@
 
 use std::any::Any;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -307,13 +307,7 @@ pub(super) async fn build_recipe_app(label: &str) -> (TempDir, App<()>) {
     (dir, app)
 }
 
-pub(super) fn config_dir_of(dir: &TempDir) -> PathBuf {
-    let config_dir = dir.path().join("config");
-
-    fs::create_dir_all(&config_dir).expect("create config dir");
-
-    config_dir
-}
+pub(super) use super::super::config_dir_of;
 
 pub(super) fn write_recipe_config(config_dir: &Path, label: &str) {
     fs::write(

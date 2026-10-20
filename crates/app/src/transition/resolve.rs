@@ -105,7 +105,10 @@ impl CandidateGraph {
 
     /// The most instance-preserving strategy `node`'s component declares for a
     /// `Replace` or `RebindLive` node.
-    fn declared_strategy(&self, node: &PlannedNode) -> crate::Result<ComponentTransitionStrategy> {
+    pub(super) fn declared_strategy(
+        &self,
+        node: &PlannedNode,
+    ) -> crate::Result<ComponentTransitionStrategy> {
         let Some(descriptor) = self.component(node.component) else {
             return Ok(ComponentTransitionStrategy::Reconstruct);
         };

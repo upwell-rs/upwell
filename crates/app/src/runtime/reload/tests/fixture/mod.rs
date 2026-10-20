@@ -20,7 +20,7 @@
 
 use std::any::Any;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -355,13 +355,7 @@ async fn build_probe_app_with(
     (dir, app)
 }
 
-pub(super) fn config_dir_of(dir: &TempDir) -> PathBuf {
-    let config_dir = dir.path().join("config");
-
-    fs::create_dir_all(&config_dir).expect("create config dir");
-
-    config_dir
-}
+pub(super) use super::config_dir_of;
 
 pub(super) fn write_probe_config(config_dir: &Path, enabled: bool, token: i64) {
     fs::write(

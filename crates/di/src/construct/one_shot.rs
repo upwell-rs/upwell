@@ -10,10 +10,9 @@
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::Mutex;
+use upwell_core::DependencyDescriptor;
 
-use upwell_core::{DependencyDescriptor, TypeDescriptor};
-
+use super::handoff::Handoff;
 use super::{Factory, ReplacementFactory};
 use crate::descriptors::{BoxedComponent, Component, ComponentConstructionContext};
 use crate::{NodeAction, PlannedNode, ReasonKind, TransitionReason};
@@ -48,10 +47,6 @@ pub(crate) struct ErasedOneShot {
     pub(crate) dependencies: Vec<DependencyDescriptor>,
     pub(crate) construct: ErasedConstruct,
 }
-
-/// The boxed outcome of a transition handler: the selected one-shot factory, or `None`
-/// when the handler declined.
-struct TransitionSelection(Mutex<Option<ErasedOneShot>>);
 
 impl ComponentChange {
     #[doc(hidden)]
@@ -134,24 +129,12 @@ where
             .ok_or(crate::Error::ChangeUnavailable { component: C::ID })?;
         let selected = handler(change).map(|one_shot| one_shot.erased);
 
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<TransitionSelection>("TransitionSelection"),
-            value: Box::new(TransitionSelection(Mutex::new(selected))),
-        })
+        Ok(Handoff::boxed(selected))
     })
 }
 
-/// Unboxes a transition handler's selection, or `None` when `boxed` is not one.
-///
-/// The selection mutex is only ever moved, never locked, so it cannot be poisoned; a
-/// poisoned value is still taken rather than discarded.
+/// Unboxes a transition handler's selection: the selected one-shot factory, or `None`
+/// when it declined. The outer `None` means `boxed` is not a selection.
 pub(crate) fn take_selection(boxed: BoxedComponent) -> Option<Option<ErasedOneShot>> {
-    let selection = boxed.value.downcast::<TransitionSelection>().ok()?;
-
-    Some(
-        selection
-            .0
-            .into_inner()
-            .unwrap_or_else(|poison| poison.into_inner()),
-    )
+    Handoff::take(boxed)
 }
