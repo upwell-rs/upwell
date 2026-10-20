@@ -89,6 +89,40 @@ async fn a_rejected_transition_never_runs_the_prepared_update() {
 }
 
 #[tokio::test]
+async fn a_panicking_apply_action_is_contained_and_the_publication_completes() {
+    let _guard = lock_test_guard().await;
+    let (dir, app) = build_recipe_app("one").await;
+    let original = banner(&app);
+    let generation = app.runtime().generation();
+    let config_generation = app.runtime().config_generation();
+
+    set_hot_update(HotUpdateMode::PanicOnApply);
+    relabel(&dir, app.runtime(), "two").await;
+
+    assert_eq!(app.runtime().generation().get(), generation.get() + 1);
+    assert_eq!(
+        app.runtime().config_generation(),
+        config_generation + 1,
+        "the config slots still committed after the contained panic"
+    );
+    assert!(Arc::ptr_eq(&original, &banner(&app)));
+    assert_eq!(
+        original.label(),
+        "one",
+        "the panicking action applied nothing"
+    );
+
+    set_hot_update(HotUpdateMode::Apply);
+    relabel(&dir, app.runtime(), "three").await;
+
+    assert_eq!(
+        original.label(),
+        "three",
+        "later reloads still apply updates"
+    );
+}
+
+#[tokio::test]
 async fn failing_or_panicking_preparations_leave_the_instance_untouched() {
     let _guard = lock_test_guard().await;
 
