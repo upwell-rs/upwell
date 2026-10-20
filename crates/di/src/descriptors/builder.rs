@@ -51,7 +51,7 @@ use upwell_hooks::HookDescriptor;
 
 use super::component::{
     BoxedComponent, Component, ComponentDescriptor, ComponentFactoryDescriptor, Injectable, Live,
-    ProviderDescriptor, ProviderOf, ProviderOrder,
+    LiveCell, ProviderDescriptor, ProviderOf, ProviderOrder,
 };
 
 /// Declares a component's construction recipes as the `fn() -> &'static [..]` a
@@ -207,6 +207,7 @@ impl ProviderDescriptor {
             priority: 0,
             ordering: &[],
             erase: erase_provider::<T, P>,
+            live: provider_live_cell::<P>,
         }
     }
 
@@ -263,6 +264,16 @@ where
         ty: TypeDescriptor::of::<P>(type_name::<P>()),
         value: Box::new(Live::new(erased)),
     }
+}
+
+/// The live cell an erased trait slot for `P` holds: the
+/// [`ProviderDescriptor::live`] accessor every [`ProviderDescriptor::of`] mapping uses.
+#[doc(hidden)]
+pub fn provider_live_cell<P>(erased: &BoxedComponent) -> Option<LiveCell>
+where
+    P: ?Sized + Send + Sync + 'static,
+{
+    erased.value.downcast_ref::<Live<P>>().map(LiveCell::of)
 }
 
 #[cfg(test)]

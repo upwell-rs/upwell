@@ -2,24 +2,52 @@
 
 use super::*;
 use crate::transition::strategy::validate_decision;
+use upwell_di::{BindingTransition, DependencyDemandId, GraphDiff, TransitionPlan};
 
-#[test]
-fn retained_live_rebinding_requires_restart_until_bindings_can_be_applied() {
+/// A structural plan whose only node is a `RebindLive` consumer with one live binding.
+fn live_rebind_plan(in_place: bool) -> (CandidateGraph, TransitionPlan) {
     let candidate = CandidateGraph::prepare(
         RuntimeGenerationId::INITIAL,
         &AppRegistry::default(),
         &topology(),
     )
     .expect("empty candidate validates");
-    let node = PlannedNode {
-        component: "live-consumer",
-        role: EffectiveNodeRole::Singleton,
-        action: NodeAction::RebindLive,
-        reasons: Box::new([]),
+    let plan = TransitionPlan {
+        base_generation: RuntimeGenerationId::INITIAL,
+        diff: GraphDiff {
+            nodes: Box::new([]),
+        },
+        nodes: Box::new([PlannedNode {
+            component: "live-consumer",
+            role: EffectiveNodeRole::Singleton,
+            action: NodeAction::RebindLive,
+            reasons: Box::new([]),
+        }]),
+        bindings: Box::new([BindingTransition {
+            dependency: DependencyDemandId {
+                consumer: "live-consumer",
+                ordinal: 0,
+            },
+            in_place,
+        }]),
+        construction_order: Box::new([]),
+        retirement_order: Box::new([]),
     };
 
-    let error = validate_decision(&candidate, &node, Some(ComponentTransitionStrategy::Retain))
-        .expect_err("live binding transitions are not applied yet");
+    (candidate, plan)
+}
+
+#[test]
+fn retained_live_rebinding_requires_every_binding_in_place() {
+    let (candidate, plan) = live_rebind_plan(false);
+
+    let error = validate_decision(
+        &candidate,
+        &plan,
+        &plan.nodes[0],
+        Some(ComponentTransitionStrategy::Retain),
+    )
+    .expect_err("a binding that cannot rebind in place rejects retention");
 
     assert!(matches!(
         error,
@@ -29,6 +57,19 @@ fn retained_live_rebinding_requires_restart_until_bindings_can_be_applied() {
             reason: RestartReason::LiveRebindUnsupported,
         })
     ));
+}
+
+#[test]
+fn retained_live_rebinding_is_valid_when_every_binding_rebinds_in_place() {
+    let (candidate, plan) = live_rebind_plan(true);
+
+    validate_decision(
+        &candidate,
+        &plan,
+        &plan.nodes[0],
+        Some(ComponentTransitionStrategy::Retain),
+    )
+    .expect("in-place live bindings let the consumer keep its instance");
 }
 
 fn strategy_fixture() -> (EffectiveGraph, CandidateGraph) {

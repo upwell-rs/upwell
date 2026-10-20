@@ -11,10 +11,12 @@ use crate::runtime::RuntimeScopePlan;
 use crate::scope::{PreparedScopeTopology, ScopePlan, SeedDestination};
 use crate::{AppConditionEvaluation, AppRegistry};
 
+mod rebind;
 mod resolve;
 mod resolved;
 mod strategy;
 
+pub(crate) use rebind::{HeldLiveCells, LiveRebinds};
 pub use resolved::ResolvedTransitionPlan;
 pub use strategy::{
     ComponentTransitionDecision, ComponentTransitionStrategy, RestartReason, RestartRequired,

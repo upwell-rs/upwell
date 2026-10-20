@@ -35,6 +35,7 @@ pub fn generate_providers<Ext: ParseKeyed>(
     let type_descriptor = paths.core("TypeDescriptor");
     let provider_of = paths.core("ProviderOf");
     let erase_provider = paths.core("erase_provider");
+    let provider_live_cell = paths.core("provider_live_cell");
     let provider_order = paths.core("ProviderOrder");
     let provider_order_direction = paths.core("ProviderOrderDirection");
     let descriptor = paths.core("Descriptor");
@@ -159,6 +160,7 @@ pub fn generate_providers<Ext: ParseKeyed>(
                 priority: #priority,
                 ordering: #ordering,
                 erase: #erase_provider::<#self_ident, #dyn_ty>,
+                live: #provider_live_cell::<#dyn_ty>,
             }
         });
 

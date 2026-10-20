@@ -63,6 +63,7 @@ where
 {
     ProviderDescriptor {
         erase: |_| panic!("transition planning must not erase components"),
+        live: |_| None,
         ..ProviderDescriptor::of::<T, dyn LiveService>("dyn LiveService").qualifier("live")
     }
 }

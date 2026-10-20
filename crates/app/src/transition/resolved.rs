@@ -284,7 +284,7 @@ impl ResolvedTransitionPlan {
         Err(error.into())
     }
 
-    fn decisions_with(
+    pub(super) fn decisions_with(
         &self,
         strategy: ComponentTransitionStrategy,
     ) -> impl Iterator<Item = &ComponentTransitionDecision> {
@@ -306,7 +306,7 @@ impl ResolvedTransitionPlan {
 
     /// A restart requirement for `decision`, naming the structural action it was meant
     /// to satisfy. A retained component outside the structural plan requires `Retain`.
-    fn restart(
+    pub(super) fn restart(
         &self,
         decision: &ComponentTransitionDecision,
         reason: RestartReason,

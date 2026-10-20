@@ -49,15 +49,22 @@ async fn stale_base_cannot_replace_a_newer_generation() {
     let publication = RuntimePublication::new(
         prepared()
             .await
-            .commit(Arc::clone(&owner), RuntimeGenerationId::INITIAL),
+            .commit(Arc::clone(&owner), RuntimeGenerationId::INITIAL)
+            .0,
     );
     let base = publication.pin();
     let winner = Arc::new(
         prepared()
             .await
-            .commit(Arc::clone(&owner), RuntimeGenerationId::new(1)),
+            .commit(Arc::clone(&owner), RuntimeGenerationId::new(1))
+            .0,
     );
-    let stale = Arc::new(prepared().await.commit(owner, RuntimeGenerationId::new(2)));
+    let stale = Arc::new(
+        prepared()
+            .await
+            .commit(owner, RuntimeGenerationId::new(2))
+            .0,
+    );
 
     publication
         .publish(TransitionAttemptId(1), &base.generation, winner)

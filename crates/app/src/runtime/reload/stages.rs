@@ -80,6 +80,9 @@ pub(super) fn plan_transition(
 /// Builds the candidate root and the prepared generation, plus the generation-local hook
 /// manager built from the candidate descriptors.
 ///
+/// The prepared generation also carries the live rebinds for retained consumers whose
+/// live dependencies changed; they apply only inside its terminal publication.
+///
 /// The candidate root seeds that manager through a generation override, so candidate
 /// hooks resolve through the candidate root only and the active manager is never reused.
 pub(super) async fn construct_candidate(
@@ -108,6 +111,8 @@ pub(super) async fn construct_candidate(
     let (root, scopes) = resolved_plan
         .build_candidate_root_from_active_with_overrides(&candidate, base, externals, overrides)
         .await?;
+    let (held_live_cells, live_rebinds) =
+        resolved_plan.prepare_live_rebinds(&candidate, base, &root)?;
     let (resolved, scope_plan, graph) = candidate.into_runtime_parts(&topology);
     let prepared = PreparedRuntimeGeneration::new(
         root,
@@ -116,7 +121,8 @@ pub(super) async fn construct_candidate(
         resolved,
         graph,
         Arc::new(AppConditionState::new(Arc::clone(catalog), evaluation)),
-    );
+    )
+    .with_live_rebinds(held_live_cells, live_rebinds);
 
     Ok((prepared, hook_manager))
 }

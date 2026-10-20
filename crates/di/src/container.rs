@@ -20,6 +20,7 @@ use crate::{
 };
 
 mod candidate;
+mod live;
 mod snapshot;
 
 /// Shared, immutable data a [`ScopeContainer`] needs to resolve beyond its own

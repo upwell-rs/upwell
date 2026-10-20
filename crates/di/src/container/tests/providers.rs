@@ -28,6 +28,7 @@ fn provider_lookup_uses_the_prebuilt_concrete_index() {
         priority: 0,
         ordering: &[],
         erase: unerased,
+        live: |_| None,
     };
     let component = ComponentDescriptor::manual("counted", "Counted", concrete_ty, &Singleton);
     let registry = ScopeRegistry::new(
@@ -121,6 +122,7 @@ fn registry_indexes_follow_final_provider_order_for_first_wins_lookups() {
         priority: 20,
         ordering: &[],
         erase: unerased,
+        live: |_| None,
     };
     let winning = ProviderDescriptor {
         trait_ty: TypeDescriptor::of::<dyn Send>("dyn Send"),
@@ -130,6 +132,7 @@ fn registry_indexes_follow_final_provider_order_for_first_wins_lookups() {
         priority: -10,
         ordering: &[],
         erase: unerased,
+        live: |_| None,
     };
     let order = HashMap::from([(
         TypeId::of::<dyn Send>(),

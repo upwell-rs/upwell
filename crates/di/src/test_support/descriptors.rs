@@ -101,6 +101,7 @@ pub(crate) const fn planned_provider(
         priority: 0,
         ordering: &[],
         erase: unerased,
+        live: |_| None,
     }
 }
 
