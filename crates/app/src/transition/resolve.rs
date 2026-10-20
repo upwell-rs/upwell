@@ -32,20 +32,24 @@ impl CandidateGraph {
 
     /// Resolves the deterministic v1 transition defaults used only by the transactional
     /// config reload while forcing runtime-invalidated component roots to reconstruct:
-    /// structural Retain nodes retain, Replace/RebindLive nodes whose component declares a
-    /// replacement factory replace from the previous instance, other Add/Replace/RebindLive
-    /// nodes reconstruct (factory availability is validated by the shared decision
-    /// checks), and Remove nodes retire
-    /// safely by absence from the candidate root — they carry no decision and require no
-    /// candidate seed. An invalidated factoryless or non-singleton node fails resolution
-    /// with [`RestartRequired`] before any construction runs.
+    /// structural Retain nodes retain, RebindLive nodes whose every changed live binding
+    /// rebinds in place retain their instance, other Replace/RebindLive nodes whose
+    /// component declares a replacement factory replace from the previous instance, other
+    /// Add/Replace/RebindLive nodes reconstruct (factory availability is validated by the
+    /// shared decision checks), and Remove nodes retire safely by absence from the
+    /// candidate root — they carry no decision and require no candidate seed. An
+    /// invalidated factoryless or non-singleton node fails resolution with
+    /// [`RestartRequired`] before any construction runs.
     pub(crate) fn resolve_runtime_transition(
         &self,
         active: &EffectiveGraph,
         invalidated_roots: &BTreeSet<&'static str>,
     ) -> crate::Result<ResolvedTransitionPlan> {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let structural = active.plan_runtime_transition(&self.graph, invalidated_roots)?;
+            let structural =
+                active.plan_runtime_transition(&self.graph, invalidated_roots, |component| {
+                    self.retainable(component)
+                })?;
 
             let requested = structural
                 .nodes
@@ -54,7 +58,7 @@ impl CandidateGraph {
                 .map(|node| {
                     Ok(ComponentTransitionDecision {
                         component: node.component,
-                        strategy: self.runtime_strategy(node)?,
+                        strategy: self.runtime_strategy(&structural, node)?,
                     })
                 })
                 .collect::<crate::Result<Vec<_>>>()?;
@@ -65,9 +69,21 @@ impl CandidateGraph {
     }
 
     /// The component-declared default strategy for one structural runtime node.
-    fn runtime_strategy(&self, node: &PlannedNode) -> crate::Result<ComponentTransitionStrategy> {
+    ///
+    /// A `RebindLive` node keeps its instance when the plan can rebind every changed
+    /// live binding in place; otherwise it replaces from its previous instance when it
+    /// declares a replacement factory, and reconstructs when it does not.
+    fn runtime_strategy(
+        &self,
+        plan: &TransitionPlan,
+        node: &PlannedNode,
+    ) -> crate::Result<ComponentTransitionStrategy> {
         let strategy = match node.action {
             NodeAction::Retain => ComponentTransitionStrategy::Retain,
+
+            NodeAction::RebindLive if plan.rebinds_in_place(node.component) => {
+                ComponentTransitionStrategy::Retain
+            }
 
             NodeAction::Replace | NodeAction::RebindLive
                 if self.declares_replacement(node.component)? =>
@@ -78,6 +94,15 @@ impl CandidateGraph {
         };
 
         Ok(strategy)
+    }
+
+    /// Whether the runtime can carry `component`'s instance into the candidate: a
+    /// singleton whose descriptor carries the typed generation-snapshot adapter.
+    fn retainable(&self, component: &str) -> bool {
+        self.component(component).is_some_and(|descriptor| {
+            descriptor.scope.id() == upwell_core::Singleton::ID
+                && descriptor.generation_snapshot.is_some()
+        })
     }
 
     fn declares_replacement(&self, component: &str) -> crate::Result<bool> {
@@ -149,7 +174,7 @@ impl CandidateGraph {
                 continue;
             }
 
-            validate_decision(self, node, strategy)?;
+            validate_decision(self, &structural, node, strategy)?;
 
             if let Some(strategy) = strategy {
                 resolved.push(ComponentTransitionDecision {

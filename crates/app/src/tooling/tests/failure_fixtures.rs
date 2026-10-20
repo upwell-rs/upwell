@@ -145,6 +145,7 @@ pub(super) static DIAGNOSTIC_PROVIDER: ProviderDescriptor = ProviderDescriptor {
     priority: 0,
     ordering: &[],
     erase: erase_diagnostic_provider,
+    live: |_| None,
 };
 
 pub(super) static DIAGNOSTIC_SCOPE_BOUNDARIES: [ScopeBoundary; 2] = [

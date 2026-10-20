@@ -16,6 +16,8 @@ use crate::{
 
 mod plan;
 
+use plan::LiveClosure;
+
 pub use plan::{
     BindingTransition, GraphDiff, NodeAction, NodeChange, NodeChangeKind, PlannedNode, ReasonKind,
     StaleGraphCandidate, TransitionPlan, TransitionReason,
@@ -73,6 +75,20 @@ pub struct DependencyDemand {
 }
 
 impl DependencyDemand {
+    /// Whether a consumer's handle for this demand is the exact live cell its root
+    /// stores, so a runtime transition can republish it in place: a single, eagerly
+    /// resolved, non-config live dependency on one singleton component or provider.
+    pub fn rebindable(&self) -> bool {
+        plan::is_live(self)
+            && !self.config
+            && self.resolution == ResolutionMode::Eager
+            && self.targets.iter().all(|target| match target {
+                EffectiveTarget::Component { scope, .. }
+                | EffectiveTarget::Provider { scope, .. } => *scope == Singleton::ID,
+                EffectiveTarget::Config { .. } | EffectiveTarget::Dynamic { .. } => false,
+            })
+    }
+
     fn live_compatible_with(&self, candidate: &Self) -> bool {
         self.cardinality == Cardinality::One
             && candidate.cardinality == Cardinality::One
@@ -301,34 +317,42 @@ impl EffectiveGraph {
     /// actions whose closure stays local to the rebind itself: the rebind's own
     /// dependents are never propagated, because a live rebind keeps the instance
     /// alive. Use [`plan_runtime_transition`](Self::plan_runtime_transition) for the
-    /// reconstruction runtime, where every `RebindLive` node is reconstructed.
+    /// runtime, which reconstructs every live consumer it cannot rebind in place.
     pub fn plan_transition(&self, candidate: &Self) -> Result<TransitionPlan, StaleGraphCandidate> {
-        plan::plan_with_invalidations(self, candidate, &BTreeSet::new(), false)
+        plan::plan_with_invalidations(self, candidate, &BTreeSet::new(), LiveClosure::Local)
     }
 
-    /// Plans a transition for the reconstruction runtime: runtime-invalidated roots
-    /// replace their active instances, and every live consumer the runtime will
-    /// reconstruct propagates to its own dependents through the same reverse
-    /// reachability to a fixed point.
+    /// Plans a transition for the runtime: runtime-invalidated roots replace their
+    /// active instances, and every live consumer the runtime will reconstruct
+    /// propagates to its own dependents through the same reverse reachability to a
+    /// fixed point.
     ///
     /// Roots missing from either graph create no node, and structural Add and Remove
     /// actions keep their precedence over forced replaces. The graph diff stays purely
-    /// structural. Because the runtime reconstructs `Add`, `Replace`, and `RebindLive`
-    /// nodes while retiring `Remove` nodes by absence, live consumers always propagate
-    /// through the changed-instance queue and their fixed (`Snapshot`) dependents plan as
-    /// `Replace` rather than retaining instances snapshotted from the retired active
-    /// root. This holds even when `invalidated_roots` is empty: a pure
-    /// provider/factory change reconstructs its live consumers and therefore their
-    /// dependents too. Ordinary DI planning
-    /// ([`plan_transition`](Self::plan_transition)) keeps live rebinding local to the
-    /// rebind itself and must not propagate live closures.
+    /// structural.
+    ///
+    /// `rebinds_in_place` names the consumers the runtime may keep while republishing
+    /// their live cells. A live binding whose demand is
+    /// [`rebindable`](DependencyDemand::rebindable) on both sides and whose consumer it
+    /// accepts plans with [`BindingTransition::in_place`] set; the consumer keeps its
+    /// instance, so it does not propagate. Every other live consumer is reconstructed:
+    /// it propagates through the changed-instance queue and its fixed (`Snapshot`)
+    /// dependents plan as `Replace` rather than retaining instances snapshotted from the
+    /// retired active root. This holds even when `invalidated_roots` is empty, because a
+    /// pure provider/factory change can start the closure on its own.
     #[doc(hidden)]
     pub fn plan_runtime_transition(
         &self,
         candidate: &Self,
         invalidated_roots: &BTreeSet<&'static str>,
+        rebinds_in_place: impl Fn(&'static str) -> bool,
     ) -> Result<TransitionPlan, StaleGraphCandidate> {
-        plan::plan_with_invalidations(self, candidate, invalidated_roots, true)
+        plan::plan_with_invalidations(
+            self,
+            candidate,
+            invalidated_roots,
+            LiveClosure::Runtime(&rebinds_in_place),
+        )
     }
 }
 

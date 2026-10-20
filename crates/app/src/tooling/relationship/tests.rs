@@ -113,6 +113,7 @@ static PROVIDER: ProviderDescriptor = ProviderDescriptor {
     priority: 0,
     ordering: &[],
     erase: erase_unreachable,
+    live: |_| None,
 };
 
 #[test]

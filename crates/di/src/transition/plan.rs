@@ -85,6 +85,10 @@ pub struct PlannedNode {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct BindingTransition {
     pub dependency: DependencyDemandId,
+    /// Whether the runtime can republish the consumer's held live cell in place,
+    /// keeping the consumer instance. `false` means the consumer must be constructed
+    /// again for the binding to observe its new target.
+    pub in_place: bool,
 }
 
 /// Pure deterministic transition requirements between two validated graphs.
@@ -99,6 +103,18 @@ pub struct TransitionPlan {
 }
 
 impl TransitionPlan {
+    /// Returns whether every live binding `component` must republish can be rebound in
+    /// place, so the component may keep its instance. `false` when it has none.
+    pub fn rebinds_in_place(&self, component: &str) -> bool {
+        let mut bindings = self
+            .bindings
+            .iter()
+            .filter(|binding| binding.dependency.consumer == component)
+            .peekable();
+
+        bindings.peek().is_some() && bindings.all(|binding| binding.in_place)
+    }
+
     /// Returns whether this plan requires no dependency-graph transition work.
     ///
     /// A wider runtime transaction may still publish config or other generation state.
@@ -120,6 +136,32 @@ pub struct StaleGraphCandidate {
     pub candidate: RuntimeGenerationId,
 }
 
+/// How the planner closes over live consumers whose binding must be republished.
+#[derive(Clone, Copy)]
+pub(super) enum LiveClosure<'a> {
+    /// Ordinary DI planning: a live rebind stays local to the rebind itself.
+    Local,
+    /// Runtime planning: a binding rebinds in place when its demand shape allows it and
+    /// the predicate accepts its consumer; every other live consumer is reconstructed
+    /// and propagates to its own dependents like a replaced instance.
+    Runtime(&'a dyn Fn(&'static str) -> bool),
+}
+
+impl LiveClosure<'_> {
+    fn in_place(self, before: &DependencyDemand, after: &DependencyDemand) -> bool {
+        let rebindable = before.rebindable() && after.rebindable();
+
+        match self {
+            Self::Local => rebindable,
+            Self::Runtime(consumer) => rebindable && consumer(after.id.consumer),
+        }
+    }
+
+    fn propagates(self, in_place: bool) -> bool {
+        matches!(self, Self::Runtime(_)) && !in_place
+    }
+}
+
 #[derive(Clone)]
 struct Requirement {
     action: NodeAction,
@@ -128,17 +170,17 @@ struct Requirement {
 
 /// Plans the transition requirements between two validated graphs.
 ///
-/// `propagate_live_consumers` selects the planning mode. Runtime planning targets
-/// the reconstruction runtime, where every `RebindLive` node is reconstructed; such
-/// a consumer's own dependents must therefore propagate exactly like replaced
-/// instances — even when `invalidated_roots` is empty, because a pure
-/// provider/factory change can start the closure on its own. Ordinary planning
-/// keeps live rebinding local to the rebind itself.
+/// `live` selects the planning mode. Runtime planning reconstructs every live consumer
+/// it cannot rebind in place; such a consumer's own dependents must therefore propagate
+/// exactly like replaced instances — even when `invalidated_roots` is empty, because a
+/// pure provider/factory change can start the closure on its own. A consumer rebound in
+/// place keeps its instance, so its dependents are unaffected. Ordinary planning keeps
+/// live rebinding local to the rebind itself.
 pub(super) fn plan_with_invalidations(
     active: &EffectiveGraph,
     candidate: &EffectiveGraph,
     invalidated_roots: &BTreeSet<&'static str>,
-    propagate_live_consumers: bool,
+    live: LiveClosure<'_>,
 ) -> Result<TransitionPlan, StaleGraphCandidate> {
     if active.generation != candidate.generation {
         return Err(StaleGraphCandidate {
@@ -215,7 +257,7 @@ pub(super) fn plan_with_invalidations(
             &mut requirements,
             &mut bindings,
             &mut changed_instances,
-            propagate_live_consumers,
+            live,
         );
     }
 
@@ -262,9 +304,14 @@ pub(super) fn plan_with_invalidations(
             }
             let mut dependent_path = path.clone();
             dependent_path.push(demand_id);
-            let live = active_demand.is_none_or(is_live) && candidate_demand.is_none_or(is_live);
+            let observes_live =
+                active_demand.is_none_or(is_live) && candidate_demand.is_none_or(is_live);
 
-            if live {
+            if observes_live {
+                let in_place = active_demand
+                    .zip(candidate_demand)
+                    .is_some_and(|(before, after)| live.in_place(before, after));
+
                 require(
                     &mut requirements,
                     demand_id.consumer,
@@ -274,9 +321,10 @@ pub(super) fn plan_with_invalidations(
                 );
                 bindings.insert(BindingTransition {
                     dependency: demand_id,
+                    in_place,
                 });
 
-                if propagate_live_consumers {
+                if live.propagates(in_place) {
                     changed_instances.push_back((demand_id.consumer, dependent_path));
                 }
             } else {
@@ -481,7 +529,7 @@ fn compare_demands(
     requirements: &mut BTreeMap<&'static str, Requirement>,
     bindings: &mut BTreeSet<BindingTransition>,
     changed_instances: &mut VecDeque<(&'static str, Vec<DependencyDemandId>)>,
-    propagate_live_consumers: bool,
+    live: LiveClosure<'_>,
 ) {
     let count = before.len().max(after.len());
 
@@ -517,6 +565,8 @@ fn compare_demands(
             let path = vec![after.id];
 
             if before.live_compatible_with(after) {
+                let in_place = live.in_place(before, after);
+
                 require(
                     requirements,
                     after.id.consumer,
@@ -526,9 +576,10 @@ fn compare_demands(
                 );
                 bindings.insert(BindingTransition {
                     dependency: after.id,
+                    in_place,
                 });
 
-                if propagate_live_consumers {
+                if live.propagates(in_place) {
                     changed_instances.push_back((after.id.consumer, path));
                 }
             } else {
@@ -581,7 +632,7 @@ fn action_precedence(action: NodeAction) -> u8 {
     }
 }
 
-fn is_live(demand: &DependencyDemand) -> bool {
+pub(super) fn is_live(demand: &DependencyDemand) -> bool {
     demand.observation == upwell_core::DependencyObservation::Live
         && demand.cardinality == upwell_core::Cardinality::One
         && !demand.optional

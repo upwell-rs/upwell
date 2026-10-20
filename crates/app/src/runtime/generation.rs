@@ -11,6 +11,7 @@ use super::RuntimeScopePlan;
 use super::reentrancy::ActiveTransition;
 use crate::registry::AppConditionEvaluation;
 use crate::registry::AppRegistry;
+use crate::transition::{HeldLiveCells, LiveRebinds};
 
 /// Stable identity of one runtime transition attempt, including no-op and failed attempts.
 ///
@@ -78,6 +79,7 @@ pub(crate) struct RuntimeGeneration {
     graph: Arc<EffectiveGraph>,
     condition: Arc<AppConditionState>,
     hooks: HookManager,
+    held_live_cells: HeldLiveCells,
 }
 
 /// A complete prepared generation whose semantic ID is assigned only at commit.
@@ -89,6 +91,8 @@ pub(crate) struct PreparedRuntimeGeneration {
     graph: EffectiveGraph,
     condition: Arc<AppConditionState>,
     hooks: HookManager,
+    held_live_cells: HeldLiveCells,
+    live_rebinds: LiveRebinds,
 }
 
 impl PreparedRuntimeGeneration {
@@ -117,11 +121,29 @@ impl PreparedRuntimeGeneration {
             graph,
             condition,
             hooks,
+            held_live_cells: HeldLiveCells::default(),
+            live_rebinds: LiveRebinds::default(),
         }
     }
 
-    fn commit(self, owner: Arc<()>, id: RuntimeGenerationId) -> RuntimeGeneration {
-        RuntimeGeneration {
+    /// Attaches the live cells this generation's retained consumers hold, and the
+    /// rebinds its terminal publication applies to them.
+    pub(crate) fn with_live_rebinds(
+        self,
+        held_live_cells: HeldLiveCells,
+        live_rebinds: LiveRebinds,
+    ) -> Self {
+        Self {
+            held_live_cells,
+            live_rebinds,
+            ..self
+        }
+    }
+
+    /// Stamps this generation for publication, splitting off the live rebinds the
+    /// publication applies.
+    fn commit(self, owner: Arc<()>, id: RuntimeGenerationId) -> (RuntimeGeneration, LiveRebinds) {
+        let generation = RuntimeGeneration {
             owner,
             id,
             root: self.root,
@@ -131,7 +153,10 @@ impl PreparedRuntimeGeneration {
             graph: Arc::new(self.graph.into_committed_generation(id)),
             condition: self.condition,
             hooks: self.hooks,
-        }
+            held_live_cells: self.held_live_cells,
+        };
+
+        (generation, self.live_rebinds)
     }
 }
 
@@ -207,7 +232,7 @@ impl WeakTransitionCoordinator {
 impl RuntimeTransitionCoordinator {
     pub(crate) fn new(initial: PreparedRuntimeGeneration) -> Self {
         let owner = Arc::new(());
-        let initial = initial.commit(Arc::clone(&owner), RuntimeGenerationId::INITIAL);
+        let (initial, _) = initial.commit(Arc::clone(&owner), RuntimeGenerationId::INITIAL);
         let publication = RuntimePublication::new(initial);
 
         Self {
@@ -317,7 +342,8 @@ impl RuntimeTransition {
             attempt,
             base,
         } = self;
-        let candidate = Arc::new(candidate.commit(Arc::clone(&coordinator.owner), next));
+        let (candidate, live_rebinds) = candidate.commit(Arc::clone(&coordinator.owner), next);
+        let candidate = Arc::new(candidate);
 
         Ok(PreparedRuntimeCommit {
             coordinator,
@@ -325,6 +351,7 @@ impl RuntimeTransition {
             attempt,
             base: base.generation,
             candidate,
+            live_rebinds,
         })
     }
 
@@ -355,15 +382,17 @@ pub(crate) struct PreparedRuntimeCommit {
     attempt: TransitionAttemptId,
     base: Arc<RuntimeGeneration>,
     candidate: Arc<RuntimeGeneration>,
+    live_rebinds: LiveRebinds,
 }
 
 impl PreparedRuntimeCommit {
-    /// Publishes the validated candidate, runs the synchronous legacy-config
-    /// compatibility callback while still holding the writer, then releases the writer.
+    /// Publishes the validated candidate, republishes the live cells its retained
+    /// consumers hold, runs the synchronous legacy-config compatibility callback while
+    /// still holding the writer, then releases the writer.
     ///
-    /// Ordering: the already validated candidate generation becomes current first, the
-    /// callback observes the new generation through the coordinator, and only then does
-    /// the writer lease end. Publication cannot fail after `prepare_commit` accepted the
+    /// Ordering: the already validated candidate generation becomes current first, then
+    /// every prepared live rebind swaps its cell, then the callback observes the new
+    /// generation through the coordinator, and only then does the writer lease end. Publication cannot fail after `prepare_commit` accepted the
     /// candidate: the writer is the sole publication serializer, so a compare-and-swap
     /// failure would be an internal invariant violation, not a recoverable error.
     pub(crate) fn commit_with(self, commit_compat: impl FnOnce()) -> RuntimeView {
@@ -373,6 +402,7 @@ impl PreparedRuntimeCommit {
             attempt,
             base,
             candidate,
+            live_rebinds,
         } = self;
 
         let view = coordinator
@@ -380,6 +410,7 @@ impl PreparedRuntimeCommit {
             .publish(attempt, &base, candidate)
             .expect("validated candidate must publish under the sole writer");
 
+        live_rebinds.commit();
         commit_compat();
 
         drop(writer);
@@ -420,6 +451,11 @@ impl RuntimeView {
     /// The root scope pinned by this generation.
     pub fn root(&self) -> &Arc<ScopeContainer> {
         &self.generation.root
+    }
+
+    /// The live cells this generation's retained consumers hold.
+    pub(crate) fn held_live_cells(&self) -> &HeldLiveCells {
+        &self.generation.held_live_cells
     }
 
     pub(crate) fn scopes(&self) -> &Arc<ScopeRegistry> {

@@ -19,8 +19,8 @@
 //!
 //! Before the terminal commit, every recoverable error, hook rejection, failed candidate
 //! factory, or cancellation leaves the framework-owned publication state unchanged: the
-//! active runtime generation, the managed config tree and its live slots, and the config
-//! generation. The candidate — its root, its hook manager, and every newly constructed component
+//! active runtime generation, the managed config tree and its live slots, the live cells
+//! retained consumers hold, and the config generation. The candidate — its root, its hook manager, and every newly constructed component
 //! instance — is dropped, so mutations held exclusively by those candidate instances
 //! disappear with it. Retained dependencies may alias the active generation's
 //! instances, so mutations a candidate factory or hook makes through them reach live
@@ -37,6 +37,20 @@
 //! Unaffected singletons retain their active instances. An affected component that
 //! cannot reconstruct in place (no ordinary factory, non-singleton, …) fails the reload
 //! with [`RestartRequired`](crate::RestartRequired) before any construction runs.
+//!
+//! # Live rebinding
+//!
+//! A retained singleton whose only changes are live (`Dep<T>`) dependencies keeps its
+//! instance: the reload republishes the live cell it holds with the candidate's value
+//! instead of reconstructing it, so its fixed dependents retain too. This applies to
+//! single, eagerly resolved dependencies on singleton components or provider mappings
+//! (including `Dep<dyn Trait>` provider switches); other live consumers reconstruct.
+//! Each consumer keeps the cell of the generation that constructed it for as long as it
+//! is retained, and every rebind is prepared before commit and applied inside the
+//! terminal publication. Snapshots taken from a rebound handle keep the previous
+//! instance. The held cell is the constructing root's slot, so — as with [`Cfg<T>`] —
+//! a pinned view of an earlier generation observes the new value through that slot once
+//! a retained consumer rebinds it.
 //!
 //! # Reentrancy
 //!
@@ -81,8 +95,8 @@
 //! reloader.
 //!
 //! At the terminal commit, the validated candidate becomes the authoritative runtime
-//! generation first, then the live config slots synchronously commit while both leases
-//! remain held. The staged commit advances the config generation
+//! generation first, then the retained consumers' live cells are republished and the
+//! live config slots synchronously commit while both leases remain held. The staged commit advances the config generation
 //! exactly once per reload. An unchanged source is a no-op: it moves neither generation
 //! nor root. A pinned [`RuntimeView`](crate::RuntimeView) consistently pins one
 //! generation's root, graph, scopes, condition state, and hook catalog, but it does not

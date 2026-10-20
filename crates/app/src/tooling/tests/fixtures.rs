@@ -328,6 +328,7 @@ where
 {
     ProviderDescriptor {
         erase: |_| panic!("tooling projection never erases providers"),
+        live: |_| None,
         ..ProviderDescriptor::of::<T, dyn OrderedProvider>("OrderedProvider").qualifier(qualifier)
     }
 }

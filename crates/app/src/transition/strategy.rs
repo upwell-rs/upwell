@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use upwell_di::{EffectiveNodeRole, NodeAction, PlannedNode};
+use upwell_di::{EffectiveNodeRole, NodeAction, PlannedNode, TransitionPlan};
 
 use super::CandidateGraph;
 
@@ -72,9 +72,7 @@ impl fmt::Display for RestartReason {
             Self::HandleRetentionUnsupported => {
                 "the component handle cannot be isolated across runtime generations"
             }
-            Self::LiveRebindUnsupported => {
-                "retained live dependency rebinding is not integrated yet"
-            }
+            Self::LiveRebindUnsupported => "a changed live dependency cannot be rebound in place",
             Self::RemovalUnsupported => "component removal is not integrated yet",
             Self::NonSingleton => "runtime transitions are singleton-only",
             Self::FactoryUnavailable => "the candidate component has no ordinary factory",
@@ -98,8 +96,12 @@ pub struct RestartRequired {
 }
 
 /// Checks one component's strategy against the planner's minimum action for its node.
+///
+/// Retaining a `RebindLive` node is valid only when `plan` can rebind every one of its
+/// changed live bindings in place.
 pub(super) fn validate_decision(
     candidate: &CandidateGraph,
+    plan: &TransitionPlan,
     node: &PlannedNode,
     strategy: Option<ComponentTransitionStrategy>,
 ) -> crate::Result<()> {
@@ -111,6 +113,7 @@ pub(super) fn validate_decision(
 
     match (node.action, strategy) {
         (NodeAction::Remove, _) => restart(node, RestartReason::RemovalUnsupported),
+        (NodeAction::RebindLive, Some(Retain)) if plan.rebinds_in_place(node.component) => Ok(()),
         (NodeAction::RebindLive, Some(Retain)) => {
             restart(node, RestartReason::LiveRebindUnsupported)
         }

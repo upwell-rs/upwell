@@ -1,5 +1,3 @@
-use arc_swap::{ArcSwap, Guard};
-use std::marker::PhantomData;
 use std::ops::Deref;
 use std::{
     any::{Any, TypeId},
@@ -15,12 +13,14 @@ use upwell_hooks::{HookDescriptor, no_hooks};
 
 mod context;
 mod factory;
+mod live;
 
 pub use context::ComponentConstructionContext;
 pub use factory::{
     ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole,
     Registration,
 };
+pub use live::{Dep, Live, LiveCell, LiveRebind, LiveRef};
 
 /// Metadata trait for types registerable as components.
 ///
@@ -92,119 +92,15 @@ pub trait Injectable: Clone + Send + Sync + 'static {
     fn snapshot_stored(_: &Self::Stored) -> Option<Self::Stored> {
         None
     }
-}
 
-/// A shared, swappable cell holding the current `Arc<T>` instance — the interior
-/// mutability primitive behind [`Dep<T>`] (and `Cfg<T>` in the config layer).
-///
-/// Backed by [`arc_swap`]: every clone shares one underlying `ArcSwap`, so a
-/// [`replace`](Self::replace) is observed by all clones, while [`snapshot`](Self::snapshot)
-/// and [`get`](Self::get) pin the generation current at the call. This is what lets a
-/// config reload swap a component (or config value) in place without recreating its
-/// consumers.
-pub struct Live<T: ?Sized> {
-    inner: Arc<ArcSwap<Arc<T>>>,
-}
-
-/// A reloadable dependency handle: a stable handle to a component slot whose
-/// instance may be swapped at runtime (e.g. by a config reload).
-///
-/// A `Dep<T>` field keeps working across a swap, observing the new instance on its
-/// next read; existing snapshots keep the old instance alive until dropped. It is
-/// the same primitive as [`Live<T>`] — an alias chosen at the injection site to opt
-/// into live, rather than fixed `Arc<T>`, semantics.
-pub type Dep<T> = Live<T>;
-
-/// A guard pinning one generation of a [`Live<T>`], dereferencing to `T`. Holding it
-/// keeps observing the generation current when [`get`](Live::get) was called; it
-/// borrows the `Live`, discouraging holding it across a long await (which would pin
-/// the old instance and delay a reload). Returned by both [`Dep<T>`] and `Cfg<T>`.
-pub struct LiveRef<'a, T: ?Sized> {
-    guard: Guard<Arc<Arc<T>>>,
-    _marker: PhantomData<&'a Live<T>>,
-}
-
-impl<T: ?Sized> Deref for LiveRef<'_, T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        &self.guard
-    }
-}
-
-impl<T: ?Sized + Send + Sync + 'static> Clone for Live<T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-        }
-    }
-}
-
-impl<T: ?Sized + Send + Sync + 'static> fmt::Debug for Live<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Live").finish_non_exhaustive()
-    }
-}
-
-impl<T: ?Sized + Send + Sync + 'static> Live<T> {
-    /// Wraps an instance in a fresh slot. Each call creates an independent cell, so
-    /// this is the seam where a constructed instance becomes reloadable.
-    pub fn new(value: Arc<T>) -> Self {
-        Self {
-            inner: Arc::new(ArcSwap::new(Arc::new(value))),
-        }
-    }
-
-    /// Publishes a new instance into the slot. Every clone of this `Live` (every
-    /// `Dep<T>` derived from it) observes the new value on its next read — the
-    /// swap a config reload performs at commit.
-    pub fn replace(&self, value: Arc<T>) {
-        self.inner.store(Arc::new(value));
-    }
-
-    /// An owned `Arc` snapshot of the current instance — stable once taken. Prefer
-    /// this over [`get`](Self::get) for anything held across an `.await`.
-    pub fn snapshot(&self) -> Arc<T> {
-        self.inner.load_full().as_ref().clone()
-    }
-
-    /// A guard pinning the current instance, dereferencing to `T`, for short
-    /// synchronous reads.
-    pub fn get(&self) -> LiveRef<'_, T> {
-        LiveRef {
-            guard: self.inner.load(),
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<T: ?Sized + Send + Sync + 'static> Injectable for Dep<T> {
-    type Target = T;
-    type Stored = Live<T>;
-
-    fn into_stored(self) -> Live<T> {
-        self
-    }
-
-    fn from_stored(stored: &Live<T>) -> Self {
-        stored.clone()
-    }
-}
-
-impl<T: ?Sized + Send + Sync + 'static> Injectable for Arc<T> {
-    type Target = T;
-    type Stored = Live<T>;
-
-    fn into_stored(self) -> Live<T> {
-        Live::new(self)
-    }
-
-    fn from_stored(stored: &Live<T>) -> Self {
-        stored.snapshot()
-    }
-
-    fn snapshot_stored(stored: &Live<T>) -> Option<Live<T>> {
-        Some(Live::new(stored.snapshot()))
+    /// The shared live cell behind `stored`, when this handle stores one.
+    ///
+    /// `Arc<T>` and `Dep<T>` store a [`Live<T>`] and return a handle onto that exact
+    /// cell, so a runtime transition can republish it for the consumers holding it.
+    /// By-value handles store no cell and keep the default.
+    #[doc(hidden)]
+    fn live_cell(_: &Self::Stored) -> Option<LiveCell> {
+        None
     }
 }
 
@@ -310,6 +206,10 @@ pub struct ProviderDescriptor {
     /// for storage under the trait's key. Generated by the macro, which alone
     /// knows that `Concrete: Trait`.
     pub erase: fn(&BoxedComponent) -> BoxedComponent,
+    /// Returns the live cell an [`erase`](Self::erase)d trait slot holds, so a runtime
+    /// transition can republish the `Dep<dyn Trait>` handles consumers took from it.
+    #[doc(hidden)]
+    pub live: fn(&BoxedComponent) -> Option<LiveCell>,
 }
 
 impl fmt::Debug for ProviderDescriptor {
@@ -399,12 +299,13 @@ pub fn from_boxed<H: Injectable>(boxed: &BoxedComponent) -> Option<H> {
     boxed.value.downcast_ref::<H::Stored>().map(H::from_stored)
 }
 
-/// Hidden typed generation-snapshot adapter and payload validator.
+/// Hidden typed generation-snapshot adapter, payload validator, and live-cell accessor.
 #[derive(Clone, Copy)]
 #[doc(hidden)]
 pub struct GenerationSnapshot {
     snapshot: fn(&BoxedComponent) -> crate::Result<BoxedComponent>,
     validate: fn(&BoxedComponent) -> bool,
+    live: fn(&BoxedComponent) -> Option<LiveCell>,
 }
 
 impl GenerationSnapshot {
@@ -416,12 +317,20 @@ impl GenerationSnapshot {
         (self.validate)(candidate)
     }
 
+    pub(crate) fn live_cell(self, stored: &BoxedComponent) -> Option<LiveCell> {
+        (self.live)(stored)
+    }
+
     #[cfg(test)]
     pub(crate) const fn for_test(
         snapshot: fn(&BoxedComponent) -> crate::Result<BoxedComponent>,
         validate: fn(&BoxedComponent) -> bool,
     ) -> Self {
-        Self { snapshot, validate }
+        Self {
+            snapshot,
+            validate,
+            live: |_| None,
+        }
     }
 }
 
@@ -445,6 +354,14 @@ pub(crate) fn generation_snapshot_adapter<T: Component>(
         ty: active.ty,
         value: Box::new(candidate_stored),
     })
+}
+
+/// The live cell a typed component's stored slot holds, when its handle stores one.
+fn generation_live_cell<T: Component>(stored: &BoxedComponent) -> Option<LiveCell> {
+    stored
+        .value
+        .downcast_ref::<<T::Handle as Injectable>::Stored>()
+        .and_then(<T::Handle as Injectable>::live_cell)
 }
 
 fn generation_snapshot_validates<T: Component>(candidate: &BoxedComponent) -> bool {
@@ -644,6 +561,7 @@ impl ComponentDescriptor {
         Some(GenerationSnapshot {
             snapshot: generation_snapshot_adapter::<T>,
             validate: generation_snapshot_validates::<T>,
+            live: generation_live_cell::<T>,
         })
     }
 

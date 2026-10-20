@@ -217,6 +217,7 @@ fn provider_descriptor(
         priority: 0,
         ordering: &[],
         erase,
+        live: |_| None,
     }
 }
 

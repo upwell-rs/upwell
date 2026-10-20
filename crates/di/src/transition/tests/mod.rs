@@ -143,3 +143,4 @@ fn action(plan: &TransitionPlan, component: &str) -> Option<NodeAction> {
 
 mod invalidation;
 mod planning;
+mod rebinding;
