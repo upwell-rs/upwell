@@ -6,9 +6,9 @@
 //! live instance; the framework applies the action infallibly during the terminal
 //! publication, and a failed or rejected transition drops it unapplied.
 
-use std::borrow::Borrow;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use upwell_core::DependencyDescriptor;
 
 use super::handoff::Handoff;
@@ -29,6 +29,7 @@ pub struct HotUpdate<C> {
 /// publication.
 #[doc(hidden)]
 pub struct HotUpdateCommit {
+    component: &'static str,
     commit: Box<dyn FnOnce() + Send>,
 }
 
@@ -43,6 +44,11 @@ pub trait HotUpdateOutput {
 
 /// An async hot-update preparation: [`Previous<C>`] first, then [`FromContainer`]
 /// parameters, returning a [`HotUpdateOutput`] for the same component `C`.
+///
+/// Implemented only for components stored as `Arc<Self>`, the handle that shares the
+/// retained instance itself. A by-value handle derives a separate copy on every
+/// resolution, so an update applied to it would be lost; such components cannot
+/// declare a hot update.
 pub trait HotUpdateFactory<Args>: Sized {
     /// The dependency edges of the parameters after [`Previous`], in order.
     fn dependencies() -> Vec<DependencyDescriptor>;
@@ -85,6 +91,11 @@ where
 }
 
 impl HotUpdateCommit {
+    /// The stable ID of the component this update applies to.
+    pub fn component(&self) -> &'static str {
+        self.component
+    }
+
     /// Applies the update to its retained instance.
     pub fn commit(self) {
         (self.commit)();
@@ -109,8 +120,7 @@ macro_rules! impl_hot_update_factory {
             F: FnOnce(Previous<C>, $($ty,)*) -> Fut + Send,
             Fut: Future<Output = Out> + Send,
             Out: HotUpdateOutput<Component = C>,
-            C: Component,
-            C::Handle: Borrow<C>,
+            C: Component<Handle = Arc<C>>,
             $( $ty: FromContainer + Send, )*
         {
             fn dependencies() -> Vec<DependencyDescriptor> {
@@ -128,7 +138,8 @@ macro_rules! impl_hot_update_factory {
 
                 let update = (self)(previous, $($ty,)*).await.into_update()?;
                 let commit = HotUpdateCommit {
-                    commit: Box::new(move || (update.apply)(instance.borrow())),
+                    component: C::ID,
+                    commit: Box::new(move || (update.apply)(&instance)),
                 };
 
                 Ok(Handoff::boxed(commit))

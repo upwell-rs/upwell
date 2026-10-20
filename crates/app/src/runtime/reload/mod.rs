@@ -68,7 +68,10 @@
 //!   candidate dependencies after the candidate root is built and returns an owned
 //!   commit action without mutating anything. The action applies during the terminal
 //!   publication, after the live rebinds, and a failed or rejected attempt drops it
-//!   unapplied. Because the instance is shared, every holder — snapshots, pinned views,
+//!   unapplied. The action must not panic; one that does is contained and traced on
+//!   `upwell::transition`, and the publication still completes. Only components stored
+//!   as `Arc<Self>` can declare a hot update, so the action always reaches the retained
+//!   instance itself. Because the instance is shared, every holder — snapshots, pinned views,
 //!   and the retained live slot that keeps pointing at it — observes the update only
 //!   once it commits. Hot updates apply only when the component's identity, factory and
 //!   dependency contract are unchanged, and its fixed dependents still reconstruct as

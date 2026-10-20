@@ -27,6 +27,7 @@ mod transition_hooks;
 pub(crate) use generation::PreparedRuntimeGeneration;
 pub use generation::{AppConditionState, RuntimeView};
 use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransitionCoordinator};
+pub(crate) use report::TRANSITION_TARGET;
 pub use report::{
     ComponentTransitionReport, PhaseTiming, RuntimeTransitionReport, TransitionAttemptId,
     TransitionFailure, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,

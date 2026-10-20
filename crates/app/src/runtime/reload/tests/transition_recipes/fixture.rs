@@ -47,6 +47,7 @@ pub(super) enum HotUpdateMode {
     Apply,
     Fail,
     Panic,
+    PanicOnApply,
 }
 
 static ONE_SHOT: Mutex<OneShotMode> = Mutex::new(OneShotMode::Decline);
@@ -216,6 +217,9 @@ async fn update_banner(
         })),
         HotUpdateMode::Fail => Err(format!("cannot update '{}'", previous.label())),
         HotUpdateMode::Panic => panic!("the hot update panicked"),
+        HotUpdateMode::PanicOnApply => Ok(HotUpdate::new(|_: &Banner| {
+            panic!("the hot update panicked while applying")
+        })),
     }
 }
 
