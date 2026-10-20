@@ -20,13 +20,7 @@ pub(super) fn build_schema(item: &DeriveInput, paths: &Paths) -> syn::Result<Tok
     let source = crate::source::item_source(item.ident.span(), &item.ident.to_string(), paths);
     let container_default = serde_flag(&item.attrs, "default")?;
     let shape = match &item.data {
-        Data::Struct(data) => {
-            let rule = serde_rename_all(&item.attrs, "rename_all")?;
-            let fields = field_schemas(&data.fields, rule, container_default, paths)?;
-            let shape = paths.core("schema::ConfigShape");
-
-            quote!(#shape::Struct(&[ #(#fields),* ]))
-        }
+        Data::Struct(data) => struct_shape(item, &data.fields, container_default, paths)?,
 
         Data::Enum(data) => enum_shape(item, data.variants.iter(), paths)?,
 
@@ -61,6 +55,52 @@ pub(super) fn described_value_impl(item: &DeriveInput, paths: &Paths) -> TokenSt
             }
         }
     }
+}
+
+/// A named struct's fields, or — for a transparent, newtype, or tuple struct — the value it
+/// deserializes as.
+fn struct_shape(
+    item: &DeriveInput,
+    fields: &Fields,
+    container_default: bool,
+    paths: &Paths,
+) -> syn::Result<TokenStream> {
+    let shape = paths.core("schema::ConfigShape");
+    let value_schema = paths.core("schema::ValueSchema");
+    let transparent = serde_flag(&item.attrs, "transparent")?;
+    let values = fields
+        .iter()
+        .map(|field| value_probe(&field.ty, paths))
+        .collect::<Vec<_>>();
+
+    let tokens = match fields {
+        Fields::Named(_) if transparent && values.len() == 1 => {
+            let value = &values[0];
+
+            quote!(#shape::Value(#value))
+        }
+
+        Fields::Named(_) => {
+            let rule = serde_rename_all(&item.attrs, "rename_all")?;
+            let fields = field_schemas(fields, rule, container_default, paths)?;
+
+            quote!(#shape::Struct(&[ #(#fields),* ]))
+        }
+
+        Fields::Unnamed(_) if values.len() == 1 => {
+            let value = &values[0];
+
+            quote!(#shape::Value(#value))
+        }
+
+        Fields::Unnamed(_) => quote! {
+            #shape::Value((|| #value_schema::Tuple(::std::vec![ #((#values)()),* ])) as fn() -> #value_schema)
+        },
+
+        Fields::Unit => quote!(#shape::Value((|| #value_schema::Unit) as fn() -> #value_schema)),
+    };
+
+    Ok(tokens)
 }
 
 fn enum_shape<'a>(

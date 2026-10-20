@@ -99,6 +99,7 @@ fn config_at(rust_type: &str, schema: &ConfigSchema, depth: usize) -> Value {
     let mut rendered = match schema.shape {
         ConfigShape::Undeclared => json!({}),
         ConfigShape::Struct(fields) => object(&type_path, fields, depth),
+        ConfigShape::Value(value) => value_at(&value(), depth + 1),
         ConfigShape::Enum { tagging, variants } => {
             enumeration(&type_path, tagging, variants, depth)
         }

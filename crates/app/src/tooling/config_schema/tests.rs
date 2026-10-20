@@ -52,6 +52,19 @@ enum Backend {
     },
 }
 
+/// Plain serde pool settings from another crate, with a strictly parsed field first.
+#[derive(Deserialize)]
+struct Pool {
+    bind: std::net::IpAddr,
+    max_size: u32,
+}
+
+/// Pool settings wrapped by a transparent config.
+#[config(upwell = ::upwell_config)]
+#[derive(Deserialize)]
+#[serde(transparent)]
+struct PoolConfig(Pool);
+
 /// A config type implemented by hand, without `#[config]`.
 #[derive(Deserialize)]
 struct ManualConfig {
@@ -138,6 +151,21 @@ fn nested_configs_and_enums_carry_their_own_schemas() {
     assert_eq!(
         database["properties"]["url"]["description"],
         "The connection URL."
+    );
+}
+
+#[test]
+fn transparent_configs_render_their_wrapped_shape_with_their_own_docs() {
+    let schema = binding_schema(&ConfigBinding::of::<PoolConfig>("pool"));
+
+    assert_eq!(
+        schema["description"],
+        "Pool settings wrapped by a transparent config."
+    );
+    assert_eq!(schema["properties"]["bind"]["type"], "string");
+    assert_eq!(
+        schema["properties"]["max_size"]["anyOf"][0]["type"],
+        "integer"
     );
 }
 

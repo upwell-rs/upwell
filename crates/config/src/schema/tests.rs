@@ -122,3 +122,40 @@ fn the_probe_prefers_declared_then_traced_then_opaque_shapes() {
         ValueSchema::Any
     ));
 }
+
+/// A string-parsed value accepting only one spelling, like an enum read through `FromStr`.
+struct JournalMode;
+
+impl<'de> Deserialize<'de> for JournalMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+
+        if text == "wal" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom("unknown journal mode"))
+        }
+    }
+}
+
+/// Fields that reject the first, or every, traced value, ahead of plainly traced ones.
+#[derive(Deserialize)]
+struct Strict {
+    bind: std::net::IpAddr,
+    journal: JournalMode,
+    either: Either,
+    port: u16,
+}
+
+#[test]
+fn tracing_retries_strict_values_and_skips_fields_that_reject_every_candidate() {
+    let fields = traced_fields(trace::<Strict>());
+
+    assert!(matches!(field(&fields, "bind"), ValueSchema::String));
+    assert!(matches!(field(&fields, "journal"), ValueSchema::String));
+    assert!(matches!(field(&fields, "either"), ValueSchema::Any));
+    assert!(matches!(
+        field(&fields, "port"),
+        ValueSchema::Integer { signed: false }
+    ));
+}

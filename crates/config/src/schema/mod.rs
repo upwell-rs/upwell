@@ -59,6 +59,9 @@ pub enum ConfigShape {
     Undeclared,
     /// A struct and its named fields, in declaration order.
     Struct(&'static [FieldSchema]),
+    /// A struct deserialized as another value: a `#[serde(transparent)]` or newtype struct (its
+    /// single field), or a tuple struct (its fields as a tuple).
+    Value(fn() -> ValueSchema),
     /// An enum, its serde tagging, and its variants, in declaration order.
     Enum {
         /// How serde represents the selected variant.
