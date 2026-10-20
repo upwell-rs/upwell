@@ -134,7 +134,11 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
         .and_then(|provenance| provenance.source.as_ref())
         .expect("the macro-recorded route source is projected");
 
-    assert!(source.file.ends_with("plugin/tests.rs"), "{}", source.file);
+    assert!(
+        std::path::Path::new(&source.file).ends_with("plugin/tests.rs"),
+        "{}",
+        source.file
+    );
     assert_eq!(
         source.rust_path.as_deref(),
         Some("upwell_axum::plugin::tests::ToolingController::health")
@@ -238,7 +242,11 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
         .expect("the register_ws call site is projected");
 
     assert_eq!(endpoint.labels["path"], "/events");
-    assert!(source.file.ends_with("plugin/tests.rs"), "{}", source.file);
+    assert!(
+        std::path::Path::new(&source.file).ends_with("plugin/tests.rs"),
+        "{}",
+        source.file
+    );
     assert_eq!(source.line, Some(registered_at));
     assert!(
         endpoint

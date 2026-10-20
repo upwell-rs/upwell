@@ -120,7 +120,7 @@ fn declared_configs_render_fields_with_docs_defaults_and_sources() {
     assert!(
         field["source"]["file"]
             .as_str()
-            .is_some_and(|file| file.ends_with("config_schema/tests.rs"))
+            .is_some_and(|file| std::path::Path::new(file).ends_with("config_schema/tests.rs"))
     );
     assert!(
         field["source"]["rust_path"]

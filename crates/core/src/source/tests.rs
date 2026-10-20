@@ -10,7 +10,7 @@ fn item_source_names_the_canonical_rust_path() {
         source.rust_path(),
         "upwell_core::source::tests::Users::list"
     );
-    assert!(source.location.file.ends_with("source/tests.rs"));
+    assert!(std::path::Path::new(source.location.file).ends_with("source/tests.rs"));
     assert_eq!(source.location.line, line + 1);
 }
 
