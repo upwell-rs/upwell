@@ -235,5 +235,6 @@ async fn root() -> Arc<ScopeContainer> {
 }
 
 mod children;
+mod drop_guard;
 mod fresh;
 mod providers;

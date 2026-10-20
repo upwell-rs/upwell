@@ -13,6 +13,13 @@ use crate::registry::AppConditionEvaluation;
 use crate::registry::AppRegistry;
 use crate::transition::{CommitActions, HeldLiveCells};
 
+mod release;
+mod view;
+
+pub use release::DisplacedGeneration;
+use release::{DisplacedGenerations, ReleaseGuard};
+pub use view::RuntimeView;
+
 /// Stable identity of one runtime transition attempt, including no-op and failed attempts.
 ///
 /// Attempt IDs are allocated monotonically per runtime when an attempt acquires the
@@ -69,6 +76,8 @@ impl AppConditionState {
     }
 }
 
+/// One committed runtime generation: the root and scope plan it serves resolutions from,
+/// plus the graph, condition state, and hook manager committed with it.
 pub(crate) struct RuntimeGeneration {
     owner: Arc<()>,
     id: RuntimeGenerationId,
@@ -141,8 +150,19 @@ impl PreparedRuntimeGeneration {
     }
 
     /// Stamps this generation for publication, splitting off the actions the
-    /// publication applies.
-    fn commit(self, owner: Arc<()>, id: RuntimeGenerationId) -> (RuntimeGeneration, CommitActions) {
+    /// publication applies. Its root reports its final release to `displaced` once a later
+    /// commit displaced it.
+    fn commit(
+        self,
+        owner: Arc<()>,
+        id: RuntimeGenerationId,
+        displaced: &Arc<DisplacedGenerations>,
+    ) -> (RuntimeGeneration, CommitActions) {
+        let guard = ReleaseGuard::new(id, Arc::clone(displaced));
+        let attached = self.root.retain_drop_guard(guard).is_ok();
+
+        debug_assert!(attached, "a prepared root is committed only once");
+
         let generation = RuntimeGeneration {
             owner,
             id,
@@ -201,6 +221,7 @@ impl RuntimePublication {
 pub(crate) struct RuntimeTransitionCoordinator {
     owner: Arc<()>,
     publication: RuntimePublication,
+    displaced: Arc<DisplacedGenerations>,
     writer: Arc<Mutex<()>>,
     next_attempt: Arc<AtomicU64>,
 }
@@ -211,6 +232,7 @@ pub(crate) struct RuntimeTransitionCoordinator {
 pub(crate) struct WeakTransitionCoordinator {
     owner: Arc<()>,
     current: Weak<ArcSwap<RuntimeGeneration>>,
+    displaced: Arc<DisplacedGenerations>,
     writer: Arc<Mutex<()>>,
     next_attempt: Arc<AtomicU64>,
 }
@@ -223,6 +245,7 @@ impl WeakTransitionCoordinator {
         Some(RuntimeTransitionCoordinator {
             owner: Arc::clone(&self.owner),
             publication: RuntimePublication { current },
+            displaced: Arc::clone(&self.displaced),
             writer: Arc::clone(&self.writer),
             next_attempt: Arc::clone(&self.next_attempt),
         })
@@ -232,12 +255,15 @@ impl WeakTransitionCoordinator {
 impl RuntimeTransitionCoordinator {
     pub(crate) fn new(initial: PreparedRuntimeGeneration) -> Self {
         let owner = Arc::new(());
-        let (initial, _) = initial.commit(Arc::clone(&owner), RuntimeGenerationId::INITIAL);
+        let displaced = Arc::default();
+        let (initial, _) =
+            initial.commit(Arc::clone(&owner), RuntimeGenerationId::INITIAL, &displaced);
         let publication = RuntimePublication::new(initial);
 
         Self {
             owner,
             publication,
+            displaced,
             writer: Arc::new(Mutex::new(())),
             next_attempt: Arc::new(AtomicU64::new(1)),
         }
@@ -248,6 +274,7 @@ impl RuntimeTransitionCoordinator {
         WeakTransitionCoordinator {
             owner: Arc::clone(&self.owner),
             current: Arc::downgrade(&self.publication.current),
+            displaced: Arc::clone(&self.displaced),
             writer: Arc::clone(&self.writer),
             next_attempt: Arc::clone(&self.next_attempt),
         }
@@ -256,6 +283,11 @@ impl RuntimeTransitionCoordinator {
     /// Pins the complete currently committed runtime generation.
     pub(crate) fn current(&self) -> RuntimeView {
         self.publication.pin()
+    }
+
+    /// The displaced generations whose roots are still alive, oldest first.
+    pub(crate) fn displaced_generations(&self) -> Vec<DisplacedGeneration> {
+        self.displaced.alive_generations()
     }
 
     /// The runtime identity shared by every handle of this coordinator.
@@ -342,7 +374,8 @@ impl RuntimeTransition {
             attempt,
             base,
         } = self;
-        let (candidate, commit_actions) = candidate.commit(Arc::clone(&coordinator.owner), next);
+        let (candidate, commit_actions) =
+            candidate.commit(Arc::clone(&coordinator.owner), next, &coordinator.displaced);
         let candidate = Arc::new(candidate);
 
         Ok(PreparedRuntimeCommit {
@@ -390,7 +423,8 @@ impl PreparedRuntimeCommit {
     /// updates, runs the synchronous legacy-config compatibility callback while still
     /// holding the writer, then releases the writer.
     ///
-    /// Ordering: the already validated candidate generation becomes current first, then
+    /// Ordering: the already validated candidate generation becomes current first, and the
+    /// base is recorded as displaced while this commit still pins it. Then
     /// every prepared live rebind swaps its cell and every prepared hot update applies,
     /// then the callback observes the new generation through the coordinator, and only
     /// then does the writer lease end. Publication cannot fail after `prepare_commit` accepted the
@@ -411,81 +445,14 @@ impl PreparedRuntimeCommit {
             .publish(attempt, &base, candidate)
             .expect("validated candidate must publish under the sole writer");
 
+        coordinator.displaced.displace(base.id, attempt);
+
         commit_actions.commit();
         commit_compat();
 
         drop(writer);
 
         view
-    }
-}
-
-/// One pinned, internally consistent view of a committed runtime generation.
-#[derive(Clone)]
-pub struct RuntimeView {
-    generation: Arc<RuntimeGeneration>,
-}
-
-impl std::fmt::Debug for RuntimeView {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("RuntimeView")
-            .field("generation", &self.id())
-            .finish_non_exhaustive()
-    }
-}
-
-impl RuntimeView {
-    pub(crate) fn from_generation(generation: Arc<RuntimeGeneration>) -> Self {
-        Self { generation }
-    }
-
-    pub(crate) fn generation_state(&self) -> Arc<RuntimeGeneration> {
-        Arc::clone(&self.generation)
-    }
-
-    /// The committed generation identity.
-    pub fn id(&self) -> RuntimeGenerationId {
-        self.generation.id
-    }
-
-    /// The root scope pinned by this generation.
-    pub fn root(&self) -> &Arc<ScopeContainer> {
-        &self.generation.root
-    }
-
-    /// The live cells this generation's retained consumers hold.
-    pub(crate) fn held_live_cells(&self) -> &HeldLiveCells {
-        &self.generation.held_live_cells
-    }
-
-    pub(crate) fn scopes(&self) -> &Arc<ScopeRegistry> {
-        &self.generation.scopes
-    }
-
-    pub(crate) fn scope_plan(&self) -> &RuntimeScopePlan {
-        &self.generation.scope_plan
-    }
-
-    /// The resolved component descriptors committed in this generation.
-    pub fn resolved_components(&self) -> &Arc<[ComponentDescriptor]> {
-        &self.generation.resolved
-    }
-
-    /// The immutable effective dependency graph committed in this generation.
-    pub fn effective_graph(&self) -> &Arc<EffectiveGraph> {
-        &self.generation.graph
-    }
-
-    /// The committed condition state pinned by this generation.
-    pub(crate) fn condition(&self) -> &Arc<AppConditionState> {
-        &self.generation.condition
-    }
-
-    /// The hook manager pinned by this generation. Hook receivers resolve through this
-    /// generation's root, so an old pinned view keeps invoking through its own manager.
-    pub fn hooks(&self) -> &HookManager {
-        &self.generation.hooks
     }
 }
 

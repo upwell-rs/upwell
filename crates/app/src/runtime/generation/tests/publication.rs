@@ -46,23 +46,24 @@ async fn publication_allocates_and_stamps_one_semantic_generation() {
 #[tokio::test]
 async fn stale_base_cannot_replace_a_newer_generation() {
     let owner = Arc::new(());
+    let displaced = Arc::default();
     let publication = RuntimePublication::new(
         prepared()
             .await
-            .commit(Arc::clone(&owner), RuntimeGenerationId::INITIAL)
+            .commit(Arc::clone(&owner), RuntimeGenerationId::INITIAL, &displaced)
             .0,
     );
     let base = publication.pin();
     let winner = Arc::new(
         prepared()
             .await
-            .commit(Arc::clone(&owner), RuntimeGenerationId::new(1))
+            .commit(Arc::clone(&owner), RuntimeGenerationId::new(1), &displaced)
             .0,
     );
     let stale = Arc::new(
         prepared()
             .await
-            .commit(owner, RuntimeGenerationId::new(2))
+            .commit(owner, RuntimeGenerationId::new(2), &displaced)
             .0,
     );
 

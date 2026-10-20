@@ -28,8 +28,16 @@
 //! category but never its error message or panic payload. It never affects the published
 //! generation, other retirements, or later reloads.
 //!
-//! Observing final destruction — when the displaced generation's root is actually dropped
-//! — is not provided yet.
+//! # Final release
+//!
+//! Final destruction is observed separately. When the last owner of a displaced
+//! generation's root lets go, the root's instances drop and one `displaced runtime
+//! generation released` event is emitted on `upwell::transition`. The event carries the
+//! generation, the attempt that displaced it, and the microseconds since displacement.
+//! [`AppRuntime::displaced_generations`](crate::AppRuntime::displaced_generations) lists
+//! the displaced generations whose roots are still alive. The current generation is never
+//! reported. There is no release hook: its receivers would have to resolve through the root
+//! that was just dropped.
 
 use std::any::TypeId;
 

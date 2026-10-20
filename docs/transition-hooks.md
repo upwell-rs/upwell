@@ -116,8 +116,16 @@ Retirement is logical displacement, not destruction. Pinned `RuntimeView`s, open
 holders may keep using the instance after retirement, until they release it. A retirement hook
 should therefore stop taking new work or schedule cleanup. It must not invalidate state that a
 pinned caller may still read. Components retire in `RuntimeTransitionReport::displaced()` order:
-a consumer retires before the components it holds a fixed dependency on. Observing when the old
-generation is finally dropped is tracked in #311.
+a consumer retires before the components it holds a fixed dependency on.
+
+To see when retired instances are really released, watch the old generation's root. When its
+last owner (a pinned view, an open scope, or any other holder) lets go, the root's instances drop and
+one `displaced runtime generation released` event is emitted on `upwell::transition`. The event
+carries `generation`, the displacing `attempt`, and `released_after_us`. While that has not
+happened yet, `AppRuntime::displaced_generations()` lists the generation, oldest first, so a
+generation that never drains shows up there. The current generation is never reported. Release
+is reported through tracing, not a hook: the root a hook receiver would resolve through is the
+one that was just dropped.
 
 ### `TransitionCommitted` / `TransitionAborted`: observe the outcome
 

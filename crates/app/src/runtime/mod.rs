@@ -25,7 +25,7 @@ mod report;
 mod transition_hooks;
 
 pub(crate) use generation::PreparedRuntimeGeneration;
-pub use generation::{AppConditionState, RuntimeView};
+pub use generation::{AppConditionState, DisplacedGeneration, RuntimeView};
 use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransitionCoordinator};
 pub(crate) use report::TRANSITION_TARGET;
 pub use report::{
@@ -182,6 +182,18 @@ impl AppRuntime {
     /// The stable identity of the currently committed runtime generation.
     pub fn generation(&self) -> RuntimeGenerationId {
         self.view().id()
+    }
+
+    /// The generations that committed transitions displaced but whose roots are still
+    /// alive, oldest first.
+    ///
+    /// A displaced generation stays listed while any pinned [`RuntimeView`], open scope,
+    /// or other owner still holds its root. When the last owner releases it, the root's
+    /// instances drop, the generation leaves this list, and a `displaced runtime generation
+    /// released` event is emitted on `upwell::transition`. The current generation is
+    /// never listed.
+    pub fn displaced_generations(&self) -> Vec<DisplacedGeneration> {
+        self.transitions.displaced_generations()
     }
 
     pub(crate) async fn begin_transition(&self) -> generation::RuntimeTransition {

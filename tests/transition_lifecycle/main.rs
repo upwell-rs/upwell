@@ -2,7 +2,8 @@
 //! `upwell` facade: switching the effective `Authenticator` provider in both directions
 //! runs every phase in order — proposal inspection, the `ConfigReload` hooks once,
 //! decision rejection with rollback, the aborted observer, then a committed attempt whose
-//! displaced instances retire before the committed observer receives the final report.
+//! displaced instances retire before the committed observer receives the final report, and
+//! the displaced generation, with its retired instances, is released once its last pin drops (#311).
 #![allow(dead_code)]
 
 mod app;
@@ -264,5 +265,41 @@ async fn shutdown_reaches_the_live_instances_after_a_switch() {
         ],
         "shutdown reaches the current gate and the provider the switch added, never the \
          retired default provider"
+    );
+}
+
+#[tokio::test]
+async fn a_displaced_generation_is_released_after_its_last_pin() {
+    let _guard = lock().await;
+    let (_dir, config_dir, app) = build("default").await;
+    let runtime = app.runtime();
+    let base = runtime.generation();
+    let pinned = runtime.view();
+    let old_gate = Arc::downgrade(&runtime.root().get::<AuthGate>().expect("the gate resolves"));
+
+    write_mode(&config_dir, "custom");
+
+    let report = runtime.reload_config().await.expect("the switch commits");
+    let still_alive = runtime.displaced_generations();
+
+    events();
+
+    assert_eq!(still_alive.len(), 1, "the pinned generation stays alive");
+    assert_eq!(still_alive[0].generation, base);
+    assert_eq!(still_alive[0].attempt, report.attempt());
+    assert!(
+        old_gate.upgrade().is_some(),
+        "the pin keeps the retired gate alive"
+    );
+
+    drop(pinned);
+
+    assert!(
+        runtime.displaced_generations().is_empty(),
+        "releasing the last pin releases the displaced generation"
+    );
+    assert!(
+        old_gate.upgrade().is_none(),
+        "the released generation dropped its retired gate"
     );
 }
