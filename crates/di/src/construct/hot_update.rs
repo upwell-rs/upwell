@@ -9,10 +9,9 @@
 use std::borrow::Borrow;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Mutex;
+use upwell_core::DependencyDescriptor;
 
-use upwell_core::{DependencyDescriptor, TypeDescriptor};
-
+use super::handoff::Handoff;
 use super::{FromContainer, Previous};
 use crate::descriptors::{BoxedComponent, Component, ComponentConstructionContext};
 
@@ -32,9 +31,6 @@ pub struct HotUpdate<C> {
 pub struct HotUpdateCommit {
     commit: Box<dyn FnOnce() + Send>,
 }
-
-/// The boxed payload a hot-update preparation produces.
-struct PreparedHotUpdate(Mutex<Option<HotUpdateCommit>>);
 
 /// Normalizes a hot-update preparation's return value: a [`HotUpdate`], or a
 /// `Result<HotUpdate, E>`.
@@ -94,17 +90,9 @@ impl HotUpdateCommit {
         (self.commit)();
     }
 
-    /// Unboxes a hot-update preparation's payload, or `None` when `boxed` is not one.
-    ///
-    /// The payload mutex is only ever moved, never locked, so it cannot be poisoned; a
-    /// poisoned value is still taken rather than discarded.
+    /// Unboxes a hot-update preparation's commit, or `None` when `boxed` is not one.
     pub(crate) fn take(boxed: BoxedComponent) -> Option<Self> {
-        let prepared = boxed.value.downcast::<PreparedHotUpdate>().ok()?;
-
-        prepared
-            .0
-            .into_inner()
-            .unwrap_or_else(|poison| poison.into_inner())
+        Handoff::take(boxed)
     }
 }
 
@@ -143,10 +131,7 @@ macro_rules! impl_hot_update_factory {
                     commit: Box::new(move || (update.apply)(instance.borrow())),
                 };
 
-                Ok(BoxedComponent {
-                    ty: TypeDescriptor::of::<PreparedHotUpdate>("PreparedHotUpdate"),
-                    value: Box::new(PreparedHotUpdate(Mutex::new(Some(commit)))),
-                })
+                Ok(Handoff::boxed(commit))
             }
         }
     };

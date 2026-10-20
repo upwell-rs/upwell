@@ -7,7 +7,7 @@
 //! into the link-time inventory and these tests cannot interfere with discovery tests.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::Deserialize;
@@ -143,13 +143,7 @@ const ALL_ON: Inputs = Inputs {
     transport: true,
 };
 
-fn config_dir_of(dir: &TempDir) -> PathBuf {
-    let config_dir = dir.path().join("config");
-
-    fs::create_dir_all(&config_dir).expect("create config dir");
-
-    config_dir
-}
+use super::config_dir_of;
 
 fn write_inputs(config_dir: &Path, inputs: Inputs) {
     let Inputs {

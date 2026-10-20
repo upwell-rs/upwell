@@ -14,7 +14,7 @@
 //! [`TEST_GUARD`] serializes them under the default `cargo test` parallelism.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Deserialize;
@@ -234,13 +234,7 @@ pub(super) async fn build_auth_app_from(
     (dir, app)
 }
 
-pub(super) fn config_dir_of(dir: &TempDir) -> PathBuf {
-    let config_dir = dir.path().join("config");
-
-    fs::create_dir_all(&config_dir).expect("create config dir");
-
-    config_dir
-}
+pub(super) use super::super::config_dir_of;
 
 pub(super) fn write_auth_config(config_dir: &Path, mode: &str) {
     fs::write(
