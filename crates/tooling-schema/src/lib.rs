@@ -34,6 +34,17 @@ pub const TOOLING_PROBE_MANIFEST_PATH_ENV: &str = "UPWELL_TOOLING_PROBE_MANIFEST
 /// Environment variable containing the Cargo binary target selected by the tooling invoker.
 pub const TOOLING_PROBE_BINARY_NAME_ENV: &str = "UPWELL_TOOLING_PROBE_BINARY_NAME";
 
+/// Document facet holding the JSON Schema (2020-12) of the whole configuration tree, with every
+/// binding nested at its path and the template grammar under `x-upwell-templating`.
+pub const CONFIG_SCHEMA_FACET: &str = "framework/config-schema";
+
+/// Resource-local suffix of the facet holding one config binding's JSON Schema; the full facet
+/// id is `<binding resource id>/config-schema`.
+pub const CONFIG_BINDING_SCHEMA_FACET: &str = "config-schema";
+
+/// Schema version of the [`CONFIG_SCHEMA_FACET`] and [`CONFIG_BINDING_SCHEMA_FACET`] payloads.
+pub const CONFIG_SCHEMA_FACET_VERSION: u16 = 1;
+
 const fn parse_package_version(version: &str) -> Version {
     let bytes = version.as_bytes();
     let mut components = [0_u64; 3];

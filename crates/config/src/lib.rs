@@ -19,12 +19,16 @@ pub mod format;
 mod managed;
 mod parse;
 mod resolve;
+pub mod schema;
 mod value;
 
 pub use de::{ValueDeserializer, from_value, from_value_in};
 pub use defaults::{DefaultSpec, EnumTag};
 pub use error::{TemplateError, TemplateErrorKind};
 pub use resolve::{EnvResolver, MapResolver, ResolveCtx, Resolver, ResolverChain};
+/// The declaration positions [`schema`] records, re-exported so `#[config]` expands under an
+/// `upwell = ::upwell_config` root.
+pub use upwell_core::{DescriptorSource, ItemSource};
 pub use value::{ConfigStr, ConfigValue, Placeholder, Segment};
 
 pub use managed::Toml;

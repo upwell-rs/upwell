@@ -85,6 +85,8 @@ pub use upwell_dirs::{Dir, DirKind, DirectoriesManager};
 // Config: Cfg, ConfigManager, reload, the config store, the directory resolver.
 // ---------------------------------------------------------------------------
 #[cfg(not(target_family = "wasm"))]
+pub use upwell_config::schema;
+#[cfg(not(target_family = "wasm"))]
 pub use upwell_config::{
     BindingFacts, CONFIG_BINDINGS, Cfg, CfgNext, ChangedBinding, ComponentHookReport,
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigBindingDescriptor, ConfigDefaults,

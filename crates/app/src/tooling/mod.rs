@@ -22,6 +22,7 @@ use crate::{
 };
 
 mod composition;
+mod config_schema;
 mod contribution;
 mod failure;
 mod output;

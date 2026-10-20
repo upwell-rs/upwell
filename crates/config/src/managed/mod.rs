@@ -257,6 +257,12 @@ pub trait ConfigProperties: DeserializeOwned + Send + Sync + 'static + Sized {
     /// through a value or trait object, use [`ConfigDefaults::defaults`].
     const DEFAULTS: DefaultSpec = DefaultSpec::none();
 
+    /// The type's declared fields, docs, and declaration, emitted by the `#[config]` macro.
+    ///
+    /// Defaults to [`ConfigSchema::UNDECLARED`](crate::schema::ConfigSchema::UNDECLARED), in which
+    /// case tooling traces the type's `Deserialize` impl for its shape instead.
+    const SCHEMA: crate::schema::ConfigSchema = crate::schema::ConfigSchema::UNDECLARED;
+
     /// Deserializes this type from the subtree at `path` (filling missing fields from
     /// [`DEFAULTS`](Self::DEFAULTS)) and wraps it as a stored `Cfg<Self>` handle.
     fn bind(tree: &ConfigManager, path: &str) -> Result<BoxedComponent, ConfigError> {
@@ -367,6 +373,8 @@ pub struct ConfigBinding {
     pub bind: fn(&ConfigManager, &str) -> Result<BoxedComponent, ConfigError>,
     pub slot: SlotThunk,
     pub defaults: DefaultSpec,
+    /// The bound type's value shape, for tooling.
+    pub describe: fn() -> crate::schema::ValueSchema,
 }
 
 impl ConfigBinding {
@@ -374,11 +382,15 @@ impl ConfigBinding {
     /// and compile-time defaults.
     pub fn of<T: ConfigProperties>(path: impl Into<String>) -> Self {
         Self {
-            ty: TypeDescriptor::of::<T>(T::NAME),
+            ty: TypeDescriptor {
+                source: T::SCHEMA.source,
+                ..TypeDescriptor::of::<T>(T::NAME)
+            },
             path: path.into(),
             bind: T::bind,
             slot: T::slot,
             defaults: T::DEFAULTS,
+            describe: crate::schema::config_value_schema::<T>,
         }
     }
 }
@@ -404,6 +416,8 @@ pub struct ConfigBindingDescriptor {
     pub bind: fn(&ConfigManager, &str) -> Result<BoxedComponent, ConfigError>,
     pub slot: SlotThunk,
     pub defaults: DefaultSpec,
+    /// The bound type's value shape, for tooling.
+    pub describe: fn() -> crate::schema::ValueSchema,
 }
 
 impl ConfigBindingDescriptor {
@@ -415,6 +429,7 @@ impl ConfigBindingDescriptor {
             bind: self.bind,
             slot: self.slot,
             defaults: self.defaults,
+            describe: self.describe,
         }
     }
 }

@@ -154,6 +154,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
             self.relationship(RelationshipKind::Binds, &id, &ty, []);
         }
 
+        self.project_config_schema(&bindings);
         self.project_config_sources();
     }
 
