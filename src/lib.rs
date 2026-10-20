@@ -42,19 +42,21 @@ pub mod condition {
 // ---------------------------------------------------------------------------
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_di::{
-    BoxedComponent, COMPONENTS, Component, ComponentConstructionContext, ComponentContainer,
-    ComponentDescriptor, ComponentFactories, ComponentFactory, ComponentFactoryDescriptor,
-    ComponentFactoryRole, ComponentRegistry, ComponentSource, ConditionCatalog, ConditionDecision,
-    ConditionDependency, ConditionError, ConditionEvaluation, ConditionFactSnapshot, Deferred, Dep,
-    DescriptorFor, Dynamic, EffectiveGraph, Factory, FactoryIdentity, FactoryOutput, Fresh,
-    FreshFromContainer, FromContainer, Injectable, Lazy, Live, LiveCell, LiveRebind, LiveRef,
-    NodeAction, PROVIDERS, PlannedNode, Previous, Provide, ProviderDescriptor, ProviderOf,
+    BoxedComponent, COMPONENTS, Component, ComponentChange, ComponentConstructionContext,
+    ComponentContainer, ComponentDescriptor, ComponentFactories, ComponentFactory,
+    ComponentFactoryDescriptor, ComponentFactoryRole, ComponentRegistry, ComponentSource,
+    ConditionCatalog, ConditionDecision, ConditionDependency, ConditionError, ConditionEvaluation,
+    ConditionFactSnapshot, Deferred, Dep, DescriptorFor, Dynamic, EffectiveGraph, Factory,
+    FactoryIdentity, FactoryOutput, Fresh, FreshFromContainer, FromContainer, HotUpdate,
+    HotUpdateFactory, HotUpdateOutput, Injectable, Lazy, Live, LiveCell, LiveRebind, LiveRef,
+    NodeAction, OneShot, PROVIDERS, PlannedNode, Previous, Provide, ProviderDescriptor, ProviderOf,
     ProviderOrder, ProviderOrderDirection, ReasonKind, Registration, RegistryFor,
     ReplacementFactory, RootResolver, ScopeContainer, ScopeRegistry, ServiceComponent,
     StaleGraphCandidate, TransitionPlan, TransitionReason, UpwellDescriptor,
     ValidatedConditionEvaluation, Wired, Wiring, dependency_of, dependency_of_observed,
-    dispatch_factory, dispatch_replacement, erase_provider, factories, factory_dependencies,
-    from_boxed, provider_live_cell, replacement_dependencies, topological_sort,
+    dispatch_factory, dispatch_hot_update, dispatch_replacement, dispatch_transition,
+    erase_provider, factories, factory_dependencies, from_boxed, hot_update_dependencies,
+    provider_live_cell, replacement_dependencies, topological_sort,
 };
 /// The DI layer's own error/result, exposed under distinct names so macro-generated
 /// **factory** code can name them without colliding with another layer's `Error`/`Result`.

@@ -27,8 +27,16 @@ use crate::descriptors::{
 };
 use crate::error::Error;
 
+mod hot_update;
+mod one_shot;
 mod replacement;
 
+pub use hot_update::{
+    HotUpdate, HotUpdateCommit, HotUpdateFactory, HotUpdateOutput, dispatch_hot_update,
+    hot_update_dependencies,
+};
+pub use one_shot::{ComponentChange, OneShot, dispatch_transition};
+pub(crate) use one_shot::{ErasedOneShot, take_selection};
 pub use replacement::{
     Previous, ReplacementFactory, dispatch_replacement, replacement_dependencies,
 };

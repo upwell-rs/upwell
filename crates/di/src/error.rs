@@ -4,6 +4,8 @@ use thiserror::Error;
 
 use upwell_core::ScopeId;
 
+use crate::ComponentFactoryRole;
+
 /// Stable identities describing a provider whose concrete component is absent.
 #[derive(Debug)]
 pub struct ProviderComponentMissing {
@@ -230,19 +232,35 @@ pub enum Error {
     #[error("component '{component}' registers duplicate factory identity '{factory}'")]
     DuplicateFactoryId { component: String, factory: String },
 
-    #[error("component '{0}' declares more than one replacement factory")]
-    AmbiguousReplacementFactory(String),
+    #[error("component '{component}' declares more than one {role} recipe")]
+    AmbiguousTransitionFactory {
+        component: String,
+        role: ComponentFactoryRole,
+    },
 
-    #[error("component '{0}' declares a replacement factory but no ordinary factory")]
-    ReplacementWithoutFactory(String),
+    #[error("component '{component}' declares a {role} recipe but no ordinary factory")]
+    TransitionRecipeWithoutFactory {
+        component: String,
+        role: ComponentFactoryRole,
+    },
 
     #[error(
-        "replacement factory for component '{component}' resolves '{dependency}' in a way its ordinary factory does not declare"
+        "{role} recipe for component '{component}' resolves '{dependency}' in a way its ordinary factory does not declare; declare it on the ordinary factory so the transition plan schedules it"
     )]
-    UndeclaredReplacementDependency {
+    UndeclaredTransitionDependency {
         component: String,
+        role: ComponentFactoryRole,
         dependency: String,
     },
+
+    #[error("component '{component}' has no planned change for its transition handler")]
+    ChangeUnavailable { component: &'static str },
+
+    #[error("component '{component}' declares no hot update")]
+    HotUpdateUnavailable { component: &'static str },
+
+    #[error("hot update for component '{component}' panicked")]
+    HotUpdatePanicked { component: &'static str },
 
     #[error("component '{component}' has no previous instance for its replacement factory")]
     PreviousUnavailable { component: &'static str },

@@ -20,6 +20,7 @@ use crate::{
 };
 
 mod candidate;
+mod hot_update;
 mod live;
 mod snapshot;
 

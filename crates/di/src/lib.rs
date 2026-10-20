@@ -30,9 +30,11 @@ pub use condition::{
     ConditionEvaluation, ConditionFactSnapshot, ValidatedConditionEvaluation,
 };
 pub use construct::{
-    Factory, FactoryOutput, FromContainer, Previous, ReplacementFactory, dependency_of,
-    dependency_of_observed, dispatch_factory, dispatch_replacement, factory_dependencies,
-    replacement_dependencies, short_name,
+    ComponentChange, Factory, FactoryOutput, FromContainer, HotUpdate, HotUpdateCommit,
+    HotUpdateFactory, HotUpdateOutput, OneShot, Previous, ReplacementFactory, dependency_of,
+    dependency_of_observed, dispatch_factory, dispatch_hot_update, dispatch_replacement,
+    dispatch_transition, factory_dependencies, hot_update_dependencies, replacement_dependencies,
+    short_name,
 };
 pub use container::{
     ComponentContainer, ComponentSource, ScopeContainer, ScopeRegistry, topological_sort,

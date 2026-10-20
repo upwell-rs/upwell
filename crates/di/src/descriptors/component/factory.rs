@@ -23,6 +23,29 @@ pub enum ComponentFactoryRole {
     /// [`Previous`](crate::Previous) and may resolve only dependencies the effective
     /// ordinary factory also declares.
     Replacement,
+    /// A transition handler: receives the planned change for its component and selects
+    /// a one-shot factory for that transition, or declines so the declared strategy
+    /// applies. It declares no dependencies of its own.
+    Transition,
+    /// An explicit hot-update preparation, used only when a runtime transition keeps the
+    /// active instance and updates it in place. It reads the instance through
+    /// [`Previous`](crate::Previous) and may resolve only dependencies the effective
+    /// ordinary factory also declares.
+    HotUpdate,
+}
+
+impl fmt::Display for ComponentFactoryRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let role = match self {
+            Self::Default => "default",
+            Self::Explicit => "explicit",
+            Self::Replacement => "replacement",
+            Self::Transition => "transition handler",
+            Self::HotUpdate => "hot-update",
+        };
+
+        f.write_str(role)
+    }
 }
 
 /// One way to construct a component, carrying the dependencies *that constructor*
@@ -137,13 +160,34 @@ impl ComponentDescriptor {
     pub fn replacement_factory(
         &self,
     ) -> crate::Result<Option<&'static ComponentFactoryDescriptor>> {
-        let mut replacements = self.factories_with(ComponentFactoryRole::Replacement);
-        let first = replacements.next();
+        self.transition_role(ComponentFactoryRole::Replacement)
+    }
 
-        if first.is_some() && replacements.next().is_some() {
-            return Err(crate::Error::AmbiguousReplacementFactory(
-                self.name.to_string(),
-            ));
+    /// The transition handler, if the component declares one. Errors if it declares
+    /// more than one.
+    pub fn transition_handler(&self) -> crate::Result<Option<&'static ComponentFactoryDescriptor>> {
+        self.transition_role(ComponentFactoryRole::Transition)
+    }
+
+    /// The hot-update preparation, if the component declares one. Errors if it declares
+    /// more than one.
+    pub fn hot_update_factory(&self) -> crate::Result<Option<&'static ComponentFactoryDescriptor>> {
+        self.transition_role(ComponentFactoryRole::HotUpdate)
+    }
+
+    /// The single recipe a component declares for a transition-only `role`.
+    fn transition_role(
+        &self,
+        role: ComponentFactoryRole,
+    ) -> crate::Result<Option<&'static ComponentFactoryDescriptor>> {
+        let mut recipes = self.factories_with(role);
+        let first = recipes.next();
+
+        if first.is_some() && recipes.next().is_some() {
+            return Err(crate::Error::AmbiguousTransitionFactory {
+                component: self.name.to_string(),
+                role,
+            });
         }
 
         Ok(first)
@@ -158,9 +202,10 @@ impl ComponentDescriptor {
             .filter(move |factory| factory.role == role)
     }
 
-    /// Validates factory identities and the replacement contract: a replacement needs
-    /// an ordinary factory and may resolve only dependencies that factory declares, so
-    /// the planned construction order stays authoritative for it.
+    /// Validates factory identities and the transition-recipe contract: a replacement,
+    /// transition handler or hot update needs an ordinary factory, and a replacement or
+    /// hot update may resolve only dependencies that factory declares, so the planned
+    /// construction order stays authoritative for it.
     pub(crate) fn validate_factories(&self) -> crate::Result<()> {
         let mut ids = std::collections::HashSet::new();
 
@@ -177,26 +222,55 @@ impl ComponentDescriptor {
             }
         }
 
-        let Some(replacement) = self.replacement_factory()? else {
-            return Ok(());
-        };
-        let Some(ordinary) = self.effective_factory()? else {
-            return Err(crate::Error::ReplacementWithoutFactory(
-                self.name.to_string(),
-            ));
-        };
-        let declared = (ordinary.dependencies)();
+        let recipes = [
+            self.replacement_factory()?,
+            self.transition_handler()?,
+            self.hot_update_factory()?,
+        ];
 
-        for dependency in (replacement.dependencies)() {
-            if !declared.iter().any(|edge| stands_in_for(edge, &dependency)) {
-                return Err(crate::Error::UndeclaredReplacementDependency {
-                    component: self.name.to_string(),
-                    dependency: dependency.name.to_string(),
-                });
-            }
+        for recipe in recipes.into_iter().flatten() {
+            self.validate_transition_recipe(recipe)?;
         }
 
         Ok(())
+    }
+
+    fn validate_transition_recipe(&self, recipe: &ComponentFactoryDescriptor) -> crate::Result<()> {
+        let Some(ordinary) = self.effective_factory()? else {
+            return Err(crate::Error::TransitionRecipeWithoutFactory {
+                component: self.name.to_string(),
+                role: recipe.role,
+            });
+        };
+
+        self.require_declared(
+            &(ordinary.dependencies)(),
+            &(recipe.dependencies)(),
+            recipe.role,
+        )
+    }
+
+    /// Requires every edge in `requested` to be covered by an edge of the ordinary
+    /// factory's `declared` dependencies.
+    pub(crate) fn require_declared(
+        &self,
+        declared: &[DependencyDescriptor],
+        requested: &[DependencyDescriptor],
+        role: ComponentFactoryRole,
+    ) -> crate::Result<()> {
+        let undeclared = requested
+            .iter()
+            .find(|dependency| !declared.iter().any(|edge| stands_in_for(edge, dependency)));
+
+        match undeclared {
+            Some(dependency) => Err(crate::Error::UndeclaredTransitionDependency {
+                component: self.name.to_string(),
+                role,
+                dependency: dependency.name.to_string(),
+            }),
+
+            None => Ok(()),
+        }
     }
 }
 

@@ -63,8 +63,11 @@ use super::component::{
 /// effective one; several need exactly one explicit recipe, as with `#[init]`, so mark
 /// the one fallback `default "id" => path`. A static state-aware replacement, whose
 /// first parameter is [`Previous<Self>`](crate::Previous), is declared as
-/// `replace "id" => path`; it never takes part in the ordinary choice. A second
-/// `default` is a compile error:
+/// `replace "id" => path`; it never takes part in the ordinary choice. A transition
+/// handler, a plain `fn(&ComponentChange) -> Option<OneShot<Self>>`, is declared as
+/// `transition "id" => path`, and an explicit hot-update preparation, whose first
+/// parameter is `Previous<Self>` and which returns a [`HotUpdate`](crate::HotUpdate), is
+/// declared as `hot_update "id" => path`. A second `default` is a compile error:
 ///
 /// ```compile_fail
 /// # use std::sync::Arc;
@@ -104,6 +107,16 @@ macro_rules! __factory_entries {
     ([$($done:expr,)*] $default:ident replace $id:literal => $factory:path $(, $($rest:tt)*)?) => {
         $crate::__factory_entries!(
             [$($done,)* $crate::__replacement_entry!($id, $factory),] $default $($($rest)*)?
+        )
+    };
+    ([$($done:expr,)*] $default:ident transition $id:literal => $handler:path $(, $($rest:tt)*)?) => {
+        $crate::__factory_entries!(
+            [$($done,)* $crate::__transition_entry!($id, $handler),] $default $($($rest)*)?
+        )
+    };
+    ([$($done:expr,)*] $default:ident hot_update $id:literal => $factory:path $(, $($rest:tt)*)?) => {
+        $crate::__factory_entries!(
+            [$($done,)* $crate::__hot_update_entry!($id, $factory),] $default $($($rest)*)?
         )
     };
     ([$($done:expr,)*] $default:ident $id:literal => $factory:path $(, $($rest:tt)*)?) => {
@@ -149,6 +162,32 @@ macro_rules! __replacement_entry {
             construct: |cx| $crate::dispatch_replacement($factory, cx),
             dependencies: || $crate::replacement_dependencies($factory),
             role: $crate::ComponentFactoryRole::Replacement,
+        }
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __transition_entry {
+    ($id:expr, $handler:path) => {
+        $crate::ComponentFactoryDescriptor {
+            id: $id,
+            construct: |cx| $crate::dispatch_transition($handler, cx),
+            dependencies: ::std::vec::Vec::new,
+            role: $crate::ComponentFactoryRole::Transition,
+        }
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __hot_update_entry {
+    ($id:expr, $factory:path) => {
+        $crate::ComponentFactoryDescriptor {
+            id: $id,
+            construct: |cx| $crate::dispatch_hot_update($factory, cx),
+            dependencies: || $crate::hot_update_dependencies($factory),
+            role: $crate::ComponentFactoryRole::HotUpdate,
         }
     };
 }

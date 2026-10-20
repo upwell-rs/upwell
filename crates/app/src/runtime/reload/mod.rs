@@ -333,7 +333,7 @@ impl AppRuntime {
         );
 
         recorder.record_components(components);
-        recorder.record_displaced(&resolved_plan.structural().retirement_order);
+        recorder.record_displaced(&resolved_plan.displaced());
         recorder.enter(TransitionPhase::Proposal);
 
         fire_gate::<TransitionProposal>(

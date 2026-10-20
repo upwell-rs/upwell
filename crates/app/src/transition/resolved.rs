@@ -6,12 +6,33 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use upwell_core::ResolverSet;
-use upwell_di::{BoxedComponent, NodeAction, ScopeContainer, ScopeRegistry, TransitionPlan};
+use upwell_di::{
+    BoxedComponent, ComponentChange, HotUpdateCommit, NodeAction, ScopeContainer, ScopeRegistry,
+    TransitionPlan,
+};
 
 use super::{
     CandidateGraph, ComponentTransitionDecision, ComponentTransitionStrategy, RestartReason,
     RestartRequired,
 };
+
+/// Which snapshot of an active instance a decision's strategy needs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SeedKind {
+    /// The instance itself carries into the candidate root.
+    Retained,
+    /// Candidate construction reads the instance through `Previous`.
+    Previous,
+}
+
+impl SeedKind {
+    fn seeds(self, strategy: ComponentTransitionStrategy) -> bool {
+        match self {
+            Self::Retained => strategy.retains_instance(),
+            Self::Previous => strategy.reads_previous(),
+        }
+    }
+}
 
 /// Explicit execution choices validated against the graph planner's minimum requirements.
 #[doc(hidden)]
@@ -39,8 +60,9 @@ impl ResolvedTransitionPlan {
 
     /// Constructs the isolated candidate singleton root selected by this resolved plan.
     ///
-    /// Retained instances and the previous instances of `Replace` decisions must be
-    /// supplied explicitly; prefer
+    /// Retained instances (`Retain` and `HotUpdate` decisions) and the previous
+    /// instances of `Replace` and `Transition` decisions must be supplied explicitly;
+    /// prefer
     /// [`build_candidate_root_from_active`](Self::build_candidate_root_from_active),
     /// which derives both from the pinned active root.
     #[doc(hidden)]
@@ -59,8 +81,8 @@ impl ResolvedTransitionPlan {
             .into());
         }
 
-        self.validate_seeds(candidate, ComponentTransitionStrategy::Retain, &retained)?;
-        self.validate_seeds(candidate, ComponentTransitionStrategy::Replace, &previous)?;
+        self.validate_seeds(candidate, SeedKind::Retained, &retained)?;
+        self.validate_seeds(candidate, SeedKind::Previous, &previous)?;
 
         std::panic::AssertUnwindSafe(async {
             let transient = candidate
@@ -83,6 +105,7 @@ impl ResolvedTransitionPlan {
                 &self.construction_order,
                 retained,
                 previous,
+                self.transition_changes(),
                 externals,
                 Arc::clone(&scopes),
             )
@@ -155,16 +178,12 @@ impl ResolvedTransitionPlan {
             .iter()
             .map(|seed| seed.ty.type_id)
             .collect::<BTreeSet<_>>();
-        let mut retained = self.snapshot_from_active(
-            candidate,
-            active.root(),
-            ComponentTransitionStrategy::Retain,
-            &overridden,
-        )?;
+        let mut retained =
+            self.snapshot_from_active(candidate, active.root(), SeedKind::Retained, &overridden)?;
         let previous = self.snapshot_from_active(
             candidate,
             active.root(),
-            ComponentTransitionStrategy::Replace,
+            SeedKind::Previous,
             &BTreeSet::new(),
         )?;
 
@@ -174,7 +193,8 @@ impl ResolvedTransitionPlan {
             .await
     }
 
-    /// Snapshots one stored representation per `strategy` decision out of the active root.
+    /// Snapshots one stored representation per decision seeding `kind` out of the active
+    /// root.
     ///
     /// Overridden types are skipped: their seed is supplied by the caller instead of
     /// the snapshot adapter, so snapshot safety is never bypassed for them.
@@ -182,12 +202,12 @@ impl ResolvedTransitionPlan {
         &self,
         candidate: &CandidateGraph,
         active_root: &ScopeContainer,
-        strategy: ComponentTransitionStrategy,
+        kind: SeedKind,
         overridden: &BTreeSet<TypeId>,
     ) -> crate::Result<Vec<BoxedComponent>> {
         let mut seeds = Vec::new();
 
-        for decision in self.decisions_with(strategy) {
+        for decision in self.decisions_seeding(kind) {
             let Some(descriptor) = candidate.component(decision.component) else {
                 continue;
             };
@@ -229,7 +249,7 @@ impl ResolvedTransitionPlan {
         candidate: &CandidateGraph,
         overrides: &[BoxedComponent],
     ) -> crate::Result<()> {
-        let retained = self.seed_types(candidate, ComponentTransitionStrategy::Retain);
+        let retained = self.seed_types(candidate, SeedKind::Retained);
         let mut seen = BTreeSet::new();
 
         for seed in overrides {
@@ -247,18 +267,18 @@ impl ResolvedTransitionPlan {
         Ok(())
     }
 
-    /// Requires `seeds` to cover exactly the components whose decision is `strategy`.
+    /// Requires `seeds` to cover exactly the components whose decision seeds `kind`.
     fn validate_seeds(
         &self,
         candidate: &CandidateGraph,
-        strategy: ComponentTransitionStrategy,
+        kind: SeedKind,
         seeds: &[BoxedComponent],
     ) -> crate::Result<()> {
         let supplied = seeds
             .iter()
             .map(|component| component.ty.type_id)
             .collect::<BTreeSet<_>>();
-        let expected = self.seed_types(candidate, strategy);
+        let expected = self.seed_types(candidate, kind);
 
         if supplied == expected {
             return Ok(());
@@ -268,7 +288,7 @@ impl ResolvedTransitionPlan {
             candidate
                 .component(decision.component)
                 .is_some_and(|component| {
-                    supplied.contains(&component.ty.type_id) != (decision.strategy == strategy)
+                    supplied.contains(&component.ty.type_id) != kind.seeds(decision.strategy)
                 })
         });
         let error = match mismatched {
@@ -284,21 +304,72 @@ impl ResolvedTransitionPlan {
         Err(error.into())
     }
 
-    pub(super) fn decisions_with(
+    /// The planned change of every `Transition` decision, for its transition handler.
+    fn transition_changes(&self) -> Vec<ComponentChange> {
+        self.decisions
+            .iter()
+            .filter(|decision| decision.strategy == ComponentTransitionStrategy::Transition)
+            .filter_map(|decision| {
+                self.structural
+                    .nodes
+                    .iter()
+                    .find(|node| node.component == decision.component)
+            })
+            .map(|node| ComponentChange::new(node.clone()))
+            .collect()
+    }
+
+    /// Prepares the hot update of every `HotUpdate` decision against the built candidate
+    /// root, in decision order. Nothing is applied until the returned commits run.
+    pub(crate) async fn prepare_hot_updates(
         &self,
-        strategy: ComponentTransitionStrategy,
+        candidate: &CandidateGraph,
+        candidate_root: &Arc<ScopeContainer>,
+    ) -> crate::Result<Vec<HotUpdateCommit>> {
+        let mut commits = Vec::new();
+
+        for decision in self
+            .decisions
+            .iter()
+            .filter(|decision| decision.strategy == ComponentTransitionStrategy::HotUpdate)
+        {
+            let descriptor = candidate
+                .component(decision.component)
+                .ok_or_else(|| self.restart(decision, RestartReason::HotUpdateUnavailable))?;
+
+            commits.push(candidate_root.prepare_hot_update(*descriptor).await?);
+        }
+
+        Ok(commits)
+    }
+
+    /// The singletons this plan displaces, in retirement order: replaced or removed
+    /// components whose decision does not keep the active instance.
+    pub fn displaced(&self) -> Vec<&'static str> {
+        self.structural
+            .retirement_order
+            .iter()
+            .filter(|component| {
+                !self.decisions.iter().any(|decision| {
+                    decision.component == **component && decision.strategy.retains_instance()
+                })
+            })
+            .copied()
+            .collect()
+    }
+
+    /// The decisions whose strategy needs a `kind` seed from the active root.
+    pub(super) fn decisions_seeding(
+        &self,
+        kind: SeedKind,
     ) -> impl Iterator<Item = &ComponentTransitionDecision> {
         self.decisions
             .iter()
-            .filter(move |decision| decision.strategy == strategy)
+            .filter(move |decision| kind.seeds(decision.strategy))
     }
 
-    fn seed_types(
-        &self,
-        candidate: &CandidateGraph,
-        strategy: ComponentTransitionStrategy,
-    ) -> BTreeSet<TypeId> {
-        self.decisions_with(strategy)
+    fn seed_types(&self, candidate: &CandidateGraph, kind: SeedKind) -> BTreeSet<TypeId> {
+        self.decisions_seeding(kind)
             .filter_map(|decision| candidate.component(decision.component))
             .map(|component| component.ty.type_id)
             .collect()
