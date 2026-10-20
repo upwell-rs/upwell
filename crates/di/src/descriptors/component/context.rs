@@ -33,6 +33,9 @@ pub struct ComponentConstructionContext {
     /// The active instance a replacement factory replaces, set only while that factory
     /// runs during candidate construction.
     previous: Option<BoxedComponent>,
+    /// The planned change a transition handler decides on, set only while that handler
+    /// runs during candidate construction.
+    change: Option<crate::ComponentChange>,
 }
 
 const STORE_POISON: &str = "scope store lock poisoned";
@@ -90,12 +93,28 @@ impl ComponentConstructionContext {
             resolvers,
             slot,
             previous: None,
+            change: None,
         }
     }
 
     /// Sets the previous instance read by the next replacement factory.
     pub(crate) fn set_previous(&mut self, previous: Option<BoxedComponent>) {
         self.previous = previous;
+    }
+
+    /// Whether a previous instance is set for the running factory.
+    pub(crate) fn has_previous(&self) -> bool {
+        self.previous.is_some()
+    }
+
+    /// Sets the planned change read by the next transition handler.
+    pub(crate) fn set_change(&mut self, change: Option<crate::ComponentChange>) {
+        self.change = change;
+    }
+
+    /// The planned change the running transition handler decides on.
+    pub(crate) fn change(&self) -> Option<&crate::ComponentChange> {
+        self.change.as_ref()
     }
 
     /// The previous instance's handle for the component `C` a replacement factory is

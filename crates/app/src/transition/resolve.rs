@@ -6,7 +6,7 @@ use std::sync::Arc;
 use upwell_core::StaticScope;
 use upwell_di::{EffectiveGraph, NodeAction, PlannedNode, TransitionPlan};
 
-use super::strategy::validate_decision;
+use super::strategy::{updates_in_place, validate_decision};
 use super::{
     CandidateGraph, ComponentTransitionDecision, ComponentTransitionStrategy,
     ResolvedTransitionPlan, RestartReason, RestartRequired,
@@ -33,13 +33,13 @@ impl CandidateGraph {
     /// Resolves the deterministic v1 transition defaults used only by the transactional
     /// config reload while forcing runtime-invalidated component roots to reconstruct:
     /// structural Retain nodes retain, RebindLive nodes whose every changed live binding
-    /// rebinds in place retain their instance, other Replace/RebindLive nodes whose
-    /// component declares a replacement factory replace from the previous instance, other
-    /// Add/Replace/RebindLive nodes reconstruct (factory availability is validated by the
-    /// shared decision checks), and Remove nodes retire safely by absence from the
-    /// candidate root — they carry no decision and require no candidate seed. An
-    /// invalidated factoryless or non-singleton node fails resolution with
-    /// [`RestartRequired`] before any construction runs.
+    /// rebinds in place retain their instance, other Replace/RebindLive nodes use the
+    /// most instance-preserving recipe their component declares (hot update, transition
+    /// handler, then replacement factory), other Add/Replace/RebindLive nodes reconstruct
+    /// (recipe availability is validated by the shared decision checks), and Remove nodes
+    /// retire safely by absence from the candidate root — they carry no decision and
+    /// require no candidate seed. An invalidated factoryless or non-singleton node fails
+    /// resolution with [`RestartRequired`] before any construction runs.
     pub(crate) fn resolve_runtime_transition(
         &self,
         active: &EffectiveGraph,
@@ -71,8 +71,10 @@ impl CandidateGraph {
     /// The component-declared default strategy for one structural runtime node.
     ///
     /// A `RebindLive` node keeps its instance when the plan can rebind every changed
-    /// live binding in place; otherwise it replaces from its previous instance when it
-    /// declares a replacement factory, and reconstructs when it does not.
+    /// live binding in place. Otherwise a `Replace` or `RebindLive` node prefers, in
+    /// order, the component's hot update (when its instance can update in place), its
+    /// transition handler, and its replacement factory, and reconstructs when it declares
+    /// none of them.
     fn runtime_strategy(
         &self,
         plan: &TransitionPlan,
@@ -85,11 +87,7 @@ impl CandidateGraph {
                 ComponentTransitionStrategy::Retain
             }
 
-            NodeAction::Replace | NodeAction::RebindLive
-                if self.declares_replacement(node.component)? =>
-            {
-                ComponentTransitionStrategy::Replace
-            }
+            NodeAction::Replace | NodeAction::RebindLive => self.declared_strategy(node)?,
             _ => ComponentTransitionStrategy::Reconstruct,
         };
 
@@ -105,12 +103,24 @@ impl CandidateGraph {
         })
     }
 
-    fn declares_replacement(&self, component: &str) -> crate::Result<bool> {
-        let Some(descriptor) = self.component(component) else {
-            return Ok(false);
+    /// The most instance-preserving strategy `node`'s component declares for a
+    /// `Replace` or `RebindLive` node.
+    fn declared_strategy(&self, node: &PlannedNode) -> crate::Result<ComponentTransitionStrategy> {
+        let Some(descriptor) = self.component(node.component) else {
+            return Ok(ComponentTransitionStrategy::Reconstruct);
         };
 
-        Ok(descriptor.replacement_factory()?.is_some())
+        let strategy = if descriptor.hot_update_factory()?.is_some() && updates_in_place(node) {
+            ComponentTransitionStrategy::HotUpdate
+        } else if descriptor.transition_handler()?.is_some() {
+            ComponentTransitionStrategy::Transition
+        } else if descriptor.replacement_factory()?.is_some() {
+            ComponentTransitionStrategy::Replace
+        } else {
+            ComponentTransitionStrategy::Reconstruct
+        };
+
+        Ok(strategy)
     }
 
     /// Completes a resolved plan from an already computed structural plan and explicit
@@ -213,7 +223,7 @@ impl CandidateGraph {
         }
 
         if let Some(decision) = resolved.iter().find(|decision| {
-            decision.strategy == ComponentTransitionStrategy::Retain
+            decision.strategy.retains_instance()
                 && depends_on_root_resolver(&self.graph, decision.component)
         }) {
             return Err(RestartRequired {
@@ -226,7 +236,7 @@ impl CandidateGraph {
 
         let constructing = resolved
             .iter()
-            .filter(|decision| decision.strategy != ComponentTransitionStrategy::Retain)
+            .filter(|decision| !decision.strategy.retains_instance())
             .map(|decision| decision.component)
             .collect::<std::collections::BTreeSet<_>>();
         let construction_order = self

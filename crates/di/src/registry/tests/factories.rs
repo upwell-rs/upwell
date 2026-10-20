@@ -4,7 +4,7 @@
 use super::*;
 use crate::test_support::unbuilt_recipe;
 
-use ComponentFactoryRole::{Default, Explicit, Replacement};
+use ComponentFactoryRole::{Default, Explicit, HotUpdate, Replacement, Transition};
 
 /// Resolves a registry holding one component built by `factories`.
 fn resolve(
@@ -137,11 +137,70 @@ fn the_replacement_contract_is_validated_during_registry_resolution() {
     let orphaned = resolve(|| &ORPHANED).expect_err("a replacement needs an ordinary factory");
     let undeclared = resolve(|| &UNDECLARED).expect_err("a replacement cannot widen the graph");
 
-    assert!(matches!(ambiguous, Error::AmbiguousReplacementFactory(_)));
-    assert!(matches!(orphaned, Error::ReplacementWithoutFactory(_)));
+    assert!(matches!(
+        ambiguous,
+        Error::AmbiguousTransitionFactory {
+            role: Replacement,
+            ..
+        }
+    ));
+    assert!(matches!(
+        orphaned,
+        Error::TransitionRecipeWithoutFactory {
+            role: Replacement,
+            ..
+        }
+    ));
     assert!(matches!(
         undeclared,
-        Error::UndeclaredReplacementDependency { ref dependency, .. } if dependency == "u16"
+        Error::UndeclaredTransitionDependency { role: Replacement, ref dependency, .. }
+            if dependency == "u16"
+    ));
+}
+
+#[test]
+fn transition_handlers_and_hot_updates_share_the_replacement_contract() {
+    static AMBIGUOUS: [ComponentFactoryDescriptor; 3] = [
+        unbuilt_recipe("default", Default, no_dependencies),
+        unbuilt_recipe("first", Transition, no_dependencies),
+        unbuilt_recipe("second", Transition, no_dependencies),
+    ];
+    static ORPHANED: [ComponentFactoryDescriptor; 1] =
+        [unbuilt_recipe("handler", Transition, no_dependencies)];
+    static UNDECLARED: [ComponentFactoryDescriptor; 2] = [
+        unbuilt_recipe("default", Default, one_u8),
+        unbuilt_recipe("update", HotUpdate, one_u16),
+    ];
+    static DECLARED: [ComponentFactoryDescriptor; 3] = [
+        unbuilt_recipe("default", Default, one_u8),
+        unbuilt_recipe("handler", Transition, no_dependencies),
+        unbuilt_recipe("update", HotUpdate, one_u8),
+    ];
+
+    let ambiguous = resolve(|| &AMBIGUOUS).expect_err("two transition handlers are ambiguous");
+    let orphaned = resolve(|| &ORPHANED).expect_err("a handler needs an ordinary factory");
+    let undeclared = resolve(|| &UNDECLARED).expect_err("a hot update cannot widen the graph");
+
+    resolve(|| &DECLARED).expect("declared transition recipes validate");
+
+    assert!(matches!(
+        ambiguous,
+        Error::AmbiguousTransitionFactory {
+            role: Transition,
+            ..
+        }
+    ));
+    assert!(matches!(
+        orphaned,
+        Error::TransitionRecipeWithoutFactory {
+            role: Transition,
+            ..
+        }
+    ));
+    assert!(matches!(
+        undeclared,
+        Error::UndeclaredTransitionDependency { role: HotUpdate, ref dependency, .. }
+            if dependency == "u16"
     ));
 }
 
@@ -167,10 +226,10 @@ fn a_replacement_edge_may_be_no_stricter_than_its_ordinary_edge() {
 
     assert!(matches!(
         tightened,
-        Error::UndeclaredReplacementDependency { .. }
+        Error::UndeclaredTransitionDependency { .. }
     ));
     assert!(matches!(
         eager,
-        Error::UndeclaredReplacementDependency { .. }
+        Error::UndeclaredTransitionDependency { .. }
     ));
 }

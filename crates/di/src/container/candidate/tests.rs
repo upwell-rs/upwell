@@ -80,6 +80,7 @@ async fn root_resolves_only_candidate_components() {
         &[dependency.id, consumer.id],
         Vec::new(),
         Vec::new(),
+        Vec::new(),
         ResolverSet::new(),
         registry([dependency, consumer]),
     )
@@ -117,6 +118,7 @@ async fn root_never_falls_back_to_an_active_parent() {
         &[consumer.id],
         Vec::new(),
         Vec::new(),
+        Vec::new(),
         ResolverSet::new(),
         registry([consumer]),
     )
@@ -147,6 +149,7 @@ async fn root_rejects_active_component_source() {
         &[],
         Vec::new(),
         Vec::new(),
+        Vec::new(),
         active.resolvers().clone(),
         registry([]),
     )
@@ -166,6 +169,7 @@ async fn factory_output_must_match_its_descriptor() {
         &[descriptor.id],
         Vec::new(),
         Vec::new(),
+        Vec::new(),
         ResolverSet::new(),
         registry([descriptor]),
     )
@@ -183,6 +187,7 @@ async fn factory_panics_are_redacted() {
         component::<CandidateDependency>("candidate-dependency", panicking_candidate_factories);
     let result = ScopeContainer::build_candidate_root(
         &[descriptor.id],
+        Vec::new(),
         Vec::new(),
         Vec::new(),
         ResolverSet::new(),
@@ -208,6 +213,7 @@ async fn builder_uses_the_candidate_registry_descriptor() {
         &[active.id],
         Vec::new(),
         Vec::new(),
+        Vec::new(),
         ResolverSet::new(),
         registry([candidate]),
     )
@@ -229,6 +235,7 @@ async fn builder_rejects_an_incomplete_candidate_root() {
 
     let result = ScopeContainer::build_candidate_root(
         &[],
+        Vec::new(),
         Vec::new(),
         Vec::new(),
         ResolverSet::new(),
@@ -253,6 +260,7 @@ async fn builder_rejects_a_retained_root_resolver() {
     let result = ScopeContainer::build_candidate_root(
         &[],
         vec![retained],
+        Vec::new(),
         Vec::new(),
         ResolverSet::new(),
         registry([descriptor]),
@@ -282,6 +290,7 @@ async fn builder_recreates_and_attaches_the_root_resolver() {
     let root = ScopeContainer::build_candidate_root(
         &[],
         vec![retained],
+        Vec::new(),
         Vec::new(),
         ResolverSet::new(),
         registry([target, resolver]),
@@ -320,6 +329,7 @@ async fn previous_instances_are_built_by_their_replacement_factory() {
         &[dependency.id, consumer.id],
         Vec::new(),
         vec![BoxedComponent::new(CandidateDependency("previous"))],
+        Vec::new(),
         ResolverSet::new(),
         registry([dependency, consumer]),
     )
@@ -353,6 +363,7 @@ async fn previous_instances_need_a_replacement_factory_in_the_construction_order
             &[descriptor.id],
             Vec::new(),
             vec![previous],
+            Vec::new(),
             ResolverSet::new(),
             registry([descriptor]),
         )

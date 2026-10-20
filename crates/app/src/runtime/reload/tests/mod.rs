@@ -22,6 +22,7 @@ mod publication;
 mod replacement;
 mod report;
 mod runtime_reloader;
+mod transition_recipes;
 mod trigger;
 
 use crate::{RuntimeTransitionReport, TransitionFailure, TransitionOutcome, TransitionPhase};
