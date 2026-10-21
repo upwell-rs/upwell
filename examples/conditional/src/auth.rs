@@ -32,7 +32,7 @@ pub struct AuthConfig {
     pub max_sessions: usize,
 }
 
-/// The framework-shipped fallback: unconditional, so it is selected whenever the custom
+/// The example's built-in fallback: unconditional, so it is selected whenever the custom
 /// provider is not eligible.
 #[component(provide = dyn Authenticator)]
 pub struct DefaultAuthenticator;

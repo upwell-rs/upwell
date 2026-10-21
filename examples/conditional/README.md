@@ -31,7 +31,7 @@ prints each step and the audit trail. `tests/scenario.rs` asserts the same scena
 ## Internal role
 
 Not published. CI builds and runs it in the `Examples` job; its test runs in the extended nextest
-cohort. It depends only on the `upwell` facade.
+cohort. Its only framework dependency is the `upwell` facade.
 
 ## Feature flags
 
