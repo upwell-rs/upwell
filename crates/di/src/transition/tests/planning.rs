@@ -183,3 +183,59 @@ fn shared_graph_plans_match_independently_built_identical_graphs() {
         active.plan_runtime_transition(&rebuilt, &roots, |_, _| false)
     );
 }
+
+/// The original pass-based retirement ordering, kept as the oracle for the layered one.
+fn reference_retirement_order(
+    graph: &EffectiveGraph,
+    components: &BTreeSet<&'static str>,
+) -> Vec<&'static str> {
+    let mut remaining = components.clone();
+    let mut order = Vec::new();
+
+    while !remaining.is_empty() {
+        let ready = remaining
+            .iter()
+            .filter(|component| {
+                !remaining.iter().any(|consumer| {
+                    consumer != *component && graph.fixed_targets(consumer).contains(*component)
+                })
+            })
+            .copied()
+            .collect::<Vec<_>>();
+
+        if ready.is_empty() {
+            order.extend(remaining.iter().copied());
+
+            break;
+        }
+
+        for component in ready {
+            remaining.remove(component);
+            order.push(component);
+        }
+    }
+
+    order
+}
+
+#[test]
+fn layered_retirement_order_matches_the_pass_based_order_for_every_subset() {
+    for graph in [graph(false), graph(true)] {
+        let ids = graph.nodes().map(|node| node.id).collect::<Vec<_>>();
+
+        for mask in 0_u32..(1 << ids.len()) {
+            let subset = ids
+                .iter()
+                .enumerate()
+                .filter(|(bit, _)| mask & (1 << bit) != 0)
+                .map(|(_, id)| *id)
+                .collect::<BTreeSet<_>>();
+
+            assert_eq!(
+                graph.retirement_order(&subset),
+                reference_retirement_order(&graph, &subset),
+                "retirement order differs for {subset:?}"
+            );
+        }
+    }
+}
