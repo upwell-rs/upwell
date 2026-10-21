@@ -8,7 +8,8 @@
 //! [`RuntimeView`]s, open scopes, and other `Arc` owners may keep using the instance after
 //! retirement and until they release it, so a retirement hook must leave the instance
 //! usable: stop accepting new work or schedule cleanup, but do not invalidate state a
-//! pinned caller still reads. Retained, rebound, and newly added components never retire.
+//! pinned caller still reads. Retained, hot-updated, rebound-in-place, and newly added
+//! components never retire; a rebound component that had to be constructed again does.
 //!
 //! # Firing
 //!
@@ -69,7 +70,8 @@ impl HookKind for ComponentRetired {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum RetirementReason {
-    /// The new generation constructed a replacement instance.
+    /// The new generation constructed a replacement instance, including a rebound
+    /// component whose live dependencies could not be rebound in place.
     Replaced,
     /// The new generation no longer contains the component.
     Removed,
@@ -156,9 +158,9 @@ fn retirement_of(
     successor_generation: RuntimeGenerationId,
 ) -> Option<ComponentRetirement> {
     let reason = match report.component(component)?.action {
-        NodeAction::Replace => RetirementReason::Replaced,
+        NodeAction::Replace | NodeAction::RebindLive => RetirementReason::Replaced,
         NodeAction::Remove => RetirementReason::Removed,
-        NodeAction::Retain | NodeAction::RebindLive | NodeAction::Add => return None,
+        NodeAction::Retain | NodeAction::Add => return None,
     };
 
     Some(ComponentRetirement {

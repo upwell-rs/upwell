@@ -15,6 +15,7 @@ use crate::{
 };
 
 mod plan;
+mod retirement;
 
 use plan::LiveClosure;
 
@@ -331,9 +332,11 @@ impl EffectiveGraph {
     /// actions keep their precedence over forced replaces. The graph diff stays purely
     /// structural.
     ///
-    /// `rebinds_in_place` names the consumers the runtime may keep while republishing
-    /// their live cells. A live binding whose demand is
-    /// [`rebindable`](DependencyDemand::rebindable) on both sides and whose consumer it
+    /// `rebinds_in_place` decides, for one live binding's active and candidate demands,
+    /// whether the runtime can keep the consumer and republish its held live cell: the
+    /// runtime must be able to carry the consumer across generations and reach the live
+    /// cell of every target on both sides. A live binding whose demand is
+    /// [`rebindable`](DependencyDemand::rebindable) on both sides and that the predicate
     /// accepts plans with [`BindingTransition::in_place`] set; the consumer keeps its
     /// instance, so it does not propagate. Every other live consumer is reconstructed:
     /// it propagates through the changed-instance queue and its fixed (`Snapshot`)
@@ -345,7 +348,7 @@ impl EffectiveGraph {
         &self,
         candidate: &Self,
         invalidated_roots: &BTreeSet<&'static str>,
-        rebinds_in_place: impl Fn(&'static str) -> bool,
+        rebinds_in_place: impl Fn(&DependencyDemand, &DependencyDemand) -> bool,
     ) -> Result<TransitionPlan, StaleGraphCandidate> {
         plan::plan_with_invalidations(
             self,

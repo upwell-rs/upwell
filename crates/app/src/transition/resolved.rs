@@ -43,6 +43,7 @@ pub struct ResolvedTransitionPlan {
     pub(super) structural: TransitionPlan,
     pub(super) decisions: Box<[ComponentTransitionDecision]>,
     pub(super) construction_order: Box<[&'static str]>,
+    pub(super) displaced: Box<[&'static str]>,
 }
 
 impl ResolvedTransitionPlan {
@@ -343,19 +344,10 @@ impl ResolvedTransitionPlan {
         Ok(commits)
     }
 
-    /// The singletons this plan displaces, in retirement order: replaced or removed
-    /// components whose decision does not keep the active instance.
-    pub fn displaced(&self) -> Vec<&'static str> {
-        self.structural
-            .retirement_order
-            .iter()
-            .filter(|component| {
-                !self.decisions.iter().any(|decision| {
-                    decision.component == **component && decision.strategy.retains_instance()
-                })
-            })
-            .copied()
-            .collect()
+    /// The singletons this plan displaces, in retirement order: removed components, and
+    /// replaced or rebound components whose decision does not keep the active instance.
+    pub fn displaced(&self) -> &[&'static str] {
+        &self.displaced
     }
 
     /// The decisions whose strategy needs a `kind` seed from the active root.

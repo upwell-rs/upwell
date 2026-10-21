@@ -4,7 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use upwell_core::StaticScope;
-use upwell_di::{EffectiveGraph, NodeAction, PlannedNode, TransitionPlan};
+use upwell_di::{
+    DependencyDemand, EffectiveGraph, EffectiveNodeRole, EffectiveTarget, NodeAction, PlannedNode,
+    TransitionPlan,
+};
 
 use super::strategy::{updates_in_place, validate_decision};
 use super::{
@@ -46,10 +49,11 @@ impl CandidateGraph {
         invalidated_roots: &BTreeSet<&'static str>,
     ) -> crate::Result<ResolvedTransitionPlan> {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let structural =
-                active.plan_runtime_transition(&self.graph, invalidated_roots, |component| {
-                    self.retainable(component)
-                })?;
+            let structural = active.plan_runtime_transition(
+                &self.graph,
+                invalidated_roots,
+                |before, after| self.rebinds_in_place(before, after),
+            )?;
 
             let requested = structural
                 .nodes
@@ -92,6 +96,33 @@ impl CandidateGraph {
         };
 
         Ok(strategy)
+    }
+
+    /// Whether the runtime can keep a live binding's consumer and republish the cell it
+    /// holds: the consumer is [`retainable`](Self::retainable), and the live cell of
+    /// every active and candidate target is reachable.
+    ///
+    /// A component target exposes its cell through its descriptor's generation-snapshot
+    /// adapter, so a target without one, or one missing from the candidate, cannot be
+    /// rebound and its consumer reconstructs instead. Provider targets always expose
+    /// their cell.
+    fn rebinds_in_place(&self, before: &DependencyDemand, after: &DependencyDemand) -> bool {
+        self.retainable(after.id.consumer)
+            && before
+                .targets
+                .iter()
+                .chain(after.targets.iter())
+                .all(|target| self.exposes_live_cell(target))
+    }
+
+    fn exposes_live_cell(&self, target: &EffectiveTarget) -> bool {
+        match target {
+            EffectiveTarget::Component { component, .. } => self
+                .component(component)
+                .is_some_and(|descriptor| descriptor.generation_snapshot.is_some()),
+            EffectiveTarget::Provider { .. } => true,
+            EffectiveTarget::Config { .. } | EffectiveTarget::Dynamic { .. } => false,
+        }
     }
 
     /// Whether the runtime can carry `component`'s instance into the candidate: a
@@ -251,14 +282,43 @@ impl CandidateGraph {
             .collect::<Vec<_>>()
             .into_boxed_slice();
 
+        let displaced = displaced(active, &structural, &resolved).into_boxed_slice();
+
         Ok(ResolvedTransitionPlan {
             candidate_identity: Arc::clone(&self.identity),
             active_identity: Arc::clone(active.identity()),
             structural,
             decisions: resolved.into_boxed_slice(),
             construction_order,
+            displaced,
         })
     }
+}
+
+/// The active singletons `structural` displaces under `decisions`, in retirement order:
+/// every removed singleton, and every replaced or rebound singleton whose decision does
+/// not keep its instance. A rebound node that falls back to construction is displaced
+/// like a replaced one.
+fn displaced(
+    active: &EffectiveGraph,
+    structural: &TransitionPlan,
+    decisions: &[ComponentTransitionDecision],
+) -> Vec<&'static str> {
+    let displaced = structural
+        .nodes
+        .iter()
+        .filter(|node| node.role == EffectiveNodeRole::Singleton)
+        .filter(|node| match node.action {
+            NodeAction::Remove => true,
+            NodeAction::Replace | NodeAction::RebindLive => decisions.iter().any(|decision| {
+                decision.component == node.component && !decision.strategy.retains_instance()
+            }),
+            NodeAction::Retain | NodeAction::Add => false,
+        })
+        .map(|node| node.component)
+        .collect();
+
+    active.retirement_order(&displaced)
 }
 
 fn depends_on_root_resolver(graph: &EffectiveGraph, component: &str) -> bool {
