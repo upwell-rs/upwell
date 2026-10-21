@@ -253,18 +253,34 @@ pub(crate) fn construction_edge(
     );
 }
 
-pub(crate) fn construction_wait(consumer: &ComponentDescriptor, dependency: &ComponentDescriptor) {
-    trace!(
-        target: GRAPH_TARGET,
-        event_name = "graph-edge",
-        schema_version = 1_u64,
-        graph_kind = "construction",
-        from_id = consumer.id,
-        to_id = dependency.id,
-        accepted = true,
-        reason = "required-eager",
-        "construction wait edge retained"
-    );
+/// Emits one retained construction-wait edge per target, in stable target-ID order.
+/// `targets` is consumed only while graph tracing is enabled, so the ordering work
+/// costs nothing on an untraced startup or reload.
+pub(crate) fn construction_waits<'a>(
+    consumer: &ComponentDescriptor,
+    targets: impl Iterator<Item = &'a ComponentDescriptor>,
+) {
+    if !tracing::enabled!(target: GRAPH_TARGET, tracing::Level::TRACE) {
+        return;
+    }
+
+    let mut targets = targets.collect::<Vec<_>>();
+
+    targets.sort_unstable_by_key(|target| target.id);
+
+    for dependency in targets {
+        trace!(
+            target: GRAPH_TARGET,
+            event_name = "graph-edge",
+            schema_version = 1_u64,
+            graph_kind = "construction",
+            from_id = consumer.id,
+            to_id = dependency.id,
+            accepted = true,
+            reason = "required-eager",
+            "construction wait edge retained"
+        );
+    }
 }
 
 pub(crate) fn build_position(component: &ComponentDescriptor, position: usize) {
