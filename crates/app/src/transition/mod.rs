@@ -7,7 +7,7 @@ use std::sync::Arc;
 use upwell_core::{RuntimeGenerationId, ScopeId};
 use upwell_di::{ComponentDescriptor, EffectiveGraph, ProviderSelectionModel};
 
-use crate::runtime::RuntimeScopePlan;
+use crate::runtime::{RuntimeScopePlan, RuntimeView};
 use crate::scope::{PreparedScopeTopology, ScopePlan, SeedDestination};
 use crate::{AppConditionEvaluation, AppRegistry};
 
@@ -30,11 +30,11 @@ pub use strategy::{
 pub struct CandidateGraph {
     identity: Arc<()>,
     graph: EffectiveGraph,
-    components: Box<[ComponentDescriptor]>,
+    components: Arc<[ComponentDescriptor]>,
     by_id: HashMap<&'static str, usize>,
     singleton_order: Box<[ComponentDescriptor]>,
-    scope_orders: HashMap<ScopeId, Box<[ComponentDescriptor]>>,
-    seed_destinations: HashMap<std::any::TypeId, SeedDestination>,
+    scope_orders: Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>>,
+    seed_destinations: Arc<HashMap<std::any::TypeId, SeedDestination>>,
 }
 
 impl CandidateGraph {
@@ -94,6 +94,38 @@ impl CandidateGraph {
         )?;
         let selection = Arc::clone(graph.provider_selection());
         let scopes = ScopePlan::partition(&components, &selection, topology)?;
+
+        Ok(Self::assemble(
+            graph,
+            Arc::from(components),
+            Arc::new(scopes.orders),
+            Arc::new(scopes.seed_destinations),
+        ))
+    }
+
+    /// The candidate for a reload whose effective registry is unchanged: the base
+    /// generation's graph, descriptors, and scope plans, shared instead of rebuilt.
+    ///
+    /// Valid only when the candidate's condition evaluation selects exactly the base's
+    /// eligible components and provider mappings from the same catalog, because the
+    /// graph and plans are a pure function of that selection and the fixed topology.
+    pub(crate) fn reuse(base: &RuntimeView) -> Self {
+        let plan = base.scope_plan();
+
+        Self::assemble(
+            base.effective_graph().same_graph(),
+            Arc::clone(base.resolved_components()),
+            Arc::clone(plan.orders()),
+            Arc::clone(plan.seed_destinations()),
+        )
+    }
+
+    fn assemble(
+        graph: EffectiveGraph,
+        components: Arc<[ComponentDescriptor]>,
+        scope_orders: Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>>,
+        seed_destinations: Arc<HashMap<std::any::TypeId, SeedDestination>>,
+    ) -> Self {
         let by_id = components
             .iter()
             .enumerate()
@@ -103,23 +135,17 @@ impl CandidateGraph {
             .construction_order()
             .iter()
             .filter_map(|id| by_id.get(id).map(|position| components[*position]))
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        let scope_orders = scopes
-            .orders
-            .into_iter()
-            .map(|(scope, order)| (scope, order.into_boxed_slice()))
-            .collect();
+            .collect::<Box<[_]>>();
 
-        Ok(Self {
+        Self {
             identity: Arc::new(()),
             graph,
-            components: components.into_boxed_slice(),
+            components,
             by_id,
             singleton_order,
             scope_orders,
-            seed_destinations: scopes.seed_destinations,
-        })
+            seed_destinations,
+        }
     }
 
     pub fn graph(&self) -> &EffectiveGraph {
@@ -146,7 +172,7 @@ impl CandidateGraph {
     }
 
     pub fn scope_order(&self, scope: &ScopeId) -> Option<&[ComponentDescriptor]> {
-        self.scope_orders.get(scope).map(Box::as_ref)
+        self.scope_orders.get(scope).map(Vec::as_slice)
     }
 
     pub fn seed_destination(&self, type_id: std::any::TypeId) -> Option<(ScopeId, &'static str)> {
@@ -166,16 +192,11 @@ impl CandidateGraph {
     ) -> (Arc<[ComponentDescriptor]>, RuntimeScopePlan, EffectiveGraph) {
         let scope_plan = RuntimeScopePlan::new(
             Arc::clone(topology),
-            Arc::new(
-                self.scope_orders
-                    .into_iter()
-                    .map(|(scope, order)| (scope, order.into_vec()))
-                    .collect(),
-            ),
-            Arc::new(self.seed_destinations),
+            self.scope_orders,
+            self.seed_destinations,
         );
 
-        (Arc::from(self.components), scope_plan, self.graph)
+        (self.components, scope_plan, self.graph)
     }
 }
 

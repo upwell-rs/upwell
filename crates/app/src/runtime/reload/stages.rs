@@ -49,6 +49,11 @@ pub(super) fn evaluate_conditions(
 /// Prepares and validates the candidate graph from the re-evaluated eligibility, then
 /// resolves the runtime transition against the base generation's effective graph.
 ///
+/// When re-evaluation leaves eligibility unchanged, the candidate graph would equal the
+/// base's, so the base graph and scope plans are shared instead of rebuilt; `evaluation`
+/// was re-evaluated against the base's own catalog, so equal eligibility means an equal
+/// effective registry. Planning still runs, so changed bindings invalidate as usual.
+///
 /// The deterministic invalidation roots — changed config bindings, matched by exact
 /// `(TypeId, path)` identity, config-reload hook owners, and `HookManager` consumers —
 /// must reconstruct instead of retaining stale state. The planner propagates each
@@ -62,7 +67,14 @@ pub(super) fn plan_transition(
     let catalog = base.condition().catalog();
     let topology = &base.scope_plan().topology;
 
-    let candidate = CandidateGraph::prepare_evaluation(base.id(), catalog, evaluation, topology)?;
+    let candidate = if evaluation
+        .evaluation()
+        .same_eligibility(base.condition().evaluation().evaluation())
+    {
+        CandidateGraph::reuse(base)
+    } else {
+        CandidateGraph::prepare_evaluation(base.id(), catalog, evaluation, topology)?
+    };
     let changed_typed = staged
         .changed_staged()
         .map(|entry| (entry.type_id(), entry.path()))

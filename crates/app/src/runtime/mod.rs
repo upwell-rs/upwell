@@ -97,6 +97,18 @@ impl RuntimeScopePlan {
             seed_destinations,
         }
     }
+
+    /// The construction order of each protocol-owned scope, shared with any candidate that
+    /// reuses this plan.
+    pub(crate) fn orders(&self) -> &Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>> {
+        &self.orders
+    }
+
+    /// The declared destination of each factory-less scoped component, shared with any
+    /// candidate that reuses this plan.
+    pub(crate) fn seed_destinations(&self) -> &Arc<HashMap<TypeId, SeedDestination>> {
+        &self.seed_destinations
+    }
 }
 
 impl AppRuntime {
