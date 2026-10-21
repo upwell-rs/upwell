@@ -102,6 +102,35 @@ is displaced: it appears in `RuntimeTransitionReport::displaced()` and receives 
 That includes a rebound component that had to be constructed again. Retained, rebound-in-place and
 hot-updated instances are never displaced.
 
+## Cost
+
+A live rebind publishes the new instance into the consumer's existing slot: one atomic swap that
+every `Dep<T>` holder observes on its next read. The consumer and everything that depends on it
+keep their instances, so nothing downstream is planned, constructed or retired.
+
+A reconstruction runs the component's factory again inside a new candidate root. Every fixed
+dependent then has to be reconstructed as well, because it holds the old instance. The whole
+reverse closure is planned, constructed, and displaced from the old generation at commit. Its cost
+therefore grows with the size of that closure, not with the one component that changed.
+
+Measured on an Apple M2 Pro (`just bench di_hot_paths di_graph_preparation reload_transition reload_allocations`):
+
+| Work | Cost |
+|---|---|
+| Live slot swap (`live_slot_replace`) | ~70 ns per rebound slot |
+| Constructing a component in a new root, framework overhead only (`construction`) | ~0.3 µs per component, plus its factory body |
+| Planning a reverse closure (`reverse_closure/root`) | ~3 µs per component in the closure |
+| Reload whose change leaves eligibility unchanged, 2048 components | ~9 MiB allocated; graph shared, not rebuilt |
+| Reload with nothing staged | ~6 KiB allocated, independent of graph size |
+
+A component that can absorb a change through `Dep<T>` therefore costs a reload about 50 times less
+than one that must be reconstructed, before counting its factory body or its dependents. Prefer `Dep<T>` for dependencies that change at runtime and that have many dependents.
+
+A reload whose re-evaluated conditions leave every component's eligibility unchanged shares the
+base generation's effective graph and scope plans instead of rebuilding them. Planning then only
+walks the reverse closure of the changed bindings. A reload that does change eligibility still
+rebuilds the effective graph for the whole application.
+
 ## Scope
 
 Transitions are **singleton-only**. Request-, connection- and other scoped components are never
