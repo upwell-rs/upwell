@@ -34,8 +34,13 @@ fn sort(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, _| {
             bencher.iter(|| {
                 black_box(
-                    topological_sort(&registry.components, &prebuilt, &selection, |_, _| true)
-                        .expect("acyclic graph sorts"),
+                    topological_sort(
+                        black_box(&registry.components),
+                        black_box(&prebuilt),
+                        black_box(&selection),
+                        |_, _| true,
+                    )
+                    .expect("acyclic graph sorts"),
                 )
             });
         });
@@ -54,8 +59,12 @@ fn effective(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, _| {
             bencher.iter(|| {
                 black_box(
-                    EffectiveGraph::build(RuntimeGenerationId::INITIAL, &registry, |_, _| true)
-                        .expect("graph validates"),
+                    EffectiveGraph::build(
+                        RuntimeGenerationId::INITIAL,
+                        black_box(&registry),
+                        |_, _| true,
+                    )
+                    .expect("graph validates"),
                 )
             });
         });
@@ -75,9 +84,9 @@ fn conditions(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, _| {
             bencher.iter(|| {
                 black_box(
-                    ConditionCatalog::new(&registry, [])
+                    ConditionCatalog::new(black_box(&registry), [])
                         .expect("unconditional catalog builds")
-                        .evaluate(&snapshot)
+                        .evaluate(black_box(&snapshot))
                         .expect("unconditional catalog evaluates"),
                 )
             });
