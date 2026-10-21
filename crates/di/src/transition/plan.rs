@@ -142,9 +142,9 @@ pub(super) enum LiveClosure<'a> {
     /// Ordinary DI planning: a live rebind stays local to the rebind itself.
     Local,
     /// Runtime planning: a binding rebinds in place when its demand shape allows it and
-    /// the predicate accepts its consumer; every other live consumer is reconstructed
-    /// and propagates to its own dependents like a replaced instance.
-    Runtime(&'a dyn Fn(&'static str) -> bool),
+    /// the predicate accepts its active and candidate demands; every other live consumer
+    /// is reconstructed and propagates to its own dependents like a replaced instance.
+    Runtime(&'a dyn Fn(&DependencyDemand, &DependencyDemand) -> bool),
 }
 
 impl LiveClosure<'_> {
@@ -153,7 +153,7 @@ impl LiveClosure<'_> {
 
         match self {
             Self::Local => rebindable,
-            Self::Runtime(consumer) => rebindable && consumer(after.id.consumer),
+            Self::Runtime(accepts) => rebindable && accepts(before, after),
         }
     }
 
@@ -394,7 +394,7 @@ pub(super) fn plan_with_invalidations(
         .copied()
         .collect::<Vec<_>>()
         .into_boxed_slice();
-    let retirement_actions = actions
+    let retiring = actions
         .into_iter()
         .filter(|(component, action)| {
             active
@@ -403,8 +403,9 @@ pub(super) fn plan_with_invalidations(
                 .is_some_and(|node| node.role == EffectiveNodeRole::Singleton)
                 && matches!(action, NodeAction::Remove | NodeAction::Replace)
         })
+        .map(|(component, _)| component)
         .collect();
-    let retirement_order = retirement_order(active, &retirement_actions).into_boxed_slice();
+    let retirement_order = active.retirement_order(&retiring).into_boxed_slice();
 
     Ok(TransitionPlan {
         base_generation: active.generation,
@@ -414,54 +415,6 @@ pub(super) fn plan_with_invalidations(
         construction_order,
         retirement_order,
     })
-}
-
-fn retirement_order(
-    active: &EffectiveGraph,
-    executable: &BTreeMap<&'static str, NodeAction>,
-) -> Vec<&'static str> {
-    let mut remaining = executable
-        .iter()
-        .filter(|(_, action)| matches!(action, NodeAction::Remove | NodeAction::Replace))
-        .map(|(component, _)| *component)
-        .collect::<BTreeSet<_>>();
-    let mut order = Vec::with_capacity(remaining.len());
-
-    while !remaining.is_empty() {
-        let ready = remaining
-            .iter()
-            .filter(|component| {
-                !remaining.iter().any(|consumer| {
-                    consumer != *component && fixed_targets(active, consumer).contains(*component)
-                })
-            })
-            .copied()
-            .collect::<Vec<_>>();
-
-        if ready.is_empty() {
-            order.extend(remaining.iter().copied());
-            break;
-        }
-
-        for component in ready {
-            remaining.remove(component);
-            order.push(component);
-        }
-    }
-
-    order
-}
-
-fn fixed_targets(graph: &EffectiveGraph, consumer: &str) -> BTreeSet<&'static str> {
-    graph
-        .nodes
-        .get(consumer)
-        .into_iter()
-        .flat_map(|node| node.dependencies.iter())
-        .filter(|dependency| !is_live(dependency))
-        .flat_map(|dependency| dependency.targets.iter())
-        .filter_map(|target| target.component_id())
-        .collect()
 }
 
 fn diff(active: &EffectiveGraph, candidate: &EffectiveGraph) -> GraphDiff {

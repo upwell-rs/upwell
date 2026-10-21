@@ -93,3 +93,29 @@ fn runtime_resolver_omits_removed_components_by_absence() {
         "a removed component carries no decision and requires no candidate seed"
     );
 }
+
+#[test]
+fn a_rebound_consumer_that_reconstructs_is_displaced() {
+    let (active, candidate) = live_retarget_fixture();
+
+    let resolved = candidate
+        .resolve_runtime_transition(&active, &BTreeSet::new())
+        .expect("a live retarget resolves without restart");
+    let consumer = resolved
+        .structural()
+        .nodes
+        .iter()
+        .find(|node| node.component == "live-consumer")
+        .expect("the live consumer is planned");
+    let mut displaced = resolved.displaced().to_vec();
+
+    displaced.sort_unstable();
+
+    assert_eq!(consumer.action, NodeAction::RebindLive);
+    assert_eq!(
+        displaced,
+        ["live-consumer", "live-provider-a"],
+        "the rebound consumer is constructed again, so its active instance is displaced \
+         alongside the removed provider"
+    );
+}

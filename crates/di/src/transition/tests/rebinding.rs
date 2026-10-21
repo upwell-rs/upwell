@@ -15,7 +15,7 @@ fn accepted_live_consumers_rebind_in_place_without_propagating() {
     let switched = graph(true);
 
     let plan = active
-        .plan_runtime_transition(&switched, &BTreeSet::new(), |_| true)
+        .plan_runtime_transition(&switched, &BTreeSet::new(), |_, _| true)
         .expect("candidate uses active base generation");
 
     assert_eq!(action(&plan, "live-consumer"), Some(NodeAction::RebindLive));
@@ -37,8 +37,8 @@ fn rejected_live_consumers_reconstruct_and_propagate() {
     let switched = graph(true);
 
     let plan = active
-        .plan_runtime_transition(&switched, &BTreeSet::new(), |consumer| {
-            consumer != "live-consumer"
+        .plan_runtime_transition(&switched, &BTreeSet::new(), |_, after| {
+            after.id.consumer != "live-consumer"
         })
         .expect("candidate uses active base generation");
 
@@ -70,7 +70,7 @@ fn live_dependents_of_an_invalidated_root_rebind_in_place() {
     let roots = BTreeSet::from(["default-authenticator"]);
 
     let plan = active
-        .plan_runtime_transition(&candidate, &roots, |_| true)
+        .plan_runtime_transition(&candidate, &roots, |_, _| true)
         .expect("candidate uses active base generation");
 
     assert_eq!(

@@ -264,8 +264,8 @@ impl RuntimeTransitionReport {
             .find(|component| component.component == id)
     }
 
-    /// The stable IDs of the singletons the committed generation displaced (replaced or
-    /// removed), in retirement order: every consumer precedes the components it holds a
+    /// The stable IDs of the singletons the committed generation displaced (constructed
+    /// again or removed), in retirement order: every consumer precedes the components it holds a
     /// fixed dependency on. Components linked only through live dependencies may retire
     /// in either order. Each receives [`ComponentRetired`](crate::ComponentRetired) once. Empty unless
     /// the attempt committed.
