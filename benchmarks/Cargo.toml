@@ -16,6 +16,7 @@ path = "src/lib.rs"
 criterion = { version = "0.8.2", features = ["async_tokio"] }
 upwell-core = { path = "../crates/core" }
 upwell-di = { path = "../crates/di" }
+upwell-app = { path = "../crates/app", default-features = false }
 upwell-config = { path = "../crates/config" }
 upwell-transport = { path = "../crates/transport" }
 upwell-rpc = { path = "../crates/rpc" }
@@ -55,4 +56,8 @@ harness = false
 
 [[bench]]
 name = "di_graph_preparation"
+harness = false
+
+[[bench]]
+name = "reload_transition"
 harness = false

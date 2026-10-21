@@ -13,8 +13,7 @@ use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, Singleton,
-    TypeDescriptor,
+    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, TypeDescriptor,
 };
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
@@ -98,13 +97,8 @@ fn node<const HI: usize, const LO: usize>() -> ComponentDescriptor {
 
     ComponentDescriptor {
         id: Box::leak(format!("graph-node-{index}").into_boxed_str()),
-        name: Node::<HI, LO>::NAME,
-        ty: TypeDescriptor::of::<Node<HI, LO>>(Node::<HI, LO>::NAME),
-        scope: &Singleton,
-        condition: None,
         factories: factories::<HI, LO>,
-        hooks: || &[],
-        generation_snapshot: None,
+        ..ComponentDescriptor::of::<Node<HI, LO>>()
     }
 }
 
@@ -145,16 +139,20 @@ fn roster() -> &'static [ComponentDescriptor] {
     })
 }
 
-/// A registry of the first `count` roster nodes, with no providers. Panics if `count`
-/// exceeds [`MAX_NODES`].
-pub fn registry(count: usize) -> ComponentRegistry {
+/// The first `count` roster nodes. Panics if `count` exceeds [`MAX_NODES`].
+pub fn components(count: usize) -> &'static [ComponentDescriptor] {
     assert!(
         count <= MAX_NODES,
         "graph needs {count} nodes but the roster holds {MAX_NODES}"
     );
 
+    &roster()[..count]
+}
+
+/// A registry of the first `count` roster nodes, with no providers.
+pub fn registry(count: usize) -> ComponentRegistry {
     ComponentRegistry {
-        components: roster()[..count].to_vec(),
+        components: components(count).to_vec(),
         providers: Vec::new(),
     }
 }
