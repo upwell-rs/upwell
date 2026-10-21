@@ -126,7 +126,7 @@ impl CandidateGraph {
     }
 
     /// Whether the runtime can carry `component`'s instance into the candidate: a
-    /// singleton whose descriptor has not opted out of retention
+    /// singleton whose typed descriptor has not opted out of retention
     /// ([`is_retainable`](ComponentDescriptor::is_retainable)).
     fn retainable(&self, component: &str) -> bool {
         self.component(component).is_some_and(|descriptor| {
