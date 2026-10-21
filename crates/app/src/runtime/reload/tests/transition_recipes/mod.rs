@@ -1,8 +1,9 @@
-//! Transition-local one-shot factories and explicit hot updates through the
-//! transactional reload.
+//! Transition-local one-shot factories, explicit hot updates, and every strategy
+//! together through the transactional reload.
 
 mod fixture;
 mod hot_update;
+mod matrix;
 mod one_shot;
 
 use crate::AppRuntime;

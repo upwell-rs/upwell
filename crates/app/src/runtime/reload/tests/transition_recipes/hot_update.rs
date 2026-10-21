@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use super::fixture::{
-    Banner, HotUpdateMode, banner_constructions, build_recipe_app, config_dir_of, lock_test_guard,
-    set_hot_update, set_veto, vetoed_labels, write_recipe_config,
+    Banner, GateMode, HotUpdateMode, banner_constructions, build_recipe_app, config_dir_of,
+    lock_test_guard, set_gate, set_hot_update, vetoed_labels, write_recipe_config,
 };
 use super::relabel;
 use crate::{TransitionFailure, TransitionPhase};
@@ -66,7 +66,7 @@ async fn a_rejected_transition_never_runs_the_prepared_update() {
     let original = banner(&app);
     let generation = app.runtime().generation();
 
-    set_veto(true);
+    set_gate(GateMode::Veto);
     write_recipe_config(&config_dir_of(&dir), "two");
 
     let error = app
