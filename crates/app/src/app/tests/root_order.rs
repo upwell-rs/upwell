@@ -22,10 +22,28 @@ static UNSEEDED_CONSUMER: ComponentDescriptor = ComponentDescriptor::of::<Unseed
     .with_factories(factories![default "static" => unseeded_consumer])
     .without_retention();
 
+static INDEPENDENT_FACTORY_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+/// A factory-backed singleton with no dependencies, ordered before the unseeded one.
+struct Independent;
+
+test_component!(Independent, "independent");
+
+async fn independent() -> Independent {
+    INDEPENDENT_FACTORY_CALLS.fetch_add(1, Ordering::SeqCst);
+
+    Independent
+}
+
+static INDEPENDENT: ComponentDescriptor = ComponentDescriptor::of::<Independent>()
+    .with_factories(factories![default "static" => independent])
+    .without_retention();
+
 #[tokio::test]
-async fn unseeded_factoryless_dependency_is_reported_missing() {
+async fn unseeded_factoryless_dependency_is_rejected_before_any_factory_runs() {
     let error = App::<()>::builder("unseeded-root-order")
         .config_source(ConfigManager::<Toml>::empty())
+        .component_descriptor(&INDEPENDENT)
         .component_descriptor(&UNSEEDED_CONSUMER)
         .component_descriptor(&UNSEEDED)
         .prepare()
@@ -41,4 +59,5 @@ async fn unseeded_factoryless_dependency_is_reported_missing() {
         ),
         "expected the unseeded singleton to be reported missing, got {error:?}"
     );
+    assert_eq!(INDEPENDENT_FACTORY_CALLS.load(Ordering::SeqCst), 0);
 }

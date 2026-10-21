@@ -710,6 +710,8 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             resolvers,
         } = self;
 
+        ensure_seeded(&root_order, &instances)?;
+
         let root = ScopeContainer::build_root(
             &root_order,
             instances,
@@ -757,6 +759,26 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             reload_triggers,
         })
     }
+}
+
+/// Rejects a factory-less root singleton that nothing seeded before any factory runs.
+///
+/// The effective graph orders every factory-less singleton as already available, so
+/// without this check a factory depending on an unseeded singleton could run, with its
+/// side effects, before the root build reached the missing seed.
+fn ensure_seeded(order: &[ComponentDescriptor], instances: &[BoxedComponent]) -> crate::Result<()> {
+    let seeded = instances
+        .iter()
+        .map(|instance| instance.ty.type_id)
+        .collect::<HashSet<_>>();
+
+    for component in order {
+        if component.effective_factory()?.is_none() && !seeded.contains(&component.ty.type_id) {
+            return Err(upwell_di::Error::MissingComponent(component.name).into());
+        }
+    }
+
+    Ok(())
 }
 
 macro_rules! seed_dirs {
