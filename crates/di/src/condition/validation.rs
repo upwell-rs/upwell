@@ -25,12 +25,12 @@ impl ConditionCatalog {
         let mut components = BTreeMap::new();
         let mut by_type = HashMap::new();
 
-        for component in resolved {
-            if components.insert(component.id, component).is_some() {
+        for component in &resolved {
+            if components.insert(component.id, *component).is_some() {
                 return Err(ConditionError::DuplicateComponentId(component.id));
             }
 
-            by_type.insert(component.ty.type_id, component);
+            by_type.insert(component.ty.type_id, *component);
         }
 
         let mut facts = BTreeMap::new();
@@ -65,7 +65,7 @@ impl ConditionCatalog {
         let provider_order = registry
             .provider_order(&components.values().copied().collect::<Vec<_>>())
             .map_err(ConditionError::Registry)?;
-        let identity = super::CatalogIdentity::new(registry, &facts)?;
+        let identity = super::CatalogIdentity::new(&resolved, &registry.providers, &facts)?;
         let config_inputs = super::graph::config_inputs(components.values());
         let catalog = Self {
             identity,

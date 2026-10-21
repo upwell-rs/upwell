@@ -132,11 +132,12 @@ impl TypeIdentity {
 
 impl CatalogIdentity {
     fn new(
-        registry: &ComponentRegistry,
+        resolved: &[ComponentDescriptor],
+        providers: &[ProviderDescriptor],
         facts: &BTreeMap<ConfigFactId, ConfigFactDescriptor>,
     ) -> Result<Self, ConditionError> {
         Ok(Self {
-            registry: RegistryIdentity::new(registry)?,
+            registry: RegistryIdentity::from_resolved(resolved, providers)?,
             facts: facts.values().copied().collect(),
         })
     }
@@ -153,6 +154,17 @@ impl RegistryIdentity {
         let components = registry
             .resolved_components()
             .map_err(ConditionError::Registry)?;
+
+        Self::from_resolved(&components, &registry.providers)
+    }
+
+    /// The identity of components already collapsed by
+    /// [`ComponentRegistry::resolved_components`], so a caller that just resolved
+    /// them does not validate every factory a second time.
+    fn from_resolved(
+        components: &[ComponentDescriptor],
+        providers: &[ProviderDescriptor],
+    ) -> Result<Self, ConditionError> {
         let by_type = components
             .iter()
             .map(|component| (component.ty.type_id, *component))
@@ -183,8 +195,7 @@ impl RegistryIdentity {
             })
             .collect::<Result<Vec<_>, ConditionError>>()?
             .into_boxed_slice();
-        let mut providers = registry
-            .providers
+        let mut providers = providers
             .iter()
             .map(|provider| {
                 let component = by_type.get(&provider.concrete_ty.type_id).ok_or(
