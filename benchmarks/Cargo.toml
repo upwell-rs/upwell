@@ -52,3 +52,7 @@ harness = false
 [[bench]]
 name = "ws_pubsub_fanout"
 harness = false
+
+[[bench]]
+name = "di_graph_preparation"
+harness = false
