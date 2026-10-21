@@ -3,9 +3,10 @@
 A config reload can change which components are eligible and what they depend on. The planner
 compares the active effective graph with the candidate graph and assigns every affected singleton a
 minimum action: `Retain`, `RebindLive`, `Replace`, `Add` or `Remove`. Each affected component then
-satisfies its action with a **strategy**. A component gets a strategy that preserves its instance
-only if it has declared that the strategy is safe. The framework never guesses whether mutating an
-instance is safe.
+satisfies its action with a **strategy**. Keeping an instance whose own inputs did not change, or
+rebinding its live `Dep<T>` cells, needs no declaration. Every strategy that runs component code
+against a changed instance (hot update, transition handler, replacement) must be declared by the
+component. The framework never guesses whether mutating an instance is safe.
 
 This guide is the contract for those strategies. For the hooks that observe and gate a transition,
 see [Transition hooks](transition-hooks.md).

@@ -19,8 +19,11 @@ impl ScopeContainer {
     /// Snapshots one singleton component out of this container's *local* store into
     /// fresh generation-local storage.
     ///
-    /// The descriptor must be singleton-scoped and carry a typed generation-snapshot
-    /// adapter (raw [`manual`](ComponentDescriptor::manual) descriptors never do).
+    /// The descriptor must be singleton-scoped and
+    /// [retainable](ComponentDescriptor::is_retainable): a typed descriptor that has not
+    /// opted out of retention. Raw [`manual`](ComponentDescriptor::manual) descriptors and
+    /// [`without_retention`](ComponentDescriptor::without_retention) descriptors return
+    /// [`SnapshotUnavailable`](Error::SnapshotUnavailable).
     /// Only the local concrete slot is consulted — no parent walk, no provider
     /// aliases — and the adapter runs under panic containment, so a panicking
     /// `Clone` surfaces as a redacted error instead of unwinding through the caller.
