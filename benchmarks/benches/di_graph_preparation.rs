@@ -1,0 +1,95 @@
+//! Wall-clock cost of preparing a DI graph: the work startup does once and every reload
+//! transition repeats before any component is constructed.
+//!
+//! - `topological_sort` — wait expansion plus construction ordering of factory-backed singletons.
+//! - `effective_graph` — the full `EffectiveGraph::build`: resolved components, provider selection,
+//!   validation, demand capture, the reverse index, and the construction order.
+//! - `condition_catalog` — building a condition catalog and evaluating it for an empty fact
+//!   snapshot, the cost every startup and reload pays even with no conditional component.
+//!
+//! Sizes double from 256 to 2048 nodes, so linear preparation shows a flat per-element
+//! throughput while a quadratic term shows up as throughput halving per step.
+
+use std::collections::HashSet;
+use std::hint::black_box;
+
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use upwell_benchmarks::graph;
+use upwell_core::RuntimeGenerationId;
+use upwell_di::{ConditionCatalog, ConditionFactSnapshot, EffectiveGraph, topological_sort};
+
+const SIZES: [usize; 4] = [256, 512, 1024, 2048];
+
+fn sort(c: &mut Criterion) {
+    let mut group = c.benchmark_group("di_graph_preparation/topological_sort");
+
+    for size in SIZES {
+        let registry = graph::registry(size);
+        let selection = registry
+            .provider_selection_model(&registry.components)
+            .expect("graph provider selection builds");
+        let prebuilt = HashSet::new();
+
+        group.throughput(Throughput::Elements(size as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, _| {
+            bencher.iter(|| {
+                black_box(
+                    topological_sort(&registry.components, &prebuilt, &selection, |_, _| true)
+                        .expect("acyclic graph sorts"),
+                )
+            });
+        });
+    }
+
+    group.finish();
+}
+
+fn effective(c: &mut Criterion) {
+    let mut group = c.benchmark_group("di_graph_preparation/effective_graph");
+
+    for size in SIZES {
+        let registry = graph::registry(size);
+
+        group.throughput(Throughput::Elements(size as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, _| {
+            bencher.iter(|| {
+                black_box(
+                    EffectiveGraph::build(RuntimeGenerationId::INITIAL, &registry, |_, _| true)
+                        .expect("graph validates"),
+                )
+            });
+        });
+    }
+
+    group.finish();
+}
+
+fn conditions(c: &mut Criterion) {
+    let mut group = c.benchmark_group("di_graph_preparation/condition_catalog");
+    let snapshot = ConditionFactSnapshot::new(Vec::new()).expect("empty fact snapshot builds");
+
+    for size in SIZES {
+        let registry = graph::registry(size);
+
+        group.throughput(Throughput::Elements(size as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, _| {
+            bencher.iter(|| {
+                black_box(
+                    ConditionCatalog::new(&registry, [])
+                        .expect("unconditional catalog builds")
+                        .evaluate(&snapshot)
+                        .expect("unconditional catalog evaluates"),
+                )
+            });
+        });
+    }
+
+    group.finish();
+}
+
+criterion_group! {
+    name = benches;
+    config = Criterion::default().without_plots();
+    targets = sort, effective, conditions
+}
+criterion_main!(benches);
