@@ -40,9 +40,10 @@ Attribute-macro sugar for the same metadata is tracked in #298.
   consumer keeps the live cell of the root that constructed it, and the commit republishes that
   cell with the candidate's value. This needs a single, eagerly resolved dependency on a singleton
   component or provider mapping. The consumer must be carried across generations through its
-  snapshot adapter, and every target's live cell must be reachable: provider mappings always are,
-  and a component target is when its descriptor keeps its snapshot adapter. Otherwise the consumer
-  falls back to the next strategy below and is constructed again.
+  snapshot adapter, and every target's live cell must be reachable. Provider mappings and typed
+  component descriptors always are, even for a target declared `.without_retention()`; only a raw
+  `manual` descriptor is not. Otherwise the consumer falls back to the next strategy below and is
+  constructed again.
 - **Hot update** keeps the instance. The preparation reads the instance and candidate dependencies
   and returns an action without mutating anything. The action runs inside the terminal
   publication, after the live rebinds. Only components stored as `Arc<Self>` can declare one, and

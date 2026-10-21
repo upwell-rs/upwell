@@ -1,25 +1,29 @@
-//! Runtime live rebinding depends on the target as well as the consumer: a retained
-//! consumer is rebound in place only when its live target exposes a live cell, and is
-//! otherwise reconstructed (and displaced) rather than failing during preparation.
+//! Runtime live rebinding depends on the target as well as the consumer. A retained
+//! consumer is rebound in place whenever its live target exposes a typed live cell, even
+//! when the target itself is never retained. A target without typed access reconstructs
+//! the consumer (which is displaced) instead of failing during preparation.
 
 use upwell_di::{BindingTransition, Dep};
 
 use super::*;
 use crate::transition::ResolvedTransitionPlan;
 
-/// A singleton whose descriptor keeps its generation-snapshot adapter, so the runtime
-/// can reach its live cell.
-pub(super) struct AdaptedTarget;
+/// A singleton reached only through a raw descriptor without typed access, so the
+/// runtime cannot read its live cell.
+pub(super) struct UntypedTarget;
 
-test_component!(AdaptedTarget, "adapted-target");
+test_component!(UntypedTarget, "untyped-target");
 
-fn adapted_target() -> ComponentDescriptor {
-    async fn construct() -> AdaptedTarget {
-        AdaptedTarget
+fn untyped_target() -> ComponentDescriptor {
+    async fn construct() -> UntypedTarget {
+        UntypedTarget
     }
 
-    ComponentDescriptor::of::<AdaptedTarget>()
-        .with_factories(upwell_di::factories!["adapted-target" => construct])
+    ComponentDescriptor {
+        generation_snapshot: None,
+        ..ComponentDescriptor::of::<UntypedTarget>()
+            .with_factories(upwell_di::factories!["untyped-target" => construct])
+    }
 }
 
 /// Declares a retainable unit consumer `$ty` holding a live `Dep<$target>`.
@@ -41,12 +45,17 @@ macro_rules! live_watcher {
 }
 
 live_watcher!(
-    AdaptedWatcher,
-    "adapted-watcher",
-    adapted_watcher,
-    AdaptedTarget
+    UnretainedWatcher,
+    "unretained-watcher",
+    unretained_watcher,
+    InvalidatedRoot
 );
-live_watcher!(BareWatcher, "bare-watcher", bare_watcher, InvalidatedRoot);
+live_watcher!(
+    UntypedWatcher,
+    "untyped-watcher",
+    untyped_watcher,
+    UntypedTarget
+);
 
 /// Resolves a runtime transition that reconstructs `target` under its live `watcher`.
 fn reconstruct_target(
@@ -81,31 +90,35 @@ fn strategy_of(
 }
 
 #[test]
-fn a_live_target_with_a_snapshot_adapter_rebinds_its_consumer_in_place() {
-    let plan = reconstruct_target(adapted_target(), adapted_watcher());
+fn a_never_retained_live_target_still_rebinds_its_consumer_in_place() {
+    let target = invalidated_root();
 
-    assert!(binding_of(&plan, "adapted-watcher").in_place);
+    assert!(!target.is_retainable() && target.exposes_live_cell());
+
+    let plan = reconstruct_target(target, unretained_watcher());
+
+    assert!(binding_of(&plan, "unretained-watcher").in_place);
     assert_eq!(
-        strategy_of(&plan, "adapted-watcher"),
+        strategy_of(&plan, "unretained-watcher"),
         Some(ComponentTransitionStrategy::Retain)
     );
-    assert!(!plan.displaced().contains(&"adapted-watcher"));
+    assert!(!plan.displaced().contains(&"unretained-watcher"));
 }
 
 #[test]
-fn a_live_target_without_a_snapshot_adapter_reconstructs_its_consumer() {
-    let plan = reconstruct_target(invalidated_root(), bare_watcher());
+fn a_live_target_without_typed_access_reconstructs_its_consumer() {
+    let plan = reconstruct_target(untyped_target(), untyped_watcher());
 
     assert!(
-        !binding_of(&plan, "bare-watcher").in_place,
+        !binding_of(&plan, "untyped-watcher").in_place,
         "the target's live cell is unreachable, so the binding cannot rebind in place"
     );
     assert_eq!(
-        strategy_of(&plan, "bare-watcher"),
+        strategy_of(&plan, "untyped-watcher"),
         Some(ComponentTransitionStrategy::Reconstruct)
     );
     assert!(
-        plan.displaced().contains(&"bare-watcher"),
+        plan.displaced().contains(&"untyped-watcher"),
         "the reconstructed watcher's active instance is displaced"
     );
 }

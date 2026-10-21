@@ -12,6 +12,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use upwell_core::{Singleton, StaticScope};
 
 use super::ScopeContainer;
+use crate::descriptors::component::GenerationSnapshot;
 use crate::{BoxedComponent, ComponentDescriptor, Error};
 
 impl ScopeContainer {
@@ -41,7 +42,10 @@ impl ScopeContainer {
             .registry
             .component(descriptor.ty.type_id)
             .ok_or(Error::MissingComponent(descriptor.name))?;
-        let Some(snapshot) = active_descriptor.generation_snapshot else {
+        let Some(snapshot) = active_descriptor
+            .generation_snapshot
+            .and_then(GenerationSnapshot::retention)
+        else {
             return Err(Error::SnapshotUnavailable {
                 component: descriptor.id,
             });
