@@ -1,4 +1,7 @@
 //! Component-owned transition strategies and the restart reasons that reject them.
+//!
+//! The complete strategy contract — selection order, valid actions and scopes, failure,
+//! panic and cancellation semantics — is documented in `docs/transition-strategies.md`.
 
 use std::fmt;
 

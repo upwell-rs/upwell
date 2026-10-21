@@ -9,6 +9,8 @@ next to the active one, and either publishes the candidate or drops it whole.
 Components and operators take part through `#[hook(Kind)]` methods: they can inspect a pending
 change, veto it, observe how it ended, and learn when they have been displaced. This guide covers
 the phases in order, how hooks are routed, and what each hook can see.
+How each affected component keeps, updates or replaces its instance is covered by
+[Component transition strategies](transition-strategies.md).
 
 The snippets below are abridged from the facade test
 [`tests/transition_lifecycle`](../tests/transition_lifecycle/app.rs), which compiles them through
@@ -110,7 +112,8 @@ After a commit, every singleton the commit **replaced or removed** receives `Com
 once. Its `&self` is the displaced instance itself, resolved through the old generation's root,
 never its replacement. `ComponentRetirement` names the component and gives its
 `RetirementReason` (`Replaced` or `Removed`), the attempt, and both generation IDs. Retained,
-rebound, and newly added components never retire.
+hot-updated, rebound-in-place, and newly added components never retire. A component whose live
+dependencies could not be rebound in place is constructed again, so it retires as `Replaced`.
 
 Retirement is logical displacement, not destruction. Pinned `RuntimeView`s, open scopes, and other
 holders may keep using the instance after retirement, until they release it. A retirement hook
