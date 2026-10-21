@@ -114,7 +114,7 @@ impl<C: Component> OneShot<C> {
 /// Runs a transition `handler` against the change set on `cx`, boxing its selection.
 ///
 /// Erased to the [`ComponentFactory`](crate::descriptors::ComponentFactory) fn-pointer
-/// shape; the candidate builder unboxes the selection with [`take_selection`].
+/// shape; the candidate builder unboxes the selection with `take_selection`.
 pub fn dispatch_transition<'a, C, H>(
     handler: H,
     cx: &'a mut ComponentConstructionContext,

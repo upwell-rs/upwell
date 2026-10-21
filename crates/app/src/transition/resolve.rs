@@ -126,7 +126,8 @@ impl CandidateGraph {
     }
 
     /// Whether the runtime can carry `component`'s instance into the candidate: a
-    /// singleton whose descriptor carries the typed generation-snapshot adapter.
+    /// singleton whose descriptor has not opted out of retention
+    /// ([`is_retainable`](ComponentDescriptor::is_retainable)).
     fn retainable(&self, component: &str) -> bool {
         self.component(component).is_some_and(|descriptor| {
             descriptor.scope.id() == upwell_core::Singleton::ID && descriptor.is_retainable()
