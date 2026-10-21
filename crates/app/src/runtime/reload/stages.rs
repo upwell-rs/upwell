@@ -16,10 +16,11 @@ use crate::registry::AppConditionEvaluation;
 use crate::transition::{CandidateGraph, CommitActions, ResolvedTransitionPlan};
 
 /// Snapshots the staged condition facts and incrementally re-evaluates conditions against
-/// the base generation's catalog.
+/// the base generation's catalog, which was validated once at startup: fact-descriptor
+/// callbacks do not run again here.
 ///
-/// The fact-extraction, descriptor, and condition callbacks are application extension
-/// points, so the whole stage runs inside a panic boundary: a panic returns the redacted
+/// The fact-extraction and condition callbacks are application extension points, so the
+/// whole stage runs inside a panic boundary: a panic returns the redacted
 /// [`CandidatePreparationPanicked`](crate::Error::CandidatePreparationPanicked) error and
 /// aborts the reload before any candidate graph, root, hook, or publication work.
 pub(super) fn evaluate_conditions(
@@ -37,12 +38,8 @@ pub(super) fn evaluate_conditions(
                 .map(|entry| (entry.type_id(), entry.path(), entry.shared_value())),
             |path| staged.resolve_raw(path),
         )?;
-        let facts = catalog
-            .condition_facts
-            .iter()
-            .flat_map(|source| (source.facts.descriptors)(source.path));
 
-        catalog.evaluate_changed_conditions(facts, condition.evaluation(), &snapshot)
+        condition.evaluation().reevaluate(&snapshot)
     }))
     .map_err(|_| crate::Error::CandidatePreparationPanicked)??;
 

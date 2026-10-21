@@ -2,6 +2,7 @@
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 use upwell_config::condition::ResolvedConfig;
@@ -13,10 +14,24 @@ use super::AppRegistry;
 use crate::error::Error;
 
 /// A condition evaluation bound to one application's DI and config catalogs.
-#[derive(Clone, Debug)]
+///
+/// It keeps the validated [`ConditionCatalog`] it was evaluated against, so a reload
+/// re-evaluates against that same catalog instead of rebuilding it from the registry.
+#[derive(Clone)]
 pub struct AppConditionEvaluation {
     evaluation: ConditionEvaluation,
     bindings: HashMap<(TypeId, String), usize>,
+    catalog: Arc<ConditionCatalog>,
+}
+
+impl fmt::Debug for AppConditionEvaluation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AppConditionEvaluation")
+            .field("evaluation", &self.evaluation)
+            .field("bindings", &self.bindings)
+            .finish_non_exhaustive()
+    }
 }
 
 impl AppConditionEvaluation {
@@ -26,6 +41,21 @@ impl AppConditionEvaluation {
 
     pub(crate) fn belongs_to(&self, registry: &AppRegistry) -> bool {
         self.bindings == registry.condition_identity()
+    }
+
+    /// Incrementally re-evaluates against the catalog this evaluation was built from.
+    ///
+    /// The catalog and binding identity are carried over unchanged, so no application
+    /// identity check is needed: the result belongs to the same application by
+    /// construction. Fact-descriptor callbacks are not called again.
+    pub(crate) fn reevaluate(&self, snapshot: &ConditionFactSnapshot) -> crate::Result<Self> {
+        let evaluation = self.catalog.evaluate_changed(&self.evaluation, snapshot)?;
+
+        Ok(Self {
+            evaluation,
+            bindings: self.bindings.clone(),
+            catalog: Arc::clone(&self.catalog),
+        })
     }
 }
 
@@ -42,12 +72,13 @@ impl AppRegistry {
         facts: impl IntoIterator<Item = ConfigFactDescriptor>,
         snapshot: &ConditionFactSnapshot,
     ) -> Result<AppConditionEvaluation, upwell_di::ConditionError> {
-        let evaluation =
-            ConditionCatalog::new(&self.component_registry(), facts)?.evaluate(snapshot)?;
+        let catalog = Arc::new(ConditionCatalog::new(&self.component_registry(), facts)?);
+        let evaluation = catalog.evaluate(snapshot)?;
 
         Ok(AppConditionEvaluation {
             evaluation,
             bindings: self.condition_identity(),
+            catalog,
         })
     }
 
@@ -145,12 +176,13 @@ impl AppRegistry {
             return Err(Error::ConditionEvaluationApplicationMismatch);
         }
 
-        let evaluation = ConditionCatalog::new(&self.component_registry(), facts)?
-            .evaluate_changed(&previous.evaluation, snapshot)?;
+        let catalog = Arc::new(ConditionCatalog::new(&self.component_registry(), facts)?);
+        let evaluation = catalog.evaluate_changed(&previous.evaluation, snapshot)?;
 
         Ok(AppConditionEvaluation {
             evaluation,
             bindings,
+            catalog,
         })
     }
 
