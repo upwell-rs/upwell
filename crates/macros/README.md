@@ -46,6 +46,12 @@ impl Pool {
 }
 ```
 
+The same block declares how a singleton is carried across a runtime transition: a `#[replace]`
+method builds the new instance from `Previous<Self>`, a `#[transition]` handler picks a one-shot
+factory for one change, and a `#[hot_update]` method prepares an in-place update. Each generates
+the descriptor the `factories!` builder declares; see the
+[transition strategies guide](../../docs/transition-strategies.md).
+
 `#[when(<bool expr>)]`, placed below a component macro, makes the component eligible only while
 the expression holds. The expression is ordinary Rust. A `#[config(path = ..)]` type used as a
 receiver reads its staged value, a component used as a receiver reads its eligibility, and

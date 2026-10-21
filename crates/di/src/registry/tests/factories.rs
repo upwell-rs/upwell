@@ -205,6 +205,34 @@ fn transition_handlers_and_hot_updates_share_the_replacement_contract() {
 }
 
 #[test]
+fn transition_recipes_are_singleton_only() {
+    static RECIPES: [ComponentFactoryDescriptor; 4] = [
+        unbuilt_recipe("default", Default, no_dependencies),
+        unbuilt_recipe("replace", Replacement, no_dependencies),
+        unbuilt_recipe("handler", Transition, no_dependencies),
+        unbuilt_recipe("update", HotUpdate, no_dependencies),
+    ];
+
+    let transient = ComponentRegistry {
+        components: vec![descriptor_with_factories(|| &RECIPES).with_scope(&Transient)],
+        providers: Vec::new(),
+    }
+    .resolved_components()
+    .expect_err("a transient component cannot declare transition recipes");
+
+    resolve(|| &RECIPES).expect("a singleton declares every recipe");
+
+    assert!(matches!(
+        transient,
+        Error::TransitionRecipeOutOfScope {
+            role: Replacement,
+            scope: "Transient",
+            ..
+        }
+    ));
+}
+
+#[test]
 fn a_replacement_edge_may_be_no_stricter_than_its_ordinary_edge() {
     static RELAXED: [ComponentFactoryDescriptor; 2] = [
         unbuilt_recipe("default", Default, one_u8),

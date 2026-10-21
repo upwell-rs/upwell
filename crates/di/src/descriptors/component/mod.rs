@@ -18,7 +18,7 @@ mod live;
 pub use context::ComponentConstructionContext;
 pub use factory::{
     ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole,
-    Registration,
+    DeclaredScope, Registration,
 };
 pub use live::{Dep, Live, LiveCell, LiveRebind, LiveRef};
 

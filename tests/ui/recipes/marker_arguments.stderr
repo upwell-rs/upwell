@@ -1,0 +1,5 @@
+error: `#[replace]` takes no arguments
+ --> tests/ui/recipes/marker_arguments.rs:8:7
+  |
+8 |     #[replace("carry")]
+  |       ^^^^^^^^^^^^^^^^

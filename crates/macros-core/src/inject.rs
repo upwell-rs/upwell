@@ -176,9 +176,6 @@ pub fn field_injection_component(
     let injectable = paths.core("Injectable");
     let distributed_slice = paths.core("linkme::distributed_slice");
     let linkme_crate = paths.core("linkme");
-    let inventory = paths.core("inventory");
-    let registration = paths.core("Registration");
-    let descriptor_for = paths.core("DescriptorFor");
     let result = paths.core("DiResult");
     let type_descriptor = paths.core("TypeDescriptor");
     let descriptor_trait = paths.core("Descriptor");
@@ -258,19 +255,12 @@ pub fn field_injection_component(
                 role: #component_factory_role::Default,
             }
         };
-        let register_default = crate::backend::dual_backend(
-            quote! {
-                #inventory::submit! {
-                    #descriptor_for::<#self_ident, #component_factory_descriptor>::new(#factory_literal)
-                }
-            },
-            quote! {
-                #[#distributed_slice(#registrations_slice)]
-                #[linkme(crate = #linkme_crate)]
-                #[allow(unsafe_code)]
-                static __UPWELL_DEFAULT_FACTORY: #registration =
-                    #registration::Factory(#factory_literal);
-            },
+        let register_default = register_factory(
+            &self_ident,
+            registrations_slice,
+            &format_ident!("__UPWELL_DEFAULT_FACTORY"),
+            &factory_literal,
+            paths,
         );
 
         quote! {
@@ -346,6 +336,37 @@ pub fn field_injection_component(
     }
 }
 
+/// Appends `factory`, a `ComponentFactoryDescriptor` literal, to `self_ty`'s registrations:
+/// an `inventory` submission, or a `static` named `name` in its `linkme` slice.
+pub fn register_factory(
+    self_ty: &impl ToTokens,
+    registrations_slice: &syn::Ident,
+    name: &syn::Ident,
+    factory: &TokenStream,
+    paths: &Paths,
+) -> TokenStream {
+    let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
+    let distributed_slice = paths.core("linkme::distributed_slice");
+    let linkme_crate = paths.core("linkme");
+    let inventory = paths.core("inventory");
+    let registration = paths.core("Registration");
+    let descriptor_for = paths.core("DescriptorFor");
+
+    crate::backend::dual_backend(
+        quote! {
+            #inventory::submit! {
+                #descriptor_for::<#self_ty, #component_factory_descriptor>::new(#factory)
+            }
+        },
+        quote! {
+            #[#distributed_slice(#registrations_slice)]
+            #[linkme(crate = #linkme_crate)]
+            #[allow(unsafe_code)]
+            static #name: #registration = #registration::Factory(#factory);
+        },
+    )
+}
+
 /// Emits an explicit `factory = path` factory entry: it appends a non-default
 /// [`ComponentFactoryDescriptor`] to the type's factory slice, driving the given
 /// async factory through the build-time `Factory` machinery (so the path's
@@ -364,11 +385,6 @@ pub fn explicit_factory(
     let dispatch_factory = paths.core("dispatch_factory");
     let factory_dependencies = paths.core("factory_dependencies");
     let boxed_component = paths.core("BoxedComponent");
-    let distributed_slice = paths.core("linkme::distributed_slice");
-    let linkme_crate = paths.core("linkme");
-    let inventory = paths.core("inventory");
-    let registration = paths.core("Registration");
-    let descriptor_for = paths.core("DescriptorFor");
     let result = paths.core("DiResult");
 
     let factory_literal = quote! {
@@ -379,19 +395,12 @@ pub fn explicit_factory(
             role: #component_factory_role::Explicit,
         }
     };
-    let register = crate::backend::dual_backend(
-        quote! {
-            #inventory::submit! {
-                #descriptor_for::<#self_ident, #component_factory_descriptor>::new(#factory_literal)
-            }
-        },
-        quote! {
-            #[#distributed_slice(#registrations_slice)]
-            #[linkme(crate = #linkme_crate)]
-            #[allow(unsafe_code)]
-            static __UPWELL_EXPLICIT_FACTORY: #registration =
-                #registration::Factory(#factory_literal);
-        },
+    let register = register_factory(
+        self_ident,
+        registrations_slice,
+        &format_ident!("__UPWELL_EXPLICIT_FACTORY"),
+        &factory_literal,
+        paths,
     );
 
     quote! {

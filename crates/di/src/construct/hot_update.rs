@@ -49,6 +49,12 @@ pub trait HotUpdateOutput {
 /// retained instance itself. A by-value handle derives a separate copy on every
 /// resolution, so an update applied to it would be lost; such components cannot
 /// declare a hot update.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a hot-update preparation",
+    label = "expected `async fn(Previous<C>, ..) -> HotUpdate<C>`",
+    note = "a hot update takes `Previous<C>` first, then at most seven injectable parameters, and returns `HotUpdate<C>` or `Result<HotUpdate<C>, E>`",
+    note = "only components stored as `Arc<Self>` can declare one; a `by_value` component cannot"
+)]
 pub trait HotUpdateFactory<Args>: Sized {
     /// The dependency edges of the parameters after [`Previous`], in order.
     fn dependencies() -> Vec<DependencyDescriptor>;

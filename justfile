@@ -102,7 +102,7 @@ test-extended:
         --filterset 'all() - ({{ critical_filter }})'
 
 test-ui:
-    cargo nextest run -p upwell --all-features --locked --test when_ui
+    cargo nextest run -p upwell --all-features --locked --test ui
 
 test-doc:
     cargo test --doc --workspace --all-features --locked

@@ -1,0 +1,19 @@
+error[E0277]: `fn(Previous<Ledger>, Cell<u8>) -> impl Future<Output = Ledger> {Ledger::__upwell_replace}` is not a replacement factory
+ --> tests/ui/recipes/replacement_parameter.rs:9:14
+  |
+6 | #[methods]
+  | ---------- required by a bound introduced by this call
+...
+9 |     async fn carry(_previous: Previous<Self>, _count: std::cell::Cell<u8>) -> Self {
+  |              ^^^^^ expected `async fn(Previous<C>, ..) -> C`
+  |
+  = help: the trait `ReplacementFactory<_>` is not implemented for fn item `fn(Previous<Ledger>, Cell<u8>) -> impl Future<Output = Ledger> {Ledger::__upwell_replace}`
+  = note: a replacement factory takes `Previous<C>` first, then at most seven injectable parameters, and returns `C` or `Result<C, E>`
+note: required by a bound in `dispatch_replacement`
+ --> crates/di/src/construct/replacement.rs
+  |
+  | pub fn dispatch_replacement<'a, F, Args>(
+  |        -------------------- required by a bound in this function
+...
+  |     F: ReplacementFactory<Args> + 'a,
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `dispatch_replacement`

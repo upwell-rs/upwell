@@ -1,0 +1,5 @@
+error: the first parameter of a `#[replace]` recipe must be `Previous<Self>`, the active instance it replaces
+  --> tests/ui/recipes/missing_previous.rs:16:27
+   |
+16 |     async fn carry(clock: Arc<Clock>) -> Self {
+   |                           ^^^^^^^^^^

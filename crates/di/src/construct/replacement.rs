@@ -41,6 +41,11 @@ impl<C: Component> Deref for Previous<C> {
 
 /// An async replacement factory: [`Previous<C>`] first, then [`FromContainer`]
 /// parameters, returning a [`FactoryOutput`] for the same component `C`.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a replacement factory",
+    label = "expected `async fn(Previous<C>, ..) -> C`",
+    note = "a replacement factory takes `Previous<C>` first, then at most seven injectable parameters, and returns `C` or `Result<C, E>`"
+)]
 pub trait ReplacementFactory<Args>: Sized {
     /// The dependency edges of the parameters after [`Previous`], in order.
     fn dependencies() -> Vec<DependencyDescriptor>;

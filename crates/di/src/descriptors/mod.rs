@@ -7,10 +7,10 @@ pub use builder::{erase_provider, provider_live_cell};
 
 pub use component::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole, Dep,
-    Dynamic, Injectable, Live, LiveCell, LiveRebind, LiveRef, Provide, ProviderDescriptor,
-    ProviderOf, ProviderOrder, ProviderOrderDirection, Registration, ServiceComponent, Wired,
-    Wiring,
+    ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole,
+    DeclaredScope, Dep, Dynamic, Injectable, Live, LiveCell, LiveRebind, LiveRef, Provide,
+    ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection, Registration,
+    ServiceComponent, Wired, Wiring,
 };
 
 pub use upwell_core::{
