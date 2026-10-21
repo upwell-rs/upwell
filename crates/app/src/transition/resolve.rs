@@ -1,6 +1,6 @@
 //! Resolution of explicit and runtime-default strategy decisions into a plan.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
 use upwell_core::StaticScope;
@@ -172,6 +172,11 @@ impl CandidateGraph {
         retire_removed_by_absence: bool,
     ) -> crate::Result<ResolvedTransitionPlan> {
         let mut decisions = BTreeMap::new();
+        let planned = structural
+            .nodes
+            .iter()
+            .map(|node| node.component)
+            .collect::<HashSet<_>>();
 
         for decision in requested {
             if decisions
@@ -193,12 +198,7 @@ impl CandidateGraph {
 
         if let Some(component) = decisions
             .keys()
-            .find(|component| {
-                !structural
-                    .nodes
-                    .iter()
-                    .any(|node| node.component == **component)
-            })
+            .find(|component| !planned.contains(**component))
             .copied()
         {
             return Err(RestartRequired {
@@ -209,6 +209,7 @@ impl CandidateGraph {
             .into());
         }
         let mut resolved = Vec::with_capacity(structural.nodes.len());
+        let mut decided = HashSet::with_capacity(structural.nodes.len());
 
         for node in &structural.nodes {
             let strategy = decisions.get(node.component).copied();
@@ -221,6 +222,7 @@ impl CandidateGraph {
             validate_decision(self, &structural, node, strategy)?;
 
             if let Some(strategy) = strategy {
+                decided.insert(node.component);
                 resolved.push(ComponentTransitionDecision {
                     component: node.component,
                     strategy,
@@ -234,10 +236,7 @@ impl CandidateGraph {
             .filter(|component| component.scope.id() == upwell_core::Singleton::ID)
             .filter(|component| component.id != upwell_di::ROOT_RESOLVER_ID)
         {
-            if resolved
-                .iter()
-                .any(|decision| decision.component == component.id)
-            {
+            if decided.contains(component.id) {
                 continue;
             }
 
@@ -304,15 +303,18 @@ fn displaced(
     structural: &TransitionPlan,
     decisions: &[ComponentTransitionDecision],
 ) -> Vec<&'static str> {
+    let constructed = decisions
+        .iter()
+        .filter(|decision| !decision.strategy.retains_instance())
+        .map(|decision| decision.component)
+        .collect::<HashSet<_>>();
     let displaced = structural
         .nodes
         .iter()
         .filter(|node| node.role == EffectiveNodeRole::Singleton)
         .filter(|node| match node.action {
             NodeAction::Remove => true,
-            NodeAction::Replace | NodeAction::RebindLive => decisions.iter().any(|decision| {
-                decision.component == node.component && !decision.strategy.retains_instance()
-            }),
+            NodeAction::Replace | NodeAction::RebindLive => constructed.contains(node.component),
             NodeAction::Retain | NodeAction::Add => false,
         })
         .map(|node| node.component)
