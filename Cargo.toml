@@ -2,6 +2,7 @@
 members = [
     ".",
     "crates/*",
+    "examples/conditional",
     "examples/daemon",
     "examples/http",
     "examples/jobs",

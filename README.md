@@ -391,6 +391,9 @@ startup or a specific deployment model.
 
 ## Examples
 
+* `examples/conditional` — conditional components switched at runtime: a config-gated
+  `Authenticator` provider, live, reconstructed and state-carrying consumers, transition hooks,
+  and rollback when a replacement fails (`cargo run -p upwell-example-conditional`).
 * `examples/daemon` — a complete RPC daemon: cross-module DI, merged config, and build-time
   DI-graph validation.
 * `examples/http` — a complete HTTP + WebSocket + STOMP app whose library also compiles to a wasm
