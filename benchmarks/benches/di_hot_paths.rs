@@ -14,9 +14,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use tokio::runtime::Runtime;
 use upwell_benchmarks::di;
 use upwell_core::{Resolver, ResolverSet};
-use tokio::runtime::Runtime;
 
 macro_rules! resolver_types {
     ($($name:ident),+ $(,)?) => {

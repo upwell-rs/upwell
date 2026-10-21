@@ -20,9 +20,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use upwell_axum::SubscriptionRegistry;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
+use upwell_axum::SubscriptionRegistry;
 
 const DESTINATION: &str = "/bench/topic";
 const FRAME_BYTES: usize = 64;
