@@ -16,6 +16,7 @@ mod factory;
 mod live;
 
 pub use context::ComponentConstructionContext;
+pub(crate) use context::SharedStore;
 pub use factory::{
     ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole,
     DeclaredScope, Registration,

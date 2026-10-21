@@ -308,6 +308,24 @@ impl ProviderSelectionModel {
         )
     }
 
+    /// Every provider of `trait_id` a runtime collection resolution gathers, without
+    /// allocating.
+    pub(crate) fn runtime_collection<'a>(
+        &'a self,
+        trait_id: TypeId,
+        resolution: ResolutionMode,
+        consumer: &'a dyn Scope,
+        can_access: impl Fn(&dyn Scope, &'static dyn Scope) -> bool + 'a,
+    ) -> impl Iterator<Item = ProviderDescriptor> + 'a {
+        self.collection_providers(
+            resolution,
+            None,
+            consumer,
+            self.providers_for_trait(trait_id),
+            can_access,
+        )
+    }
+
     pub(crate) fn select_runtime_keyed(
         &self,
         trait_id: TypeId,
@@ -514,29 +532,38 @@ impl ProviderSelectionModel {
         matching: &[ProviderDescriptor],
         can_access: &(impl Fn(&dyn Scope, &'static dyn Scope) -> bool + ?Sized),
     ) -> Vec<ProviderSelection> {
-        matching
-            .iter()
-            .filter(|provider| provider_matches(provider, qualifier))
-            .filter(|provider| {
-                if resolution == ResolutionMode::Fresh {
-                    return self.is_visible(consumer, provider, can_access);
-                }
-
-                let component = self.components[&provider.concrete_ty.type_id];
-
-                if component.scope.is_transient() {
-                    return resolution != ResolutionMode::Deferred;
-                }
-
-                can_access(consumer, component.scope)
-            })
-            .copied()
+        self.collection_providers(resolution, qualifier, consumer, matching, can_access)
             .map(|provider| ProviderSelection {
                 provider,
                 reason: DependencySelectionReason::Collection,
                 stage: DependencySelectionStage::Collection,
             })
             .collect()
+    }
+
+    /// The providers in `matching` a collection dependency gathers, in provider order.
+    /// Lazy, so runtime resolution walks them without collecting an intermediate list.
+    fn collection_providers<'a>(
+        &'a self,
+        resolution: ResolutionMode,
+        qualifier: Option<&'a str>,
+        consumer: &'a dyn Scope,
+        matching: &'a [ProviderDescriptor],
+        can_access: impl Fn(&dyn Scope, &'static dyn Scope) -> bool + 'a,
+    ) -> impl Iterator<Item = ProviderDescriptor> + 'a {
+        matching
+            .iter()
+            .filter(move |provider| provider_matches(provider, qualifier))
+            .filter(move |provider| {
+                let scope = self.components[&provider.concrete_ty.type_id].scope;
+
+                if resolution != ResolutionMode::Fresh && scope.is_transient() {
+                    return resolution != ResolutionMode::Deferred;
+                }
+
+                can_access(consumer, scope)
+            })
+            .copied()
     }
 
     fn select_keyed(

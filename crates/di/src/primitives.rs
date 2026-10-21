@@ -328,10 +328,10 @@ where
         std::any::TypeId::of::<T>(),
         ResolutionMode::Fresh,
         scope.scope(),
-        &|dependency| scope.can_access(dependency),
+        |dependency| scope.can_access(dependency),
     );
 
-    for provider in &providers {
+    for provider in providers {
         let Some(descriptor) = registry.factory_backed(provider.concrete_ty.type_id) else {
             if let Some(component) = registry.component(provider.concrete_ty.type_id) {
                 return Err(Error::UnsupportedFreshFactory {
@@ -353,7 +353,7 @@ where
         let value =
             from_boxed::<Arc<T>>(&erased).ok_or(Error::MissingComponent(short_name::<T>()))?;
 
-        values.push((*provider, value));
+        values.push((provider, value));
     }
 
     Ok(values)
