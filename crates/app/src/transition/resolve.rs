@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use upwell_core::StaticScope;
 use upwell_di::{
-    DependencyDemand, EffectiveGraph, EffectiveNodeRole, EffectiveTarget, NodeAction, PlannedNode,
-    TransitionPlan,
+    ComponentDescriptor, DependencyDemand, EffectiveGraph, EffectiveNodeRole, EffectiveTarget,
+    NodeAction, PlannedNode, TransitionPlan,
 };
 
 use super::strategy::{updates_in_place, validate_decision};
@@ -102,10 +102,10 @@ impl CandidateGraph {
     /// holds: the consumer is [`retainable`](Self::retainable), and the live cell of
     /// every active and candidate target is reachable.
     ///
-    /// A component target exposes its cell through its descriptor's generation-snapshot
-    /// adapter, so a target without one, or one missing from the candidate, cannot be
-    /// rebound and its consumer reconstructs instead. Provider targets always expose
-    /// their cell.
+    /// A component target exposes its cell through its typed descriptor, whether or not
+    /// the component itself is retained. A raw manual target, or one missing from the
+    /// candidate, cannot be rebound, so its consumer reconstructs instead. Provider
+    /// targets always expose their cell.
     fn rebinds_in_place(&self, before: &DependencyDemand, after: &DependencyDemand) -> bool {
         self.retainable(after.id.consumer)
             && before
@@ -119,7 +119,7 @@ impl CandidateGraph {
         match target {
             EffectiveTarget::Component { component, .. } => self
                 .component(component)
-                .is_some_and(|descriptor| descriptor.generation_snapshot.is_some()),
+                .is_some_and(ComponentDescriptor::exposes_live_cell),
             EffectiveTarget::Provider { .. } => true,
             EffectiveTarget::Config { .. } | EffectiveTarget::Dynamic { .. } => false,
         }
@@ -129,8 +129,7 @@ impl CandidateGraph {
     /// singleton whose descriptor carries the typed generation-snapshot adapter.
     fn retainable(&self, component: &str) -> bool {
         self.component(component).is_some_and(|descriptor| {
-            descriptor.scope.id() == upwell_core::Singleton::ID
-                && descriptor.generation_snapshot.is_some()
+            descriptor.scope.id() == upwell_core::Singleton::ID && descriptor.is_retainable()
         })
     }
 

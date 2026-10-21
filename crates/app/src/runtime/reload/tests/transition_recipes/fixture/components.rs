@@ -55,7 +55,8 @@ pub(in super::super) fn alive_counts() -> AliveCounts {
     }
 }
 
-/// The config consumer that every label change reconstructs.
+/// The config consumer that every label change reconstructs. It opts out of retention,
+/// yet [`Watcher`]'s live dependency on it still rebinds in place.
 pub(in super::super) struct Tally {
     pub(in super::super) label: String,
     _alive: Alive,
@@ -273,8 +274,9 @@ static BANNER_HOOKS: [HookDescriptor; 1] =
             .with_dependencies(banner_gate_deps),
     ];
 
-static TALLY_COMPONENT: ComponentDescriptor =
-    ComponentDescriptor::of::<Tally>().with_factories(factories!["static" => construct_tally]);
+static TALLY_COMPONENT: ComponentDescriptor = ComponentDescriptor::of::<Tally>()
+    .with_factories(factories!["static" => construct_tally])
+    .without_retention();
 
 static GREETER_COMPONENT: ComponentDescriptor = ComponentDescriptor::of::<Greeter>()
     .with_factories(factories![

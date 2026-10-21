@@ -299,16 +299,29 @@ pub fn from_boxed<H: Injectable>(boxed: &BoxedComponent) -> Option<H> {
     boxed.value.downcast_ref::<H::Stored>().map(H::from_stored)
 }
 
-/// Hidden typed generation-snapshot adapter, payload validator, and live-cell accessor.
+/// Hidden typed generation adapter: the optional [`Retention`] that carries an instance
+/// into a later generation, plus the live-cell accessor that reads a stored slot's
+/// [`Live<T>`] cell.
+///
+/// Live-cell access only needs the component's type, so it stays available when a
+/// descriptor opts out of retention: live consumers of a never-retained component can
+/// still be rebound in place.
 #[derive(Clone, Copy)]
 #[doc(hidden)]
 pub struct GenerationSnapshot {
-    snapshot: fn(&BoxedComponent) -> crate::Result<BoxedComponent>,
-    validate: fn(&BoxedComponent) -> bool,
+    retention: Option<Retention>,
     live: fn(&BoxedComponent) -> Option<LiveCell>,
 }
 
-impl GenerationSnapshot {
+/// The typed snapshot adapter that carries an instance into a later generation, and the
+/// validator for the payload it produces.
+#[derive(Clone, Copy)]
+pub(crate) struct Retention {
+    snapshot: fn(&BoxedComponent) -> crate::Result<BoxedComponent>,
+    validate: fn(&BoxedComponent) -> bool,
+}
+
+impl Retention {
     pub(crate) fn snapshot(self, active: &BoxedComponent) -> crate::Result<BoxedComponent> {
         (self.snapshot)(active)
     }
@@ -316,9 +329,25 @@ impl GenerationSnapshot {
     pub(crate) fn validates(self, candidate: &BoxedComponent) -> bool {
         (self.validate)(candidate)
     }
+}
+
+impl GenerationSnapshot {
+    /// The adapter that carries the instance into a later generation, unless the
+    /// descriptor opted out of retention.
+    pub(crate) fn retention(self) -> Option<Retention> {
+        self.retention
+    }
 
     pub(crate) fn live_cell(self, stored: &BoxedComponent) -> Option<LiveCell> {
         (self.live)(stored)
+    }
+
+    /// This adapter without retention, keeping its live-cell access.
+    pub(crate) const fn without_retention(self) -> Self {
+        Self {
+            retention: None,
+            ..self
+        }
     }
 
     #[cfg(test)]
@@ -327,8 +356,7 @@ impl GenerationSnapshot {
         validate: fn(&BoxedComponent) -> bool,
     ) -> Self {
         Self {
-            snapshot,
-            validate,
+            retention: Some(Retention { snapshot, validate }),
             live: |_| None,
         }
     }
@@ -482,10 +510,11 @@ pub struct ComponentDescriptor {
     /// The component's `{Type}Hooks` slice (its `#[hook]` methods). Empty for a type
     /// that declares none — and for every manually-seeded instance.
     pub hooks: fn() -> &'static [HookDescriptor],
-    /// Hidden typed generation-snapshot adapter. Set for generated/typed descriptors
+    /// Hidden typed generation adapter. Set for generated/typed descriptors
     /// ([`of`](Self::of), [`manual_of`](Self::manual_of), macro-generated literals);
     /// `None` for raw [`manual`](Self::manual) descriptors, which are never
-    /// retainable.
+    /// retainable and expose no live cell.
+    /// [`without_retention`](Self::without_retention) keeps it for live-cell access only.
     #[doc(hidden)]
     pub generation_snapshot: Option<GenerationSnapshot>,
 }
@@ -559,10 +588,28 @@ impl ComponentDescriptor {
     #[doc(hidden)]
     pub const fn typed_snapshot<T: Component>() -> Option<GenerationSnapshot> {
         Some(GenerationSnapshot {
-            snapshot: generation_snapshot_adapter::<T>,
-            validate: generation_snapshot_validates::<T>,
+            retention: Some(Retention {
+                snapshot: generation_snapshot_adapter::<T>,
+                validate: generation_snapshot_validates::<T>,
+            }),
             live: generation_live_cell::<T>,
         })
+    }
+
+    /// Whether a runtime transition can carry this component's instance into a later
+    /// generation: a typed descriptor that has not opted out of retention.
+    #[doc(hidden)]
+    pub fn is_retainable(&self) -> bool {
+        self.generation_snapshot
+            .is_some_and(|adapter| adapter.retention().is_some())
+    }
+
+    /// Whether the runtime can read the live cell of this component's stored slot, so its
+    /// live consumers can be rebound in place. True for every typed descriptor, retained
+    /// or not; raw [`manual`](Self::manual) descriptors carry no typed access.
+    #[doc(hidden)]
+    pub fn exposes_live_cell(&self) -> bool {
+        self.generation_snapshot.is_some()
     }
 
     /// The dependencies of the effective factory (empty for a manual instance, or if

@@ -93,8 +93,8 @@ impl ComponentRegistry {
                     } else if new_manual
                         && existing_manual
                         && existing.id == component.id
-                        && existing.generation_snapshot.is_some()
-                        && component.generation_snapshot.is_none()
+                        && existing.is_retainable()
+                        && !component.is_retainable()
                     {
                         // A raw pre-built registration has stronger provenance than a
                         // snapshot-capable factoryless catalog descriptor for the same

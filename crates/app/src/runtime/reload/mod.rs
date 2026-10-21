@@ -44,9 +44,9 @@
 //! instance: the reload republishes the live cell it holds with the candidate's value
 //! instead of reconstructing it, so its fixed dependents retain too. This applies to
 //! single, eagerly resolved dependencies on singleton components or provider mappings
-//! (including `Dep<dyn Trait>` provider switches) whose live cell the runtime can reach: a
-//! component target must keep its generation-snapshot adapter. Other live consumers
-//! reconstruct and are displaced like replaced components.
+//! (including `Dep<dyn Trait>` provider switches) whose live cell the runtime can reach,
+//! which every typed descriptor allows even when the target opts out of retention. Other
+//! live consumers reconstruct and are displaced like replaced components.
 //! Each consumer keeps the cell of the generation that constructed it for as long as it
 //! is retained, and every rebind is prepared before commit and applied inside the
 //! terminal publication. Snapshots taken from a rebound handle keep the previous

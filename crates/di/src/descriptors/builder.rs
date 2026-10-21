@@ -219,11 +219,17 @@ impl ComponentDescriptor {
         Self { scope, ..self }
     }
 
-    /// Drops the typed generation snapshot, so a transition never retains the instance
-    /// across generations and always rebuilds it.
+    /// Opts out of retention, so a transition never carries the instance across
+    /// generations and always rebuilds it. Live consumers of the component can still be
+    /// rebound in place, because its typed live-cell access is kept.
     pub const fn without_retention(self) -> Self {
+        let generation_snapshot = match self.generation_snapshot {
+            Some(adapter) => Some(adapter.without_retention()),
+            None => None,
+        };
+
         Self {
-            generation_snapshot: None,
+            generation_snapshot,
             ..self
         }
     }

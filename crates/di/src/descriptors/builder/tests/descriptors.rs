@@ -55,7 +55,10 @@ fn setters_override_one_field_each() {
         .without_retention();
 
     assert_eq!(descriptor.scope.id(), Transient.id());
-    assert!(descriptor.generation_snapshot.is_none());
+    assert!(
+        !descriptor.is_retainable() && descriptor.exposes_live_cell(),
+        "opting out of retention keeps typed live-cell access"
+    );
     assert!(descriptor.condition.is_none());
     assert!(
         (descriptor.factories)().is_empty(),
