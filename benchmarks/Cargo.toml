@@ -61,3 +61,7 @@ harness = false
 [[bench]]
 name = "reload_transition"
 harness = false
+
+[[bench]]
+name = "reload_allocations"
+harness = false
