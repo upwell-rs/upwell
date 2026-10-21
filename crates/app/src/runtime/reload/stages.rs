@@ -31,7 +31,8 @@ pub(super) fn evaluate_conditions(
     let catalog = condition.catalog();
 
     let evaluation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let snapshot = catalog.condition_snapshot(
+        let snapshot = catalog.condition_snapshot_for(
+            condition.evaluation().config_inputs(),
             staged
                 .staged()
                 .iter()

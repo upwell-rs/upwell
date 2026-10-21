@@ -318,7 +318,7 @@ impl AppRuntime {
 
         recorder.record_changed(staged.changed());
 
-        if staged.is_empty() && !base.condition().catalog().reads_raw_config() {
+        if staged.is_empty() && !base.condition().evaluation().reads_raw_config() {
             transition.finish_noop();
 
             return Ok((TransitionCompletion::NoOp, None));
