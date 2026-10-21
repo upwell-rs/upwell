@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use upwell_core::{ConditionDescriptor, ConditionPredicate, StaticScope};
+use upwell_core::{ConditionDescriptor, ConditionInputId, ConditionPredicate, StaticScope};
 
 use super::{
     ConditionCatalog, ConditionDecision, ConditionDependency, ConditionError, ConditionEvaluation,
@@ -9,6 +9,11 @@ use super::{
 use crate::{ComponentRegistry, ProviderSelectionModel, Singleton};
 
 impl ConditionCatalog {
+    /// The declared binding and raw-path inputs of every condition in this catalog.
+    pub fn config_inputs(&self) -> &BTreeSet<ConditionInputId> {
+        &self.config_inputs
+    }
+
     pub fn evaluate(
         &self,
         snapshot: &ConditionFactSnapshot,

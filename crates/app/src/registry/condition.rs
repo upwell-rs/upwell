@@ -1,7 +1,7 @@
 //! Condition evaluation over an application's registered components and config.
 
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
 
@@ -41,6 +41,20 @@ impl AppConditionEvaluation {
 
     pub(crate) fn belongs_to(&self, registry: &AppRegistry) -> bool {
         self.bindings == registry.condition_identity()
+    }
+
+    /// The declared binding and raw-path inputs of every condition in this evaluation's
+    /// catalog.
+    pub(crate) fn config_inputs(&self) -> &BTreeSet<ConditionInputId> {
+        self.catalog.config_inputs()
+    }
+
+    /// Whether any condition reads a raw config path, so it can change with the config
+    /// tree even when no typed binding does.
+    pub(crate) fn reads_raw_config(&self) -> bool {
+        self.config_inputs()
+            .iter()
+            .any(|input| matches!(input, ConditionInputId::Raw(_)))
     }
 
     /// Incrementally re-evaluates against the catalog this evaluation was built from.
@@ -93,6 +107,21 @@ impl AppRegistry {
     pub fn condition_snapshot<'a>(
         &self,
         staged: impl IntoIterator<Item = StagedBinding<'a>>,
+        resolve_raw: impl FnMut(&'static str) -> Result<Option<ResolvedConfig>, ConfigError>,
+    ) -> crate::Result<ConditionFactSnapshot> {
+        self.condition_snapshot_for(
+            &self.component_registry().condition_config_inputs(),
+            staged,
+            resolve_raw,
+        )
+    }
+
+    /// Like [`condition_snapshot`](Self::condition_snapshot), for already known condition
+    /// `inputs`, so a reload reads them from its catalog instead of re-deriving them.
+    pub(crate) fn condition_snapshot_for<'a>(
+        &self,
+        inputs: &BTreeSet<ConditionInputId>,
+        staged: impl IntoIterator<Item = StagedBinding<'a>>,
         mut resolve_raw: impl FnMut(&'static str) -> Result<Option<ResolvedConfig>, ConfigError>,
     ) -> crate::Result<ConditionFactSnapshot> {
         let staged = staged.into_iter().collect::<Vec<_>>();
@@ -108,8 +137,8 @@ impl AppRegistry {
 
         let mut snapshot = ConditionFactSnapshot::new(scalars)?;
 
-        for input in self.component_registry().condition_config_inputs() {
-            match input {
+        for input in inputs {
+            match *input {
                 ConditionInputId::Binding(binding) => {
                     let value = staged.iter().find(|(type_id, path, _)| {
                         *type_id == binding.type_id && *path == binding.path
