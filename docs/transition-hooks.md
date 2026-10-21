@@ -15,7 +15,8 @@ How each affected component keeps, updates or replaces its instance is covered b
 The snippets below are abridged from the facade test
 [`tests/transition_lifecycle`](../tests/transition_lifecycle/app.rs), which compiles them through
 `upwell` and switches the effective `Authenticator` provider in both directions through every
-phase. Helpers such as `current_freeze` or `metrics::record_reload` stand in for application
+phase. The runnable [`examples/conditional`](../examples/conditional/src/audit.rs) shows proposal and
+outcome hooks auditing a provider switch. Helpers such as `current_freeze` or `metrics::record_reload` stand in for application
 code.
 
 ## Phases

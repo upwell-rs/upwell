@@ -478,3 +478,6 @@ jobs:
       - name: cargo build -p upwell-example-http
         if: ${{ !startsWith(github.head_ref, 'release-plz-') }}
         run: cargo build -p upwell-example-http --locked
+      - name: cargo run -p upwell-example-conditional
+        if: ${{ !startsWith(github.head_ref, 'release-plz-') }}
+        run: cargo run -p upwell-example-conditional --locked

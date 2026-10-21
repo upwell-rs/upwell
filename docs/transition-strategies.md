@@ -8,7 +8,9 @@ rebinding its live `Dep<T>` cells, needs no declaration. Every strategy that run
 against a changed instance (hot update, transition handler, replacement) must be declared by the
 component. The framework never guesses whether mutating an instance is safe.
 
-This guide is the contract for those strategies. For the hooks that observe and gate a transition,
+This guide is the contract for those strategies. The worked example
+[`examples/conditional`](../examples/conditional/src/lib.rs) uses live rebind, replacement and
+reconstruction in one provider switch, in both directions, with a rollback. For the hooks that observe and gate a transition,
 see [Transition hooks](transition-hooks.md).
 
 ## Declaring recipes

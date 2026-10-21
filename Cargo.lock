@@ -4555,6 +4555,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "upwell-example-conditional"
+version = "0.20.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "upwell",
+]
+
+[[package]]
 name = "upwell-example-daemon"
 version = "0.20.0"
 dependencies = [
