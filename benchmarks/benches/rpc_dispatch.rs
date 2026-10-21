@@ -15,6 +15,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use serde::{Deserialize, Serialize};
+use tokio::runtime::Runtime;
+use tokio_util::sync::CancellationToken;
 use upwell_core::{ResolverSet, TypeDescriptor};
 use upwell_di::{ScopeContainer, ScopeRegistry};
 use upwell_rpc::descriptors::{RpcCallContext, RpcOutcome, RpcResponse};
@@ -23,9 +26,6 @@ use upwell_rpc::{
     ServiceDescriptor,
 };
 use upwell_transport::{PeerInfo, WireMessage, WireOutcome, WireRequest, WireResponse};
-use serde::{Deserialize, Serialize};
-use tokio::runtime::Runtime;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Serialize, Deserialize)]
 struct Args {
@@ -133,13 +133,10 @@ fn build_router(routes: usize) -> RpcRouter {
 }
 
 async fn empty_scope() -> Arc<ScopeContainer> {
-    let registry = Arc::new(ScopeRegistry::new(
-        HashMap::new(),
-        HashMap::new(),
-        Vec::new(),
-        HashMap::new(),
-    )
-    .expect("empty scope registry validates"));
+    let registry = Arc::new(
+        ScopeRegistry::new(HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
+            .expect("empty scope registry validates"),
+    );
 
     ScopeContainer::build_root(&[], Vec::new(), ResolverSet::new(), registry)
         .await

@@ -11,11 +11,11 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use serde::Deserialize;
 use upwell_config::{
     ConfigManager, ConfigProperties, ConfigStr, ConfigValue, DefaultSpec, MapResolver, Resolver,
     ResolverChain, Toml, from_value,
 };
-use serde::Deserialize;
 
 /// Builds a table of `n` string leaves: a third static, a third full `${VAR}` placeholders (which
 /// resolve to a scalar), a third interpolated `a${VAR}-i` templates (which resolve to a string).
