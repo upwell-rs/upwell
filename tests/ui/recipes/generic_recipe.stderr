@@ -1,0 +1,5 @@
+error: a `#[replace]` recipe cannot be generic; its descriptor drives one concrete function
+ --> tests/ui/recipes/generic_recipe.rs:9:19
+  |
+9 |     async fn carry<T: Default>(_previous: Previous<Self>) -> Self {
+  |                   ^^^^^^^^^^^^

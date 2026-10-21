@@ -1,0 +1,5 @@
+error: a `#[hook]` method cannot also be a factory; move the hook to its own method
+ --> tests/ui/recipes/hook_and_recipe.rs:8:5
+  |
+8 |     #[hook(ComponentRetired)]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^

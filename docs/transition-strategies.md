@@ -45,8 +45,8 @@ impl Ledger {
 ```
 
 A method carries at most one marker, and a component at most one recipe of each kind.
-Declaring a recipe on a non-singleton `scope`, or with a first parameter that is not
-`Previous<Self>`, is a compile error. A hand-built descriptor with a recipe on a non-singleton
+Declaring any recipe on a non-singleton `scope` is a compile error, and so is a `#[replace]` or
+`#[hot_update]` whose first parameter is not `Previous<Self>`. A hand-built descriptor with a recipe on a non-singleton
 fails registry validation with `TransitionRecipeOutOfScope`.
 
 ## The strategies
