@@ -6,11 +6,14 @@
 //!   validation, demand capture, the reverse index, and the construction order.
 //! - `condition_catalog` — building a condition catalog and evaluating it for an empty fact
 //!   snapshot, the cost every startup and reload pays even with no conditional component.
+//! - `reverse_closure` — planning a runtime transition against an unchanged (shared) graph
+//!   with one invalidated root: a `leaf` nothing depends on, or the first node, which every
+//!   other node depends on transitively. Planning should scale with the closure, not the graph.
 //!
 //! Sizes double from 256 to 2048 nodes, so linear preparation shows a flat per-element
 //! throughput while a quadratic term shows up as throughput halving per step.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -96,9 +99,49 @@ fn conditions(c: &mut Criterion) {
     group.finish();
 }
 
+fn closure(c: &mut Criterion) {
+    let mut group = c.benchmark_group("di_graph_preparation/reverse_closure");
+
+    for size in SIZES {
+        let active = EffectiveGraph::build(
+            RuntimeGenerationId::INITIAL,
+            &graph::registry(size),
+            |_, _| true,
+        )
+        .expect("graph validates");
+        let candidate = active.same_graph();
+        let roots = [
+            ("leaf", graph::components(size)[size - 1].id),
+            ("root", graph::components(size)[0].id),
+        ];
+
+        group.throughput(Throughput::Elements(size as u64));
+
+        for (label, root) in roots {
+            let invalidated = BTreeSet::from([root]);
+
+            group.bench_with_input(BenchmarkId::new(label, size), &size, |bencher, _| {
+                bencher.iter(|| {
+                    black_box(
+                        active
+                            .plan_runtime_transition(
+                                black_box(&candidate),
+                                black_box(&invalidated),
+                                |_, _| false,
+                            )
+                            .expect("candidate shares the active generation"),
+                    )
+                });
+            });
+        }
+    }
+
+    group.finish();
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default().without_plots();
-    targets = sort, effective, conditions
+    targets = sort, effective, conditions, closure
 }
 criterion_main!(benches);
