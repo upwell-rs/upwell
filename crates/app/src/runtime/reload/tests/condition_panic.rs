@@ -1,7 +1,9 @@
 //! Panic containment in the reload's condition stage: a panicking condition-fact
-//! extraction or descriptor callback, or config condition callback, aborts the reload
-//! with the redacted preparation panic error before any candidate graph, root, hook,
-//! or publication work, and the reload serializers stay usable for a subsequent reload.
+//! extraction or config condition callback aborts the reload with the redacted
+//! preparation panic error before any candidate graph, root, hook, or publication work,
+//! and the reload serializers stay usable for a subsequent reload. Fact-descriptor
+//! callbacks run only when the catalog is validated at startup, so they cannot panic a
+//! reload.
 
 use std::sync::Arc;
 
@@ -189,21 +191,30 @@ async fn condition_fact_panic_preserves_generations_and_recovers() {
 }
 
 #[tokio::test]
-async fn condition_fact_descriptor_panic_preserves_generations_and_recovers() {
+async fn condition_fact_descriptors_do_not_run_on_reload() {
     let _guard = lock_test_guard().await;
 
     reset_controls().await;
 
     let (dir, app) = build_probe_app(true, 1).await;
+    let runtime = app.runtime();
+    let old_generation = runtime.generation();
 
-    assert_panic_contained_reload_recovers(
-        &dir,
-        &app,
-        true,
-        panic_condition_descriptors,
-        (true, 7),
-    )
-    .await;
+    panic_condition_descriptors(true);
+    write_probe_config(&config_dir_of(&dir), true, 7);
+
+    let report = runtime.reload_config().await;
+
+    panic_condition_descriptors(false);
+
+    let report = report.expect("the reload reuses the catalog validated at startup");
+
+    assert!(report.is_committed(), "the reload publishes");
+    assert_eq!(
+        runtime.generation().get(),
+        old_generation.get() + 1,
+        "the reload advances the runtime generation"
+    );
 }
 
 #[tokio::test]
