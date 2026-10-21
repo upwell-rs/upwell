@@ -189,12 +189,18 @@ pub(super) fn plan_with_invalidations(
         });
     }
 
-    let diff = diff(active, candidate);
+    let shared = active.shares_data_with(candidate);
+    let diff = if shared {
+        unchanged_diff(candidate)
+    } else {
+        diff(active, candidate)
+    };
+    let changes = if shared { &[][..] } else { &diff.nodes[..] };
     let mut requirements = BTreeMap::new();
     let mut bindings = BTreeSet::new();
     let mut changed_instances = VecDeque::new();
 
-    for change in &diff.nodes {
+    for change in changes {
         let kinds = change.kinds.as_ref();
         let mut changed_directly = false;
 
@@ -415,6 +421,21 @@ pub(super) fn plan_with_invalidations(
         construction_order,
         retirement_order,
     })
+}
+
+/// The diff of a graph against one sharing its data: every node unchanged, so the
+/// planner has no structural or binding change to look for.
+fn unchanged_diff(graph: &EffectiveGraph) -> GraphDiff {
+    GraphDiff {
+        nodes: graph
+            .nodes
+            .keys()
+            .map(|component| NodeChange {
+                component,
+                kinds: Box::new([NodeChangeKind::Unchanged]),
+            })
+            .collect(),
+    }
 }
 
 fn diff(active: &EffectiveGraph, candidate: &EffectiveGraph) -> GraphDiff {

@@ -164,3 +164,22 @@ fn changed_recipe_identity_replaces_the_component() {
         change.component == "unrelated" && change.kinds.contains(&NodeChangeKind::FactoryChanged)
     }));
 }
+
+#[test]
+fn shared_graph_plans_match_independently_built_identical_graphs() {
+    let active = graph(false);
+    let shared = active.same_graph();
+    let rebuilt = graph(false);
+    let roots = BTreeSet::from(["default-authenticator"]);
+
+    assert!(shared.shares_data_with(&active));
+    assert!(!rebuilt.shares_data_with(&active));
+    assert_eq!(
+        active.plan_transition(&shared),
+        active.plan_transition(&rebuilt)
+    );
+    assert_eq!(
+        active.plan_runtime_transition(&shared, &roots, |_, _| false),
+        active.plan_runtime_transition(&rebuilt, &roots, |_, _| false)
+    );
+}
