@@ -13,6 +13,7 @@ mod candidate_failure;
 mod concurrency;
 mod condition_panic;
 mod fixture;
+mod graph_reuse;
 mod hook_rejection;
 mod invalidation;
 mod manager_consumer;

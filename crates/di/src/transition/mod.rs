@@ -170,13 +170,17 @@ impl std::fmt::Debug for FactoryIdentity {
 }
 
 /// A complete immutable effective dependency graph derived without constructing components.
+///
+/// The derived graph data is shared, so [`same_graph`](Self::same_graph) can hand an
+/// unchanged graph to a new candidate without rebuilding it; the identity and generation
+/// stay per instance.
 pub struct EffectiveGraph {
     identity: Arc<()>,
     generation: RuntimeGenerationId,
-    nodes: BTreeMap<&'static str, EffectiveNode>,
-    reverse: BTreeMap<&'static str, Box<[DependencyDemandId]>>,
-    singleton_order: Box<[&'static str]>,
-    construction_order: Box<[&'static str]>,
+    nodes: Arc<BTreeMap<&'static str, EffectiveNode>>,
+    reverse: Arc<BTreeMap<&'static str, Box<[DependencyDemandId]>>>,
+    singleton_order: Arc<[&'static str]>,
+    construction_order: Arc<[&'static str]>,
     selection: Arc<ProviderSelectionModel>,
 }
 
@@ -264,18 +268,18 @@ impl EffectiveGraph {
         let singleton_order = topological_sort(&singletons, &prebuilt, &selection, can_reach)?
             .into_iter()
             .map(|component| component.id)
-            .collect::<Box<[_]>>();
+            .collect::<Arc<[_]>>();
         let construction_order = singleton_order
             .iter()
             .filter(|id| constructed.contains(*id))
             .copied()
-            .collect::<Box<[_]>>();
+            .collect::<Arc<[_]>>();
 
         Ok(Self {
             identity: Arc::new(()),
             generation,
-            nodes,
-            reverse,
+            nodes: Arc::new(nodes),
+            reverse: Arc::new(reverse),
             singleton_order,
             construction_order,
             selection,
@@ -291,6 +295,30 @@ impl EffectiveGraph {
     #[doc(hidden)]
     pub fn identity(&self) -> &Arc<()> {
         &self.identity
+    }
+
+    /// A new graph instance over this graph's unchanged data, for a candidate whose
+    /// effective registry is identical. It has its own process-local identity, so prepared
+    /// transition work stays bound to exactly one instance, and keeps this generation until
+    /// it is committed.
+    #[doc(hidden)]
+    pub fn same_graph(&self) -> Self {
+        Self {
+            identity: Arc::new(()),
+            generation: self.generation,
+            nodes: Arc::clone(&self.nodes),
+            reverse: Arc::clone(&self.reverse),
+            singleton_order: Arc::clone(&self.singleton_order),
+            construction_order: Arc::clone(&self.construction_order),
+            selection: Arc::clone(&self.selection),
+        }
+    }
+
+    /// Whether this graph and `other` share their derived data, as a graph produced by
+    /// [`same_graph`](Self::same_graph) does with its source.
+    #[doc(hidden)]
+    pub fn shares_data_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.nodes, &other.nodes)
     }
 
     /// Assigns the semantic generation allocated when this prepared graph is committed.
