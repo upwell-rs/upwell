@@ -1,0 +1,5 @@
+error: a method carries at most one of `#[init]`, `#[replace]`, `#[transition]` and `#[hot_update]`
+ --> tests/ui/recipes/two_markers.rs:9:5
+  |
+9 |     #[replace]
+  |     ^^^^^^^^^^

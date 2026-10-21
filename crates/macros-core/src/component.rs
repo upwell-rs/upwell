@@ -118,6 +118,7 @@ pub fn expand<Ext: ComponentExt>(
         paths,
     );
     let component = paths.core("Component");
+    let declared_scope = paths.core("DeclaredScope");
 
     // A router-class component (a service, a controller) forces the lazy `Wired` graph check
     // at its own definition — a missing dependency provider is an error here, not deferred to
@@ -144,6 +145,10 @@ pub fn expand<Ext: ComponentExt>(
             const ID: &'static str = #id;
             const NAME: &'static str = #name;
             #handle_method
+        }
+
+        impl #declared_scope for #self_ident {
+            type Scope = #scope_path;
         }
 
         #injectable

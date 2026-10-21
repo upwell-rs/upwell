@@ -1,0 +1,20 @@
+error[E0277]: `fn(Previous<Banner>) -> impl Future<Output = upwell::HotUpdate<Banner>> {Banner::__upwell_hot_update}` is not a hot-update preparation
+  --> tests/ui/recipes/hot_update_by_value.rs:10:14
+   |
+ 7 | #[methods]
+   | ---------- required by a bound introduced by this call
+...
+10 |     async fn relabel(_previous: Previous<Self>) -> HotUpdate<Self> {
+   |              ^^^^^^^ expected `async fn(Previous<C>, ..) -> HotUpdate<C>`
+   |
+   = help: the trait `HotUpdateFactory<_>` is not implemented for fn item `fn(Previous<Banner>) -> impl Future<Output = upwell::HotUpdate<Banner>> {Banner::__upwell_hot_update}`
+   = note: a hot update takes `Previous<C>` first, then at most seven injectable parameters, and returns `HotUpdate<C>` or `Result<HotUpdate<C>, E>`
+   = note: only components stored as `Arc<Self>` can declare one; a `by_value` component cannot
+note: required by a bound in `dispatch_hot_update`
+  --> crates/di/src/construct/hot_update.rs
+   |
+   | pub fn dispatch_hot_update<'a, F, Args>(
+   |        ------------------- required by a bound in this function
+...
+   |     F: HotUpdateFactory<Args> + 'a,
+   |        ^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `dispatch_hot_update`

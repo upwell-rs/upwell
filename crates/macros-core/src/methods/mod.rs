@@ -1,17 +1,18 @@
 //! The base impl-block macro: `MethodArgs<Ext>` and its expansion state machine.
 //!
-//! `#[methods]` is `MethodArgs<NoExt>`: it claims `#[init]` constructors and `#[hook]` methods
-//! on any component. `#[handlers]` is `MethodArgs<Rpcs>` — the *same* base plus the RPC
+//! `#[methods]` is `MethodArgs<NoExt>`: it claims `#[init]` constructors, the `#[replace]`,
+//! `#[transition]` and `#[hot_update]` transition recipes, and `#[hook]` methods on any
+//! component. `#[handlers]` is `MethodArgs<Rpcs>` — the *same* base plus the RPC
 //! extension — so handlers also supports init and hooks, and adds RPC registration on top.
 //!
 //! Expansion is a state machine over the extension ([`ParseKeyed`] → [`ParseItem<ItemImpl>`] →
-//! [`ParseMethod`] per method → [`ToTokens`]): the base claims `#[init]`/`#[hook]`, delegates
+//! [`ParseMethod`] per method → [`ToTokens`]): the base claims its factory markers and `#[hook]`, delegates
 //! every other method to the extension, emits its own output, and appends the extension's.
 
 use proc_macro2::TokenStream;
-use quote::{ToTokens, format_ident, quote};
+use quote::{ToTokens, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::{FnArg, Ident, ImplItem, ImplItemFn, ItemImpl, LitStr, ReturnType, Type};
+use syn::{Attribute, Ident, ImplItem, ImplItemFn, ItemImpl, LitStr, Type};
 
 use crate::client::ClientMethod;
 use crate::extend::{
@@ -20,6 +21,15 @@ use crate::extend::{
 use crate::hook::{self, HookInfo};
 use crate::inject::registrations_slice_ident;
 use crate::paths::Paths;
+
+mod init;
+mod recipe;
+
+#[cfg(test)]
+mod tests;
+
+use init::InitInfo;
+use recipe::{Recipe, RecipeKind};
 
 /// The base arguments of an impl-block macro: the common `factory_slice` key plus the
 /// extension `Ext`, which contributes its own keyed args, per-method parsing, and emission.
@@ -73,7 +83,7 @@ impl<Ext: ParseKeyed> Parse for MethodArgs<Ext> {
 }
 
 /// Expands an impl-block macro: runs the extension state machine over `item`, emitting the
-/// base output (the `#[init]` factory and `#[hook]` registrations) with the extension's
+/// base output (the `#[init]` factory, transition recipes and `#[hook]` registrations) with the extension's
 /// contribution appended.
 pub fn expand<Ext>(
     mut args: MethodArgs<Ext>,
@@ -91,10 +101,10 @@ where
     // self type, name, and resolved paths) before the per-method walk.
     args.ext.parse_item(&item, paths)?;
 
-    // Walk the methods: the base claims `#[hook]` and `#[init]` (stripping the markers);
+    // Walk the methods: the base claims `#[hook]` and the factory markers (stripping them);
     // everything else is offered to the extension's per-method pass, which may return a
     // client-method hint the framework will emit into the generated client.
-    let mut init: Option<InitInfo> = None;
+    let mut factories = FactoryClaims::default();
     let mut hooks: Vec<HookInfo> = Vec::new();
     let mut client_methods: Vec<ClientMethod> = Vec::new();
 
@@ -112,18 +122,7 @@ where
             continue;
         }
 
-        if let Some(pos) = method.attrs.iter().position(|a| a.path().is_ident("init")) {
-            method.attrs.remove(pos);
-
-            if init.is_some() {
-                return Err(syn::Error::new_spanned(
-                    &method.sig,
-                    "this impl block already has an #[init] constructor",
-                ));
-            }
-
-            init = Some(parse_init(method)?);
-
+        if factories.claim(method, &self_ident) {
             continue;
         }
 
@@ -134,14 +133,29 @@ where
         }
     }
 
+    if let Some(errors) = factories.errors {
+        let errors = errors.into_compile_error();
+
+        return Ok(quote! {
+            #errors
+
+            #item
+        });
+    }
+
     let registrations_slice = args
         .factory_slice
         .unwrap_or_else(|| registrations_slice_ident(&self_ident));
 
-    let (marker, component) = match &init {
-        Some(info) => generate_init(&self_ty, &registrations_slice, info, paths),
+    let (marker, component) = match &factories.init {
+        Some(info) => init::generate_init(&self_ty, &registrations_slice, info, paths),
         None => (quote!(), quote!()),
     };
+    let (recipe_wrappers, recipe_registrations): (Vec<_>, Vec<_>) = factories
+        .recipes
+        .iter()
+        .map(|recipe| recipe::generate(&self_ty, &registrations_slice, recipe, paths))
+        .unzip();
 
     let hook_tokens = hooks.iter().enumerate().map(|(index, info)| {
         hook::generate_hook(
@@ -177,8 +191,12 @@ where
 
         #marker
 
+        #(#recipe_wrappers)*
+
         const _: () = {
             #component
+
+            #(#recipe_registrations)*
 
             #(#hook_tokens)*
         };
@@ -195,144 +213,125 @@ where
     })
 }
 
-/// The parsed shape of an `#[init]` constructor.
-struct InitInfo {
-    ident: syn::Ident,
-    is_async: bool,
-    param_types: Vec<Type>,
-    output: ReturnType,
+/// A factory marker the base claims from a method.
+enum FactoryMarker {
+    Init,
+    Recipe(RecipeKind),
 }
 
-fn parse_init(method: &ImplItemFn) -> syn::Result<InitInfo> {
-    let mut param_types = Vec::new();
+impl FactoryMarker {
+    fn of(attr: &Attribute) -> Option<Self> {
+        if attr.path().is_ident("init") {
+            return Some(Self::Init);
+        }
 
-    // Parameter *types* only — each must be a `FromContainer` (`Arc<T>`, `Cfg<T>`,
-    // `Vec<Arc<dyn Tr>>`, a by-value injectable, …), enforced by the `Factory` impl
-    // at the type level rather than by shape-matching here.
-    for arg in &method.sig.inputs {
-        match arg {
-            FnArg::Receiver(receiver) => {
-                return Err(syn::Error::new_spanned(
-                    receiver,
-                    "#[init] is a constructor and cannot take `self`",
-                ));
-            }
-            FnArg::Typed(typed) => {
-                param_types.push((*typed.ty).clone());
-            }
+        RecipeKind::ALL
+            .into_iter()
+            .find(|kind| attr.path().is_ident(kind.marker()))
+            .map(Self::Recipe)
+    }
+}
+
+/// The factory markers an impl block claims, with every diagnostic they raised.
+#[derive(Default)]
+struct FactoryClaims {
+    init: Option<InitInfo>,
+    recipes: Vec<Recipe>,
+    errors: Option<syn::Error>,
+}
+
+impl FactoryClaims {
+    /// Claims `method` when it carries a factory marker, stripping every such marker. A
+    /// malformed claim is recorded rather than returned, so the walk still strips the rest
+    /// and the impl block is kept beside the diagnostics.
+    fn claim(&mut self, method: &mut ImplItemFn, self_ident: &Ident) -> bool {
+        let mut markers = take_factory_markers(method).into_iter();
+        let Some((marker, attr)) = markers.next() else {
+            return false;
+        };
+
+        if let Some((_, second)) = markers.next() {
+            self.reject(syn::Error::new_spanned(
+                second,
+                "a method carries at most one of `#[init]`, `#[replace]`, `#[transition]` and `#[hot_update]`",
+            ));
+
+            return true;
+        }
+
+        let claimed = match marker {
+            FactoryMarker::Init => self.claim_init(method),
+            FactoryMarker::Recipe(kind) => self.claim_recipe(kind, &attr, method, self_ident),
+        };
+
+        if let Err(error) = claimed {
+            self.reject(error);
+        }
+
+        true
+    }
+
+    fn claim_init(&mut self, method: &ImplItemFn) -> syn::Result<()> {
+        if self.init.is_some() {
+            return Err(syn::Error::new_spanned(
+                &method.sig,
+                "this impl block already has an #[init] constructor",
+            ));
+        }
+
+        self.init = Some(init::parse_init(method)?);
+
+        Ok(())
+    }
+
+    fn claim_recipe(
+        &mut self,
+        kind: RecipeKind,
+        attr: &Attribute,
+        method: &ImplItemFn,
+        self_ident: &Ident,
+    ) -> syn::Result<()> {
+        if self.recipes.iter().any(|recipe| recipe.kind == kind) {
+            return Err(syn::Error::new_spanned(
+                &method.sig,
+                format!(
+                    "this impl block already has a `#[{}]` recipe",
+                    kind.marker()
+                ),
+            ));
+        }
+
+        self.recipes
+            .push(recipe::parse(kind, attr, method, self_ident)?);
+
+        Ok(())
+    }
+
+    fn reject(&mut self, error: syn::Error) {
+        match &mut self.errors {
+            Some(errors) => errors.combine(error),
+
+            None => self.errors = Some(error),
+        }
+    }
+}
+
+/// Strips every factory marker from `method`, in declaration order.
+fn take_factory_markers(method: &mut ImplItemFn) -> Vec<(FactoryMarker, Attribute)> {
+    let mut markers = Vec::new();
+    let mut kept = Vec::new();
+
+    for attr in method.attrs.drain(..) {
+        match FactoryMarker::of(&attr) {
+            Some(marker) => markers.push((marker, attr)),
+
+            None => kept.push(attr),
         }
     }
 
-    Ok(InitInfo {
-        ident: method.sig.ident.clone(),
-        is_async: method.sig.asyncness.is_some(),
-        param_types,
-        output: method.sig.output.clone(),
-    })
-}
+    method.attrs = kept;
 
-/// Emits the `#[init]` factory: a fixed-name async `init` wrapper (the guard and sync→async
-/// normalizer) plus its `ComponentFactoryDescriptor`, appended to the type's factory slice.
-fn generate_init(
-    self_ty: &Type,
-    registrations_slice: &syn::Ident,
-    info: &InitInfo,
-    paths: &Paths,
-) -> (TokenStream, TokenStream) {
-    let marked = &info.ident;
-    let component_construction_context = paths.core("ComponentConstructionContext");
-    let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
-    let component_factory_role = paths.core("ComponentFactoryRole");
-    let dependency_descriptor = paths.core("DependencyDescriptor");
-    let dispatch_factory = paths.core("dispatch_factory");
-    let factory_dependencies = paths.core("factory_dependencies");
-    let boxed_component = paths.core("BoxedComponent");
-    let distributed_slice = paths.core("linkme::distributed_slice");
-    let linkme_crate = paths.core("linkme");
-    let inventory = paths.core("inventory");
-    let registration = paths.core("Registration");
-    let descriptor_for = paths.core("DescriptorFor");
-    let result = paths.core("DiResult");
-
-    // A fixed-name `init` associated fn, always `async`, forwards to the marked constructor —
-    // normalizing a sync constructor to async (factories are async) and serving as the
-    // compile-time uniqueness guard: two `#[init]`s in one impl emit two `fn init` and fail
-    // with E0592. When the marked method is already named `init`, it is its own guard and
-    // must itself be `async`.
-    let fresh: Vec<_> = (0..info.param_types.len())
-        .map(|i| format_ident!("__p{i}"))
-        .collect();
-    let param_types = &info.param_types;
-    let output = &info.output;
-    let dotawait = if info.is_async {
-        quote!(.await)
-    } else {
-        quote!()
-    };
-
-    let marker = if marked == "init" {
-        quote!()
-    } else {
-        quote! {
-            impl #self_ty {
-                #[doc(hidden)]
-                async fn init(#(#fresh: #param_types),*) #output {
-                    <#self_ty>::#marked(#(#fresh),*)#dotawait
-                }
-            }
-        }
-    };
-
-    let factory_literal = quote! {
-        #component_factory_descriptor {
-            id: concat!("init:", stringify!(#marked)),
-            construct: __upwell_init_factory,
-            dependencies: __upwell_init_deps,
-            role: #component_factory_role::Explicit,
-        }
-    };
-    // The explicit `#[init]` factory, appended to the type's registrations; it overrides the
-    // field-injection default.
-    let register = crate::backend::dual_backend(
-        quote! {
-            #inventory::submit! {
-                #descriptor_for::<#self_ty, #component_factory_descriptor>::new(#factory_literal)
-            }
-        },
-        quote! {
-            #[#distributed_slice(#registrations_slice)]
-            #[linkme(crate = #linkme_crate)]
-            #[allow(unsafe_code)]
-            static __UPWELL_INIT_FACTORY: #registration =
-                #registration::Factory(#factory_literal);
-        },
-    );
-
-    // The constructor is a `Factory`: it knows its parameters, so it reports its own
-    // dependency edges and drives construction. No hand-built dep list — each parameter's
-    // `FromContainer` impl supplies its edge.
-    let component = quote! {
-        fn __upwell_init_deps() -> ::std::vec::Vec<#dependency_descriptor> {
-            #factory_dependencies(<#self_ty>::init)
-        }
-
-        #[allow(unused_variables)]
-        fn __upwell_init_factory(
-            cx: &mut #component_construction_context,
-        ) -> ::core::pin::Pin<
-            ::std::boxed::Box<
-                dyn ::core::future::Future<
-                    Output = #result<#boxed_component>,
-                > + ::core::marker::Send + '_,
-            >,
-        > {
-            #dispatch_factory(<#self_ty>::init, cx)
-        }
-
-        #register
-    };
-
-    (marker, component)
+    markers
 }
 
 /// Extracts the bare identifier of the impl's self type, erroring on anything but a plain path

@@ -1,9 +1,9 @@
 use std::{fmt, future::Future, pin::Pin};
 
-use upwell_core::{DependencyDescriptor, UpwellDescriptor};
+use upwell_core::{DependencyDescriptor, Singleton, StaticScope, UpwellDescriptor};
 use upwell_hooks::HookDescriptor;
 
-use super::{BoxedComponent, ComponentConstructionContext, ComponentDescriptor};
+use super::{BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor};
 
 /// Async factory function pointer for constructing a component.
 pub type ComponentFactory =
@@ -135,6 +135,22 @@ pub trait ComponentFactories {
     fn factories() -> &'static [ComponentFactoryDescriptor];
 }
 
+/// The scope marker a `#[component]` declares, named at the type level.
+///
+/// Implemented by `#[component]` and `#[service]`, so the transition recipes an impl-block
+/// macro declares (`#[replace]`, `#[transition]`, `#[hot_update]`) are checked against
+/// the singleton scope at compile time. A hand-written component declares its recipes with
+/// [`factories!`](crate::factories) instead, and registry validation checks the scope.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` declares transition recipes but is not a `#[component]`",
+    note = "declare the recipes of a hand-written component with `factories!`"
+)]
+pub trait DeclaredScope: Component {
+    /// The scope marker type from `#[component(scope = ..)]`, `Singleton` when omitted.
+    type Scope;
+}
+
 impl ComponentDescriptor {
     /// The factory the container should use: an explicit one if present (the default
     /// is its fallback), or `None` for a manually-provided instance (no ordinary
@@ -236,6 +252,14 @@ impl ComponentDescriptor {
     }
 
     fn validate_transition_recipe(&self, recipe: &ComponentFactoryDescriptor) -> crate::Result<()> {
+        if self.scope.id() != Singleton::ID {
+            return Err(crate::Error::TransitionRecipeOutOfScope {
+                component: self.name.to_string(),
+                role: recipe.role,
+                scope: self.scope.name(),
+            });
+        }
+
         let Some(ordinary) = self.effective_factory()? else {
             return Err(crate::Error::TransitionRecipeWithoutFactory {
                 component: self.name.to_string(),

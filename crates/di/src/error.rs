@@ -245,6 +245,15 @@ pub enum Error {
     },
 
     #[error(
+        "component '{component}' declares a {role} recipe but has scope '{scope}'; runtime transitions are singleton-only"
+    )]
+    TransitionRecipeOutOfScope {
+        component: String,
+        role: ComponentFactoryRole,
+        scope: &'static str,
+    },
+
+    #[error(
         "{role} recipe for component '{component}' resolves '{dependency}' in a way its ordinary factory does not declare; declare it on the ordinary factory so the transition plan schedules it"
     )]
     UndeclaredTransitionDependency {

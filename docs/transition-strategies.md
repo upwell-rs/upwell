@@ -24,7 +24,30 @@ static LEDGER: ComponentDescriptor = ComponentDescriptor::of::<Ledger>().with_fa
 ]);
 ```
 
-Attribute-macro sugar for the same metadata is tracked in #298.
+With the macros, each recipe is a marked method in the component's `#[methods]` block. It
+generates the same descriptor as the builder entry, with the ID `"<marker>:<method>"`:
+
+```rust
+#[methods]
+impl Ledger {
+    #[init]
+    async fn construct(clock: Arc<Clock>) -> Self { /* ... */ }
+
+    #[replace]                                 // replace "replace:carry" => Ledger::carry
+    async fn carry(previous: Previous<Self>, clock: Arc<Clock>) -> Self { /* ... */ }
+
+    #[transition]                              // transition "transition:pick" => Ledger::pick
+    fn pick(change: &ComponentChange) -> Option<OneShot<Self>> { /* ... */ }
+
+    #[hot_update]                              // hot_update "hot_update:entries" => Ledger::entries
+    async fn entries(previous: Previous<Self>, clock: Arc<Clock>) -> HotUpdate<Self> { /* ... */ }
+}
+```
+
+A method carries at most one marker, and a component at most one recipe of each kind.
+Declaring a recipe on a non-singleton `scope`, or with a first parameter that is not
+`Previous<Self>`, is a compile error. A hand-built descriptor with a recipe on a non-singleton
+fails registry validation with `TransitionRecipeOutOfScope`.
 
 ## The strategies
 

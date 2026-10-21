@@ -7,8 +7,9 @@
 //! | Macro                       | Applies to | Produces |
 //! |-----------------------------|------------|----------|
 //! | `#[component]`              | struct     | `Component` impl + a factory (field-injection default, `factory = path`, or `default_factory = false` for a manual instance) |
-//! | `#[methods]`                | impl block | lifecycle methods — an `#[init]` constructor (an explicit factory) |
+//! | `#[methods]`                | impl block | lifecycle methods — an `#[init]` constructor (an explicit factory), transition recipes and hooks |
 //! | `#[init]`                   | method     | marker consumed by `#[methods]` |
+//! | `#[replace]` / `#[transition]` / `#[hot_update]` | method | transition-recipe markers consumed by `#[methods]` |
 //! | `#[injectable]`             | trait      | `Provide<dyn Trait>` impl (under `di-check`) |
 //! | `#[config]`                 | struct/enum | `ConfigProperties` impl (with field `#[default = ".."]` templated defaults); auto-registers a binding when given `#[config(path = "..")]` |
 //! | [`app!`]                    | declaration | named typestate host, configured builder, and feature-gated CLI/tooling entry |
@@ -169,7 +170,8 @@ pub fn config(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Registers a component's lifecycle methods from an inherent `impl` block.
 ///
-/// Today that is the `#[init]` constructor — an explicit factory that overrides the
+/// That is the `#[init]` constructor, the transition recipes and `#[hook]` methods. The
+/// `#[init]` constructor is an explicit factory that overrides the
 /// field-injection default. Works on any component (`#[component]` or `#[service]`),
 /// so a plain component gets a full-flexibility constructor (sync or async, any
 /// injectable parameter — `Arc<T>`, `Cfg<T>`, `Vec<Arc<dyn Tr>>`, a by-value
@@ -178,6 +180,39 @@ pub fn config(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The constructor's parameters are its dependencies (resolved from the container)
 /// and its return is `Self` or `Result<Self, E>`; a non-`async` constructor is
 /// wrapped to async. Two `#[init]`s on one type is a compile error.
+///
+/// # Transition recipes
+///
+/// A singleton component declares how a runtime transition may carry it across a reload
+/// with at most one method of each marker. Each generates the descriptor
+/// `factories![replace | transition | hot_update "<marker>:<method>" => Type::method]`
+/// declares:
+///
+/// - `#[replace]` — a static state-aware replacement, `(Previous<Self>, deps..) -> Self` or
+///   `Result<Self, E>`;
+/// - `#[transition]` — a transition handler, a plain
+///   `fn(&ComponentChange) -> Option<OneShot<Self>>`;
+/// - `#[hot_update]` — an in-place update preparation,
+///   `(Previous<Self>, deps..) -> HotUpdate<Self>` or `Result<HotUpdate<Self>, E>`, for a
+///   component stored as `Arc<Self>`.
+///
+/// A replacement or hot update may be sync or `async`, and may resolve only dependencies the
+/// ordinary factory declares. A non-singleton `scope`, a missing `Previous<Self>`, a second
+/// recipe of one kind, or more than one factory marker on a method is a compile error. See
+/// `docs/transition-strategies.md` for when the runtime uses each recipe.
+///
+/// ```ignore
+/// #[methods]
+/// impl Ledger {
+///     #[init]
+///     async fn open(clock: Arc<Clock>) -> Self { Self { clock, entries: 0 } }
+///
+///     #[replace]
+///     async fn carry(previous: Previous<Self>, clock: Arc<Clock>) -> Self {
+///         Self { clock, entries: previous.entries }
+///     }
+/// }
+/// ```
 ///
 /// # Arguments
 ///

@@ -1,0 +1,5 @@
+error: this impl block already has a `#[replace]` recipe
+  --> tests/ui/recipes/duplicate_recipe.rs:14:5
+   |
+14 |     async fn carry_again(_previous: Previous<Self>) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

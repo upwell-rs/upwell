@@ -1,0 +1,5 @@
+error: the first parameter of a `#[hot_update]` recipe must be `Previous<Self>`, the active instance it updates
+  --> tests/ui/recipes/mistyped_previous.rs:12:33
+   |
+12 |     async fn relabel(_previous: Previous<Clock>) -> upwell::HotUpdate<Self> {
+   |                                 ^^^^^^^^^^^^^^^

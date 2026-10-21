@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: `#[replace]` requires a singleton component; runtime transitions are singleton-only
+ --> tests/ui/recipes/non_singleton_scope.rs:9:7
+  |
+9 |     #[replace]
+  |       ^^^^^^^ evaluation of `_::_` failed here
