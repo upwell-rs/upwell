@@ -31,6 +31,7 @@ pub struct CandidateGraph {
     identity: Arc<()>,
     graph: EffectiveGraph,
     components: Box<[ComponentDescriptor]>,
+    by_id: HashMap<&'static str, usize>,
     singleton_order: Box<[ComponentDescriptor]>,
     scope_orders: HashMap<ScopeId, Box<[ComponentDescriptor]>>,
     seed_destinations: HashMap<std::any::TypeId, SeedDestination>,
@@ -93,11 +94,15 @@ impl CandidateGraph {
         )?;
         let selection = Arc::clone(graph.provider_selection());
         let scopes = ScopePlan::partition(&components, &selection, topology)?;
+        let by_id = components
+            .iter()
+            .enumerate()
+            .map(|(position, component)| (component.id, position))
+            .collect::<HashMap<_, _>>();
         let singleton_order = graph
             .construction_order()
             .iter()
-            .filter_map(|id| components.iter().find(|component| component.id == *id))
-            .copied()
+            .filter_map(|id| by_id.get(id).map(|position| components[*position]))
             .collect::<Vec<_>>()
             .into_boxed_slice();
         let scope_orders = scopes
@@ -110,6 +115,7 @@ impl CandidateGraph {
             identity: Arc::new(()),
             graph,
             components: components.into_boxed_slice(),
+            by_id,
             singleton_order,
             scope_orders,
             seed_destinations: scopes.seed_destinations,
@@ -126,7 +132,9 @@ impl CandidateGraph {
 
     /// The candidate descriptor with stable ID `id`.
     pub fn component(&self, id: &str) -> Option<&ComponentDescriptor> {
-        self.components.iter().find(|component| component.id == id)
+        self.by_id
+            .get(id)
+            .map(|position| &self.components[*position])
     }
 
     pub fn provider_selection(&self) -> &Arc<ProviderSelectionModel> {
