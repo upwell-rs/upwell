@@ -86,6 +86,15 @@ pub(super) fn parse(
     let marker = kind.marker();
     let mut param_types = Vec::new();
 
+    if !method.sig.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &method.sig.generics,
+            format!(
+                "a `#[{marker}]` recipe cannot be generic; its descriptor drives one concrete function"
+            ),
+        ));
+    }
+
     if !matches!(attr.meta, syn::Meta::Path(_)) {
         return Err(syn::Error::new_spanned(
             &attr.meta,

@@ -197,8 +197,9 @@ pub fn config(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///   component stored as `Arc<Self>`.
 ///
 /// A replacement or hot update may be sync or `async`, and may resolve only dependencies the
-/// ordinary factory declares. A non-singleton `scope`, a missing `Previous<Self>`, a second
-/// recipe of one kind, or more than one factory marker on a method is a compile error. See
+/// ordinary factory declares, and must take `Previous<Self>` first. A recipe on a
+/// non-singleton `scope`, a generic recipe, a second recipe of one kind, or a method carrying
+/// more than one factory marker or a `#[hook]` beside one is a compile error. See
 /// `docs/transition-strategies.md` for when the runtime uses each recipe.
 ///
 /// ```ignore

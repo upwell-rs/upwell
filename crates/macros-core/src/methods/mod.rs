@@ -113,16 +113,16 @@ where
             continue;
         };
 
+        if factories.claim(method, &self_ident) {
+            continue;
+        }
+
         if let Some(pos) = method.attrs.iter().position(|a| a.path().is_ident("hook")) {
             let attr = method.attrs.remove(pos);
             let hook_attr = hook::parse_hook_attr(&attr)?;
 
             hooks.push(hook::parse_hook(method, hook_attr)?);
 
-            continue;
-        }
-
-        if factories.claim(method, &self_ident) {
             continue;
         }
 
@@ -241,9 +241,9 @@ struct FactoryClaims {
 }
 
 impl FactoryClaims {
-    /// Claims `method` when it carries a factory marker, stripping every such marker. A
-    /// malformed claim is recorded rather than returned, so the walk still strips the rest
-    /// and the impl block is kept beside the diagnostics.
+    /// Claims `method` when it carries a factory marker, stripping every such marker and any
+    /// `#[hook]` beside it. A malformed claim is recorded rather than returned, so the walk
+    /// still strips the rest and the impl block is kept beside the diagnostics.
     fn claim(&mut self, method: &mut ImplItemFn, self_ident: &Ident) -> bool {
         let mut markers = take_factory_markers(method).into_iter();
         let Some((marker, attr)) = markers.next() else {
@@ -254,6 +254,15 @@ impl FactoryClaims {
             self.reject(syn::Error::new_spanned(
                 second,
                 "a method carries at most one of `#[init]`, `#[replace]`, `#[transition]` and `#[hot_update]`",
+            ));
+
+            return true;
+        }
+
+        if let Some(hook) = take_hook_markers(method).into_iter().next() {
+            self.reject(syn::Error::new_spanned(
+                hook,
+                "a `#[hook]` method cannot also be a factory; move the hook to its own method",
             ));
 
             return true;
@@ -314,6 +323,18 @@ impl FactoryClaims {
             None => self.errors = Some(error),
         }
     }
+}
+
+/// Strips every `#[hook]` from `method`, in declaration order.
+fn take_hook_markers(method: &mut ImplItemFn) -> Vec<Attribute> {
+    let (hooks, kept) = method
+        .attrs
+        .drain(..)
+        .partition(|attr| attr.path().is_ident("hook"));
+
+    method.attrs = kept;
+
+    hooks
 }
 
 /// Strips every factory marker from `method`, in declaration order.
