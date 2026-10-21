@@ -148,4 +148,5 @@ impl PreparedProtocol for PreparedBoundaryProtocol {
 
 mod boundary;
 mod conditions;
+mod root_order;
 mod snapshots;

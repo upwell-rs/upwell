@@ -20,7 +20,7 @@ use upwell_core::{
 };
 use upwell_di::{
     BoxedComponent, Component, ComponentDescriptor, EffectiveGraph, Injectable, ProviderDescriptor,
-    RootResolver, ScopeContainer, ScopeRegistry, root_resolver_descriptor, topological_sort,
+    RootResolver, ScopeContainer, ScopeRegistry, root_resolver_descriptor,
 };
 use upwell_dirs::{Cache, Config, Data, Dir, DirKind, DirectoriesManager, Runtime, State, Tmp};
 use upwell_hooks::{
@@ -486,20 +486,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             &scope_topology,
         )?;
         let scopes = ScopePlan::partition(&resolved, &provider_selection, &scope_topology)?;
-        let prebuilt: HashSet<_> = instances
-            .iter()
-            .map(|instance| instance.ty.type_id)
-            .collect();
-        let root_order: Vec<_> = topological_sort(
-            &scopes.singletons,
-            &prebuilt,
-            &provider_selection,
-            |consumer, dependency| scope_topology.is_reachable(&consumer, &dependency),
-        )
-        .map_err(Error::from)?
-        .into_iter()
-        .copied()
-        .collect();
+        let root_order = scopes.root_order(&effective_graph);
 
         let protocol = protocol.prepare(&ValidationContext::new(
             &self.name,

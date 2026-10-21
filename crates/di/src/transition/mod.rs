@@ -175,6 +175,7 @@ pub struct EffectiveGraph {
     generation: RuntimeGenerationId,
     nodes: BTreeMap<&'static str, EffectiveNode>,
     reverse: BTreeMap<&'static str, Box<[DependencyDemandId]>>,
+    singleton_order: Box<[&'static str]>,
     construction_order: Box<[&'static str]>,
     selection: Arc<ProviderSelectionModel>,
 }
@@ -260,18 +261,22 @@ impl EffectiveGraph {
             }
         }
 
-        let construction_order = topological_sort(&singletons, &prebuilt, &selection, can_reach)?
+        let singleton_order = topological_sort(&singletons, &prebuilt, &selection, can_reach)?
             .into_iter()
-            .filter(|component| constructed.contains(component.id))
             .map(|component| component.id)
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
+            .collect::<Box<[_]>>();
+        let construction_order = singleton_order
+            .iter()
+            .filter(|id| constructed.contains(*id))
+            .copied()
+            .collect::<Box<[_]>>();
 
         Ok(Self {
             identity: Arc::new(()),
             generation,
             nodes,
             reverse,
+            singleton_order,
             construction_order,
             selection,
         })
@@ -306,6 +311,13 @@ impl EffectiveGraph {
 
     pub fn provider_selection(&self) -> &Arc<ProviderSelectionModel> {
         &self.selection
+    }
+
+    /// Every singleton, factory-less ones included, in construction order. Building a
+    /// root walks this order, so seeded instances are checked where they would have been
+    /// constructed.
+    pub fn singleton_order(&self) -> &[&'static str] {
+        &self.singleton_order
     }
 
     pub fn construction_order(&self) -> &[&'static str] {
