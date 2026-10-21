@@ -14,7 +14,7 @@ use crate::registry::selection::ProviderSelectionModel;
 use crate::{
     descriptors::{
         Component, ComponentDescriptor, Injectable, ProviderDescriptor,
-        component::{ComponentConstructionContext, ScopeStore},
+        component::{ComponentConstructionContext, ScopeStore, SharedStore},
     },
     error::Error,
 };
@@ -111,20 +111,17 @@ impl ScopeRegistry {
             .map(|selection| selection.provider)
     }
 
-    pub(crate) fn selected_runtime_collection(
-        &self,
+    pub(crate) fn selected_runtime_collection<'a>(
+        &'a self,
         trait_id: TypeId,
         resolution: ResolutionMode,
-        scope: &dyn Scope,
-        can_access: &impl Fn(&'static dyn Scope) -> bool,
-    ) -> Vec<ProviderDescriptor> {
+        scope: &'a dyn Scope,
+        can_access: impl Fn(&'static dyn Scope) -> bool + 'a,
+    ) -> impl Iterator<Item = ProviderDescriptor> + 'a {
         self.selection
-            .select_runtime_collection(trait_id, resolution, scope, &|_, dependency| {
+            .runtime_collection(trait_id, resolution, scope, move |_, dependency| {
                 can_access(dependency)
             })
-            .into_iter()
-            .map(|selection| selection.provider)
-            .collect()
     }
 
     pub(crate) fn selected_runtime_keyed(
@@ -269,12 +266,6 @@ impl ScopeResolverSlot {
     }
 }
 
-/// A fresh empty shared store for transient construction against an already
-/// frozen scope: resolution then flows entirely through the parent chain.
-fn empty_store() -> Arc<std::sync::RwLock<ScopeStore>> {
-    Arc::new(std::sync::RwLock::new(ScopeStore::default()))
-}
-
 /// Constructs a fresh `Transient` instance whose `Injectable::Target` is `H`, if
 /// one is registered. A transient is rebuilt on every resolution and never stored,
 /// so it is constructed in a throwaway context parented to `parent` (its
@@ -287,7 +278,7 @@ async fn construct_transient_boxed(
     registry: &Arc<ScopeRegistry>,
     parent: Option<Arc<ScopeContainer>>,
     slot: ScopeResolverSlot,
-    store: Arc<std::sync::RwLock<ScopeStore>>,
+    store: SharedStore,
     descriptor: ComponentDescriptor,
 ) -> crate::Result<BoxedComponent> {
     let factory = descriptor
@@ -353,7 +344,7 @@ pub(crate) async fn construct_transient<H: Injectable>(
     registry: &Arc<ScopeRegistry>,
     parent: Option<Arc<ScopeContainer>>,
     slot: ScopeResolverSlot,
-    store: Arc<std::sync::RwLock<ScopeStore>>,
+    store: SharedStore,
 ) -> crate::Result<Option<H>> {
     let target = TypeId::of::<H::Target>();
     let Some(descriptor) = registry.transient(target) else {
@@ -368,7 +359,7 @@ pub(crate) async fn construct_transient_provider<H: Injectable>(
     registry: &Arc<ScopeRegistry>,
     parent: Option<Arc<ScopeContainer>>,
     slot: ScopeResolverSlot,
-    store: Arc<std::sync::RwLock<ScopeStore>>,
+    store: SharedStore,
     provider: ProviderDescriptor,
 ) -> crate::Result<Option<H>> {
     let Some(descriptor) = registry.transient(provider.concrete_ty.type_id) else {
@@ -720,7 +711,7 @@ impl ScopeContainer {
                     &self.registry,
                     Some(Arc::clone(self)),
                     self.slot.clone(),
-                    empty_store(),
+                    SharedStore::default(),
                     provider,
                 )
                 .await;
@@ -737,7 +728,7 @@ impl ScopeContainer {
             &self.registry,
             Some(Arc::clone(self)),
             self.slot.clone(),
-            empty_store(),
+            SharedStore::default(),
         )
         .await
     }
@@ -768,7 +759,7 @@ impl ScopeContainer {
                 &self.registry,
                 Some(Arc::clone(self)),
                 self.slot.clone(),
-                empty_store(),
+                SharedStore::default(),
                 provider,
             )
             .await;

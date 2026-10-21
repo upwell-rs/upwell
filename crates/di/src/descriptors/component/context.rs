@@ -22,8 +22,10 @@ pub struct ComponentConstructionContext {
     scope: &'static dyn Scope,
     /// Shared because transients constructed mid-build resolve their own
     /// dependencies from this same in-progress store. Reads/writes are brief and
-    /// sequential; no guard is held across an await.
-    store: Arc<std::sync::RwLock<ScopeStore>>,
+    /// sequential; no guard is held across an await. `None` until the first write,
+    /// so a request-time extraction context, which never stores anything, does not
+    /// allocate one.
+    store: Option<SharedStore>,
     parent: Option<Arc<crate::container::ScopeContainer>>,
     registry: Arc<crate::container::ScopeRegistry>,
     slot: crate::container::ScopeResolverSlot,
@@ -39,6 +41,9 @@ pub struct ComponentConstructionContext {
 }
 
 const STORE_POISON: &str = "scope store lock poisoned";
+
+/// A construction store shared with the transients built while it is in progress.
+pub(crate) type SharedStore = Arc<std::sync::RwLock<ScopeStore>>;
 
 pub(crate) struct ComponentConstructionParts {
     pub(crate) scope: &'static dyn Scope,
@@ -63,14 +68,16 @@ impl ComponentConstructionContext {
         resolvers: ResolverSet,
         slot: crate::container::ScopeResolverSlot,
     ) -> Self {
-        Self::with_store(
+        Self {
             scope,
+            store: None,
             parent,
             registry,
             resolvers,
             slot,
-            Arc::new(std::sync::RwLock::new(ScopeStore::default())),
-        )
+            previous: None,
+            change: None,
+        }
     }
 
     /// Creates a context over an existing store, used when a transient is
@@ -83,11 +90,11 @@ impl ComponentConstructionContext {
         registry: Arc<crate::container::ScopeRegistry>,
         resolvers: ResolverSet,
         slot: crate::container::ScopeResolverSlot,
-        store: Arc<std::sync::RwLock<ScopeStore>>,
+        store: SharedStore,
     ) -> Self {
         Self {
             scope,
-            store,
+            store: Some(store),
             parent,
             registry,
             resolvers,
@@ -136,9 +143,23 @@ impl ComponentConstructionContext {
         self.slot.clone()
     }
 
-    /// The shared handle to this context's store, for transient construction.
-    pub(crate) fn store_handle(&self) -> Arc<std::sync::RwLock<ScopeStore>> {
-        Arc::clone(&self.store)
+    /// The shared handle to this context's store, for transient construction. A
+    /// context that has stored nothing hands out a fresh empty store: a transient
+    /// only reads it while it is built, so it observes the same empty state.
+    pub(crate) fn store_handle(&self) -> SharedStore {
+        self.store.clone().unwrap_or_default()
+    }
+
+    /// Reads this context's store, or `None` when nothing has been stored yet.
+    fn read_store<R>(&self, read: impl FnOnce(&ScopeStore) -> Option<R>) -> Option<R> {
+        read(&self.store.as_ref()?.read().expect(STORE_POISON))
+    }
+
+    fn write_store(&mut self) -> std::sync::RwLockWriteGuard<'_, ScopeStore> {
+        self.store
+            .get_or_insert_with(SharedStore::default)
+            .write()
+            .expect(STORE_POISON)
     }
 
     /// Captures this construction scope for forced reconstruction of `H`.
@@ -173,53 +194,18 @@ impl ComponentConstructionContext {
     /// if `H::Target` is a `Transient` component — a freshly constructed instance.
     pub async fn resolve<H: Injectable>(&self) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
-        let can_access = |scope: &'static dyn Scope| {
-            scope.is_transient()
-                || scope.id() == self.scope.id()
-                || self
-                    .parent
-                    .as_ref()
-                    .is_some_and(|parent| parent.can_access(scope))
-        };
 
         if let Some(provider) = self.registry.selected_runtime_provider(
             target,
             None,
             ResolutionMode::Eager,
             self.scope,
-            &can_access,
+            &|scope| self.can_access(scope),
         ) {
-            if self
-                .registry
-                .transient(provider.concrete_ty.type_id)
-                .is_some()
-            {
-                return crate::container::construct_transient_provider::<H>(
-                    &self.registry,
-                    self.parent.clone(),
-                    self.slot.clone(),
-                    self.store_handle(),
-                    provider,
-                )
-                .await;
-            }
-
-            if let Some(handle) = self
-                .store
-                .read()
-                .expect(STORE_POISON)
-                .resolve_provider_local::<H>(&provider)
-            {
-                return Ok(Some(handle));
-            }
-
-            return Ok(self
-                .parent
-                .as_ref()
-                .and_then(|parent| parent.resolve_provider_built::<H>(&provider)));
+            return self.resolve_selected::<H>(provider).await;
         }
 
-        if let Some(handle) = self.store.read().expect(STORE_POISON).resolve_local::<H>() {
+        if let Some(handle) = self.read_store(ScopeStore::resolve_local::<H>) {
             return Ok(Some(handle));
         }
 
@@ -244,24 +230,77 @@ impl ComponentConstructionContext {
         qualifier: &str,
     ) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
-        let can_access = |scope: &'static dyn Scope| {
-            scope.is_transient()
-                || scope.id() == self.scope.id()
-                || self
-                    .parent
-                    .as_ref()
-                    .is_some_and(|parent| parent.can_access(scope))
-        };
         let Some(provider) = self.registry.selected_runtime_provider(
             target,
             Some(qualifier),
             ResolutionMode::Eager,
             self.scope,
-            &can_access,
+            &|scope| self.can_access(scope),
         ) else {
             return Ok(None);
         };
 
+        self.resolve_selected::<H>(provider).await
+    }
+
+    /// Every provider of the trait `H::Target` across this scope and its parents.
+    pub async fn resolve_all<H: Injectable>(&self) -> crate::Result<Vec<H>> {
+        let target = TypeId::of::<H::Target>();
+        let providers = self.registry.selected_runtime_collection(
+            target,
+            ResolutionMode::Eager,
+            self.scope,
+            |scope| self.can_access(scope),
+        );
+        let mut all = Vec::with_capacity(providers.size_hint().1.unwrap_or_default());
+
+        for provider in providers {
+            if let Some(value) = self.resolve_selected::<H>(provider).await? {
+                all.push(value);
+            }
+        }
+
+        Ok(all)
+    }
+
+    /// Every provider of the trait `H::Target` keyed by qualifier, across this scope
+    /// and its parents (a closer scope wins a qualifier collision).
+    pub async fn resolve_keyed<H: Injectable>(&self) -> crate::Result<HashMap<String, H>> {
+        let target = TypeId::of::<H::Target>();
+        let providers = self.registry.selected_runtime_keyed(
+            target,
+            ResolutionMode::Eager,
+            self.scope,
+            &|scope| self.can_access(scope),
+        );
+        let mut keyed = HashMap::with_capacity(providers.len());
+
+        for provider in providers {
+            if let Some(value) = self.resolve_selected::<H>(provider).await? {
+                keyed.insert(provider.qualifier.to_string(), value);
+            }
+        }
+
+        Ok(keyed)
+    }
+
+    /// Whether a component in `scope` is visible from this construction scope.
+    fn can_access(&self, scope: &'static dyn Scope) -> bool {
+        scope.is_transient()
+            || scope.id() == self.scope.id()
+            || self
+                .parent
+                .as_ref()
+                .is_some_and(|parent| parent.can_access(scope))
+    }
+
+    /// Resolves one selected provider: a transient provider is constructed fresh,
+    /// anything else is read from this scope's store or its parents. Checking for a
+    /// transient first keeps the common built case free of the construction setup.
+    async fn resolve_selected<H: Injectable>(
+        &self,
+        provider: ProviderDescriptor,
+    ) -> crate::Result<Option<H>> {
         if self
             .registry
             .transient(provider.concrete_ty.type_id)
@@ -277,11 +316,7 @@ impl ComponentConstructionContext {
             .await;
         }
 
-        if let Some(handle) = self
-            .store
-            .read()
-            .expect(STORE_POISON)
-            .resolve_provider_local::<H>(&provider)
+        if let Some(handle) = self.read_store(|store| store.resolve_provider_local::<H>(&provider))
         {
             return Ok(Some(handle));
         }
@@ -292,120 +327,21 @@ impl ComponentConstructionContext {
             .and_then(|parent| parent.resolve_provider_built::<H>(&provider)))
     }
 
-    /// Every provider of the trait `H::Target` across this scope and its parents.
-    pub async fn resolve_all<H: Injectable>(&self) -> crate::Result<Vec<H>> {
-        let target = TypeId::of::<H::Target>();
-        let can_access = |scope: &'static dyn Scope| {
-            scope.is_transient()
-                || scope.id() == self.scope.id()
-                || self
-                    .parent
-                    .as_ref()
-                    .is_some_and(|parent| parent.can_access(scope))
-        };
-        let providers = self.registry.selected_runtime_collection(
-            target,
-            ResolutionMode::Eager,
-            self.scope,
-            &can_access,
-        );
-        let mut all = Vec::new();
-
-        for provider in providers {
-            if let Some(value) = crate::container::construct_transient_provider::<H>(
-                &self.registry,
-                self.parent.clone(),
-                self.slot.clone(),
-                self.store_handle(),
-                provider,
-            )
-            .await?
-            {
-                all.push(value);
-            } else if let Some(value) = self
-                .store
-                .read()
-                .expect(STORE_POISON)
-                .resolve_provider_local::<H>(&provider)
-                .or_else(|| {
-                    self.parent
-                        .as_ref()
-                        .and_then(|parent| parent.resolve_provider_built::<H>(&provider))
-                })
-            {
-                all.push(value);
-            }
-        }
-
-        Ok(all)
-    }
-
-    /// Every provider of the trait `H::Target` keyed by qualifier, across this scope
-    /// and its parents (a closer scope wins a qualifier collision).
-    pub async fn resolve_keyed<H: Injectable>(&self) -> crate::Result<HashMap<String, H>> {
-        let target = TypeId::of::<H::Target>();
-        let can_access = |scope: &'static dyn Scope| {
-            scope.is_transient()
-                || scope.id() == self.scope.id()
-                || self
-                    .parent
-                    .as_ref()
-                    .is_some_and(|parent| parent.can_access(scope))
-        };
-        let providers = self.registry.selected_runtime_keyed(
-            target,
-            ResolutionMode::Eager,
-            self.scope,
-            &can_access,
-        );
-        let mut keyed = HashMap::new();
-
-        for provider in providers {
-            if let Some(value) = crate::container::construct_transient_provider::<H>(
-                &self.registry,
-                self.parent.clone(),
-                self.slot.clone(),
-                self.store_handle(),
-                provider,
-            )
-            .await?
-            {
-                keyed.insert(provider.qualifier.to_string(), value);
-            } else if let Some(value) = self
-                .store
-                .read()
-                .expect(STORE_POISON)
-                .resolve_provider_local::<H>(&provider)
-                .or_else(|| {
-                    self.parent
-                        .as_ref()
-                        .and_then(|parent| parent.resolve_provider_built::<H>(&provider))
-                })
-            {
-                keyed.insert(provider.qualifier.to_string(), value);
-            }
-        }
-
-        Ok(keyed)
-    }
-
     pub(crate) fn insert(&mut self, component: BoxedComponent) {
-        self.store.write().expect(STORE_POISON).insert(component);
+        self.write_store().insert(component);
     }
 
     pub(crate) fn register_provider(&mut self, provider: &ProviderDescriptor, ordinal: usize) {
-        self.store
-            .write()
-            .expect(STORE_POISON)
-            .register_provider(provider, ordinal);
+        self.write_store().register_provider(provider, ordinal);
     }
 
     pub(crate) fn into_parts(self) -> ComponentConstructionParts {
         // The scope is freezing: every transient context sharing this store was
         // dropped when its construction returned, so unwrapping cannot race.
-        let store = match Arc::try_unwrap(self.store) {
-            Ok(lock) => lock.into_inner().expect(STORE_POISON),
-            Err(_) => panic!("construction store has outstanding readers at scope freeze"),
+        let store = match self.store.map(Arc::try_unwrap) {
+            None => ScopeStore::default(),
+            Some(Ok(lock)) => lock.into_inner().expect(STORE_POISON),
+            Some(Err(_)) => panic!("construction store has outstanding readers at scope freeze"),
         };
 
         ComponentConstructionParts {
@@ -421,6 +357,7 @@ impl ComponentConstructionContext {
     /// Whether a component of `type_id` has already been constructed or seeded in
     /// this scope.
     pub(crate) fn contains(&self, type_id: TypeId) -> bool {
-        self.store.read().expect(STORE_POISON).contains(type_id)
+        self.read_store(|store| store.contains(type_id).then_some(()))
+            .is_some()
     }
 }
