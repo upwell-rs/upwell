@@ -127,7 +127,9 @@ pub struct PreviewComponent {
     pub role: PreviewRole,
     /// The minimum structural action the planner requires.
     pub action: PreviewAction,
-    /// The strategy the runtime would apply; absent for a removed component.
+    /// The strategy the runtime would apply. Absent for a removed component, and for a
+    /// scoped or transient component, which has no root instance and is rebuilt from the
+    /// published scope plan on its next opening.
     #[serde(default)]
     pub strategy: Option<PreviewStrategy>,
     /// The canonical reason paths from each direct change to this component.
