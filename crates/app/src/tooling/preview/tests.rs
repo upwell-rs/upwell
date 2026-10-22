@@ -2,7 +2,8 @@
 //! consumer from tooling alone, without running factories or trusted callbacks, and every
 //! preview stays redacted.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::cell::Cell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::Deserialize;
 use upwell_config::{ConditionFacts, ConfigManager, ConfigProperties, ResolverChain, Toml};
@@ -18,7 +19,12 @@ use crate::test_support::{TempFixture, test_component, unbuilt_factories};
 use crate::{App, ExecutionMode};
 
 static TRUSTED_CALLS: AtomicUsize = AtomicUsize::new(0);
-static SCALARS_PANIC: AtomicBool = AtomicBool::new(false);
+thread_local! {
+    /// Whether fact extraction panics on this test's thread only. A preview evaluates
+    /// synchronously on its caller's thread, so a sibling test running in parallel never
+    /// observes it, and it dies with the test thread.
+    static SCALARS_PANIC: Cell<bool> = const { Cell::new(false) };
+}
 
 const CUSTOM_ENABLED: ConfigFactId = ConfigFactId::new("PreviewAuth", "auth", "custom");
 
@@ -59,7 +65,7 @@ impl ConditionFacts for PreviewAuth {
         &self,
         binding_path: &'static str,
     ) -> Vec<(ConfigFactId, ConditionScalar)> {
-        if SCALARS_PANIC.load(Ordering::SeqCst) {
+        if SCALARS_PANIC.get() {
             panic!("fact extraction panicked");
         }
 
@@ -265,11 +271,11 @@ fn an_unbindable_assignment_is_rejected_while_staging() {
 fn a_panicking_fact_extraction_is_rejected_while_evaluating() {
     let (_fixture, prepared) = prepared(true);
 
-    SCALARS_PANIC.store(true, Ordering::SeqCst);
+    SCALARS_PANIC.set(true);
 
     let preview = prepared.transition_preview(&overlay(&[("auth.custom", "false")]));
 
-    SCALARS_PANIC.store(false, Ordering::SeqCst);
+    SCALARS_PANIC.set(false);
 
     assert_eq!(
         preview.outcome,
