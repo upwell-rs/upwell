@@ -344,6 +344,7 @@ impl ComponentRegistry {
                             candidates: model.visible_provider_ids(
                                 dep_id,
                                 dep.qualifier,
+                                dep.resolution,
                                 c.scope,
                                 can_access,
                             ),
@@ -495,6 +496,7 @@ impl ComponentRegistry {
                                     candidates: model.visible_provider_ids(
                                         dependency.ty.type_id,
                                         dependency.qualifier,
+                                        ResolutionMode::Deferred,
                                         consumer.scope,
                                         can_access,
                                     ),

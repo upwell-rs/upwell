@@ -287,10 +287,9 @@ pub enum Error {
     },
 
     #[error(
-        "ambiguous provider for '{type_name}'{}: {} tie for it; mark exactly one `#[primary]`, \
-         give them distinct priorities, or inject `Vec`/`HashMap<String, _>` to receive all of them",
+        "ambiguous provider for '{type_name}'{}: {}",
         component_id.as_ref().map(|id| format!(" required by '{id}'")).unwrap_or_default(),
-        candidates.join(", ")
+        ambiguity_detail(candidates)
     )]
     AmbiguousProvider {
         /// Stable consumer component identity, when selection has a consumer.
@@ -435,3 +434,22 @@ pub enum Error {
 }
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;
+
+/// Explains an ambiguous selection from the providers the resolution could select: a real
+/// tie names them with the fixes that break it, and anything else explains that none of
+/// them can be chosen.
+fn ambiguity_detail(candidates: &[String]) -> String {
+    if candidates.len() < 2 {
+        return format!(
+            "no selectable provider among [{}]; register a provider this resolution can select \
+             or inject `Vec`/`HashMap<String, _>` to receive all of them",
+            candidates.join(", ")
+        );
+    }
+
+    format!(
+        "{} tie for it; mark exactly one `#[primary]`, give them distinct priorities, or inject \
+         `Vec`/`HashMap<String, _>` to receive all of them",
+        candidates.join(", ")
+    )
+}

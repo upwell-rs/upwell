@@ -149,10 +149,15 @@ fn validate_rejects_ambiguous_deferred_candidates() {
     // The transient primary passes the global primary-count check, but after
     // transient filtering the scoped set is ambiguous with no parent fallback
     // left — hydration could never select deterministically.
-    assert!(matches!(
-        registry.validate(),
-        Err(Error::AmbiguousProvider { .. })
-    ));
+    let Err(Error::AmbiguousProvider { candidates, .. }) = registry.validate() else {
+        panic!("the deferred scoped set is ambiguous");
+    };
+
+    assert_eq!(
+        candidates,
+        ["SecondScoped", "FirstScoped"],
+        "only the providers deferred hydration could select are reported, in provider order"
+    );
 }
 
 #[test]

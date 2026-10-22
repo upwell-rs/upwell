@@ -457,11 +457,13 @@ impl ProviderSelectionModel {
     }
 
     /// The stable component IDs of every provider of `trait_id` matching `qualifier` that
-    /// `consumer` can see, in provider order.
+    /// `consumer` can see and `resolution` can select, in provider order. Deferred
+    /// resolution never selects transient providers, so they are left out for it.
     pub(crate) fn visible_provider_ids(
         &self,
         trait_id: TypeId,
         qualifier: Option<&str>,
+        resolution: ResolutionMode,
         consumer: &dyn Scope,
         can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
     ) -> Vec<String> {
@@ -470,6 +472,9 @@ impl ProviderSelectionModel {
             .filter(|provider| provider_matches(provider, qualifier))
             .filter(|provider| self.is_visible(consumer, provider, can_access))
             .filter_map(|provider| self.component(provider.concrete_ty.type_id))
+            .filter(|component| {
+                resolution != ResolutionMode::Deferred || !component.scope.is_transient()
+            })
             .map(|component| component.id.to_string())
             .collect()
     }
