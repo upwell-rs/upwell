@@ -45,6 +45,9 @@ fn calls_macros_and_other_operators_are_trusted() {
         Audit.eligible::<()>(),
         Some(AuthConfig.mode).is_some(),
         resolve(PATH) == Some("on"),
+        upwell::condition::resolve("feature.mode") == Some("on"),
+        evil::resolve("feature.mode") == Some("on"),
+        resolve("feature.mode") == mine::Some("on"),
         AuthConfig.mode == { AuthMode::Custom },
         flag,
     );

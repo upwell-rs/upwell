@@ -453,8 +453,10 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         let config_store = Arc::new(config_store);
 
         // Evaluate the startup conditions from the staged config values, with the same
-        // evaluator the transactional reload uses. An app with no condition facts gets an
-        // empty-facts evaluation, which leaves every unconditional component eligible.
+        // evaluator the transactional reload uses, or in tooling mode the tooling
+        // evaluator, which never runs trusted callbacks. An app with no condition facts
+        // gets an empty-facts evaluation, which leaves every unconditional component
+        // eligible.
         let evaluation = evaluate_startup_conditions(&registry, &tree, &reload_slots, self.mode)?;
 
         // Retain the full catalog with the evaluation for this and future generations.
@@ -868,14 +870,6 @@ fn seed_dir<K: DirKind>(
     });
 }
 
-/// Evaluates the startup conditions from the staged config values, with the same
-/// evaluator the transactional reload uses. An app with no condition facts gets an
-/// empty-facts evaluation, which leaves every unconditional component eligible.
-///
-/// Staging, fact extraction, descriptor callbacks, and evaluation are application
-/// extension points, so — like the reload's condition stage — the whole stage runs
-/// inside a panic boundary: a panic returns the redacted preparation panic error,
-/// while ordinary errors pass through unchanged.
 /// Builds and validates the initial effective graph of the eligible registry, and partitions
 /// its scope plans.
 fn plan_effective_graph(
@@ -918,6 +912,15 @@ fn undecided_graph_error(condition: &AppConditionState, error: Error) -> Error {
     }
 }
 
+/// Evaluates the startup conditions from the staged config values, with the same
+/// evaluator the transactional reload uses, or in tooling mode the tooling evaluator,
+/// which never runs trusted callbacks. An app with no condition facts gets an
+/// empty-facts evaluation, which leaves every unconditional component eligible.
+///
+/// Staging, fact extraction, descriptor callbacks, and evaluation are application
+/// extension points, so — like the reload's condition stage — the whole stage runs
+/// inside a panic boundary: a panic returns the redacted preparation panic error,
+/// while ordinary errors pass through unchanged.
 fn evaluate_startup_conditions(
     registry: &AppRegistry,
     tree: &ConfigManager,
