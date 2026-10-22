@@ -3,6 +3,7 @@
 //! `watch` feature — a file change drives the app runtime's transactional reload.
 #![allow(dead_code)]
 
+#[cfg(any(feature = "daemon", feature = "watch"))]
 use std::fs;
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use upwell::config::Toml;
 #[cfg(any(feature = "daemon", feature = "watch"))]
 use upwell::dirs::{Config, DirectoriesManager};
 use upwell_config::ResolverChain;
+#[cfg(feature = "watch")]
 use upwell_test_utils::AbortOnDropTask;
 
 #[cfg(feature = "watch")]
