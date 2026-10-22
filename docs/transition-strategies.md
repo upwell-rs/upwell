@@ -144,10 +144,21 @@ rebuilds the effective graph for the whole application.
 
 ## Scope
 
-Transitions are **singleton-only**. Request-, connection- and other scoped components are never
-transitioned in place. Each new scope is built from the generation that is current when it opens.
-An already open scope keeps the generation it pinned. A planned transition that would have to move
-a non-singleton fails with `RestartRequired` (`NonSingleton`) before anything is constructed.
+Transitions move **singleton instances only**. Request-, connection-, custom-scoped and transient
+components have no instance in the root, so a reload never transitions them in place. It replans
+them instead. When a change affects one (for example a request-scoped consumer of a switched
+`Arc<dyn Authenticator>`), the planner still reports it, with its `FutureScope` or `Transient`
+role, but it needs no strategy and is never constructed during the reload. The published
+generation's scope plan builds it on the next opening.
+
+Already open scopes **defer**. An open scope, and every scope opened beneath it, keeps resolving
+from the generation it pinned until it closes. Only scopes opened from the root after the commit see
+the new generation. The displaced generation stays alive (`AppRuntime::displaced_generations()`)
+until the last such scope closes. Nothing ever migrates an open scope, and the reload never waits
+for one.
+
+The explicit `CandidateGraph::resolve_transition` path stays strict: a decision for a non-singleton
+fails with `RestartRequired` (`NonSingleton`).
 
 `RestartRequired` is also how every other unsupported request fails, always before construction.
 Examples: a recipe the component did not declare, a `Previous` read for an added component, a hot

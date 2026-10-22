@@ -83,25 +83,32 @@ fn counted_transient() -> ComponentDescriptor {
 }
 
 #[test]
-fn runtime_invalidated_non_singleton_requires_restart_before_construction() {
+fn runtime_invalidated_non_singleton_is_replanned_without_construction() {
     let (active, candidate) = unchanged_graphs([counted_transient()]);
     let invalidated = BTreeSet::from(["counted-transient"]);
 
-    let error = candidate
+    let resolved = candidate
         .resolve_runtime_transition(&active, &invalidated)
-        .expect_err("an invalidated non-singleton cannot join a runtime transition");
+        .expect("an invalidated non-singleton is replanned, not restarted");
 
-    assert!(matches!(
-        error,
-        Error::RestartRequired(RestartRequired {
-            component: "counted-transient",
-            required: Some(NodeAction::Replace),
-            reason: RestartReason::NonSingleton,
-        })
-    ));
+    assert!(
+        resolved
+            .decisions()
+            .iter()
+            .all(|decision| decision.component != "counted-transient"),
+        "the non-singleton carries no decision: it is replanned for future resolutions"
+    );
+    assert!(
+        resolved
+            .structural()
+            .nodes
+            .iter()
+            .any(|node| node.component == "counted-transient" && node.action == NodeAction::Replace),
+        "the planner still reports the non-singleton as affected"
+    );
     assert_eq!(
         TRANSIENT_CONSTRUCTIONS.load(Ordering::SeqCst),
         0,
-        "resolution must reject before any factory callback runs"
+        "resolution never runs a factory callback"
     );
 }

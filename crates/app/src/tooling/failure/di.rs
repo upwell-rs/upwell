@@ -28,13 +28,16 @@ pub(in crate::tooling) fn di_failure(
         upwell_di::Error::AmbiguousProvider {
             component_id,
             type_name,
+            ..
         } => (
             "upwell/tooling-provider-ambiguous",
             "A dependency has more than one eligible provider.",
             phase,
             optional_component_and_type(component_id.as_deref(), type_name),
             Vec::new(),
-            Some("Mark one provider primary or request a provider collection."),
+            Some(
+                "Mark exactly one provider primary, give the providers distinct priorities, or request a provider collection.",
+            ),
         ),
         upwell_di::Error::ProviderComponentMissing(error) => {
             let upwell_di::ProviderComponentMissing {

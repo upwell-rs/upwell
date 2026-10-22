@@ -26,8 +26,8 @@ use upwell_core::{
 use upwell_di::{ComponentDescriptor, ProviderDescriptor, factories};
 use upwell_hooks::HookDescriptor;
 
-use crate::App;
 use crate::test_support::test_component;
+use crate::{App, AppBuilder, ProtocolDefinition};
 
 /// The trait both provider components implement and the dependency side resolves as
 /// `Arc<dyn Authenticator>`.
@@ -35,7 +35,7 @@ pub(super) trait Authenticator: Send + Sync {
     fn scheme(&self) -> &'static str;
 }
 
-const AUTH_MODE: ConfigFactId = ConfigFactId::new("AuthConfig", "auth", "mode");
+pub(super) const AUTH_MODE: ConfigFactId = ConfigFactId::new("AuthConfig", "auth", "mode");
 
 /// The primary is eligible exactly when `auth.mode` is `"primary"`.
 static PRIMARY_CONDITION: ConditionDescriptor =
@@ -52,8 +52,22 @@ static OBSERVED_MODES: tokio::sync::Mutex<Vec<String>> = tokio::sync::Mutex::con
 /// Whether the fallback factory fails, to abort a switch during candidate construction.
 static FALLBACK_FAILS: AtomicBool = AtomicBool::new(false);
 
+/// Whether the fallback factory panics, to abort a switch during candidate construction.
+static FALLBACK_PANICS: AtomicBool = AtomicBool::new(false);
+
+/// Whether extracting the `auth.mode` fact panics, to abort a switch while evaluating.
+static SCALARS_PANIC: AtomicBool = AtomicBool::new(false);
+
 pub(super) fn fail_fallback_factory(fails: bool) {
     FALLBACK_FAILS.store(fails, Ordering::SeqCst);
+}
+
+pub(super) fn panic_fallback_factory(panics: bool) {
+    FALLBACK_PANICS.store(panics, Ordering::SeqCst);
+}
+
+pub(super) fn panic_fact_extraction(panics: bool) {
+    SCALARS_PANIC.store(panics, Ordering::SeqCst);
 }
 
 /// Serializes this fixture's tests so no concurrent construction pushes into
@@ -95,6 +109,10 @@ impl ConditionFacts for AuthConfig {
         &self,
         binding_path: &'static str,
     ) -> Vec<(ConfigFactId, ConditionScalar)> {
+        if SCALARS_PANIC.load(Ordering::SeqCst) {
+            panic!("the auth.mode fact extraction panicked");
+        }
+
         vec![(
             ConfigFactId::new("AuthConfig", binding_path, "mode"),
             ConditionScalar::string(self.mode.clone()),
@@ -143,6 +161,10 @@ async fn construct_fallback(cfg: Cfg<AuthConfig>) -> Result<FallbackAuthenticato
         return Err("the fallback authenticator is unavailable");
     }
 
+    if FALLBACK_PANICS.load(Ordering::SeqCst) {
+        panic!("the fallback authenticator panicked");
+    }
+
     let observed_mode = observe_mode(&cfg).await;
 
     Ok(FallbackAuthenticator { observed_mode })
@@ -167,7 +189,8 @@ pub(super) const fn primary_component(
         .without_retention()
 }
 
-static PRIMARY_COMPONENT: ComponentDescriptor = primary_component(upwell_hooks::no_hooks);
+pub(super) static PRIMARY_COMPONENT: ComponentDescriptor =
+    primary_component(upwell_hooks::no_hooks);
 
 static FALLBACK_COMPONENT: ComponentDescriptor = ComponentDescriptor::of::<FallbackAuthenticator>()
     .with_condition(&FALLBACK_CONDITION)
@@ -200,19 +223,39 @@ pub(super) async fn build_auth_app_from(
     gate: &'static ComponentDescriptor,
     extra: &[&'static ComponentDescriptor],
 ) -> (TempDir, App<()>) {
+    let dir = auth_config_dir(mode);
+    let app = auth_builder::<()>(&config_dir_of(&dir), primary, gate, extra)
+        .build()
+        .await
+        .expect("auth app builds");
+
+    (dir, app)
+}
+
+/// A temp dir whose config sets `auth.mode = mode`.
+pub(super) fn auth_config_dir(mode: &str) -> TempDir {
     let dir = tempfile::Builder::new()
         .prefix("upwell-auth-switch-")
         .tempdir()
         .expect("create temp dir");
-    let config_dir = config_dir_of(&dir);
 
-    write_auth_config(&config_dir, mode);
+    write_auth_config(&config_dir_of(&dir), mode);
 
+    dir
+}
+
+/// The auth app builder over protocol `D`, reading its config from `config_dir`, with both
+/// provider components, `gate`, and `extra` registered.
+pub(super) fn auth_builder<D: ProtocolDefinition + Default>(
+    config_dir: &Path,
+    primary: &'static ComponentDescriptor,
+    gate: &'static ComponentDescriptor,
+    extra: &[&'static ComponentDescriptor],
+) -> AppBuilder<D> {
     let manager =
-        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
+        ConfigManager::<Toml>::load_in_with_resolvers(config_dir, &[], ResolverChain::empty())
             .expect("load config");
-
-    let mut builder = App::<()>::builder("auth-provider-switch-test")
+    let mut builder = App::<D>::builder("auth-provider-switch-test")
         .config_source(manager)
         .config::<AuthConfig>("auth")
         .condition_facts::<AuthConfig>("auth")
@@ -224,14 +267,9 @@ pub(super) async fn build_auth_app_from(
         builder = builder.component_descriptor(descriptor);
     }
 
-    let app = builder
+    builder
         .provider_descriptor(&PRIMARY_PROVIDER)
         .provider_descriptor(&FALLBACK_PROVIDER)
-        .build()
-        .await
-        .expect("auth app builds");
-
-    (dir, app)
 }
 
 pub(super) use super::super::config_dir_of;

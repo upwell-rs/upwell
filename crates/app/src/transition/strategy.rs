@@ -133,7 +133,7 @@ impl fmt::Display for RestartReason {
             }
             Self::LiveRebindUnsupported => "a changed live dependency cannot be rebound in place",
             Self::RemovalUnsupported => "component removal is not integrated yet",
-            Self::NonSingleton => "runtime transitions are singleton-only",
+            Self::NonSingleton => "only singleton instances can take a transition decision",
             Self::FactoryUnavailable => "the candidate component has no ordinary factory",
             Self::ReplacementUnavailable => {
                 "the candidate component declares no replacement factory"

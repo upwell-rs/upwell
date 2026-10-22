@@ -41,8 +41,11 @@ impl CandidateGraph {
     /// handler, then replacement factory), other Add/Replace/RebindLive nodes reconstruct
     /// (recipe availability is validated by the shared decision checks), and Remove nodes
     /// retire safely by absence from the candidate root — they carry no decision and
-    /// require no candidate seed. An invalidated factoryless or non-singleton node fails
-    /// resolution with [`RestartRequired`] before any construction runs.
+    /// require no candidate seed. Affected future-scope and transient nodes carry no
+    /// decision either: they have no root instance, so the published scope plan rebuilds
+    /// them on the next opening, while already open scopes keep their pinned generation.
+    /// An invalidated factoryless singleton fails resolution with [`RestartRequired`]
+    /// before any construction runs.
     pub(crate) fn resolve_runtime_transition(
         &self,
         active: &EffectiveGraph,
@@ -59,6 +62,7 @@ impl CandidateGraph {
                 .nodes
                 .iter()
                 .filter(|node| node.action != NodeAction::Remove)
+                .filter(|node| node.role == EffectiveNodeRole::Singleton)
                 .map(|node| {
                     Ok(ComponentTransitionDecision {
                         component: node.component,
@@ -160,16 +164,17 @@ impl CandidateGraph {
     /// Completes a resolved plan from an already computed structural plan and explicit
     /// decisions.
     ///
-    /// `retire_removed_by_absence` selects the runtime reload's default policy: a Remove
-    /// node with no decision is a safe retirement (the component is simply absent from
-    /// the candidate root) instead of a restart requirement. The explicit
-    /// [`resolve_transition`](Self::resolve_transition) path keeps rejecting removals.
+    /// `runtime_defaults` selects the runtime reload's default policy: a Remove node with
+    /// no decision is a safe retirement (the component is simply absent from the candidate
+    /// root), and a non-singleton node with no decision is replanned for future scope
+    /// openings, instead of either being a restart requirement. The explicit
+    /// [`resolve_transition`](Self::resolve_transition) path keeps rejecting both.
     fn resolve_transition_plan(
         &self,
         active: &EffectiveGraph,
         structural: TransitionPlan,
         requested: Vec<ComponentTransitionDecision>,
-        retire_removed_by_absence: bool,
+        runtime_defaults: bool,
     ) -> crate::Result<ResolvedTransitionPlan> {
         let mut decisions = BTreeMap::new();
         let planned = structural
@@ -214,8 +219,10 @@ impl CandidateGraph {
         for node in &structural.nodes {
             let strategy = decisions.get(node.component).copied();
 
-            if retire_removed_by_absence && strategy.is_none() && node.action == NodeAction::Remove
-            {
+            let replanned =
+                node.action == NodeAction::Remove || node.role != EffectiveNodeRole::Singleton;
+
+            if runtime_defaults && strategy.is_none() && replanned {
                 continue;
             }
 

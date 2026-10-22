@@ -34,9 +34,16 @@
 //! root: consumers of changed config bindings, owners of [`ConfigReload`] hooks, and
 //! consumers of the generation-local [`HookManager`], plus the singletons that depend on
 //! them — the planner propagates each invalidation through reverse reachability.
-//! Unaffected singletons retain their active instances. An affected component that
-//! cannot reconstruct in place (no ordinary factory, non-singleton, …) fails the reload
-//! with [`RestartRequired`](crate::RestartRequired) before any construction runs.
+//! Unaffected singletons retain their active instances. An affected singleton that
+//! cannot reconstruct in place (no ordinary factory, …) fails the reload with
+//! [`RestartRequired`](crate::RestartRequired) before any construction runs.
+//!
+//! # Scopes
+//!
+//! Affected scoped and transient components have no root instance, so they need no
+//! strategy: the published scope plan rebuilds them on the next opening. Already open
+//! scopes, and scopes opened beneath them, keep resolving from the generation they
+//! pinned until they close; a reload never migrates or waits for them.
 //!
 //! # Live rebinding
 //!

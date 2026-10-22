@@ -150,7 +150,7 @@ fn runtime_resolver_propagates_repeated_live_chains_with_empty_invalidations() {
 }
 
 #[test]
-fn runtime_resolver_preflights_non_reconstructible_live_retarget_closure() {
+fn runtime_resolver_replans_a_non_singleton_live_retarget_closure() {
     let (active, candidate) = graphs(
         &registry(
             [
@@ -170,21 +170,30 @@ fn runtime_resolver_preflights_non_reconstructible_live_retarget_closure() {
         ),
     );
 
-    let error = candidate
-        .resolve_runtime_transition(&active, &BTreeSet::new())
-        .expect_err("a non-singleton closure dependent cannot join a runtime transition");
+    let invalidated = BTreeSet::new();
+    let resolved = candidate
+        .resolve_runtime_transition(&active, &invalidated)
+        .expect("a non-singleton closure dependent is replanned, not restarted");
 
-    assert!(matches!(
-        error,
-        Error::RestartRequired(RestartRequired {
-            component: "retarget-closure-transient",
-            required: Some(NodeAction::Replace),
-            reason: RestartReason::NonSingleton,
-        })
-    ));
+    assert!(
+        resolved
+            .decisions()
+            .iter()
+            .all(|decision| decision.component != "retarget-closure-transient"),
+        "the non-singleton carries no decision: it is replanned for future resolutions"
+    );
+    assert!(
+        resolved
+            .structural()
+            .nodes
+            .iter()
+            .any(|node| node.component == "retarget-closure-transient"
+                && node.action == NodeAction::Replace),
+        "the planner still reports the non-singleton as affected"
+    );
     assert_eq!(
         RETARGET_CLOSURE_TRANSIENT_CONSTRUCTIONS.load(Ordering::SeqCst),
         0,
-        "resolution must reject before any factory callback runs"
+        "resolution never runs a factory callback"
     );
 }

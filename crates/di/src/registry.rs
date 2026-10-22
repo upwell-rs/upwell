@@ -341,6 +341,12 @@ impl ComponentRegistry {
                         return Err(Error::AmbiguousProvider {
                             component_id: Some(c.id.to_string()),
                             type_name: (dep.ty.type_name)().to_string(),
+                            candidates: model.visible_provider_ids(
+                                dep_id,
+                                dep.qualifier,
+                                c.scope,
+                                can_access,
+                            ),
                         });
                     }
                 }
@@ -486,6 +492,12 @@ impl ComponentRegistry {
                                 return Err(Error::AmbiguousProvider {
                                     component_id: Some(consumer.id.to_string()),
                                     type_name: (dependency.ty.type_name)().to_string(),
+                                    candidates: model.visible_provider_ids(
+                                        dependency.ty.type_id,
+                                        dependency.qualifier,
+                                        consumer.scope,
+                                        can_access,
+                                    ),
                                 });
                             }
                         }

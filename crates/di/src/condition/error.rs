@@ -99,6 +99,29 @@ pub enum ConditionError {
     ConditionalManualComponent(&'static str),
     #[error("manual registration cannot override conditional component '{0}'")]
     ConditionalManualOverride(&'static str),
-    #[error("condition availability cycle: {0:?}")]
+    #[error(
+        "condition availability cycle: {}; remove one of these eligibility conditions so \
+         eligibility no longer depends on itself",
+        cycle_path(.0)
+    )]
     AvailabilityCycle(Vec<AvailabilityEdge>),
+}
+
+/// Renders a cycle as `a -[condition]-> b -[not condition]-> a`.
+fn cycle_path(cycle: &[AvailabilityEdge]) -> String {
+    let mut path = cycle
+        .first()
+        .map(|edge| edge.from.to_string())
+        .unwrap_or_default();
+
+    for edge in cycle {
+        let negation = if edge.negated { "not " } else { "" };
+
+        path.push_str(&format!(
+            " -[{negation}{}]-> {}",
+            edge.condition_id, edge.to
+        ));
+    }
+
+    path
 }

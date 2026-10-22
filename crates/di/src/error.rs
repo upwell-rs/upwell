@@ -287,14 +287,18 @@ pub enum Error {
     },
 
     #[error(
-        "ambiguous provider for '{type_name}': multiple components provide it; mark one `#[primary]`, \
-         or inject `Vec`/`HashMap<String, _>` to receive all of them"
+        "ambiguous provider for '{type_name}'{}: {} tie for it; mark exactly one `#[primary]`, \
+         give them distinct priorities, or inject `Vec`/`HashMap<String, _>` to receive all of them",
+        component_id.as_ref().map(|id| format!(" required by '{id}'")).unwrap_or_default(),
+        candidates.join(", ")
     )]
     AmbiguousProvider {
         /// Stable consumer component identity, when selection has a consumer.
         component_id: Option<String>,
         /// Stable underlying requested Rust type.
         type_name: String,
+        /// Stable component IDs of every eligible provider the consumer can see.
+        candidates: Vec<String>,
     },
 
     #[error("dependency cycle: no construction order for components: {0}")]
