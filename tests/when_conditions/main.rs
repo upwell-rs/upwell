@@ -6,6 +6,7 @@
 
 mod app;
 mod descriptors;
+mod registration;
 mod selection;
 #[cfg(feature = "tooling")]
 mod tooling;

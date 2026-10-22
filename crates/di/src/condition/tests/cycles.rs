@@ -33,6 +33,11 @@ fn availability_cycles_are_rejected_with_canonical_edges() {
     assert_eq!(first_error.to_string(), second_error.to_string());
     assert!(first_error.to_string().contains("a-to-b"));
     assert!(first_error.to_string().contains("b-to-a-target"));
+    assert!(
+        first_error.to_string().contains(" -[")
+            && first_error.to_string().contains("remove one of these"),
+        "the cycle reads as a path with a fix: {first_error}"
+    );
 }
 
 #[test]

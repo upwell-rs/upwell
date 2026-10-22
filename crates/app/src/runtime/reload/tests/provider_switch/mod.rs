@@ -7,6 +7,7 @@
 mod fixture;
 mod gate;
 mod gate_hooks;
+mod hardening;
 mod live_rebind;
 mod outcome_hooks;
 mod outcomes;

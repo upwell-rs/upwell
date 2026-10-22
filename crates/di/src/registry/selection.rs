@@ -456,6 +456,24 @@ impl ProviderSelectionModel {
             .any(|provider| provider_matches(provider, qualifier))
     }
 
+    /// The stable component IDs of every provider of `trait_id` matching `qualifier` that
+    /// `consumer` can see, in provider order.
+    pub(crate) fn visible_provider_ids(
+        &self,
+        trait_id: TypeId,
+        qualifier: Option<&str>,
+        consumer: &dyn Scope,
+        can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
+    ) -> Vec<String> {
+        self.providers_for_trait(trait_id)
+            .iter()
+            .filter(|provider| provider_matches(provider, qualifier))
+            .filter(|provider| self.is_visible(consumer, provider, can_access))
+            .filter_map(|provider| self.component(provider.concrete_ty.type_id))
+            .map(|component| component.id.to_string())
+            .collect()
+    }
+
     pub(crate) fn has_visible_provider(
         &self,
         trait_id: TypeId,

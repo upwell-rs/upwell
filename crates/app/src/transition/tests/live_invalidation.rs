@@ -83,7 +83,7 @@ fn runtime_resolver_maps_the_invalidated_live_closure_to_reconstruct() {
 }
 
 #[test]
-fn runtime_invalidated_non_reconstructible_dependent_requires_restart_before_construction() {
+fn runtime_invalidated_non_singleton_dependent_is_replanned_without_construction() {
     let (active, candidate) = unchanged_graphs([
         invalidated_root(),
         live_invalidated_consumer(),
@@ -91,21 +91,33 @@ fn runtime_invalidated_non_reconstructible_dependent_requires_restart_before_con
     ]);
     let invalidated = BTreeSet::from(["invalidated-root"]);
 
-    let error = candidate
+    let resolved = candidate
         .resolve_runtime_transition(&active, &invalidated)
-        .expect_err("a non-singleton closure dependent cannot join a runtime transition");
+        .expect("a non-singleton closure dependent is replanned, not restarted");
 
-    assert!(matches!(
-        error,
-        Error::RestartRequired(RestartRequired {
-            component: "closure-transient",
-            required: Some(NodeAction::Replace),
-            reason: RestartReason::NonSingleton,
-        })
-    ));
+    assert!(
+        resolved
+            .decisions()
+            .iter()
+            .all(|decision| decision.component != "closure-transient"),
+        "the non-singleton carries no decision: it is replanned for future resolutions"
+    );
+    assert!(
+        resolved
+            .structural()
+            .nodes
+            .iter()
+            .any(|node| node.component == "closure-transient" && node.action == NodeAction::Replace),
+        "the planner still reports the non-singleton as affected"
+    );
+    assert_eq!(
+        resolved.construction_order(),
+        ["invalidated-root", "live-invalidated-consumer"],
+        "only the singleton closure is constructed"
+    );
     assert_eq!(
         CLOSURE_TRANSIENT_CONSTRUCTIONS.load(Ordering::SeqCst),
         0,
-        "resolution must reject before any factory callback runs"
+        "resolution never runs a factory callback"
     );
 }
