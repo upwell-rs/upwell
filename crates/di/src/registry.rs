@@ -491,7 +491,7 @@ impl ComponentRegistry {
                             }
                             None => {
                                 return Err(unselectable_provider(
-                                    &consumer,
+                                    consumer,
                                     &dependency,
                                     model.visible_provider_ids(
                                         dependency.ty.type_id,
