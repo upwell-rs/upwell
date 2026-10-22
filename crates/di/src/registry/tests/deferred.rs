@@ -323,3 +323,36 @@ fn validate_groups_deferred_candidates_by_scope_identity_not_rank() {
     // false ambiguity. Grouping by scope identity keeps them separate.
     assert!(registry.validate().is_ok());
 }
+
+#[test]
+fn a_deferred_dependency_only_a_transient_provides_names_the_transient_cause() {
+    let consumer = scoped!(
+        "TransientOnlyConsumer",
+        &Singleton,
+        &SINGLETON_DEFERRED_SHARED,
+        TypeDescriptor::of::<u64>("TransientOnlyConsumer"),
+    );
+    let transient = scoped!(
+        "OnlyTransient",
+        &Transient,
+        &[],
+        TypeDescriptor::of::<u32>("OnlyTransient"),
+    );
+    let registry = ComponentRegistry {
+        components: vec![consumer, transient],
+        providers: vec![trait_provider(
+            TypeDescriptor::of::<u32>("OnlyTransient"),
+            "t",
+            true,
+        )],
+    };
+
+    let error = registry
+        .validate()
+        .expect_err("hydration can never select a transient");
+
+    assert!(
+        matches!(error, Error::DeferredTransientDependency(_)),
+        "the cause is the transient target, not an ambiguity: {error}"
+    );
+}

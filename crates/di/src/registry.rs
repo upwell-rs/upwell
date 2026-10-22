@@ -338,17 +338,17 @@ impl ComponentRegistry {
                     } else {
                         crate::observability::selection_absent(c, &dep);
 
-                        return Err(Error::AmbiguousProvider {
-                            component_id: Some(c.id.to_string()),
-                            type_name: (dep.ty.type_name)().to_string(),
-                            candidates: model.visible_provider_ids(
+                        return Err(unselectable_provider(
+                            c,
+                            &dep,
+                            model.visible_provider_ids(
                                 dep_id,
                                 dep.qualifier,
                                 dep.resolution,
                                 c.scope,
                                 can_access,
                             ),
-                        });
+                        ));
                     }
                 }
 
@@ -490,17 +490,17 @@ impl ComponentRegistry {
                                 None
                             }
                             None => {
-                                return Err(Error::AmbiguousProvider {
-                                    component_id: Some(consumer.id.to_string()),
-                                    type_name: (dependency.ty.type_name)().to_string(),
-                                    candidates: model.visible_provider_ids(
+                                return Err(unselectable_provider(
+                                    &consumer,
+                                    &dependency,
+                                    model.visible_provider_ids(
                                         dependency.ty.type_id,
                                         dependency.qualifier,
                                         ResolutionMode::Deferred,
                                         consumer.scope,
                                         can_access,
                                     ),
-                                });
+                                ));
                             }
                         }
                     }
@@ -764,3 +764,33 @@ fn scope_allows_with(
 
 #[cfg(test)]
 mod tests;
+
+/// The error for a single-provider dependency no provider can be selected for: a tie
+/// among `candidates`, or, when deferred resolution filtered every visible provider out,
+/// a deferred dependency that only transient providers could satisfy.
+fn unselectable_provider(
+    consumer: &ComponentDescriptor,
+    dependency: &upwell_core::DependencyDescriptor,
+    candidates: Vec<String>,
+) -> Error {
+    let type_name = (dependency.ty.type_name)().to_string();
+
+    if candidates.is_empty() {
+        return Error::DeferredTransientDependency(Box::new(
+            crate::error::DeferredTransientDependency {
+                component: consumer.name.to_string(),
+                component_id: consumer.id.to_string(),
+                dependency: type_name.clone(),
+                dependency_type: type_name,
+                component_scope: consumer.scope.id(),
+                dependency_scope: <upwell_core::Transient as upwell_core::StaticScope>::ID,
+            },
+        ));
+    }
+
+    Error::AmbiguousProvider {
+        component_id: Some(consumer.id.to_string()),
+        type_name,
+        candidates,
+    }
+}
