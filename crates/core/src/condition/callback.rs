@@ -233,9 +233,10 @@ pub struct ConditionInputRead {
 /// `#[when]` marks an expression [`Pure`](Self::Pure) only when it stays inside a closed
 /// subset: field reads of declared inputs, `==` / `!=` against literals, unit enum variants,
 /// constants and `Some(..)` / `None`, `&&` / `||` / `!`, `X.eligible()` and
-/// `resolve("<path>")`. Such a callback calls no user function; the only user code it can
-/// reach is the `PartialEq` and `Deref` impls of the compared config fields, which must be
-/// side-effect free.
+/// `resolve("<path>")`, with `Some` and `resolve` written bare. Such a callback calls no user
+/// function; the only user code it can reach is the `PartialEq` and `Deref` impls of the
+/// compared config fields, which must be side-effect free. The check is syntactic, so the
+/// expression's scope must not shadow `Some` or `resolve` with a user function.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ConditionPurity {
     /// Tooling may evaluate the callback over supplied config.

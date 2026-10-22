@@ -9,8 +9,8 @@ use upwell::{
 use upwell::condition::ConditionPurity;
 
 use crate::app::{
-    AuditExporter, AuthConfig, CustomAuthenticator, NamedCondition, ReorderedAuditExporter,
-    TrustedCondition,
+    AuditExporter, AuditTransport, AuthConfig, CustomAuthenticator, NamedCondition,
+    ReorderedAuditExporter, TrustedCondition,
 };
 
 const FIXTURE: &str = include_str!("app.rs");
@@ -171,6 +171,7 @@ fn subset_expressions_are_pure_and_others_trusted() {
     let pure = [
         callback(condition::<CustomAuthenticator>()),
         callback(condition::<NamedCondition>()),
+        callback(condition::<AuditTransport>()),
     ]
     .into_iter()
     .chain(nodes(condition::<AuditExporter>()).iter().map(callback));
