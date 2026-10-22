@@ -2,7 +2,7 @@
 //! consumer from tooling alone, without running factories or trusted callbacks, and every
 //! preview stays redacted.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use serde::Deserialize;
 use upwell_config::{ConditionFacts, ConfigManager, ConfigProperties, ResolverChain, Toml};
@@ -18,6 +18,7 @@ use crate::test_support::{TempFixture, test_component, unbuilt_factories};
 use crate::{App, ExecutionMode};
 
 static TRUSTED_CALLS: AtomicUsize = AtomicUsize::new(0);
+static SCALARS_PANIC: AtomicBool = AtomicBool::new(false);
 
 const CUSTOM_ENABLED: ConfigFactId = ConfigFactId::new("PreviewAuth", "auth", "custom");
 
@@ -58,6 +59,10 @@ impl ConditionFacts for PreviewAuth {
         &self,
         binding_path: &'static str,
     ) -> Vec<(ConfigFactId, ConditionScalar)> {
+        if SCALARS_PANIC.load(Ordering::SeqCst) {
+            panic!("fact extraction panicked");
+        }
+
         vec![(
             ConfigFactId::new("PreviewAuth", binding_path, "custom"),
             ConditionScalar::Bool(self.custom),
@@ -254,6 +259,26 @@ fn an_unbindable_assignment_is_rejected_while_staging() {
         }
     );
     assert!(preview.components.is_empty());
+}
+
+#[test]
+fn a_panicking_fact_extraction_is_rejected_while_evaluating() {
+    let (_fixture, prepared) = prepared(true);
+
+    SCALARS_PANIC.store(true, Ordering::SeqCst);
+
+    let preview = prepared.transition_preview(&overlay(&[("auth.custom", "false")]));
+
+    SCALARS_PANIC.store(false, Ordering::SeqCst);
+
+    assert_eq!(
+        preview.outcome,
+        PreviewOutcome::Rejected {
+            phase: PreviewPhase::Evaluate,
+            failure: PreviewFailure::Panicked,
+        },
+        "the phase matches the one a runtime reload of the same change reports"
+    );
 }
 
 #[test]

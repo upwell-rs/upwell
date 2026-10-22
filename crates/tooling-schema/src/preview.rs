@@ -24,6 +24,7 @@ pub struct ConfigAssignment {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TransitionPreviewRequest {
     /// Assignments merged above every config source, in order; later ones win.
+    #[serde(default)]
     pub assignments: Vec<ConfigAssignment>,
 }
 
@@ -363,3 +364,6 @@ impl PreviewReasonKind {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

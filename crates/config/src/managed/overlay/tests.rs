@@ -76,3 +76,24 @@ fn invalid_paths_and_templates_are_rejected_without_the_value() {
     );
     assert!(overlay.is_empty(), "rejected assignments record nothing");
 }
+
+#[test]
+fn out_of_range_numbers_are_rejected_instead_of_converted() {
+    let mut overlay = ConfigOverlay::default();
+
+    for literal in [
+        "170141183460469231731687303715884105728",
+        "-170141183460469231731687303715884105729",
+        "1e999",
+    ] {
+        assert!(
+            matches!(
+                overlay.set("a.n", literal),
+                Err(ConfigOverlayError::OutOfRange { .. })
+            ),
+            "{literal} is rejected"
+        );
+    }
+
+    assert!(overlay.is_empty());
+}

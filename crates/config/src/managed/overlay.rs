@@ -24,14 +24,21 @@ pub enum ConfigOverlayError {
         #[source]
         source: TemplateError,
     },
+    /// A numeric literal does not fit an integer or a finite float.
+    #[error("config overlay number at '{path}' is out of range")]
+    OutOfRange {
+        /// The property path the value was assigned to.
+        path: String,
+    },
 }
 
 /// Property assignments merged above every config source, so a proposed change can be
 /// staged without editing a source file.
 ///
 /// Each assignment replaces the node at its dotted path; later assignments win. Values are
-/// scalar literals: `true`/`false`, integers, floats, `"quoted strings"`, and otherwise the
-/// bare text as a string. String values keep `${…}` placeholders, exactly as a source file
+/// scalar literals: `true`/`false`, integers (`i128`), finite floats, `"quoted strings"`, and
+/// otherwise the bare text as a string. A number outside those ranges is rejected rather than
+/// converted. String values keep `${…}` placeholders, exactly as a source file
 /// would. Overlays are ordinary config sources: bound defaults still fill missing leaves
 /// underneath them.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -57,10 +64,7 @@ impl ConfigOverlay {
             });
         }
 
-        let value = scalar(literal).map_err(|source| ConfigOverlayError::InvalidValue {
-            path: path.to_string(),
-            source,
-        })?;
+        let value = scalar(path, literal)?;
         let nested = path.rsplit('.').fold(value, |value, segment| {
             ConfigValue::Table(vec![(segment.to_string(), value)])
         });
@@ -93,23 +97,34 @@ impl ConfigOverlay {
     }
 }
 
-/// Parses one scalar literal. Floats must be numeric text, so words such as `inf` or
-/// `nan` stay strings.
-fn scalar(literal: &str) -> Result<ConfigValue, TemplateError> {
+/// Parses one scalar literal assigned at `path`. Floats must be numeric text, so words such
+/// as `inf` or `nan` stay strings; integer text never degrades to a float.
+fn scalar(path: &str, literal: &str) -> Result<ConfigValue, ConfigOverlayError> {
+    let digits = literal.strip_prefix(['-', '+']).unwrap_or(literal);
+    let integral = !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit());
     let numeric = literal
         .bytes()
         .all(|byte| byte.is_ascii_digit() || matches!(byte, b'.' | b'-' | b'+' | b'e' | b'E'));
+    let out_of_range = || ConfigOverlayError::OutOfRange {
+        path: path.to_string(),
+    };
 
     if let Ok(boolean) = literal.parse::<bool>() {
         return Ok(ConfigValue::Bool(boolean));
     }
 
-    if let Ok(integer) = literal.parse::<i128>() {
-        return Ok(ConfigValue::Int(integer));
+    if integral {
+        return literal
+            .parse::<i128>()
+            .map(ConfigValue::Int)
+            .map_err(|_| out_of_range());
     }
 
     if numeric && let Ok(float) = literal.parse::<f64>() {
-        return Ok(ConfigValue::Float(float));
+        return float
+            .is_finite()
+            .then_some(ConfigValue::Float(float))
+            .ok_or_else(out_of_range);
     }
 
     let text = literal
@@ -117,7 +132,10 @@ fn scalar(literal: &str) -> Result<ConfigValue, TemplateError> {
         .and_then(|text| text.strip_suffix('"'))
         .unwrap_or(literal);
 
-    ConfigValue::parsed_str(text)
+    ConfigValue::parsed_str(text).map_err(|source| ConfigOverlayError::InvalidValue {
+        path: path.to_string(),
+        source,
+    })
 }
 
 #[cfg(test)]

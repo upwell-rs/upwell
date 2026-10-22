@@ -90,9 +90,12 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             return Ok(PreviewOutcome::NoOp);
         }
 
-        let evaluation = staged_condition_snapshot(state.catalog(), base, &staged)
-            .and_then(|snapshot| base.evaluate_for_tooling(&snapshot))
-            .map_err(|error| (TransitionPhase::Evaluate, error))?;
+        let evaluation = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            staged_condition_snapshot(state.catalog(), base, &staged)
+                .and_then(|snapshot| base.evaluate_for_tooling(&snapshot))
+        }))
+        .unwrap_or(Err(crate::Error::CandidatePreparationPanicked))
+        .map_err(|error| (TransitionPhase::Evaluate, error))?;
 
         preview.evaluation = evaluation_kind(&evaluation);
         preview.eligibility = self.eligibility_changes(base, &evaluation);
