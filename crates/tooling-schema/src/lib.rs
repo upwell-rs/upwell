@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+mod preview;
+
+pub use preview::*;
+
 /// JSON value used by opaque protocol and plugin facets.
 pub use serde_json::Value as JsonValue;
 
@@ -1121,6 +1125,9 @@ pub struct ToolingDocument {
     /// Document-level namespaced opaque facets.
     #[serde(default)]
     pub facets: BTreeMap<String, Facet>,
+    /// The plan of a proposed config change, when the invoker requested a preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_preview: Option<TransitionPreview>,
 }
 
 impl ToolingDocument {
@@ -1306,6 +1313,7 @@ impl Default for ToolingDocument {
             diagnostics: Vec::new(),
             validation: ValidationResult::default(),
             facets: BTreeMap::new(),
+            transition_preview: None,
         }
     }
 }

@@ -8,7 +8,8 @@ use thiserror::Error;
 use upwell_tooling_schema::{
     ProbeEnvelope, ProbeOutcome, TOOLING_PROBE_ARGUMENT, TOOLING_PROBE_BINARY_NAME_ENV,
     TOOLING_PROBE_MANIFEST_PATH_ENV, TOOLING_PROBE_OUTPUT_ENV, TOOLING_PROBE_PACKAGE_NAME_ENV,
-    TOOLING_PROBE_PACKAGE_VERSION_ENV,
+    TOOLING_PROBE_PACKAGE_VERSION_ENV, TOOLING_PROBE_TRANSITION_PREVIEW_ENV,
+    TransitionPreviewRequest,
 };
 
 use crate::process::{PROBE_OUTPUT_LIMIT, ProcessExecutionError, execute};
@@ -140,12 +141,14 @@ pub enum ProbeError {
     },
 }
 
-/// Executes and validates one built target's generated private tooling probe.
+/// Executes and validates one built target's generated private tooling probe, previewing
+/// `transition_preview` against the prepared application when one is supplied.
 pub fn execute_probe(
     executable: &Path,
     workspace_target_directory: &Path,
     selected: &SelectedTarget,
     current_dir: Option<&Path>,
+    transition_preview: Option<&TransitionPreviewRequest>,
     cancellation: &CancellationToken,
 ) -> Result<ProbeResult, ProbeError> {
     let run_directory = ProbeDirectory::create(workspace_target_directory)?;
@@ -160,6 +163,10 @@ pub fn execute_probe(
         .env(TOOLING_PROBE_PACKAGE_VERSION_ENV, &selected.package_version)
         .env(TOOLING_PROBE_MANIFEST_PATH_ENV, &selected.manifest_path)
         .env(TOOLING_PROBE_BINARY_NAME_ENV, &selected.binary_name);
+
+    if let Some(request) = transition_preview {
+        command.env(TOOLING_PROBE_TRANSITION_PREVIEW_ENV, request.to_env_value());
+    }
 
     if let Some(current_dir) = current_dir {
         command.current_dir(current_dir);

@@ -36,9 +36,7 @@ fn execute(request: CommandRequest) -> ExitCode {
     match request {
         CommandRequest::GenerateCompletions(shell) => generate_completions(shell),
         CommandRequest::RefreshCompletions(discovery) => {
-            let options = ProbeOptions {
-                show_cargo_output: interactive,
-            };
+            let options = probe_options(interactive);
 
             match run_probe_with_options(&discovery, &cancellation, options) {
                 Ok(probe) => match refresh_completion_cache(&probe, &discovery) {
@@ -98,9 +96,7 @@ fn execute(request: CommandRequest) -> ExitCode {
             discovery,
             format,
         } => {
-            let options = ProbeOptions {
-                show_cargo_output: interactive,
-            };
+            let options = probe_options(interactive);
             let report = run_command_with_options(command, &discovery, &cancellation, options);
             let exit_code = report.exit_code().code();
             let command = match command {
@@ -160,7 +156,7 @@ fn execute(request: CommandRequest) -> ExitCode {
                 return ExitCode::from(CommandExitCode::Misuse.code());
             }
 
-            let options = completion_probe_options(interactive);
+            let options = probe_options(interactive);
 
             match run_probe_with_options(&discovery, &cancellation, options) {
                 Ok(probe) => {
@@ -189,13 +185,7 @@ fn execute(request: CommandRequest) -> ExitCode {
                 eprintln!("cargo upwell binary export format `{format}` requires `--output`");
                 return ExitCode::from(CommandExitCode::Misuse.code());
             }
-            match run_probe_with_options(
-                &discovery,
-                &cancellation,
-                ProbeOptions {
-                    show_cargo_output: interactive,
-                },
-            ) {
+            match run_probe_with_options(&discovery, &cancellation, probe_options(interactive)) {
                 Ok(probe) => {
                     let _ = refresh_completion_cache(&probe, &discovery);
                     export(probe.probe.envelope, &format, output.as_deref())
@@ -217,13 +207,7 @@ fn execute(request: CommandRequest) -> ExitCode {
             if let Err(exit) = validate_terminal_options(selected, color, pager) {
                 return exit;
             }
-            match run_probe_with_options(
-                &discovery,
-                &cancellation,
-                ProbeOptions {
-                    show_cargo_output: interactive,
-                },
-            ) {
+            match run_probe_with_options(&discovery, &cancellation, probe_options(interactive)) {
                 Ok(probe) => {
                     let _ = refresh_completion_cache(&probe, &discovery);
                     graph(probe, &format, query, color, pager)
@@ -235,6 +219,7 @@ fn execute(request: CommandRequest) -> ExitCode {
             discovery,
             format,
             resource,
+            preview,
             color,
             pager,
         } => {
@@ -245,13 +230,12 @@ fn execute(request: CommandRequest) -> ExitCode {
             if let Err(exit) = validate_terminal_options(selected, color, pager) {
                 return exit;
             }
-            match run_probe_with_options(
-                &discovery,
-                &cancellation,
-                ProbeOptions {
-                    show_cargo_output: interactive,
-                },
-            ) {
+            let options = ProbeOptions {
+                transition_preview: preview,
+                ..probe_options(interactive)
+            };
+
+            match run_probe_with_options(&discovery, &cancellation, options) {
                 Ok(probe) => {
                     let _ = refresh_completion_cache(&probe, &discovery);
                     explain(probe, &format, &resource, color, pager)
@@ -262,9 +246,10 @@ fn execute(request: CommandRequest) -> ExitCode {
     }
 }
 
-fn completion_probe_options(interactive: bool) -> ProbeOptions {
+fn probe_options(interactive: bool) -> ProbeOptions {
     ProbeOptions {
         show_cargo_output: interactive,
+        ..ProbeOptions::default()
     }
 }
 

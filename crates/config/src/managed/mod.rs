@@ -7,6 +7,7 @@
 //! shorthand that resolves only when exactly one binding of that type exists.
 
 mod dirs;
+mod overlay;
 mod reload;
 mod source;
 mod store;
@@ -21,6 +22,7 @@ use upwell_core::{ConditionScalar, ConfigFactDescriptor, ConfigFactId, TypeDescr
 use upwell_di::{BoxedComponent, Injectable, Live, LiveRef};
 
 pub use dirs::DirectoriesResolver;
+pub use overlay::{ConfigOverlay, ConfigOverlayError};
 use reload::ConfigSlot;
 pub use reload::{
     ChangedBinding, ComponentHookReport, ConfigReload, ConfigReloadError, ConfigReloader,

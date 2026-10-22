@@ -6,12 +6,13 @@ use std::sync::Arc;
 
 use upwell_config::StagedReload;
 use upwell_core::{ResolverSet, TypeDescriptor};
-use upwell_di::{BoxedComponent, Injectable};
+use upwell_di::{BoxedComponent, ConditionFactSnapshot, EffectiveGraph, Injectable};
 use upwell_hooks::{HOOK_MANAGER_NAME, HookDescriptor, HookManager};
 
 use super::super::generation::RuntimeTransition;
 use super::super::report::TransitionCompletion;
 use super::super::{AppConditionState, PreparedRuntimeGeneration, RuntimeView};
+use crate::AppRegistry;
 use crate::registry::AppConditionEvaluation;
 use crate::transition::{CandidateGraph, CommitActions, ResolvedTransitionPlan};
 
@@ -28,23 +29,33 @@ pub(super) fn evaluate_conditions(
     staged: &StagedReload,
 ) -> crate::Result<AppConditionEvaluation> {
     let condition = base.condition();
-    let catalog = condition.catalog();
 
     let evaluation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let snapshot = catalog.condition_snapshot_for(
-            condition.evaluation().config_inputs(),
-            staged
-                .staged()
-                .iter()
-                .map(|entry| (entry.type_id(), entry.path(), entry.shared_value())),
-            |path| staged.resolve_raw(path),
-        )?;
+        let snapshot =
+            staged_condition_snapshot(condition.catalog(), condition.evaluation(), staged)?;
 
         condition.evaluation().reevaluate(&snapshot)
     }))
     .map_err(|_| crate::Error::CandidatePreparationPanicked)??;
 
     Ok(evaluation)
+}
+
+/// The condition snapshot of `staged`: the inputs `evaluation`'s catalog reads, taken from
+/// every staged binding and the staged tree's raw paths.
+pub(crate) fn staged_condition_snapshot(
+    catalog: &AppRegistry,
+    evaluation: &AppConditionEvaluation,
+    staged: &StagedReload,
+) -> crate::Result<ConditionFactSnapshot> {
+    catalog.condition_snapshot_for(
+        evaluation.config_inputs(),
+        staged
+            .staged()
+            .iter()
+            .map(|entry| (entry.type_id(), entry.path(), entry.shared_value())),
+        |path| staged.resolve_raw(path),
+    )
 }
 
 /// Prepares and validates the candidate graph from the re-evaluated eligibility, then
@@ -76,15 +87,25 @@ pub(super) fn plan_transition(
     } else {
         CandidateGraph::prepare_evaluation(base.id(), catalog, evaluation, topology)?
     };
+    let resolved_plan = resolve_staged_transition(&candidate, base.effective_graph(), staged)?;
+
+    Ok((candidate, resolved_plan))
+}
+
+/// Resolves the runtime transition from `active` to `candidate`, forcing the roots
+/// `staged`'s changed bindings invalidate to reconstruct.
+pub(crate) fn resolve_staged_transition(
+    candidate: &CandidateGraph,
+    active: &EffectiveGraph,
+    staged: &StagedReload,
+) -> crate::Result<ResolvedTransitionPlan> {
     let changed_typed = staged
         .changed_staged()
         .map(|entry| (entry.type_id(), entry.path()))
         .collect::<Vec<_>>();
-    let invalidated = super::invalidation::invalidated_component_roots(&candidate, &changed_typed);
-    let resolved_plan =
-        candidate.resolve_runtime_transition(base.effective_graph(), &invalidated)?;
+    let invalidated = super::invalidation::invalidated_component_roots(candidate, &changed_typed);
 
-    Ok((candidate, resolved_plan))
+    candidate.resolve_runtime_transition(active, &invalidated)
 }
 
 /// Builds the candidate root and the prepared generation, plus the generation-local hook

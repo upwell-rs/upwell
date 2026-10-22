@@ -8,6 +8,7 @@ use super::detail::{source_location, terminal_text, write_diagnostics, write_hea
 use super::name::{
     cli_owner_name, cli_provider_kind_name, relationship_kind_name, resource_kind_name,
 };
+use impact::{write_selection, write_transition};
 
 /// Writes one resource explanation in its requested deterministic representation.
 pub(crate) fn write_explanation(
@@ -93,6 +94,8 @@ fn write_text(
         output,
     )?;
     write_resolution_edges(explanation, color, output)?;
+    write_selection(explanation, color, output)?;
+    write_transition(explanation, color, output)?;
 
     write_heading(output, "Diagnostics", color)?;
 
@@ -321,6 +324,8 @@ fn value_summary(value: &serde_json::Value) -> String {
         serde_json::Value::Object(values) => format!("object ({} fields)", values.len()),
     }
 }
+
+mod impact;
 
 #[cfg(test)]
 mod tests;

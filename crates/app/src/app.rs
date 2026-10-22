@@ -689,6 +689,16 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
     }
 
     #[cfg(feature = "tooling")]
+    pub(crate) fn config_reloader(&self) -> &ConfigReloader {
+        &self.reloader
+    }
+
+    #[cfg(feature = "tooling")]
+    pub(crate) fn effective_graph(&self) -> &EffectiveGraph {
+        &self.effective_graph
+    }
+
+    #[cfg(feature = "tooling")]
     pub(crate) fn component_resource_id(&self, ty: std::any::TypeId) -> Option<String> {
         self.registry
             .components

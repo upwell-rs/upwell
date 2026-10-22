@@ -334,6 +334,64 @@ fn explain_preserves_one_complete_resource_value() {
 }
 
 #[test]
+fn explain_collects_repeated_config_assignments_into_a_preview() {
+    let cli = Cli::try_parse_from([
+        "cargo-upwell",
+        "explain",
+        "dyn Authenticator",
+        "--set",
+        "auth.custom.enabled=false",
+        "--set",
+        "auth.realm=\"a=b\"",
+    ])
+    .expect("explain arguments parse");
+    let CommandRequest::Explain { preview, .. } = cli.into_request() else {
+        panic!("explain produces an explanation request");
+    };
+
+    let assignments = preview
+        .expect("assignments request a preview")
+        .assignments
+        .into_iter()
+        .map(|assignment| (assignment.path, assignment.value))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        assignments,
+        [
+            (String::from("auth.custom.enabled"), String::from("false")),
+            (String::from("auth.realm"), String::from("\"a=b\"")),
+        ]
+    );
+}
+
+#[test]
+fn explain_without_assignments_requests_no_preview() {
+    let cli = Cli::try_parse_from(["cargo-upwell", "explain", "component:worker"])
+        .expect("explain arguments parse");
+    let CommandRequest::Explain { preview, .. } = cli.into_request() else {
+        panic!("explain produces an explanation request");
+    };
+
+    assert_eq!(preview, None);
+}
+
+#[test]
+fn explain_rejects_malformed_assignments() {
+    for argument in [
+        "auth.custom",
+        "=true",
+        "auth..custom=true",
+        "auth custom=true",
+    ] {
+        assert!(
+            Cli::try_parse_from(["cargo-upwell", "explain", "x", "--set", argument]).is_err(),
+            "{argument:?} is rejected"
+        );
+    }
+}
+
+#[test]
 fn cargo_help_uses_external_subcommand_invocation_name() {
     let mut command = Cli::command();
     let mut output = Vec::new();

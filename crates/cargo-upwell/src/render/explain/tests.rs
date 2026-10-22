@@ -1,12 +1,15 @@
 use cargo_upwell::{
-    CliArgumentOwnership, CliCommandOwnership, CliOwnershipSummary, GraphSource,
-    ResourceExplanation,
+    CliArgumentOwnership, CliCommandOwnership, CliOwnershipSummary, ConditionStep, GraphSource,
+    ProviderSelection, ResolvedConsumer, ResourceExplanation,
 };
 use semver::Version;
 use serde_json::json;
 use upwell_tooling_schema::{
     CliOwner, CliProvider, CliProviderKind, Diagnostic, DiagnosticSeverity, DocumentIdentity,
-    Facet, Provenance, Relationship, RelationshipKind, Resource, ResourceKind,
+    Facet, PreviewAction, PreviewChangedBinding, PreviewComponent, PreviewDemand,
+    PreviewEvaluation, PreviewOutcome, PreviewReason, PreviewReasonKind, PreviewRole,
+    PreviewStrategy, Provenance, Relationship, RelationshipKind, Resource, ResourceKind,
+    TransitionPreview,
 };
 
 use super::write_explanation;
@@ -107,6 +110,80 @@ fn text_explanation_escapes_controls_in_details_and_cli_ownership() {
     assert!(output.contains(r"threads\r\n\u{1b}"));
 }
 
+#[test]
+fn text_explanation_shows_provider_selection_and_the_transition_preview() {
+    let mut explanation = fixture();
+
+    explanation.selection = vec![ProviderSelection {
+        provider: String::from("provider:dyn Auth:Custom:dyn Auth"),
+        component: Some(String::from("component:custom-auth")),
+        effective: true,
+        role: Some(String::from("conditional")),
+        condition_state: Some(String::from("holds")),
+        conditions: vec![ConditionStep {
+            id: String::from("condition:custom-auth:enabled"),
+            depth: 0,
+            predicate: Some(String::from("config-bool")),
+            outcome: Some(String::from("holds")),
+            detail: Some(String::from("Auth@auth#custom")),
+        }],
+        resolved_by: vec![ResolvedConsumer {
+            consumer: String::from("component:worker"),
+            reason: Some(String::from("primary-provider-in-winning-set")),
+        }],
+    }];
+    explanation.transition = Some(TransitionPreview {
+        assignments: vec![String::from("auth.custom")],
+        outcome: PreviewOutcome::Planned,
+        evaluation: PreviewEvaluation::Complete,
+        changed: vec![PreviewChangedBinding {
+            path: String::from("auth"),
+            type_name: String::from("Auth"),
+        }],
+        eligibility: Vec::new(),
+        components: vec![PreviewComponent {
+            component: String::from("worker"),
+            factory: Some(String::from("static")),
+            role: PreviewRole::Singleton,
+            action: PreviewAction::Replace,
+            strategy: Some(PreviewStrategy::Reconstruct),
+            reasons: vec![PreviewReason {
+                kind: PreviewReasonKind::DependencyTargetChanged,
+                path: vec![PreviewDemand {
+                    consumer: String::from("worker"),
+                    ordinal: 0,
+                    requested: Some(String::from("dyn Auth")),
+                }],
+            }],
+        }],
+        displaced: vec![String::from("worker")],
+    });
+
+    let mut output = Vec::new();
+
+    write_explanation(&explanation, ExplainFormat::Text, false, &mut output)
+        .expect("explanation writes");
+
+    let output = String::from_utf8(output).expect("explanation is UTF-8");
+
+    for expected in [
+        "provider:dyn Auth:Custom:dyn Auth [effective] role=conditional condition=holds",
+        "resolved by component:worker (primary-provider-in-winning-set)",
+        "condition:custom-auth:enabled config-bool -> holds (Auth@auth#custom)",
+        "assignments: auth.custom",
+        "outcome: planned",
+        "changed auth (Auth)",
+        "*replace worker [singleton] strategy=reconstruct",
+        "dependency_target_changed: worker#0 (dyn Auth)",
+        "displaced: worker",
+    ] {
+        assert!(
+            output.contains(expected),
+            "missing {expected:?} in {output}"
+        );
+    }
+}
+
 fn fixture() -> ResourceExplanation {
     let provider = String::from("cli-provider:worker");
 
@@ -183,5 +260,7 @@ fn fixture() -> ResourceExplanation {
                 owner: CliOwner::Plugin { provider },
             }],
         },
+        selection: Vec::new(),
+        transition: None,
     }
 }

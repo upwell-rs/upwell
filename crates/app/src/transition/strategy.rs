@@ -93,6 +93,30 @@ pub enum RestartReason {
     HotUpdateIncompatible,
 }
 
+impl RestartReason {
+    /// The reason's stable snake-case name, as used in serialized reports.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingDecision => "missing_decision",
+            Self::DuplicateDecision => "duplicate_decision",
+            Self::UnknownDecision => "unknown_decision",
+            Self::StaleRetention => "stale_retention",
+            Self::GenerationBoundDependency => "generation_bound_dependency",
+            Self::ManualInstanceUnsupported => "manual_instance_unsupported",
+            Self::HandleRetentionUnsupported => "handle_retention_unsupported",
+            Self::LiveRebindUnsupported => "live_rebind_unsupported",
+            Self::RemovalUnsupported => "removal_unsupported",
+            Self::NonSingleton => "non_singleton",
+            Self::FactoryUnavailable => "factory_unavailable",
+            Self::ReplacementUnavailable => "replacement_unavailable",
+            Self::PreviousUnavailable => "previous_unavailable",
+            Self::TransitionHandlerUnavailable => "transition_handler_unavailable",
+            Self::HotUpdateUnavailable => "hot_update_unavailable",
+            Self::HotUpdateIncompatible => "hot_update_incompatible",
+        }
+    }
+}
+
 impl fmt::Display for RestartReason {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let reason = match self {
