@@ -215,6 +215,7 @@ static PANIC_CONDITION_CALLBACK: ConditionCallback = ConditionCallback {
     kind: "test/panic-callback-enabled",
     inputs: &[ConditionInputId::Fact(CALLBACK_FLAG)],
     expression: None,
+    purity: ConditionPurity::Trusted,
     evaluate: panic_callback_evaluate,
 };
 
@@ -282,8 +283,9 @@ fn panicking_condition_scalar_extraction_returns_the_redacted_preparation_error(
         .condition_facts
         .push(ConditionFactSource::of::<PanicScalarsConfig>("flags"));
 
-    let error = crate::app::evaluate_startup_conditions(&registry, &manager, &slots)
-        .expect_err("the armed fact extraction must abort the condition stage");
+    let error =
+        crate::app::evaluate_startup_conditions(&registry, &manager, &slots, ExecutionMode::Run)
+            .expect_err("the armed fact extraction must abort the condition stage");
 
     assert!(
         matches!(error, crate::Error::CandidatePreparationPanicked),
@@ -306,8 +308,9 @@ fn panicking_condition_fact_descriptors_return_the_redacted_preparation_error() 
         .condition_facts
         .push(ConditionFactSource::of::<PanicDescriptorsConfig>("flags"));
 
-    let error = crate::app::evaluate_startup_conditions(&registry, &manager, &slots)
-        .expect_err("the armed descriptor callback must abort the condition stage");
+    let error =
+        crate::app::evaluate_startup_conditions(&registry, &manager, &slots, ExecutionMode::Run)
+            .expect_err("the armed descriptor callback must abort the condition stage");
 
     assert!(
         matches!(error, crate::Error::CandidatePreparationPanicked),
@@ -331,8 +334,9 @@ fn panicking_config_condition_callback_returns_the_redacted_preparation_error() 
         .condition_facts
         .push(ConditionFactSource::of::<PanicCallbackConfig>("flags"));
 
-    let error = crate::app::evaluate_startup_conditions(&registry, &manager, &slots)
-        .expect_err("the armed condition callback must abort the condition stage");
+    let error =
+        crate::app::evaluate_startup_conditions(&registry, &manager, &slots, ExecutionMode::Run)
+            .expect_err("the armed condition callback must abort the condition stage");
 
     assert!(
         matches!(error, crate::Error::CandidatePreparationPanicked),
@@ -353,8 +357,9 @@ fn ordinary_condition_errors_are_preserved_not_redacted_as_preparation_panics() 
     let mut registry = AppRegistry::default();
     registry.components.push(FLAG_COMPONENT);
 
-    let error = crate::app::evaluate_startup_conditions(&registry, &manager, &slots)
-        .expect_err("the unsupplied condition fact must fail the condition stage");
+    let error =
+        crate::app::evaluate_startup_conditions(&registry, &manager, &slots, ExecutionMode::Run)
+            .expect_err("the unsupplied condition fact must fail the condition stage");
 
     assert!(
         matches!(error, crate::Error::Condition(_)),

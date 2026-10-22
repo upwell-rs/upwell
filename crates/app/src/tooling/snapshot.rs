@@ -12,6 +12,7 @@ use crate::scope::{PreparedScopeTopology, SeedDestination};
 /// Immutable callback-free input for prepared-state tooling projection.
 pub(crate) struct ProjectionSnapshot {
     components: Vec<ComponentSnapshot>,
+    candidates: Vec<CandidateSnapshot>,
     root_plan: Vec<ConstructionPlanEntry>,
     scope_plans: HashMap<ScopeId, Vec<ConstructionPlanEntry>>,
 }
@@ -77,13 +78,28 @@ impl ProjectionSnapshot {
 
         Ok(Self {
             components,
+            candidates: Vec::new(),
             root_plan,
             scope_plans,
         })
     }
 
+    /// Captures every candidate of the full condition `catalog`, eligible or not.
+    pub(crate) fn with_candidates(mut self, catalog: &[ComponentDescriptor]) -> Self {
+        self.candidates = catalog
+            .iter()
+            .map(|descriptor| CandidateSnapshot::capture(*descriptor))
+            .collect();
+
+        self
+    }
+
     pub(crate) fn components(&self) -> &[ComponentSnapshot] {
         &self.components
+    }
+
+    pub(crate) fn candidates(&self) -> &[CandidateSnapshot] {
+        &self.candidates
     }
 
     pub(crate) fn root_plan(&self) -> &[ConstructionPlanEntry] {
@@ -168,6 +184,42 @@ impl ComponentSnapshot {
                 .get(&descriptor.ty.type_id)
                 .map(|seed| seed.scope),
         })
+    }
+}
+
+/// Callback-derived facts for one catalog candidate, whether or not its condition holds.
+#[derive(Clone)]
+pub(crate) struct CandidateSnapshot {
+    pub(crate) descriptor: ComponentDescriptor,
+    /// The transition strategies the descriptor supports, in preference order.
+    pub(crate) transition_capabilities: Vec<&'static str>,
+    /// The effective factory's declared dependencies, before any provider selection.
+    pub(crate) dependencies: Vec<DependencyDescriptor>,
+}
+
+impl CandidateSnapshot {
+    fn capture(descriptor: ComponentDescriptor) -> Self {
+        let declared = |recipe: upwell_di::Result<Option<_>>| recipe.ok().flatten().is_some();
+        let capabilities = [
+            ("live-rebind", descriptor.exposes_live_cell()),
+            ("hot-update", declared(descriptor.hot_update_factory())),
+            (
+                "transition-handler",
+                declared(descriptor.transition_handler()),
+            ),
+            ("replacement", declared(descriptor.replacement_factory())),
+            ("reconstruct", declared(descriptor.effective_factory())),
+        ];
+
+        Self {
+            descriptor,
+            transition_capabilities: capabilities
+                .into_iter()
+                .filter(|(_, supported)| *supported)
+                .map(|(name, _)| name)
+                .collect(),
+            dependencies: descriptor.dependencies(),
+        }
     }
 }
 

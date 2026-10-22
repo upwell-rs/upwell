@@ -610,6 +610,8 @@ pub enum ResourceKind {
     Contributor,
     /// A plugin capability slot, including an unoccupied relation endpoint.
     PluginSlot,
+    /// One node of a component's condition expression.
+    Condition,
 }
 
 /// Classifies a diagnostic resource identity by its canonical generic prefix.
@@ -632,6 +634,7 @@ pub fn diagnostic_resource_kind(id: &str) -> ResourceKind {
         "type" => ResourceKind::Type,
         "contribution" => ResourceKind::Contribution,
         "plugin-slot" => ResourceKind::PluginSlot,
+        "condition" => ResourceKind::Condition,
         "framework" => ResourceKind::Contributor,
         _ => ResourceKind::Unknown,
     }
@@ -732,6 +735,8 @@ pub enum RelationshipKind {
     Validates,
     /// The source cannot coexist with the target.
     Conflicts,
+    /// A condition decides whether its target component, or parent condition, is eligible.
+    Gates,
 }
 
 /// One directed relationship between resources.
@@ -1860,6 +1865,13 @@ fn validate_relationship_kinds(
             (&from.kind, &to.kind),
             (ResourceKind::Component, ResourceKind::Hook)
                 | (ResourceKind::Hook, ResourceKind::Lifecycle)
+        ),
+        RelationshipKind::Gates => matches!(
+            (&from.kind, &to.kind),
+            (
+                ResourceKind::Condition,
+                ResourceKind::Component | ResourceKind::Condition
+            )
         ),
         RelationshipKind::Contains => valid_contains_relationship(&from.kind, &to.kind),
         RelationshipKind::Contributes => valid_contribution_relationship(&from.kind, &to.kind),

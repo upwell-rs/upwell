@@ -32,8 +32,8 @@ use upwell_config::{
 };
 use upwell_core::{
     ConditionCallback, ConditionContext, ConditionDescriptor, ConditionInputId, ConditionPredicate,
-    ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId, DependencyDescriptor,
-    ResolverCtx, TypeDescriptor,
+    ConditionPurity, ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId,
+    DependencyDescriptor, ResolverCtx, TypeDescriptor,
 };
 use upwell_di::{Component, ComponentDescriptor, factories};
 use upwell_hooks::{HookDescriptor, HookKind, HookManager, HookParam};
@@ -66,6 +66,7 @@ static PROBE_CONDITION_CALLBACK: ConditionCallback = ConditionCallback {
     kind: "test/probe-enabled",
     inputs: &[ConditionInputId::Fact(PROBE_ENABLED)],
     expression: None,
+    purity: ConditionPurity::Trusted,
     evaluate: probe_condition_evaluate,
 };
 

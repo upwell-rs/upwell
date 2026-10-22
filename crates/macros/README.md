@@ -63,6 +63,12 @@ receiver reads its staged value, a component used as a receiver reads its eligib
 struct CustomAuthenticator;
 ```
 
+`cargo upwell inspect` evaluates a condition for the supplied config only when its expression
+stays inside a closed subset: input field reads, `==` / `!=` against literals, unit enum
+variants, constants and `Some(..)` / `None`, `&&`, `||`, `!`, `X.eligible()`, and
+`resolve("<path>")`. Any other expression, such as one calling a method or a macro, is trusted
+code that tooling never runs. It shows that condition's inputs and source text as not evaluated.
+
 `app!` defines a named lifecycle host and its configured builder, selecting a protocol via its
 `protocol:` field. Code that needs local values or post-declaration builder mutation should use
 `App::<Protocol>::builder(name).auto_discover()` directly.

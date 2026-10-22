@@ -218,7 +218,7 @@ impl VisitMut for Lowering {
 
 /// Whether `path` names a type used as a value receiver: a plain path whose last segment is
 /// UpperCamelCase, excluding `Type::Variant` / `Type::CONST` paths.
-fn is_input_receiver(path: &ExprPath) -> bool {
+pub(super) fn is_input_receiver(path: &ExprPath) -> bool {
     let segments = &path.path.segments;
     let Some(last) = segments.last() else {
         return false;
@@ -246,7 +246,7 @@ fn is_upper_camel(ident: &syn::Ident) -> bool {
     starts_upper && (name.len() == 1 || has_lower)
 }
 
-fn is_resolve(func: &Expr) -> bool {
+pub(super) fn is_resolve(func: &Expr) -> bool {
     match func {
         Expr::Path(path) => {
             path.qself.is_none()
@@ -284,7 +284,7 @@ fn respan(tokens: TokenStream, span: Span) -> TokenStream {
 }
 
 /// The dotted field path of a field-access chain rooted at an input receiver.
-fn input_field_chain(expr: &Expr) -> Option<String> {
+pub(super) fn input_field_chain(expr: &Expr) -> Option<String> {
     let mut members = Vec::new();
     let mut cursor = expr;
 

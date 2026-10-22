@@ -9,6 +9,7 @@ use super::{
 };
 use crate::ProtocolDefinition;
 
+mod condition;
 mod dependency;
 
 impl<D: ProtocolDefinition> Projection<'_, D> {

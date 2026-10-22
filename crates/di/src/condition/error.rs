@@ -34,6 +34,8 @@ pub enum ConditionError {
     MissingConfigInput(ConditionInputId),
     #[error("the previous condition evaluation belongs to another catalog")]
     EvaluationCatalogMismatch,
+    #[error("a tooling condition evaluation left conditions undecided and cannot seed a reload")]
+    IncompleteEvaluation,
     #[error("config fact kind mismatch for {fact:?}: expected {expected:?}, found {actual:?}")]
     FactKindMismatch {
         fact: ConfigFactId,

@@ -57,6 +57,7 @@ static FACT_AND_ELIGIBILITY: ConditionCallback = ConditionCallback {
         ConditionInputId::Component("a"),
     ],
     expression: None,
+    purity: ConditionPurity::Trusted,
     evaluate: fact_and_eligibility,
 };
 
@@ -97,6 +98,7 @@ static UNDECLARED_READ: ConditionCallback = ConditionCallback {
     kind: "test/undeclared-read",
     inputs: &[],
     expression: None,
+    purity: ConditionPurity::Trusted,
     evaluate: reads_undeclared_path,
 };
 
@@ -137,6 +139,7 @@ static MISDESCRIBED: ConditionCallback = ConditionCallback {
     kind: "test/misdescribed",
     inputs: &[ConditionInputId::Fact(ENABLED)],
     expression: Some(&DESCRIBED_EXPRESSION),
+    purity: ConditionPurity::Trusted,
     evaluate: fact_and_eligibility,
 };
 
@@ -172,6 +175,7 @@ static READS_B: ConditionCallback = ConditionCallback {
     kind: "test/reads-b",
     inputs: &[ConditionInputId::Component("b")],
     expression: None,
+    purity: ConditionPurity::Trusted,
     evaluate: eligible_b,
 };
 

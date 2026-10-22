@@ -15,7 +15,8 @@ use tempfile::TempDir;
 use upwell_config::condition::resolve;
 use upwell_config::{ConfigManager, ConfigProperties, ResolverChain, Toml};
 use upwell_core::{
-    ConditionCallback, ConditionContext, ConditionDescriptor, ConditionInputId, ConfigBindingId,
+    ConditionCallback, ConditionContext, ConditionDescriptor, ConditionInputId, ConditionPurity,
+    ConfigBindingId,
 };
 use upwell_di::{Component as _, ComponentDescriptor, factories};
 
@@ -75,6 +76,7 @@ static AUDITOR_CALLBACK: ConditionCallback = ConditionCallback {
         ConfigBindingId::of::<AuditConfig>("audit"),
     )],
     expression: None,
+    purity: ConditionPurity::Trusted,
     evaluate: auditor_enabled,
 };
 
@@ -85,6 +87,7 @@ static TRANSPORT_CALLBACK: ConditionCallback = ConditionCallback {
     kind: "test/transport-enabled",
     inputs: &[ConditionInputId::Raw(TRANSPORT)],
     expression: None,
+    purity: ConditionPurity::Trusted,
     evaluate: transport_enabled,
 };
 
@@ -96,6 +99,7 @@ static EXPORTER_CALLBACK: ConditionCallback = ConditionCallback {
         ConditionInputId::Component(CallbackTransport::ID),
     ],
     expression: None,
+    purity: ConditionPurity::Trusted,
     evaluate: exporter_enabled,
 };
 

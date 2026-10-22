@@ -3,25 +3,34 @@
 use std::collections::BTreeMap;
 
 use upwell_core::condition::scope;
-use upwell_core::{ConditionCallback, ConditionContext, ConditionInputId, ConditionInputValue};
+use upwell_core::{
+    ConditionCallback, ConditionContext, ConditionInputId, ConditionInputValue, ConditionPurity,
+};
 
-use super::{ConditionCatalog, ConditionDecision, ConditionError, ConditionFactSnapshot};
+use super::evaluation::Evaluation;
+use super::{ConditionCatalog, ConditionError, ConditionFactSnapshot, ConditionOutcome};
 
 impl ConditionCatalog {
     /// Evaluates the eligibility inputs first, then runs the callback with exactly its declared
     /// inputs and its raw paths installed as the thread's `resolve` scope.
     ///
     /// A rejected raw read fails the evaluation even when the callback still returned a value,
-    /// so an undeclared or invalid input can never silently select a branch.
+    /// so an undeclared or invalid input can never silently select a branch. A callback the
+    /// pass may not run, or one reading an undecided eligibility, is not evaluated.
     pub(super) fn evaluate_callback(
         &self,
         owner: &'static str,
         condition_id: &'static str,
         callback: &'static ConditionCallback,
-        snapshot: &ConditionFactSnapshot,
-        states: &mut BTreeMap<&'static str, bool>,
-        decisions: &mut Vec<ConditionDecision>,
-    ) -> Result<bool, ConditionError> {
+        evaluation: &mut Evaluation<'_>,
+    ) -> Result<ConditionOutcome, ConditionError> {
+        let runnable = callback.purity == ConditionPurity::Pure
+            || evaluation.runnable == ConditionPurity::Trusted;
+
+        if !runnable {
+            return Ok(ConditionOutcome::NotEvaluated);
+        }
+
         let mut ids = callback.inputs.to_vec();
         let mut eligibility = BTreeMap::new();
 
@@ -38,13 +47,14 @@ impl ConditionCatalog {
                     continue;
                 }
             };
+            let Some(eligible) = self.evaluate_component(target, evaluation)?.decided() else {
+                return Ok(ConditionOutcome::NotEvaluated);
+            };
 
-            eligibility.insert(
-                *id,
-                self.evaluate_component(target, snapshot, states, decisions)?,
-            );
+            eligibility.insert(*id, eligible);
         }
 
+        let snapshot = evaluation.snapshot;
         let values = ids
             .iter()
             .map(|id| (*id, input_value(*id, snapshot, &eligibility)))
@@ -67,7 +77,7 @@ impl ConditionCatalog {
                 rejection,
             }),
 
-            None => Ok(outcome),
+            None => Ok(ConditionOutcome::from_bool(outcome)),
         }
     }
 }

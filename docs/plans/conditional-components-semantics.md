@@ -46,6 +46,17 @@ attributes combine under `All`. Node ids hash the expression's tokens, or come f
 node carries its source text and per-input reads for tooling. A config type a condition reads is
 bound at its declared path even when no component injects it.
 
+Tooling preparation (#300, #324) never runs a trusted callback. The macro marks a callback
+`ConditionPurity::Pure` when its expression stays inside a closed subset: input field reads,
+`==` / `!=` against literals, unit enum variants, constants and `Some(..)` / `None`, `&&` / `||` /
+`!`, `X.eligible()`, and `resolve("<path>")`. Such a callback calls no user function, so tooling
+evaluates it over the staged config. The only user code it can reach is the `PartialEq` and
+`Deref` impls of the compared fields. `ConditionCatalog::evaluate_for_tooling` uses three-valued
+logic: a trusted callback, and every condition whose outcome depends on it, is `NotEvaluated`.
+Only components whose condition holds join the graph tooling projects. That graph is marked
+`partial`, and a validation failure names each undecided component in a
+`upwell/tooling-condition-not-evaluated` warning. A tooling preparation cannot be built.
+
 ## Eligibility and provider selection
 
 The following states are distinct:

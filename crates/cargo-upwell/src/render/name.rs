@@ -20,6 +20,7 @@ pub(crate) fn resource_kind_name(kind: &ResourceKind) -> &'static str {
         ResourceKind::Contribution => "contribution",
         ResourceKind::Contributor => "contributor",
         ResourceKind::PluginSlot => "plugin-slot",
+        ResourceKind::Condition => "condition",
         _ => "resource",
     }
 }
@@ -39,6 +40,7 @@ pub(crate) fn relationship_kind_name(kind: &RelationshipKind) -> &'static str {
         RelationshipKind::OrdersAfter => "orders-after",
         RelationshipKind::Validates => "validates",
         RelationshipKind::Conflicts => "conflicts",
+        RelationshipKind::Gates => "gates",
         _ => "relates-to",
     }
 }

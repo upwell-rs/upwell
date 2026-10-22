@@ -19,6 +19,66 @@ pub use error::ConditionError;
 pub use graph::{AvailabilityEdge, ConditionDependency};
 pub use snapshot::ConditionFactSnapshot;
 
+/// The three-valued outcome of one condition.
+///
+/// Runtime evaluation always decides; a tooling evaluation leaves every trusted callback,
+/// and every condition whose outcome depends on one, [`NotEvaluated`](Self::NotEvaluated).
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ConditionOutcome {
+    Holds,
+    Fails,
+    NotEvaluated,
+}
+
+impl ConditionOutcome {
+    pub const fn from_bool(holds: bool) -> Self {
+        if holds { Self::Holds } else { Self::Fails }
+    }
+
+    /// The decided outcome, or `None` when the condition was not evaluated.
+    pub const fn decided(self) -> Option<bool> {
+        match self {
+            Self::Holds => Some(true),
+            Self::Fails => Some(false),
+            Self::NotEvaluated => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Holds => "holds",
+            Self::Fails => "fails",
+            Self::NotEvaluated => "not-evaluated",
+        }
+    }
+
+    /// Kleene conjunction: one failing operand decides the result.
+    fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Fails, _) | (_, Self::Fails) => Self::Fails,
+            (Self::Holds, Self::Holds) => Self::Holds,
+            _ => Self::NotEvaluated,
+        }
+    }
+
+    /// Kleene disjunction: one holding operand decides the result.
+    fn or(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Holds, _) | (_, Self::Holds) => Self::Holds,
+            (Self::Fails, Self::Fails) => Self::Fails,
+            _ => Self::NotEvaluated,
+        }
+    }
+
+    fn not(self) -> Self {
+        match self {
+            Self::Holds => Self::Fails,
+            Self::Fails => Self::Holds,
+            Self::NotEvaluated => Self::NotEvaluated,
+        }
+    }
+}
+
 /// One redacted condition-node outcome.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConditionDecision {
@@ -27,7 +87,7 @@ pub struct ConditionDecision {
     pub predicate: upwell_core::ConditionPredicateKind,
     pub callback_kind: Option<&'static str>,
     pub source: upwell_core::DescriptorSource,
-    pub outcome: bool,
+    pub outcome: ConditionOutcome,
 }
 
 /// Deterministic eligibility result for one supplied fact snapshot.
@@ -36,8 +96,8 @@ pub struct ConditionEvaluation {
     pub(super) catalog: CatalogIdentity,
     pub(super) facts: ConditionFactSnapshot,
     pub(super) eligible: ComponentRegistry,
-    pub(super) components: BTreeMap<&'static str, bool>,
-    pub(super) providers: BTreeMap<ProviderMappingId, bool>,
+    pub(super) components: BTreeMap<&'static str, ConditionOutcome>,
+    pub(super) providers: BTreeMap<ProviderMappingId, ConditionOutcome>,
     pub(super) decisions: Vec<ConditionDecision>,
 }
 
@@ -46,12 +106,36 @@ impl ConditionEvaluation {
         &self.eligible
     }
 
+    /// Whether the component's condition holds; `Some(false)` when it was not evaluated.
     pub fn component_eligible(&self, id: &str) -> Option<bool> {
+        self.component_outcome(id)
+            .map(|outcome| outcome == ConditionOutcome::Holds)
+    }
+
+    pub fn component_outcome(&self, id: &str) -> Option<ConditionOutcome> {
         self.components.get(id).copied()
     }
 
+    /// Whether the mapping's component condition holds; `Some(false)` when it was not
+    /// evaluated.
     pub fn provider_eligible(&self, id: ProviderMappingId) -> Option<bool> {
-        self.providers.get(&id).copied()
+        self.providers
+            .get(&id)
+            .map(|outcome| *outcome == ConditionOutcome::Holds)
+    }
+
+    /// Whether every component's eligibility was decided, which only a tooling evaluation
+    /// over a trusted callback can leave undone.
+    pub fn is_complete(&self) -> bool {
+        self.not_evaluated().next().is_none()
+    }
+
+    /// The components whose eligibility was not evaluated, in id order.
+    pub fn not_evaluated(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.components
+            .iter()
+            .filter(|(_, outcome)| **outcome == ConditionOutcome::NotEvaluated)
+            .map(|(component, _)| *component)
     }
 
     /// Whether `other` makes exactly the same components and provider mappings eligible.

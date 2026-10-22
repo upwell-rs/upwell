@@ -42,7 +42,7 @@ pub use output::{
 };
 pub use panic::install_process_probe_panic_hook;
 pub(crate) use snapshot::ProjectionSnapshot;
-pub(crate) use source::{item_location, type_location, with_source};
+pub(crate) use source::{descriptor_location, item_location, type_location, with_source};
 pub use upwell_tooling_schema::ResourceDisplay;
 
 /// A typed failure while projecting an already prepared application.
@@ -173,18 +173,9 @@ impl ToolingProbeError {
             ),
         };
 
-        let diagnostic = Diagnostic {
-            code: code.to_string(),
-            severity: DiagnosticSeverity::Error,
-            message: message.to_string(),
-            resources,
-            sources,
-            fix: hint.map(str::to_string),
-        };
-
         ProbeFailure {
             phase,
-            diagnostics: vec![diagnostic],
+            diagnostics: vec![details_diagnostic(code, message, resources, sources, hint)],
             resource_kinds: BTreeMap::new(),
         }
     }
@@ -313,6 +304,23 @@ fn required_env(name: &'static str) -> Result<String, ToolingProbeTargetError> {
     }
 
     Ok(value)
+}
+
+fn details_diagnostic(
+    code: &str,
+    message: &str,
+    resources: Vec<String>,
+    sources: Vec<upwell_tooling_schema::SourceLocation>,
+    hint: Option<&str>,
+) -> Diagnostic {
+    Diagnostic {
+        code: code.to_string(),
+        severity: DiagnosticSeverity::Error,
+        message: message.to_string(),
+        resources,
+        sources,
+        fix: hint.map(str::to_string),
+    }
 }
 
 type FailureDetails = (
@@ -621,6 +629,7 @@ impl<'a, D: ProtocolDefinition> Projection<'a, D> {
         self.project_providers();
         self.project_config_bindings();
         self.project_hooks();
+        self.project_conditions();
         self.project_plugins();
         self.project_cli();
         self.project_tooling_contributions()?;

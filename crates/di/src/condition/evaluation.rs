@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use upwell_core::{ConditionDescriptor, ConditionInputId, ConditionPredicate, StaticScope};
+use upwell_core::{
+    ConditionDescriptor, ConditionInputId, ConditionPredicate, ConditionPurity, StaticScope,
+};
 
 use super::{
     ConditionCatalog, ConditionDecision, ConditionDependency, ConditionError, ConditionEvaluation,
-    ConditionFactSnapshot, ValidatedConditionEvaluation,
+    ConditionFactSnapshot, ConditionOutcome, ValidatedConditionEvaluation,
 };
 use crate::{ComponentRegistry, ProviderSelectionModel, Singleton};
 
@@ -20,7 +22,27 @@ impl ConditionCatalog {
     ) -> Result<ConditionEvaluation, ConditionError> {
         self.validate_snapshot(snapshot)?;
 
-        self.evaluate_from(snapshot, BTreeMap::new(), Vec::new())
+        self.evaluate_from(
+            snapshot,
+            ConditionPurity::Trusted,
+            BTreeMap::new(),
+            Vec::new(),
+        )
+    }
+
+    /// Evaluates every condition tooling may decide without running trusted code.
+    ///
+    /// Structured predicates and [`ConditionPurity::Pure`] callbacks are evaluated over
+    /// `snapshot`; a trusted callback is never called, and it and every condition whose
+    /// outcome depends on it are [`ConditionOutcome::NotEvaluated`]. Only components whose
+    /// condition holds are eligible, so the result is the graph tooling can prove.
+    pub fn evaluate_for_tooling(
+        &self,
+        snapshot: &ConditionFactSnapshot,
+    ) -> Result<ConditionEvaluation, ConditionError> {
+        self.validate_snapshot(snapshot)?;
+
+        self.evaluate_from(snapshot, ConditionPurity::Pure, BTreeMap::new(), Vec::new())
     }
 
     /// Re-evaluates only conditions reachable from changed config inputs: scalar facts,
@@ -39,6 +61,10 @@ impl ConditionCatalog {
 
         if previous.catalog != self.identity {
             return Err(ConditionError::EvaluationCatalogMismatch);
+        }
+
+        if !previous.is_complete() {
+            return Err(ConditionError::IncompleteEvaluation);
         }
 
         let mut changed = self
@@ -73,17 +99,28 @@ impl ConditionCatalog {
             .cloned()
             .collect();
 
-        self.evaluate_from(snapshot, states, decisions)
+        self.evaluate_from(snapshot, ConditionPurity::Trusted, states, decisions)
     }
 
+    /// Evaluates every component not already in `states`, running callbacks up to
+    /// `runnable`: [`ConditionPurity::Trusted`] runs every callback, while
+    /// [`ConditionPurity::Pure`] leaves trusted ones not evaluated.
     fn evaluate_from(
         &self,
         snapshot: &ConditionFactSnapshot,
-        mut states: BTreeMap<&'static str, bool>,
+        runnable: ConditionPurity,
+        mut states: BTreeMap<&'static str, ConditionOutcome>,
         mut decisions: Vec<ConditionDecision>,
     ) -> Result<ConditionEvaluation, ConditionError> {
+        let mut evaluation = Evaluation {
+            snapshot,
+            runnable,
+            states: &mut states,
+            decisions: &mut decisions,
+        };
+
         for component in &self.component_order {
-            self.evaluate_component(component, snapshot, &mut states, &mut decisions)?;
+            self.evaluate_component(component, &mut evaluation)?;
         }
 
         let providers = self
@@ -95,13 +132,13 @@ impl ConditionCatalog {
             components: self
                 .registry_order
                 .iter()
-                .filter(|id| states[**id])
+                .filter(|id| states[**id] == ConditionOutcome::Holds)
                 .map(|id| self.components[id])
                 .collect(),
             providers: self
                 .providers
                 .iter()
-                .filter(|(id, _)| states[id.component])
+                .filter(|(id, _)| states[id.component] == ConditionOutcome::Holds)
                 .map(|(_, provider)| *provider)
                 .collect(),
         };
@@ -207,21 +244,19 @@ impl ConditionCatalog {
     pub(super) fn evaluate_component(
         &self,
         component_id: &'static str,
-        snapshot: &ConditionFactSnapshot,
-        states: &mut BTreeMap<&'static str, bool>,
-        decisions: &mut Vec<ConditionDecision>,
-    ) -> Result<bool, ConditionError> {
-        if let Some(value) = states.get(component_id) {
-            return Ok(*value);
+        evaluation: &mut Evaluation<'_>,
+    ) -> Result<ConditionOutcome, ConditionError> {
+        if let Some(outcome) = evaluation.states.get(component_id) {
+            return Ok(*outcome);
         }
 
         let component = self.components[component_id];
         let outcome = match component.condition {
-            Some(root) => self.evaluate_node(component_id, root, snapshot, states, decisions)?,
-            None => true,
+            Some(root) => self.evaluate_node(component_id, root, evaluation)?,
+            None => ConditionOutcome::Holds,
         };
 
-        states.insert(component_id, outcome);
+        evaluation.states.insert(component_id, outcome);
 
         Ok(outcome)
     }
@@ -230,54 +265,38 @@ impl ConditionCatalog {
         &self,
         owner: &'static str,
         node: &'static ConditionDescriptor,
-        snapshot: &ConditionFactSnapshot,
-        states: &mut BTreeMap<&'static str, bool>,
-        decisions: &mut Vec<ConditionDecision>,
-    ) -> Result<bool, ConditionError> {
+        evaluation: &mut Evaluation<'_>,
+    ) -> Result<ConditionOutcome, ConditionError> {
         let outcome = match node.predicate {
-            ConditionPredicate::ConfigBool(fact) => snapshot.facts[&fact]
-                .as_bool()
-                .expect("validated boolean fact"),
+            ConditionPredicate::ConfigBool(fact) => ConditionOutcome::from_bool(
+                evaluation.snapshot.facts[&fact]
+                    .as_bool()
+                    .expect("validated boolean fact"),
+            ),
             ConditionPredicate::ConfigEquals { fact, expected } => {
-                expected.matches(&snapshot.facts[&fact])
+                ConditionOutcome::from_bool(expected.matches(&evaluation.snapshot.facts[&fact]))
             }
             ConditionPredicate::ComponentEligible(component) => {
-                self.evaluate_component(component, snapshot, states, decisions)?
+                self.evaluate_component(component, evaluation)?
             }
             ConditionPredicate::ProviderMappingEligible(provider) => {
-                self.evaluate_component(provider.component, snapshot, states, decisions)?
+                self.evaluate_component(provider.component, evaluation)?
             }
             ConditionPredicate::Callback(callback) => {
-                self.evaluate_callback(owner, node.id, callback, snapshot, states, decisions)?
+                self.evaluate_callback(owner, node.id, callback, evaluation)?
             }
-            ConditionPredicate::All(children) => {
-                let mut outcomes = Vec::with_capacity(children.len());
-                let mut children = children.iter().collect::<Vec<_>>();
-                children.sort_by_key(|child| child.id);
-
-                for child in children {
-                    outcomes.push(self.evaluate_node(owner, child, snapshot, states, decisions)?);
-                }
-
-                outcomes.into_iter().all(|outcome| outcome)
-            }
-            ConditionPredicate::Any(children) => {
-                let mut outcomes = Vec::with_capacity(children.len());
-                let mut children = children.iter().collect::<Vec<_>>();
-                children.sort_by_key(|child| child.id);
-
-                for child in children {
-                    outcomes.push(self.evaluate_node(owner, child, snapshot, states, decisions)?);
-                }
-
-                outcomes.into_iter().any(|outcome| outcome)
-            }
-            ConditionPredicate::Not(child) => {
-                !self.evaluate_node(owner, child, snapshot, states, decisions)?
-            }
+            ConditionPredicate::All(children) => self
+                .evaluate_children(owner, children, evaluation)?
+                .into_iter()
+                .fold(ConditionOutcome::Holds, ConditionOutcome::and),
+            ConditionPredicate::Any(children) => self
+                .evaluate_children(owner, children, evaluation)?
+                .into_iter()
+                .fold(ConditionOutcome::Fails, ConditionOutcome::or),
+            ConditionPredicate::Not(child) => self.evaluate_node(owner, child, evaluation)?.not(),
         };
 
-        decisions.push(ConditionDecision {
+        evaluation.decisions.push(ConditionDecision {
             component_id: owner,
             condition_id: node.id,
             predicate: node.predicate.kind(),
@@ -291,4 +310,30 @@ impl ConditionCatalog {
 
         Ok(outcome)
     }
+
+    /// Evaluates every child in id order, without short-circuiting, so each records its
+    /// decision.
+    fn evaluate_children(
+        &self,
+        owner: &'static str,
+        children: &'static [ConditionDescriptor],
+        evaluation: &mut Evaluation<'_>,
+    ) -> Result<Vec<ConditionOutcome>, ConditionError> {
+        let mut children = children.iter().collect::<Vec<_>>();
+
+        children.sort_by_key(|child| child.id);
+
+        children
+            .into_iter()
+            .map(|child| self.evaluate_node(owner, child, evaluation))
+            .collect()
+    }
+}
+
+/// The mutable state of one evaluation pass.
+pub(super) struct Evaluation<'a> {
+    pub(super) snapshot: &'a ConditionFactSnapshot,
+    pub(super) runnable: ConditionPurity,
+    pub(super) states: &'a mut BTreeMap<&'static str, ConditionOutcome>,
+    pub(super) decisions: &'a mut Vec<ConditionDecision>,
 }

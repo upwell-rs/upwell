@@ -1,10 +1,11 @@
 //! Lowers a component's `#[when]` attributes to its static condition descriptor.
 //!
 //! Each `#[when]` becomes one trusted callback node that runs the expression verbatim over its
-//! declared inputs and carries a `ConditionExpression`
-//! for tooling. Stacked attributes combine under one `All` root. Nodes are identified by a
-//! hash of their expression (or an explicit `id`) and ordered by that id, so the order the
-//! attributes are written in cannot change the descriptor.
+//! declared inputs and carries a `ConditionExpression` for tooling. An expression inside the
+//! closed subset (see [`super::purity`]) is marked pure, so tooling may evaluate it. Stacked
+//! attributes combine under one `All` root. Nodes are identified by a hash of their expression
+//! (or an explicit `id`) and ordered by that id, so the order the attributes are written in
+//! cannot change the descriptor.
 
 use std::collections::BTreeSet;
 
@@ -14,6 +15,7 @@ use syn::spanned::Spanned;
 
 use super::args::WhenAttr;
 use super::inputs::{self, Lowering};
+use super::purity::is_pure;
 use crate::paths::Paths;
 
 /// The id of the `All` root that stacked `#[when]` nodes combine under.
@@ -87,6 +89,7 @@ struct Node {
     expr_span: Span,
     expr: syn::Expr,
     lowering: Lowering,
+    pure: bool,
 }
 
 impl Node {
@@ -99,6 +102,7 @@ impl Node {
         } = when;
         let mut expr = args.expr;
         let expr_span = expr.span();
+        let pure = is_pure(&expr);
         let (id, id_span) = match &args.id {
             Some(id) => (id.value(), id.span()),
 
@@ -120,6 +124,7 @@ impl Node {
             expr_span,
             expr,
             lowering,
+            pure,
         })
     }
 
@@ -131,6 +136,7 @@ impl Node {
         let input_id_ty = paths.core("ConditionInputId");
         let condition_input = paths.core("ConditionInput");
         let read_ty = paths.core("ConditionInputRead");
+        let purity_ty = paths.core("ConditionPurity");
         let option = quote!(::core::option::Option);
 
         let evaluate = format_ident!("__upwell_when_{index}");
@@ -159,6 +165,12 @@ impl Node {
             }
         });
 
+        let purity = if self.pure {
+            quote!(#purity_ty::Pure)
+        } else {
+            quote!(#purity_ty::Trusted)
+        };
+
         let outcome = quote_spanned!(self.expr_span=> let __upwell_outcome: bool = #expr;);
 
         let items = quote! {
@@ -178,6 +190,7 @@ impl Node {
                     text: #text,
                     reads: &[#(#reads),*],
                 }),
+                purity: #purity,
                 evaluate: #evaluate,
             };
         };

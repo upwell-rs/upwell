@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use tracing::{debug, error, trace};
 use upwell_core::ConditionPredicateKind;
 
-use crate::condition::{AvailabilityEdge, ConditionEvaluation};
+use crate::condition::{AvailabilityEdge, ConditionEvaluation, ConditionOutcome};
 use crate::descriptors::{ComponentDescriptor, ProviderDescriptor};
 use crate::registry::{DependencySelectionReason, DependencySelectionStage};
 
@@ -35,7 +35,7 @@ pub(crate) fn condition_evaluation(
             is_root = decision.condition_id == root_condition_id,
             predicate_kind = predicate_kind(decision.predicate),
             callback_kind = decision.callback_kind.unwrap_or(""),
-            node_outcome = decision.outcome,
+            node_outcome = decision.outcome.as_str(),
             "condition node evaluated"
         );
     }
@@ -58,7 +58,9 @@ pub(crate) fn condition_evaluation(
         );
     }
 
-    for (mapping, eligible) in &evaluation.providers {
+    for (mapping, outcome) in &evaluation.providers {
+        let eligible = *outcome == ConditionOutcome::Holds;
+
         trace!(
             target: CONDITION_TARGET,
             event_name = "eligibility",

@@ -3,9 +3,9 @@ use std::sync::Arc;
 use upwell_core::condition::scope::{self, ConditionInputRejection};
 use upwell_core::{
     ConditionCallback, ConditionContext, ConditionDescriptor, ConditionExpression,
-    ConditionInputId, ConditionInputRead, ConditionScalar, ConditionScalarKind, ConfigBindingId,
-    ConfigFactDescriptor, ConfigFactId, DependencyObservation, DescriptorSource, ProviderMappingId,
-    Singleton, Transient, TypeDescriptor,
+    ConditionInputId, ConditionInputRead, ConditionPurity, ConditionScalar, ConditionScalarKind,
+    ConfigBindingId, ConfigFactDescriptor, ConfigFactId, DependencyObservation, DescriptorSource,
+    ProviderMappingId, Singleton, Transient, TypeDescriptor,
 };
 
 use super::*;
@@ -81,3 +81,4 @@ mod config_inputs;
 mod cycles;
 mod incremental;
 mod providers;
+mod tooling;

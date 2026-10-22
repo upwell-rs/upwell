@@ -7,3 +7,5 @@
 mod app;
 mod descriptors;
 mod selection;
+#[cfg(feature = "tooling")]
+mod tooling;

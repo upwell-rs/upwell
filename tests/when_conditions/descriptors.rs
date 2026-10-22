@@ -6,8 +6,11 @@ use upwell::{
     ConditionPredicate, ConfigBindingId, Descriptor, DescriptorSource,
 };
 
+use upwell::condition::ConditionPurity;
+
 use crate::app::{
     AuditExporter, AuthConfig, CustomAuthenticator, NamedCondition, ReorderedAuditExporter,
+    TrustedCondition,
 };
 
 const FIXTURE: &str = include_str!("app.rs");
@@ -160,5 +163,24 @@ fn an_explicit_id_overrides_the_content_id() {
     assert_eq!(
         callback(condition::<CustomAuthenticator>()).inputs,
         callback(root).inputs
+    );
+}
+
+#[test]
+fn subset_expressions_are_pure_and_others_trusted() {
+    let pure = [
+        callback(condition::<CustomAuthenticator>()),
+        callback(condition::<NamedCondition>()),
+    ]
+    .into_iter()
+    .chain(nodes(condition::<AuditExporter>()).iter().map(callback));
+
+    for callback in pure {
+        assert_eq!(callback.purity, ConditionPurity::Pure);
+    }
+
+    assert_eq!(
+        callback(condition::<TrustedCondition>()).purity,
+        ConditionPurity::Trusted
     );
 }

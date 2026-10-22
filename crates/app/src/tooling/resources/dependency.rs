@@ -271,7 +271,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
         }
     }
 
-    fn project_provider(&mut self, provider: &ProviderDescriptor) {
+    pub(super) fn project_provider(&mut self, provider: &ProviderDescriptor) {
         let id = provider_id(provider);
         let trait_resource = self.type_resource(&provider.trait_ty);
         let component = self.app.component_resource_id(provider.concrete_ty.type_id);
@@ -314,7 +314,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
     }
 }
 
-fn dependency_labels(dependency: &DependencyDescriptor) -> BTreeMap<String, String> {
+pub(super) fn dependency_labels(dependency: &DependencyDescriptor) -> BTreeMap<String, String> {
     let cardinality = match dependency.cardinality {
         Cardinality::One => "one",
         Cardinality::Collection => "collection",
