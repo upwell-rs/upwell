@@ -18,7 +18,8 @@ pub enum GraphRelationFamily {
     /// Every relationship, using each concrete family's semantic orientation.
     #[default]
     All,
-    /// Runtime requirements, implementations, config bindings, and construction ordering.
+    /// Runtime requirements, implementations, config bindings, condition gating, and
+    /// construction ordering.
     Dependencies,
     /// Plugin requirements, slots, ordering, replacement, suppression, and conflicts.
     Composition,

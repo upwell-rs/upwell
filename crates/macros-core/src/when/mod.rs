@@ -16,6 +16,7 @@ mod args;
 mod emit;
 mod impls;
 mod inputs;
+mod purity;
 
 pub(crate) use emit::Condition;
 pub(crate) use impls::{component_input, config_input};

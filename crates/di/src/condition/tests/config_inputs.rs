@@ -28,6 +28,7 @@ macro_rules! counted_config_callback {
                 kind: "test/custom-and-beta",
                 inputs: &[ConditionInputId::Binding(AUTH), ConditionInputId::Raw(BETA)],
                 expression: None,
+                purity: ConditionPurity::Trusted,
                 evaluate,
             };
 

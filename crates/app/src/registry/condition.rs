@@ -86,8 +86,28 @@ impl AppRegistry {
         facts: impl IntoIterator<Item = ConfigFactDescriptor>,
         snapshot: &ConditionFactSnapshot,
     ) -> Result<AppConditionEvaluation, upwell_di::ConditionError> {
+        self.evaluate_conditions_with(facts, |catalog| catalog.evaluate(snapshot))
+    }
+
+    /// Like [`evaluate_conditions`](Self::evaluate_conditions), without running trusted
+    /// condition callbacks: see [`ConditionCatalog::evaluate_for_tooling`].
+    pub(crate) fn evaluate_tooling_conditions(
+        &self,
+        facts: impl IntoIterator<Item = ConfigFactDescriptor>,
+        snapshot: &ConditionFactSnapshot,
+    ) -> Result<AppConditionEvaluation, upwell_di::ConditionError> {
+        self.evaluate_conditions_with(facts, |catalog| catalog.evaluate_for_tooling(snapshot))
+    }
+
+    fn evaluate_conditions_with(
+        &self,
+        facts: impl IntoIterator<Item = ConfigFactDescriptor>,
+        evaluate: impl FnOnce(
+            &ConditionCatalog,
+        ) -> Result<ConditionEvaluation, upwell_di::ConditionError>,
+    ) -> Result<AppConditionEvaluation, upwell_di::ConditionError> {
         let catalog = Arc::new(ConditionCatalog::new(&self.component_registry(), facts)?);
-        let evaluation = catalog.evaluate(snapshot)?;
+        let evaluation = evaluate(&catalog)?;
 
         Ok(AppConditionEvaluation {
             evaluation,

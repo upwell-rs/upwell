@@ -29,6 +29,7 @@ use upwell_hooks::{
 
 use crate::builtins::RuntimeReloader;
 use crate::error::Error;
+use crate::host::ExecutionMode;
 use crate::lifecycle::{ShutdownHandle, ShutdownSignal};
 use crate::plugin::{
     EarlyPluginCatalog, EffectivePluginPlan, Plugin, PluginCatalog, PluginWithOptions,
@@ -82,6 +83,8 @@ pub struct AppBuilder<D: ProtocolDefinition> {
     plugins: PluginCatalog,
     /// The selected protocol definition and its accumulated configuration.
     protocol: D,
+    /// Tooling preparation evaluates only conditions it can decide without trusted code.
+    mode: ExecutionMode,
 }
 
 /// A validated application assembly awaiting runtime component construction.
@@ -103,6 +106,8 @@ pub struct PreparedApp<D: ProtocolDefinition> {
     root_order: Arc<[ComponentDescriptor]>,
     effective_graph: EffectiveGraph,
     condition: Arc<AppConditionState>,
+    #[cfg(feature = "tooling")]
+    mode: ExecutionMode,
     #[cfg(feature = "tooling")]
     host_lifecycle: Option<HostLifecycleCapabilities>,
     #[cfg(feature = "tooling")]
@@ -175,7 +180,16 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             dirs: None,
             plugins: PluginCatalog::new(),
             protocol: D::default(),
+            mode: ExecutionMode::Run,
         }
+    }
+
+    /// Prepares for `mode`: tooling preparation never runs trusted condition callbacks, and
+    /// cannot be built while it leaves a condition undecided.
+    pub(crate) fn execution_mode(mut self, mode: ExecutionMode) -> Self {
+        self.mode = mode;
+
+        self
     }
 
     /// Mutable access to the protocol definition, for protocol-specific extension traits.
@@ -441,7 +455,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         // Evaluate the startup conditions from the staged config values, with the same
         // evaluator the transactional reload uses. An app with no condition facts gets an
         // empty-facts evaluation, which leaves every unconditional component eligible.
-        let evaluation = evaluate_startup_conditions(&registry, &tree, &reload_slots)?;
+        let evaluation = evaluate_startup_conditions(&registry, &tree, &reload_slots, self.mode)?;
 
         // Retain the full catalog with the evaluation for this and future generations.
         let condition = Arc::new(AppConditionState::new(
@@ -473,19 +487,10 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             value: Box::new(Injectable::into_stored(hook_manager)),
         });
 
-        let effective_graph = EffectiveGraph::build(
-            RuntimeGenerationId::INITIAL,
-            &eligible,
-            |consumer, dependency| scope_topology.is_reachable(&consumer, &dependency),
-        )
-        .map_err(Error::from)?;
+        let (effective_graph, scopes) =
+            plan_effective_graph(&registry, &eligible, &resolved, &scope_topology)
+                .map_err(|error| undecided_graph_error(&condition, error))?;
         let provider_selection = Arc::clone(effective_graph.provider_selection());
-        registry.validate_effective_with_scope_topology(
-            &resolved,
-            &provider_selection,
-            &scope_topology,
-        )?;
-        let scopes = ScopePlan::partition(&resolved, &provider_selection, &scope_topology)?;
         let root_order = scopes.root_order(&effective_graph);
 
         let protocol = protocol.prepare(&ValidationContext::new(
@@ -552,7 +557,8 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
                 &instances,
                 &scopes.seed_destinations,
             )
-            .map_err(Error::from)?,
+            .map_err(Error::from)?
+            .with_candidates(&condition.catalog().components),
         );
 
         Ok(PreparedApp {
@@ -570,6 +576,8 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             root_order: Arc::from(root_order),
             effective_graph,
             condition,
+            #[cfg(feature = "tooling")]
+            mode: self.mode,
             #[cfg(feature = "tooling")]
             host_lifecycle: None,
             #[cfg(feature = "tooling")]
@@ -667,6 +675,17 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
         &self.tooling_snapshot
     }
 
+    /// The full candidate catalog and the condition evaluation this plan was prepared from.
+    #[cfg(feature = "tooling")]
+    pub(crate) fn condition_state(&self) -> &AppConditionState {
+        &self.condition
+    }
+
+    #[cfg(feature = "tooling")]
+    pub(crate) const fn execution_mode(&self) -> ExecutionMode {
+        self.mode
+    }
+
     #[cfg(feature = "tooling")]
     pub(crate) fn component_resource_id(&self, ty: std::any::TypeId) -> Option<String> {
         self.registry
@@ -694,6 +713,8 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             effective_graph,
             condition,
             #[cfg(feature = "tooling")]
+                mode: _,
+            #[cfg(feature = "tooling")]
                 host_lifecycle: _,
             #[cfg(feature = "tooling")]
                 provider_order: _,
@@ -709,6 +730,10 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             seed_destinations,
             resolvers,
         } = self;
+
+        if !condition.evaluation().evaluation().is_complete() {
+            return Err(Error::UndecidedConditionsBuild.into());
+        }
 
         ensure_seeded(&root_order, &instances)?;
 
@@ -851,10 +876,53 @@ fn seed_dir<K: DirKind>(
 /// extension points, so — like the reload's condition stage — the whole stage runs
 /// inside a panic boundary: a panic returns the redacted preparation panic error,
 /// while ordinary errors pass through unchanged.
+/// Builds and validates the initial effective graph of the eligible registry, and partitions
+/// its scope plans.
+fn plan_effective_graph(
+    registry: &AppRegistry,
+    eligible: &upwell_di::ComponentRegistry,
+    resolved: &[ComponentDescriptor],
+    topology: &PreparedScopeTopology,
+) -> crate::Result<(EffectiveGraph, ScopePlan)> {
+    let graph = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        eligible,
+        |consumer, dependency| topology.is_reachable(&consumer, &dependency),
+    )
+    .map_err(Error::from)?;
+    let selection = graph.provider_selection();
+
+    registry.validate_effective_with_scope_topology(resolved, selection, topology)?;
+
+    let scopes = ScopePlan::partition(resolved, selection, topology)?;
+
+    Ok((graph, scopes))
+}
+
+/// Names the undecided conditions when a tooling preparation's graph fails validation, since
+/// a component left out because its condition was not evaluated may be what the graph lacks.
+fn undecided_graph_error(condition: &AppConditionState, error: Error) -> Error {
+    let not_evaluated = condition
+        .evaluation()
+        .evaluation()
+        .not_evaluated()
+        .collect::<Vec<_>>();
+
+    if not_evaluated.is_empty() {
+        return error;
+    }
+
+    Error::UndecidedConditionGraph {
+        not_evaluated,
+        source: Box::new(error),
+    }
+}
+
 fn evaluate_startup_conditions(
     registry: &AppRegistry,
     tree: &ConfigManager,
     reload_slots: &[Box<dyn ReloadableConfig>],
+    mode: ExecutionMode,
 ) -> crate::Result<AppConditionEvaluation> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let staged: Vec<_> = reload_slots
@@ -872,9 +940,11 @@ fn evaluate_startup_conditions(
             .iter()
             .flat_map(|source| (source.facts.descriptors)(source.path));
 
-        registry
-            .evaluate_conditions(facts, &snapshot)
-            .map_err(Error::from)
+        match mode {
+            ExecutionMode::Tooling => registry.evaluate_tooling_conditions(facts, &snapshot),
+            _ => registry.evaluate_conditions(facts, &snapshot),
+        }
+        .map_err(Error::from)
     }))
     .map_err(|_| Error::CandidatePreparationPanicked)?
 }

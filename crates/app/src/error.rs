@@ -149,6 +149,25 @@ pub enum Error {
     #[error("candidate runtime preparation panicked")]
     CandidatePreparationPanicked,
 
+    /// An application prepared for tooling was built while some component conditions were
+    /// not evaluated. Tooling never runs trusted condition callbacks, so it left those
+    /// components out and its graph is not the runtime graph.
+    #[error(
+        "an application prepared for tooling left component conditions undecided and cannot be built"
+    )]
+    UndecidedConditionsBuild,
+
+    /// A tooling preparation's graph failed validation while some component conditions
+    /// were not evaluated, because they need trusted callbacks tooling never runs.
+    #[error("the graph tooling can decide is invalid; {} component condition(s) were not evaluated", not_evaluated.len())]
+    UndecidedConditionGraph {
+        /// Stable IDs of the components whose condition was not evaluated.
+        not_evaluated: Vec<&'static str>,
+        /// The validation failure of the graph without those components.
+        #[source]
+        source: Box<Error>,
+    },
+
     /// A runtime transition attempt was rejected before publication, leaving the previous
     /// generation active. Carries the attempt's redacted report, which is all `Display`
     /// and `Debug` render; the error that rejected it is the

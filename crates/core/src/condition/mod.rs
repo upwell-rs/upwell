@@ -281,7 +281,8 @@ pub mod scope;
 
 pub use callback::{
     ConditionCallback, ConditionContext, ConditionExpression, ConditionInput, ConditionInputId,
-    ConditionInputRead, ConditionInputValue, ConfigBindingId, Eligibility, read_input,
+    ConditionInputRead, ConditionInputValue, ConditionPurity, ConfigBindingId, Eligibility,
+    read_input,
 };
 
 #[cfg(test)]

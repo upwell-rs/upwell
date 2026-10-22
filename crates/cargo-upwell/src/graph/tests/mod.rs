@@ -11,6 +11,7 @@ use super::{
     ResourceExplanation, explain_resource, query_graph,
 };
 
+mod conditions;
 mod output;
 mod selectors;
 mod traversal;

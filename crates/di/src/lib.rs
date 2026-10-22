@@ -27,7 +27,7 @@ pub mod transition;
 
 pub use condition::{
     AvailabilityEdge, ConditionCatalog, ConditionDecision, ConditionDependency, ConditionError,
-    ConditionEvaluation, ConditionFactSnapshot, ValidatedConditionEvaluation,
+    ConditionEvaluation, ConditionFactSnapshot, ConditionOutcome, ValidatedConditionEvaluation,
 };
 pub use construct::{
     ComponentChange, Factory, FactoryOutput, FromContainer, HotUpdate, HotUpdateCommit,

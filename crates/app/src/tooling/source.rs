@@ -1,6 +1,6 @@
 //! Conversion of descriptor declaration sites into tooling source locations.
 
-use upwell_core::{ItemSource, TypeDescriptor};
+use upwell_core::{DescriptorSource, ItemSource, TypeDescriptor};
 use upwell_tooling_schema::{Provenance, SourceLocation};
 
 /// The tooling location of a recorded declaration, or `None` for an unknown position.
@@ -16,6 +16,20 @@ pub(crate) fn item_location(source: &ItemSource) -> Option<SourceLocation> {
         line: Some(location.line),
         column: (location.column > 0).then_some(location.column),
         rust_path: Some(source.rust_path()),
+    })
+}
+
+/// The tooling location of a descriptor node, or `None` for an unknown position.
+pub(crate) fn descriptor_location(source: DescriptorSource) -> Option<SourceLocation> {
+    if source.line == 0 || source.file.is_empty() {
+        return None;
+    }
+
+    Some(SourceLocation {
+        file: source.file.to_string(),
+        line: Some(source.line),
+        column: (source.column > 0).then_some(source.column),
+        rust_path: None,
     })
 }
 

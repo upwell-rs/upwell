@@ -8,7 +8,8 @@ use upwell_config::{
 };
 use upwell_core::{
     ConditionCallback, ConditionContext, ConditionDescriptor, ConditionInputId, ConditionPredicate,
-    ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId, ResolverSet,
+    ConditionPurity, ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId,
+    ResolverSet,
 };
 use upwell_di::{
     BoxedComponent, Component, ComponentDescriptor, Injectable, RootResolver, ScopeContainer,
@@ -18,6 +19,7 @@ use upwell_dirs::{Config as ConfigDir, Dir, DirectoriesManager};
 use upwell_hooks::HookManager;
 
 use super::App;
+use crate::ExecutionMode;
 use crate::builtins::RuntimeReloader;
 use crate::test_support::test_component;
 use crate::{

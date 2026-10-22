@@ -228,6 +228,22 @@ pub struct ConditionInputRead {
     pub source: DescriptorSource,
 }
 
+/// Whether tooling may evaluate a condition callback.
+///
+/// `#[when]` marks an expression [`Pure`](Self::Pure) only when it stays inside a closed
+/// subset: field reads of declared inputs, `==` / `!=` against literals, unit enum variants,
+/// constants and `Some(..)` / `None`, `&&` / `||` / `!`, `X.eligible()` and
+/// `resolve("<path>")`. Such a callback calls no user function; the only user code it can
+/// reach is the `PartialEq` and `Deref` impls of the compared config fields, which must be
+/// side-effect free.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ConditionPurity {
+    /// Tooling may evaluate the callback over supplied config.
+    Pure,
+    /// Arbitrary trusted code that tooling reports as not evaluated.
+    Trusted,
+}
+
 /// Trusted callback over statically declared config and eligibility inputs.
 ///
 /// The context only exposes declared inputs, but Rust callbacks remain ordinary trusted
@@ -235,12 +251,13 @@ pub struct ConditionInputRead {
 /// incremental evaluation reuses the result while those inputs are unchanged.
 /// Implementations must also be deterministic, non-blocking, panic-free, and free of
 /// external side effects; the framework cannot sandbox environment, filesystem, or
-/// global-state access. Tooling never executes callbacks.
+/// global-state access. Tooling executes only [`ConditionPurity::Pure`] callbacks.
 #[derive(Clone, Copy)]
 pub struct ConditionCallback {
     pub kind: &'static str,
     pub inputs: &'static [ConditionInputId],
     pub expression: Option<&'static ConditionExpression>,
+    pub purity: ConditionPurity,
     pub evaluate: for<'a> fn(ConditionContext<'a>) -> bool,
 }
 
@@ -251,6 +268,7 @@ impl fmt::Debug for ConditionCallback {
             .field("kind", &self.kind)
             .field("inputs", &self.inputs)
             .field("expression", &self.expression)
+            .field("purity", &self.purity)
             .finish_non_exhaustive()
     }
 }

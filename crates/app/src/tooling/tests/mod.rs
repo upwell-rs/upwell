@@ -59,6 +59,7 @@ use failure_fixtures::*;
 use fixtures::*;
 use plugins::*;
 
+mod conditions;
 mod config_projection;
 mod failure_fixtures;
 mod failures;

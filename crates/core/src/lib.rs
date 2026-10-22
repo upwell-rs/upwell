@@ -22,8 +22,9 @@ pub mod types;
 pub use condition::{
     ConditionCallback, ConditionContext, ConditionDescriptor, ConditionExpression, ConditionInput,
     ConditionInputId, ConditionInputRead, ConditionInputValue, ConditionPredicate,
-    ConditionPredicateKind, ConditionScalar, ConditionScalarKind, ConditionScalarLiteral,
-    ConfigBindingId, ConfigFactDescriptor, ConfigFactId, Eligibility, ProviderMappingId,
+    ConditionPredicateKind, ConditionPurity, ConditionScalar, ConditionScalarKind,
+    ConditionScalarLiteral, ConfigBindingId, ConfigFactDescriptor, ConfigFactId, Eligibility,
+    ProviderMappingId,
 };
 pub use dependency::{Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode};
 pub use descriptor::{Descriptor, DescriptorFor, RegistryFor, RuntimeDescriptor, UpwellDescriptor};

@@ -41,6 +41,10 @@ fn diagnostic_resource_classification_preserves_unknown_identities() {
         ResourceKind::Provider
     );
     assert_eq!(
+        diagnostic_resource_kind("condition:custom:when"),
+        ResourceKind::Condition
+    );
+    assert_eq!(
         diagnostic_resource_kind("cli-command:serve"),
         ResourceKind::Unknown
     );
@@ -1188,6 +1192,7 @@ fn duplicate_relationships_and_core_kind_mismatches_are_rejected() {
         RelationshipKind::Hooks,
         RelationshipKind::Contains,
         RelationshipKind::Contributes,
+        RelationshipKind::Gates,
     ] {
         let mut invalid = fixture();
 
@@ -1256,3 +1261,35 @@ fn add_cli_resources(document: &mut ToolingDocument) {
 }
 
 fn add_second_cli_provider_resource(_document: &mut ToolingDocument) {}
+
+#[test]
+fn conditions_gate_components_and_parent_conditions() {
+    let mut document = fixture();
+
+    document.resources.extend(
+        ["condition:worker:when", "condition:worker:when/child"].map(|id| Resource {
+            id: id.to_string(),
+            kind: ResourceKind::Condition,
+            name: String::from("when"),
+            ..Resource::default()
+        }),
+    );
+    document.relationships.extend([
+        Relationship {
+            kind: RelationshipKind::Gates,
+            from: String::from("condition:worker:when"),
+            to: String::from("component:worker"),
+            labels: BTreeMap::new(),
+        },
+        Relationship {
+            kind: RelationshipKind::Gates,
+            from: String::from("condition:worker:when/child"),
+            to: String::from("condition:worker:when"),
+            labels: BTreeMap::new(),
+        },
+    ]);
+
+    document
+        .validate()
+        .expect("conditions gate components and conditions");
+}

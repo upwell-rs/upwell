@@ -14,7 +14,7 @@ use serde::Deserialize;
 use tempfile::TempDir;
 use upwell::condition::resolve;
 use upwell::config::Toml;
-use upwell::{App, AppError, ConfigManager, component, config, injectable, when};
+use upwell::{App, AppBuilder, AppError, ConfigManager, component, config, injectable, when};
 use upwell_config::ResolverChain;
 
 /// The trait both providers implement and the gate consumes.
@@ -82,6 +82,11 @@ pub struct ReorderedAuditExporter;
 #[when(id = "custom-mode", AuthConfig.mode == AuthMode::Custom)]
 pub struct NamedCondition;
 
+/// A condition outside the tooling-evaluable subset: it calls a macro.
+#[component]
+#[when(matches!(AuthConfig.mode, AuthMode::Custom))]
+pub struct TrustedCondition;
+
 /// A fixed consumer that captured the effective provider at construction.
 #[component]
 pub struct AuthGate {
@@ -126,10 +131,18 @@ pub async fn build(settings: &Settings) -> (TempDir, PathBuf, Result<App<()>, Ap
     fs::create_dir_all(&config_dir).expect("create config dir");
     write_settings(&config_dir, settings);
 
+    let app = builder(&config_dir).build().await;
+
+    (dir, config_dir, app)
+}
+
+/// The app's builder over the config in `config_dir`.
+pub fn builder(config_dir: &Path) -> AppBuilder<()> {
     let manager =
-        ConfigManager::<Toml>::load_in_with_resolvers(&config_dir, &[], ResolverChain::empty())
+        ConfigManager::<Toml>::load_in_with_resolvers(config_dir, &[], ResolverChain::empty())
             .expect("load config");
-    let app = App::<()>::builder("when-conditions-test")
+
+    App::<()>::builder("when-conditions-test")
         .config_source(manager)
         .component::<DefaultAuthenticator>()
         .component::<CustomAuthenticator>()
@@ -137,11 +150,8 @@ pub async fn build(settings: &Settings) -> (TempDir, PathBuf, Result<App<()>, Ap
         .component::<AuditExporter>()
         .component::<ReorderedAuditExporter>()
         .component::<NamedCondition>()
+        .component::<TrustedCondition>()
         .component::<AuthGate>()
         .provider::<DefaultAuthenticator>()
         .provider::<CustomAuthenticator>()
-        .build()
-        .await;
-
-    (dir, config_dir, app)
 }
