@@ -233,20 +233,16 @@ pub async fn probe_bootstrapped_host<H: AppHost>(
     identity: DocumentIdentity,
     context: Result<BootstrapContext, crate::CliError>,
 ) -> ProbeEnvelope {
-    let result = match (context, requested_preview()) {
-        (_, Err(error)) => Err(error),
-        (Ok(context), Ok(preview)) => try_probe_bootstrapped_host::<H>(context, preview).await,
-        (Err(crate::CliError::Bootstrap(error)), _) => Err(ToolingProbeError::Bootstrap(error)),
-        (Err(crate::CliError::Clap(error)), _) => Err(ToolingProbeError::CliParse(error)),
-        (Err(crate::CliError::PluginCatalog(error)), _) => {
-            Err(ToolingProbeError::PluginCatalog(error))
-        }
-        (Err(crate::CliError::Definition(error)), _) => {
-            Err(ToolingProbeError::CliDefinition(error))
-        }
-        (Err(error), _) => {
-            unreachable!("tooling CLI preparation returned unrelated failure: {error}")
-        }
+    let result = match context {
+        Ok(context) => match requested_preview() {
+            Ok(preview) => try_probe_bootstrapped_host::<H>(context, preview).await,
+            Err(error) => Err(error),
+        },
+        Err(crate::CliError::Bootstrap(error)) => Err(ToolingProbeError::Bootstrap(error)),
+        Err(crate::CliError::Clap(error)) => Err(ToolingProbeError::CliParse(error)),
+        Err(crate::CliError::PluginCatalog(error)) => Err(ToolingProbeError::PluginCatalog(error)),
+        Err(crate::CliError::Definition(error)) => Err(ToolingProbeError::CliDefinition(error)),
+        Err(error) => unreachable!("tooling CLI preparation returned unrelated failure: {error}"),
     };
 
     probe_envelope(identity, result)
