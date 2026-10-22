@@ -10,7 +10,10 @@ use crate::condition::ResolvedConfig;
 use crate::resolve::{ResolveCtx, ResolvedDependency};
 use crate::{ConfigValue, Resolver, ResolverChain, from_value_in};
 
-use super::{CONFIG_BINDINGS, ConfigBinding, ConfigError, ConfigProperties, DirectoriesResolver};
+use super::{
+    CONFIG_BINDINGS, ConfigBinding, ConfigError, ConfigOverlay, ConfigProperties,
+    DirectoriesResolver,
+};
 
 /// A parser from source text to the normalized config tree.
 type Parser = fn(&str) -> Result<ConfigValue, crate::TemplateError>;
@@ -630,16 +633,17 @@ impl<F> ConfigManager<F> {
     /// Re-reads every retained source from disk and rebuilds a fresh merged tree
     /// (defaults seeded), **without** adopting it. Rebuilding from empty in the
     /// original merge order preserves precedence: if profile `b` changed, `c` still
-    /// overrides `b` and `b` overrides `a`. Returns the new tree for diffing.
-    pub(crate) fn reread(&self) -> Result<ConfigValue, ConfigError> {
+    /// overrides `b` and `b` overrides `a`. A non-empty `overlay` merges above every
+    /// source, before defaults fill the remaining gaps. Returns the new tree for diffing.
+    pub(crate) fn reread(&self, overlay: &ConfigOverlay) -> Result<ConfigValue, ConfigError> {
         let parsers = parsers_for(self.format);
-
         let mut root = ConfigValue::Table(Vec::new());
 
         for source in &self.sources {
             merge_file(&mut root, source, &parsers)?;
         }
 
+        overlay.apply(&mut root);
         seed_defaults_into(&mut root, &self.bindings);
 
         Ok(root)
@@ -843,7 +847,7 @@ fn merge_stem(
 
 /// Deep-merges `overlay` into `base`: tables recurse key-by-key, every other value
 /// (scalar or array) replaces the base value wholesale.
-fn merge_into(base: &mut ConfigValue, overlay: ConfigValue) {
+pub(super) fn merge_into(base: &mut ConfigValue, overlay: ConfigValue) {
     let ConfigValue::Table(overlay_entries) = overlay else {
         *base = overlay;
         return;

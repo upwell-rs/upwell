@@ -27,6 +27,8 @@ mod transition_hooks;
 pub(crate) use generation::PreparedRuntimeGeneration;
 pub use generation::{AppConditionState, DisplacedGeneration, RuntimeView};
 use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransitionCoordinator};
+#[cfg(feature = "tooling")]
+pub(crate) use reload::{resolve_staged_transition, staged_condition_snapshot};
 pub(crate) use report::TRANSITION_TARGET;
 pub use report::{
     ComponentTransitionReport, PhaseTiming, RuntimeTransitionReport, TransitionAttemptId,

@@ -351,5 +351,12 @@ test = false
 bench = false
 required-features = ["cli", "tooling"]
 
+[[bin]]
+name = "tooling_preview_fixture"
+path = "tests/tooling_preview_process/fixture.rs"
+test = false
+bench = false
+required-features = ["cli", "tooling"]
+
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 upwell-test-utils = { workspace = true }

@@ -242,6 +242,29 @@ impl GraphIndex {
             .collect()
     }
 
+    /// The far endpoints of `id`'s `kind` relationships, in canonical relationship order.
+    pub(super) fn neighbors(&self, id: &str, kind: RelationshipKind, outgoing: bool) -> Vec<&str> {
+        let edges = if outgoing {
+            self.outgoing.get(id)
+        } else {
+            self.incoming.get(id)
+        };
+
+        edges
+            .into_iter()
+            .flatten()
+            .map(|index| &self.document.relationships[*index])
+            .filter(|edge| edge.kind == kind)
+            .map(|edge| {
+                if outgoing {
+                    edge.to.as_str()
+                } else {
+                    edge.from.as_str()
+                }
+            })
+            .collect()
+    }
+
     pub(super) fn relevant_cli_providers(&self, selected: &BTreeSet<String>) -> Vec<CliProvider> {
         let Some(cli) = &self.document.cli else {
             return Vec::new();

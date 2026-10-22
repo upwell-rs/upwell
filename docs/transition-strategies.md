@@ -102,6 +102,17 @@ is displaced: it appears in `RuntimeTransitionReport::displaced()` and receives 
 That includes a rebound component that had to be constructed again. Retained, rebound-in-place and
 hot-updated instances are never displaced.
 
+To see these choices before changing anything, preview the change from tooling:
+
+```sh
+cargo upwell explain 'dyn my_app::Authenticator' --set auth.mode=default
+```
+
+The probe runs the same stage, evaluate and plan steps as a reload against the proposed config and
+stops before construction. It prints each affected component's action, chosen strategy and reason
+paths, the components a commit would displace, and why each provider mapping is or is not selected.
+Trusted condition callbacks are not run, so a component they gate shows as not evaluated.
+
 ## Cost
 
 A live rebind publishes the new instance into the consumer's existing slot: one atomic swap that

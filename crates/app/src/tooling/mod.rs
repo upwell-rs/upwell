@@ -8,11 +8,12 @@ use std::path::Path;
 
 use futures::FutureExt as _;
 use thiserror::Error;
+use upwell_config::ConfigOverlay;
 use upwell_di::ProviderDescriptor;
 use upwell_tooling_schema::{
     BinaryTargetIdentity, Diagnostic, DiagnosticSeverity, DocumentIdentity, PackageIdentity,
     ProbeEnvelope, ProbeFailure, ProbeTargetIdentity, Provenance, RelationshipKind, Resource,
-    ResourceKind, ToolingDocument,
+    ResourceKind, TOOLING_PROBE_TRANSITION_PREVIEW_ENV, ToolingDocument, TransitionPreviewRequest,
 };
 
 use crate::{
@@ -27,6 +28,7 @@ mod contribution;
 mod failure;
 mod output;
 mod panic;
+mod preview;
 mod relationship;
 mod resources;
 mod snapshot;
@@ -82,6 +84,9 @@ enum ToolingProbeError {
     /// A lifecycle callback or framework future panicked while being polled.
     #[error("the tooling probe panicked")]
     Panic,
+    /// The invoker-requested transition preview could not be decoded.
+    #[error("the requested transition preview is invalid")]
+    PreviewRequest,
 }
 
 /// A typed failure while resolving the selected target for a generated tooling entry.
@@ -163,6 +168,14 @@ impl ToolingProbeError {
                 Vec::new(),
                 Some("Correct the reported application metadata and retry the probe."),
             ),
+            Self::PreviewRequest => (
+                "upwell/tooling-preview-request",
+                "The requested transition preview is not a valid set of config assignments.",
+                None,
+                Vec::new(),
+                Vec::new(),
+                Some("Assign scalar values to dot-separated [A-Za-z0-9_-] property paths."),
+            ),
             Self::Panic => (
                 "upwell/tooling-panic",
                 "The tooling probe panicked while preparing the application.",
@@ -203,7 +216,14 @@ impl ToolingProbeError {
 /// Runs the target-local preparation path and always returns a serializable probe envelope.
 #[doc(hidden)]
 pub async fn probe_host<H: AppHost>(identity: DocumentIdentity) -> ProbeEnvelope {
-    probe_host_context::<H>(identity, BootstrapContext::new(ExecutionMode::Tooling)).await
+    let result = match requested_preview() {
+        Ok(preview) => {
+            try_probe_host::<H>(BootstrapContext::new(ExecutionMode::Tooling), preview).await
+        }
+        Err(error) => Err(error),
+    };
+
+    probe_envelope(identity, result)
 }
 
 /// Runs a target-local probe after generated bootstrap resolved policy and environment sources.
@@ -213,23 +233,21 @@ pub async fn probe_bootstrapped_host<H: AppHost>(
     identity: DocumentIdentity,
     context: Result<BootstrapContext, crate::CliError>,
 ) -> ProbeEnvelope {
-    let result = match context {
-        Ok(context) => try_probe_bootstrapped_host::<H>(context).await,
-        Err(crate::CliError::Bootstrap(error)) => Err(ToolingProbeError::Bootstrap(error)),
-        Err(crate::CliError::Clap(error)) => Err(ToolingProbeError::CliParse(error)),
-        Err(crate::CliError::PluginCatalog(error)) => Err(ToolingProbeError::PluginCatalog(error)),
-        Err(crate::CliError::Definition(error)) => Err(ToolingProbeError::CliDefinition(error)),
-        Err(error) => unreachable!("tooling CLI preparation returned unrelated failure: {error}"),
+    let result = match (context, requested_preview()) {
+        (_, Err(error)) => Err(error),
+        (Ok(context), Ok(preview)) => try_probe_bootstrapped_host::<H>(context, preview).await,
+        (Err(crate::CliError::Bootstrap(error)), _) => Err(ToolingProbeError::Bootstrap(error)),
+        (Err(crate::CliError::Clap(error)), _) => Err(ToolingProbeError::CliParse(error)),
+        (Err(crate::CliError::PluginCatalog(error)), _) => {
+            Err(ToolingProbeError::PluginCatalog(error))
+        }
+        (Err(crate::CliError::Definition(error)), _) => {
+            Err(ToolingProbeError::CliDefinition(error))
+        }
+        (Err(error), _) => {
+            unreachable!("tooling CLI preparation returned unrelated failure: {error}")
+        }
     };
-
-    probe_envelope(identity, result)
-}
-
-async fn probe_host_context<H: AppHost>(
-    identity: DocumentIdentity,
-    context: BootstrapContext,
-) -> ProbeEnvelope {
-    let result = try_probe_host::<H>(context).await;
 
     probe_envelope(identity, result)
 }
@@ -545,32 +563,68 @@ fn config_resource(path: &str) -> String {
 }
 
 async fn try_probe_host<H: AppHost>(
-    context: BootstrapContext,
+    mut context: BootstrapContext,
+    preview: Option<ConfigOverlay>,
 ) -> Result<ToolingDocument, ToolingProbeError> {
     let plugins =
         crate::resolve_host_plugin_catalog::<H>().map_err(ToolingProbeError::PluginCatalog)?;
 
-    try_probe_host_with_plugins::<H>(context, plugins).await
-}
-
-async fn try_probe_host_with_plugins<H: AppHost>(
-    mut context: BootstrapContext,
-    plugins: crate::EarlyPluginCatalog,
-) -> Result<ToolingDocument, ToolingProbeError> {
     crate::retain_host_plugin_catalog(&mut context, plugins);
 
     let (_, prepared) = crate::prepare_host_context::<H>(context).await?;
 
-    Ok(prepared.tooling_document()?)
+    project_prepared(&prepared, preview.as_ref())
 }
 
 #[cfg(feature = "cli")]
 async fn try_probe_bootstrapped_host<H: AppHost>(
     context: BootstrapContext,
+    preview: Option<ConfigOverlay>,
 ) -> Result<ToolingDocument, ToolingProbeError> {
     let (_, prepared) = crate::prepare_host_context::<H>(context).await?;
 
-    Ok(prepared.tooling_document()?)
+    project_prepared(&prepared, preview.as_ref())
+}
+
+/// Projects `prepared`, then previews the requested config change against it.
+fn project_prepared<D: ProtocolDefinition>(
+    prepared: &PreparedApp<D>,
+    preview: Option<&ConfigOverlay>,
+) -> Result<ToolingDocument, ToolingProbeError> {
+    let mut document = prepared.tooling_document()?;
+
+    document.transition_preview = preview.map(|overlay| prepared.transition_preview(overlay));
+
+    Ok(document)
+}
+
+/// The config overlay of the transition preview the invoker requested, if any.
+fn requested_preview() -> Result<Option<ConfigOverlay>, ToolingProbeError> {
+    let Some(value) = std::env::var_os(TOOLING_PROBE_TRANSITION_PREVIEW_ENV) else {
+        return Ok(None);
+    };
+
+    let request = value
+        .to_str()
+        .ok_or(ToolingProbeError::PreviewRequest)
+        .and_then(|value| {
+            TransitionPreviewRequest::from_env_value(value)
+                .map_err(|_| ToolingProbeError::PreviewRequest)
+        })?;
+
+    preview_overlay(&request).map(Some)
+}
+
+fn preview_overlay(request: &TransitionPreviewRequest) -> Result<ConfigOverlay, ToolingProbeError> {
+    let mut overlay = ConfigOverlay::default();
+
+    for assignment in &request.assignments {
+        overlay
+            .set(&assignment.path, &assignment.value)
+            .map_err(|_| ToolingProbeError::PreviewRequest)?;
+    }
+
+    Ok(overlay)
 }
 
 fn lifecycle_failure_code(phase: LifecyclePhase) -> &'static str {

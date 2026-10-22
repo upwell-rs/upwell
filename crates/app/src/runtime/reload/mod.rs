@@ -175,6 +175,8 @@ use super::transition_hooks::{
 };
 use super::{AppRuntime, RuntimeView};
 use stages::{commit_candidate, construct_candidate, evaluate_conditions, plan_transition};
+#[cfg(feature = "tooling")]
+pub(crate) use stages::{resolve_staged_transition, staged_condition_snapshot};
 use upwell_config::ReloadCause;
 
 impl AppRuntime {

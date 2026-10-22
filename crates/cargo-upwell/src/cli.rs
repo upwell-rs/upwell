@@ -10,8 +10,10 @@ use clap::{
     Args, ColorChoice, CommandFactory as _, FromArgMatches as _, Parser, Subcommand, ValueHint,
 };
 use clap_complete::{ArgValueCompleter, CompletionCandidate};
+use upwell_tooling_schema::{ConfigAssignment, TransitionPreviewRequest};
 
 mod format;
+mod preview;
 
 use format::{
     Check, Doctor, Explain, Export, Format, Graph, GraphFamily, GraphTraversalDirection, Inspect,
@@ -248,6 +250,11 @@ struct ExplainArgs {
     /// Exact stable resource ID or exact unique name.
     #[arg(add = ArgValueCompleter::new(complete_resources))]
     resource: String,
+    /// Previews the transition a config change would cause, without constructing anything.
+    /// Repeatable; later assignments win. VALUE is `true`/`false`, a number, a `"quoted
+    /// string"`, or bare text.
+    #[arg(long = "set", value_name = "PATH=VALUE", value_parser = preview::parse_assignment)]
+    set: Vec<ConfigAssignment>,
     #[command(flatten)]
     target: TargetArgs,
     #[command(flatten)]
@@ -352,6 +359,7 @@ pub(crate) enum CommandRequest {
         discovery: DiscoveryRequest,
         format: String,
         resource: String,
+        preview: Option<TransitionPreviewRequest>,
         color: TerminalPolicy,
         pager: TerminalPolicy,
     },
@@ -438,6 +446,9 @@ impl Cli {
                 discovery: discovery_request(arguments.target),
                 format: arguments.format.into_value(),
                 resource: arguments.resource,
+                preview: (!arguments.set.is_empty()).then_some(TransitionPreviewRequest {
+                    assignments: arguments.set,
+                }),
                 color: arguments.terminal.color,
                 pager: arguments.terminal.pager,
             },

@@ -73,6 +73,27 @@ impl AppConditionEvaluation {
     }
 }
 
+impl AppConditionEvaluation {
+    /// Evaluates `snapshot` from scratch against this evaluation's catalog without running
+    /// trusted callbacks: see [`ConditionCatalog::evaluate_for_tooling`].
+    ///
+    /// Unlike [`reevaluate`](Self::reevaluate) this accepts a partial previous evaluation,
+    /// which is what a tooling preparation produces.
+    #[cfg(feature = "tooling")]
+    pub(crate) fn evaluate_for_tooling(
+        &self,
+        snapshot: &ConditionFactSnapshot,
+    ) -> crate::Result<Self> {
+        let evaluation = self.catalog.evaluate_for_tooling(snapshot)?;
+
+        Ok(Self {
+            evaluation,
+            bindings: self.bindings.clone(),
+            catalog: Arc::clone(&self.catalog),
+        })
+    }
+}
+
 /// One staged config binding: its type, path, and shared staged value.
 pub type StagedBinding<'a> = (TypeId, &'a str, &'a Arc<dyn Any + Send + Sync>);
 

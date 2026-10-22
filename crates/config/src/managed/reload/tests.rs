@@ -11,7 +11,9 @@ use serde::Deserialize;
 use tempfile::TempDir;
 
 use crate::ResolverChain;
-use crate::managed::{Cfg, ConfigManager, ConfigProperties, ConfigReloader, ConfigStore, Toml};
+use crate::managed::{
+    Cfg, ConfigManager, ConfigOverlay, ConfigProperties, ConfigReloader, ConfigStore, Toml,
+};
 
 #[derive(Debug, Deserialize)]
 struct SvcCfg {
@@ -144,5 +146,51 @@ fn noop_stage_leaves_the_candidate_store_unbuilt_until_requested() {
             .value,
         100,
         "the candidate store holds the unchanged binding's current value"
+    );
+}
+
+#[test]
+fn overlay_stage_previews_a_change_without_touching_the_sources() {
+    let (_dir, config_file, reloader) =
+        two_binding_reloader("[svc]\nvalue = 1\n\n[other]\nvalue = 100\n");
+    let mut overlay = ConfigOverlay::default();
+
+    overlay
+        .set("svc.value", "7")
+        .expect("valid overlay assignment");
+
+    let staged = reloader
+        .stage_with(&overlay)
+        .expect("staging with an overlay");
+    let changed = staged
+        .changed()
+        .iter()
+        .map(|binding| binding.path.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(changed, ["svc"], "only the overlaid binding changes");
+    assert_eq!(
+        staged
+            .candidate_store()
+            .resolve_path::<Cfg<SvcCfg>>("svc")
+            .expect("candidate store resolves svc")
+            .get()
+            .value,
+        7,
+        "the candidate holds the overlaid value"
+    );
+    assert_eq!(
+        fs::read_to_string(&config_file).expect("read config"),
+        "[svc]\nvalue = 1\n\n[other]\nvalue = 100\n",
+        "staging never edits a source"
+    );
+
+    drop(staged);
+
+    let plain = reloader.stage().expect("staging without the overlay");
+
+    assert!(
+        plain.changed().is_empty(),
+        "an uncommitted overlay leaves the committed config unchanged"
     );
 }

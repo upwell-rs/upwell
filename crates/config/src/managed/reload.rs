@@ -22,7 +22,9 @@ use upwell_hooks::{HookKind, HookManager, HookParam};
 use crate::ConfigValue;
 use crate::condition::ResolvedConfig;
 
-use super::{Cfg, CfgNext, ConfigError, ConfigManager, ConfigProperties, ConfigStore};
+use super::{
+    Cfg, CfgNext, ConfigError, ConfigManager, ConfigOverlay, ConfigProperties, ConfigStore,
+};
 
 /// The config-reload hook kind: a `#[hook(ConfigReload)]` method runs when a config it
 /// targets is reloaded, receiving the proposed value(s) as [`CfgNext<T>`] and returning a
@@ -427,13 +429,24 @@ impl ConfigReloader {
     /// [`lock_reload`](Self::lock_reload) across the whole transaction.
     #[allow(clippy::result_large_err)]
     pub fn stage(&self) -> Result<StagedReload, ConfigReloadError> {
+        self.stage_with(&ConfigOverlay::default())
+    }
+
+    /// Stages a reload like [`stage`](Self::stage), with `overlay` merged above every
+    /// re-read source.
+    ///
+    /// This previews a proposed change without editing a source file: the staged
+    /// proposal, its changed bindings, and its candidate store reflect the overlaid tree.
+    /// Committing it adopts the overlaid tree until the next reload re-reads the sources.
+    #[allow(clippy::result_large_err)]
+    pub fn stage_with(&self, overlay: &ConfigOverlay) -> Result<StagedReload, ConfigReloadError> {
         // Phase 1 (prepare): re-read, diff, and deserialize changed bindings — all under
         // the manager lock, with no await, so the lock is released before hooks run. User
         // deserializers execute in this boundary; convert their panics to a failed reload.
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let manager = self.lock_manager();
             let new_root = manager
-                .reread()
+                .reread(overlay)
                 .map_err(|error| Box::new(ConfigReloadError::Load(error)))?;
             let mut prepared = Vec::new();
             let mut changed = Vec::new();

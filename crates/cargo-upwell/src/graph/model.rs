@@ -2,7 +2,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use upwell_tooling_schema::{
     CliOwner, CliProvider, Diagnostic, DocumentIdentity, ProbeFailure, Relationship, Resource,
-    ToolingDocument,
+    ToolingDocument, TransitionPreview,
 };
 
 use super::error::{GraphEmitError, GraphQueryError};
@@ -193,6 +193,56 @@ pub struct ResourceExplanation {
     pub cli_providers: Vec<CliProvider>,
     /// Parser elements owned by those providers or by the selected application/framework owner.
     pub cli_ownership: CliOwnershipSummary,
+    /// Every provider mapping of the traits the selected type, provider, or component takes
+    /// part in, with the condition path deciding whether it is effective.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selection: Vec<ProviderSelection>,
+    /// The plan of the config change the probe previewed, when one was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<TransitionPreview>,
+}
+
+/// Why one provider mapping is or is not part of the effective graph.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProviderSelection {
+    /// The provider mapping's stable resource ID.
+    pub provider: String,
+    /// The providing component's stable resource ID.
+    pub component: Option<String>,
+    /// Whether the effective graph includes the mapping.
+    pub effective: bool,
+    /// `conditional`, `fallback`, or `unconditional`, as the probe labelled it.
+    pub role: Option<String>,
+    /// The providing component's condition state, as the probe labelled it.
+    pub condition_state: Option<String>,
+    /// The conditions gating the component, depth-first.
+    pub conditions: Vec<ConditionStep>,
+    /// The consumers whose dependency resolves to this mapping, and why it won.
+    pub resolved_by: Vec<ResolvedConsumer>,
+}
+
+/// One consumer whose dependency the probe resolved to a provider mapping.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ResolvedConsumer {
+    /// The consuming component's stable resource ID.
+    pub consumer: String,
+    /// The probe's selection reason, such as `primary-provider-in-winning-set`.
+    pub reason: Option<String>,
+}
+
+/// One condition node on a provider's selection path.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ConditionStep {
+    /// The condition's stable resource ID.
+    pub id: String,
+    /// Nesting depth below the gated component.
+    pub depth: usize,
+    /// The predicate kind, such as `config-bool` or `callback`.
+    pub predicate: Option<String>,
+    /// `holds`, `fails`, or `not-evaluated`.
+    pub outcome: Option<String>,
+    /// The callback's source expression or the fact a structured predicate reads.
+    pub detail: Option<String>,
 }
 
 impl ResourceExplanation {

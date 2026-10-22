@@ -37,8 +37,9 @@ pub use managed::Yaml;
 pub use managed::{
     BindingFacts, CONFIG_BINDINGS, Cfg, CfgNext, ChangedBinding, ComponentHookReport,
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigBindingDescriptor, ConfigDefaults,
-    ConfigError, ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError, ConfigReloader,
-    ConfigStore, ContainerConfigExt, DirectoriesResolver, Dynamic, Format, FormatId, HookOutcome,
-    ReloadCause, ReloadProposal, ReloadSummary, ReloadTarget, ReloadTriggers, ReloadableConfig,
-    StagedConfig, StagedReload, spawn_reload_triggers, stop_reload_triggers,
+    ConfigError, ConfigManager, ConfigOverlay, ConfigOverlayError, ConfigProperties, ConfigReload,
+    ConfigReloadError, ConfigReloader, ConfigStore, ContainerConfigExt, DirectoriesResolver,
+    Dynamic, Format, FormatId, HookOutcome, ReloadCause, ReloadProposal, ReloadSummary,
+    ReloadTarget, ReloadTriggers, ReloadableConfig, StagedConfig, StagedReload,
+    spawn_reload_triggers, stop_reload_triggers,
 };
