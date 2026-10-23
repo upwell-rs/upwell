@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use upwell_core::{
     ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
-    ConfigFactDescriptor, ConfigFactId, DescriptorSource, Resolver, ResolverCtx, ResolverCtxExt,
-    ResolverSet, RuntimeGenerationId, TypeDescriptor,
+    ConfigFactDescriptor, ConfigFactId, DescriptorSource, Resolver, ResolverCtxExt, ResolverSet,
+    RuntimeGenerationId, TypeDescriptor,
 };
 use upwell_di::{
     ComponentDescriptor, ComponentRegistry, ConditionFactSnapshot, EffectiveGraph, ScopeContainer,
@@ -15,7 +15,7 @@ use upwell_di::{
 use upwell_hooks::{HookDescriptor, HookKind, HookManager};
 
 use super::*;
-use crate::test_support::{HookFuture, empty_condition, seed_hook_manager, unbuilt_factories};
+use crate::test_support::{empty_condition, seed_hook_manager, unbuilt_factories};
 use crate::{AppRegistry, ScopeTopology};
 
 const ENABLED: ConfigFactId = ConfigFactId::new("test::GenerationConfig", "generation", "enabled");

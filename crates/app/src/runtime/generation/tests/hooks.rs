@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::test_support::hook_call;
+
 /// A hook kind whose outcome reports which generation root resolved the hook.
 struct ProbeKind;
 
@@ -21,19 +23,14 @@ impl Resolver for GenerationProbe {}
 /// The hook's nominal receiver type; the probe call never resolves a component.
 struct ProbeComponent;
 
-fn probe_call<'a>(
-    ctx: &'a (dyn ResolverCtx + Send + Sync),
-    _: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
-    Box::pin(async move {
-        let tag = ctx
-            .get_resolver::<GenerationProbe>()
-            .map(|probe| probe.0)
-            .unwrap_or("<unresolved>");
+hook_call!(probe_call, |ctx, _| async move {
+    let tag = ctx
+        .get_resolver::<GenerationProbe>()
+        .map(|probe| probe.0)
+        .unwrap_or("<unresolved>");
 
-        Ok(Box::new(tag) as Box<dyn Any + Send>)
-    })
-}
+    Ok(Box::new(tag) as Box<dyn Any + Send>)
+});
 
 static PROBE_HOOK: HookDescriptor = HookDescriptor::of::<ProbeKind>(
     1,
