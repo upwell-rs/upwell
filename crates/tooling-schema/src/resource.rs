@@ -68,7 +68,7 @@ pub enum ResourceKind {
 
 /// Classifies a diagnostic resource identity by its canonical generic prefix.
 ///
-/// Producers may override this classification in [`ProbeFailure::resource_kinds`] when an
+/// Producers may override this classification in [`ProbeFailure::resource_kinds`](crate::ProbeFailure::resource_kinds) when an
 /// owner-qualified identity has more specific semantics.
 pub fn diagnostic_resource_kind(id: &str) -> ResourceKind {
     let prefix = id.split_once(':').map_or(id, |(prefix, _)| prefix);
