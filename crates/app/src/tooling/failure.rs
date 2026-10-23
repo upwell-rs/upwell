@@ -3,8 +3,10 @@ use upwell_tooling_schema::{Diagnostic, DiagnosticSeverity, ProbeFailure};
 use super::{contribution_id, contributor_id};
 use crate::{ContributionProvenance, InstallationOrigin, InstallationProvenance};
 
+mod details;
 mod di;
 
+pub(in crate::tooling) use details::*;
 pub(in crate::tooling) use di::di_failure;
 
 pub(super) fn app_diagnostics(error: &crate::Error, phase: Option<String>) -> Option<ProbeFailure> {
@@ -39,11 +41,9 @@ fn undecided_graph_diagnostics(not_evaluated: &[&str], source: &crate::Error) ->
         Some(failure) => failure.diagnostics,
 
         None => {
-            let (code, message, _, resources, sources, hint) = super::app_failure(source, None);
+            let (code, message, _, resources, sources, hint) = app_failure(source, None);
 
-            vec![super::details_diagnostic(
-                code, message, resources, sources, hint,
-            )]
+            vec![details_diagnostic(code, message, resources, sources, hint)]
         }
     };
 

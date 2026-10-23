@@ -1,4 +1,4 @@
-use super::super::FailureDetails;
+use super::FailureDetails;
 
 pub(in crate::tooling) fn di_failure(
     error: &upwell_di::Error,

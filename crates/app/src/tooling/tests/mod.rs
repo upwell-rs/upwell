@@ -16,7 +16,8 @@ use upwell_tooling_schema::{
     SourceLocation,
 };
 
-use super::{ToolingProbeError, emit_probe_envelope};
+use super::emit_probe_envelope;
+use super::probe::ToolingProbeError;
 use crate::test_support::{TempFixture, test_component};
 use crate::{
     App, AppRegistry, CompositionDiagnostic, CompositionDiagnostics, InstallationOrigin,
