@@ -46,3 +46,32 @@ pub enum TransitionHookOutcome {
     /// The hook panicked. The payload is never recorded.
     Panicked,
 }
+
+impl TransitionHookOutcome {
+    /// The redacted category of a hook that could not complete: panics stay distinct from
+    /// every other error.
+    pub(crate) fn of_error(error: &upwell_hooks::Error) -> Self {
+        match error {
+            upwell_hooks::Error::Panicked { .. } => Self::Panicked,
+            _ => Self::Failed,
+        }
+    }
+
+    /// How an observer ended.
+    pub(crate) fn of_observer(outcome: &upwell_hooks::Result<()>) -> Self {
+        match outcome {
+            Ok(()) => Self::Completed,
+            Err(error) => Self::of_error(error),
+        }
+    }
+
+    /// The outcome's stable snake-case name, as used in tracing and serialized reports.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Rejected { .. } => "rejected",
+            Self::Failed => "failed",
+            Self::Panicked => "panicked",
+        }
+    }
+}

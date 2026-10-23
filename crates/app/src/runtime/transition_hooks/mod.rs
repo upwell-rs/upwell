@@ -52,6 +52,7 @@ use upwell_core::{
 };
 use upwell_hooks::{HookKind, HookParam};
 
+use super::report::TransitionHookOutcome;
 use super::{ComponentTransitionReport, TransitionAttemptId, TransitionPhase};
 
 mod fire;
@@ -213,12 +214,12 @@ impl PendingTransition {
     }
 }
 
-/// The dependency edge a [`PendingTransition`] parameter reports: supplied by the firing
-/// transition at runtime, so it is `dynamic` and exempt from static graph validation.
-fn pending_dependency() -> DependencyDescriptor {
+/// The dependency edge of a hook parameter the firing transition supplies at runtime, so it
+/// is `dynamic` and exempt from static graph validation.
+const fn event_dependency<T: 'static>(name: &'static str) -> DependencyDescriptor {
     DependencyDescriptor {
-        name: "PendingTransition",
-        ty: TypeDescriptor::of::<PendingTransition>("PendingTransition"),
+        name,
+        ty: TypeDescriptor::of::<T>(name),
         cardinality: Cardinality::One,
         optional: false,
         dynamic: true,
@@ -229,9 +230,22 @@ fn pending_dependency() -> DependencyDescriptor {
     }
 }
 
+/// The observers of one firing that did not complete, named by their owner's stable ID and
+/// paired with their redacted failure outcome.
+fn failed_observers(
+    observers: Vec<(TypeDescriptor, upwell_hooks::Result<()>)>,
+    owners: &HookOwners,
+) -> impl Iterator<Item = (&'static str, TransitionHookOutcome)> + '_ {
+    observers.into_iter().filter_map(|(owner, outcome)| {
+        let outcome = TransitionHookOutcome::of_observer(&outcome);
+
+        (outcome != TransitionHookOutcome::Completed).then(|| (owners.id(&owner), outcome))
+    })
+}
+
 impl<K: HookKind<Cx = TransitionHookContext>> HookParam<K> for PendingTransition {
     fn dependency(_path: Option<&'static str>) -> DependencyDescriptor {
-        pending_dependency()
+        event_dependency::<Self>("PendingTransition")
     }
 
     fn extract(

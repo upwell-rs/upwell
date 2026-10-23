@@ -86,7 +86,7 @@ where
 
     for (owner, outcome) in fired.observers {
         let component = owners.id(&owner);
-        let outcome = observer_outcome(outcome);
+        let outcome = TransitionHookOutcome::of_observer(&outcome);
 
         if outcome != TransitionHookOutcome::Completed {
             tracing::warn!(
@@ -95,7 +95,7 @@ where
                 phase = phase.as_str(),
                 hook = K::NAME,
                 component,
-                outcome = ?outcome,
+                outcome = outcome.as_str(),
                 "transition observer failed"
             );
         }
@@ -130,26 +130,12 @@ fn participant_outcome<K: HookKind>(
             }),
         ),
         Err(error) => (
-            failure_outcome(&error),
+            TransitionHookOutcome::of_error(&error),
             Some(crate::Error::TransitionHookFailed {
                 kind: K::NAME,
                 component,
                 source: Box::new(error),
             }),
         ),
-    }
-}
-
-fn observer_outcome(outcome: upwell_hooks::Result<()>) -> TransitionHookOutcome {
-    match outcome {
-        Ok(()) => TransitionHookOutcome::Completed,
-        Err(error) => failure_outcome(&error),
-    }
-}
-
-fn failure_outcome(error: &upwell_hooks::Error) -> TransitionHookOutcome {
-    match error {
-        upwell_hooks::Error::Panicked { .. } => TransitionHookOutcome::Panicked,
-        _ => TransitionHookOutcome::Failed,
     }
 }

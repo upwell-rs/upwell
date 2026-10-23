@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
 use std::pin::Pin;
@@ -7,8 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use upwell_config::{ConfigBinding, ConfigManager, ConfigProperties, ConfigReloader};
 use upwell_core::{
-    ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId, ResolverCtx,
-    ResolverSet, RuntimeGenerationId, Transient, TypeDescriptor,
+    ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId, ResolverSet,
+    RuntimeGenerationId, Transient, TypeDescriptor,
 };
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
