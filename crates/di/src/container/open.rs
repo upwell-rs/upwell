@@ -132,7 +132,7 @@ impl ScopeContainer {
     /// providers as each instance lands. Resolution during construction reaches the
     /// parent chain. The frozen container is built with [`Arc::new_cyclic`] so it can
     /// hold its own [`ComponentSource`] (a `Weak` self-reference) in its resolver set.
-    pub(super) async fn build(
+    async fn build(
         scope: &'static dyn Scope,
         parent: Option<Arc<ScopeContainer>>,
         registry: Arc<ScopeRegistry>,
