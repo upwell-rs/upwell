@@ -15,7 +15,7 @@ impl ProviderSelectionModel {
     /// Returns the producer-authoritative targets selected for one dependency.
     ///
     /// Scope reachability has the same meaning as
-    /// [`ComponentRegistry::validate_with_scope_reachability`].
+    /// [`ComponentRegistry::validate_with_scope_reachability`](crate::ComponentRegistry::validate_with_scope_reachability).
     pub fn selected_dependencies_with_scope_reachability(
         &self,
         consumer: &ComponentDescriptor,
