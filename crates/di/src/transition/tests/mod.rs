@@ -1,11 +1,13 @@
+use std::collections::BTreeSet;
+
 use upwell_core::{
     Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, RuntimeGenerationId,
     TypeDescriptor,
 };
 
 use super::*;
-use crate::ComponentFactoryDescriptor;
 use crate::test_support::{component, no_dependencies, provider, unbuilt_factories};
+use crate::{ComponentFactoryDescriptor, ComponentRegistry};
 
 struct DefaultAuthenticator;
 struct CustomAuthenticator;
