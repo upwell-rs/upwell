@@ -94,7 +94,7 @@ impl ConditionFacts for AuthConfig {
         vec![ConfigFactDescriptor {
             id: ConfigFactId::new("AuthConfig", binding_path, "mode"),
             kind: ConditionScalarKind::String,
-            source: upwell_core::descriptor_source!(),
+            source: upwell_core::DescriptorSource::caller(),
         }]
     }
 

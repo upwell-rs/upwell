@@ -14,7 +14,7 @@ use crate::{ComponentFactoryDescriptor, Dep, FromContainer, Live, ProviderOrder}
 
 const ENABLED: ConfigFactId = ConfigFactId::new("AuthConfig", "auth", "custom.enabled");
 const MODE: ConfigFactId = ConfigFactId::new("AuthConfig", "auth", "mode");
-const SOURCE: DescriptorSource = upwell_core::descriptor_source!();
+const SOURCE: DescriptorSource = upwell_core::DescriptorSource::caller();
 
 fn missing_dependencies() -> Vec<upwell_core::DependencyDescriptor> {
     vec![crate::dependency_of::<u128>(

@@ -14,7 +14,7 @@ const FLAG_ENABLED: ConfigFactId = ConfigFactId::new("test::FlagConfig", "flags"
 
 static FLAG_CONDITION: ConditionDescriptor = ConditionDescriptor {
     id: "flag-enabled",
-    source: upwell_core::descriptor_source!(),
+    source: upwell_core::DescriptorSource::caller(),
     predicate: ConditionPredicate::ConfigBool(FLAG_ENABLED),
 };
 
@@ -32,7 +32,7 @@ impl ConditionFacts for FlagConfig {
         vec![ConfigFactDescriptor {
             id: ConfigFactId::new("test::FlagConfig", binding_path, "enabled"),
             kind: ConditionScalarKind::Bool,
-            source: upwell_core::descriptor_source!(),
+            source: upwell_core::DescriptorSource::caller(),
         }]
     }
 
@@ -136,7 +136,7 @@ impl ConditionFacts for PanicScalarsConfig {
         vec![ConfigFactDescriptor {
             id: ConfigFactId::new("test::PanicScalarsConfig", binding_path, "enabled"),
             kind: ConditionScalarKind::Bool,
-            source: upwell_core::descriptor_source!(),
+            source: upwell_core::DescriptorSource::caller(),
         }]
     }
 
@@ -178,7 +178,7 @@ impl ConditionFacts for PanicDescriptorsConfig {
         vec![ConfigFactDescriptor {
             id: ConfigFactId::new("test::PanicDescriptorsConfig", binding_path, "enabled"),
             kind: ConditionScalarKind::Bool,
-            source: upwell_core::descriptor_source!(),
+            source: upwell_core::DescriptorSource::caller(),
         }]
     }
 
@@ -221,7 +221,7 @@ static PANIC_CONDITION_CALLBACK: ConditionCallback = ConditionCallback {
 
 static PANIC_CALLBACK_CONDITION: ConditionDescriptor = ConditionDescriptor {
     id: "panic-callback-enabled",
-    source: upwell_core::descriptor_source!(),
+    source: upwell_core::DescriptorSource::caller(),
     predicate: ConditionPredicate::Callback(&PANIC_CONDITION_CALLBACK),
 };
 
@@ -239,7 +239,7 @@ impl ConditionFacts for PanicCallbackConfig {
         vec![ConfigFactDescriptor {
             id: ConfigFactId::new("test::PanicCallbackConfig", binding_path, "enabled"),
             kind: ConditionScalarKind::Bool,
-            source: upwell_core::descriptor_source!(),
+            source: upwell_core::DescriptorSource::caller(),
         }]
     }
 
