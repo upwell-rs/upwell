@@ -2,11 +2,14 @@ use std::{any::TypeId, collections::HashMap, sync::Arc};
 
 use upwell_core::{ResolverSet, ScopeId, StaticScope, Transient, TypeDescriptor};
 
+use super::fresh::{fresh_arc, fresh_construct_all};
 use super::*;
+use crate::container::ScopeResolverSlot;
+use crate::error::Error;
 use crate::test_support::test_component;
 use crate::{
-    BoxedComponent, Component, ComponentDescriptor, ProviderDescriptor, ProviderOf, ScopeRegistry,
-    factories,
+    BoxedComponent, Component, ComponentDescriptor, ProviderDescriptor, ProviderOf, ScopeContainer,
+    ScopeRegistry, factories,
 };
 
 const VISIBLE_SCOPE_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/fresh-visible");

@@ -1,15 +1,7 @@
-//! Scope-capturing deferred and forced-construction dependency handles.
+//! `Fresh<H>`: a dependency constructed anew on every request.
 
-use std::{
-    collections::HashMap,
-    future::Future,
-    marker::PhantomData,
-    pin::Pin,
-    sync::{Arc, OnceLock, Weak},
-};
+use std::{collections::HashMap, future::Future, marker::PhantomData, sync::Arc};
 
-use arc_swap::ArcSwapOption;
-use tokio::sync::Mutex as AsyncMutex;
 use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode};
 
 use crate::{
@@ -19,124 +11,6 @@ use crate::{
     descriptors::component::from_boxed,
     error::Error,
 };
-
-/// Type-erased deferred slot hydrated after a scope finishes construction.
-pub(crate) trait DeferredHydrator: Send + Sync {
-    fn hydrate(&self, scope: &ScopeContainer) -> crate::Result<()>;
-}
-
-/// A cloneable, strongly cached dependency resolved from the consumer's scope.
-pub struct Lazy<H> {
-    inner: Arc<LazyInner<H>>,
-}
-
-struct LazyInner<H> {
-    scope: ScopeResolverSlot,
-    resolver: LazyResolver<H>,
-    value: ArcSwapOption<H>,
-    initializing: AsyncMutex<()>,
-}
-
-type LazyResolver<H> = Arc<
-    dyn Fn(Arc<ScopeContainer>) -> Pin<Box<dyn Future<Output = crate::Result<H>> + Send>>
-        + Send
-        + Sync,
->;
-
-impl<H> Clone for Lazy<H> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-        }
-    }
-}
-
-impl<H> Lazy<H>
-where
-    H: FromContainer + Clone + Send + Sync + 'static,
-{
-    pub(crate) fn capture(scope: ScopeResolverSlot) -> Self {
-        Self {
-            inner: Arc::new(LazyInner {
-                scope,
-                resolver: Arc::new(|scope| Box::pin(async move { scope.extract::<H>().await })),
-                value: ArcSwapOption::empty(),
-                initializing: AsyncMutex::new(()),
-            }),
-        }
-    }
-
-    /// Returns the cached value without resolving it.
-    pub fn get(&self) -> Option<H> {
-        self.inner.value.load_full().map(|value| (*value).clone())
-    }
-
-    /// Resolves normally from the captured scope and replaces the cache.
-    pub async fn create(&self) -> crate::Result<H> {
-        let scope = self.inner.scope.resolve()?;
-        let value = (self.inner.resolver)(scope).await?;
-
-        self.inner.value.store(Some(Arc::new(value.clone())));
-
-        Ok(value)
-    }
-
-    /// Returns the cached value or initializes it once among concurrent callers.
-    pub async fn get_or_create(&self) -> crate::Result<H> {
-        if let Some(value) = self.get() {
-            return Ok(value);
-        }
-
-        let _guard = self.inner.initializing.lock().await;
-
-        if let Some(value) = self.get() {
-            return Ok(value);
-        }
-
-        self.create().await
-    }
-}
-
-impl<T> Lazy<Arc<T>>
-where
-    T: ?Sized + Send + Sync + 'static,
-{
-    pub(crate) fn capture_qualified(scope: ScopeResolverSlot, qualifier: &'static str) -> Self {
-        Self {
-            inner: Arc::new(LazyInner {
-                scope,
-                resolver: Arc::new(move |scope| {
-                    Box::pin(async move {
-                        scope
-                            .resolve_qualified::<Arc<T>>(qualifier)
-                            .await?
-                            .ok_or(Error::MissingComponent(short_name::<T>()))
-                    })
-                }),
-                value: ArcSwapOption::empty(),
-                initializing: AsyncMutex::new(()),
-            }),
-        }
-    }
-}
-
-impl<H> FromContainer for Lazy<H>
-where
-    H: FromContainer + Clone + Send + Sync + 'static,
-{
-    fn dependency() -> DependencyDescriptor {
-        let mut dependency = H::dependency();
-
-        dependency.resolution = ResolutionMode::Lazy;
-        dependency.observation = upwell_core::DependencyObservation::Snapshot;
-
-        dependency
-    }
-
-    async fn from_container(cx: &ComponentConstructionContext) -> crate::Result<Self> {
-        Ok(Self::capture(cx.resolver_slot()))
-    }
-}
 
 /// A dependency handle that always re-runs factory-backed targets.
 pub struct Fresh<H> {
@@ -316,7 +190,7 @@ where
 /// each provider descriptor with its fresh value. A selected factory-less provider
 /// returns [`Error::UnsupportedFreshFactory`]. Shared by the collection and keyed
 /// [`Fresh`] shapes so both apply identical eligibility rules.
-async fn fresh_construct_all<T>(
+pub(super) async fn fresh_construct_all<T>(
     scope: &Arc<ScopeContainer>,
 ) -> crate::Result<Vec<(ProviderDescriptor, Arc<T>)>>
 where
@@ -359,7 +233,7 @@ where
     Ok(values)
 }
 
-async fn fresh_arc<T>(
+pub(super) async fn fresh_arc<T>(
     scope: &Arc<ScopeContainer>,
     qualifier: Option<&str>,
 ) -> crate::Result<Option<Arc<T>>>
@@ -406,98 +280,3 @@ where
 
     Ok(from_boxed::<Arc<T>>(&erased))
 }
-
-/// An Arc-specific deferred dependency retaining only a weak cached reference.
-pub struct Deferred<T: ?Sized> {
-    inner: Arc<DeferredInner<T>>,
-}
-
-struct DeferredInner<T: ?Sized> {
-    qualifier: Option<&'static str>,
-    value: OnceLock<Weak<T>>,
-}
-
-impl<T: ?Sized> Clone for Deferred<T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-        }
-    }
-}
-
-impl<T> Deferred<T>
-where
-    T: ?Sized + Send + Sync + 'static,
-{
-    pub(crate) fn capture(
-        scope: ScopeResolverSlot,
-        qualifier: Option<&'static str>,
-    ) -> crate::Result<Self> {
-        let inner = Arc::new(DeferredInner {
-            qualifier,
-            value: OnceLock::new(),
-        });
-
-        scope.register_deferred(Arc::clone(&inner) as Arc<dyn DeferredHydrator>)?;
-
-        Ok(Self { inner })
-    }
-
-    /// Returns the hydrated target when it is still alive.
-    pub fn try_get(&self) -> Option<Arc<T>> {
-        self.inner.value.get().and_then(Weak::upgrade)
-    }
-
-    /// Returns the hydrated target.
-    ///
-    /// Panics when called from a component factory before its scope has finished
-    /// construction, or after the target's scope has been dropped.
-    #[track_caller]
-    pub fn get(&self) -> Arc<T> {
-        self.try_get().unwrap_or_else(|| {
-            panic!(
-                "deferred dependency `{}` was accessed before scope hydration or after its scope was dropped",
-                std::any::type_name::<T>()
-            )
-        })
-    }
-}
-
-impl<T> DeferredHydrator for DeferredInner<T>
-where
-    T: ?Sized + Send + Sync + 'static,
-{
-    fn hydrate(&self, scope: &ScopeContainer) -> crate::Result<()> {
-        let value = match self.qualifier {
-            Some(qualifier) => scope.resolve_qualified_built::<Arc<T>>(qualifier),
-            None => scope.resolve_built::<Arc<T>>(),
-        }
-        .ok_or(Error::MissingComponent(short_name::<T>()))?;
-
-        // Each slot is registered with exactly one scope and hydrated once;
-        // a repeated set keeps the first value.
-        let _ = self.value.set(Arc::downgrade(&value));
-
-        Ok(())
-    }
-}
-
-impl<T> FromContainer for Deferred<T>
-where
-    T: ?Sized + Send + Sync + 'static,
-{
-    fn dependency() -> DependencyDescriptor {
-        let mut dependency = dependency_of::<T>(Cardinality::One, false, false);
-
-        dependency.resolution = ResolutionMode::Deferred;
-
-        dependency
-    }
-
-    async fn from_container(cx: &ComponentConstructionContext) -> crate::Result<Self> {
-        Self::capture(cx.resolver_slot(), None)
-    }
-}
-
-#[cfg(test)]
-mod tests;
