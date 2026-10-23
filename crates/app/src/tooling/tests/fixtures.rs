@@ -1,6 +1,7 @@
 //! Components, providers and hooks the projection tests register.
 
 use super::*;
+use crate::test_support::uncalled_hook;
 
 pub(super) struct ProjectedComponent;
 
@@ -186,7 +187,7 @@ pub(super) static SNAPSHOT_HOOKS: [upwell_hooks::HookDescriptor; 1] =
     [upwell_hooks::HookDescriptor::of::<ConfigReload>(
         3,
         TypeDescriptor::of::<ProjectedComponent>(ProjectedComponent::NAME),
-        unreachable_hook_call,
+        uncalled_hook,
     )
     .with_dependencies(snapshot_hook_dependencies)];
 
@@ -217,21 +218,11 @@ pub(super) static ALTERNATE_COMPONENT: ComponentDescriptor = ComponentDescriptor
     &Singleton,
 );
 
-pub(super) type TestHookFuture<'a> =
-    Pin<Box<dyn Future<Output = upwell_hooks::Result<Box<dyn std::any::Any + Send>>> + Send + 'a>>;
-
-pub(super) fn unreachable_hook_call<'a>(
-    _resolver: &'a (dyn upwell_core::ResolverCtx + Send + Sync),
-    _context: &'a (dyn std::any::Any + Send + Sync),
-) -> TestHookFuture<'a> {
-    unreachable!("tooling projection never invokes hooks")
-}
-
 pub(super) static RELOAD_HOOKS: [upwell_hooks::HookDescriptor; 1] =
     [upwell_hooks::HookDescriptor::of::<ConfigReload>(
         1,
         TypeDescriptor::of::<ReloadHookComponent>(ReloadHookComponent::NAME),
-        unreachable_hook_call,
+        uncalled_hook,
     )];
 
 pub(super) fn exact_config_dependency() -> Vec<DependencyDescriptor> {
@@ -287,7 +278,7 @@ pub(super) static AMBIGUOUS_CONFIG_HOOKS: [upwell_hooks::HookDescriptor; 1] =
     [upwell_hooks::HookDescriptor::of::<ConfigReload>(
         2,
         TypeDescriptor::of::<ReloadHookComponent>(ReloadHookComponent::NAME),
-        unreachable_hook_call,
+        uncalled_hook,
     )
     .with_dependencies(ambiguous_config_dependency)];
 
@@ -295,7 +286,7 @@ pub(super) static MISSING_CONFIG_HOOKS: [upwell_hooks::HookDescriptor; 1] =
     [upwell_hooks::HookDescriptor::of::<ConfigReload>(
         4,
         TypeDescriptor::of::<ReloadHookComponent>(ReloadHookComponent::NAME),
-        unreachable_hook_call,
+        uncalled_hook,
     )
     .with_dependencies(missing_config_dependency)];
 

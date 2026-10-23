@@ -93,17 +93,12 @@ fn lifecycle_projection_classifies_phases_and_links_config_reload_hooks() {
 
 #[test]
 fn provider_ordering_connects_matching_provider_resources() {
-    let mut builder = App::<()>::builder("provider-ordering")
+    let document = App::<()>::builder("provider-ordering")
         .config_source(ConfigManager::<Toml>::empty())
         .with_component(FirstProvider)
-        .with_component(SecondProvider);
-
-    builder
-        .registry_mut()
-        .providers
-        .extend([FIRST_PROVIDER_DESCRIPTOR, SECOND_PROVIDER_DESCRIPTOR]);
-
-    let document = builder
+        .with_component(SecondProvider)
+        .provider_descriptor(&FIRST_PROVIDER_DESCRIPTOR)
+        .provider_descriptor(&SECOND_PROVIDER_DESCRIPTOR)
         .prepare()
         .expect("provider ordering prepares")
         .tooling_document()

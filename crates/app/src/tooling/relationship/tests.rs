@@ -222,14 +222,11 @@ fn conflicting_dependency_facts_are_sorted_and_schema_unique() {
 
 #[test]
 fn projection_aggregates_dependencies_to_the_same_type_and_provider() {
-    let mut builder = App::<()>::builder("relationship-aggregation")
+    let document = App::<()>::builder("relationship-aggregation")
         .config_source(ConfigManager::<Toml>::empty())
         .component_descriptor(&PROVIDER_COMPONENT)
-        .component_descriptor(&CONSUMER_COMPONENT);
-
-    builder.registry_mut().providers.push(PROVIDER);
-
-    let document = builder
+        .component_descriptor(&CONSUMER_COMPONENT)
+        .provider_descriptor(&PROVIDER)
         .prepare()
         .expect("aggregation fixture prepares")
         .tooling_document()

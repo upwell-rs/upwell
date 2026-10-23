@@ -38,14 +38,12 @@
 //! triggered outcome observers fire strictly between them. A direct
 //! [`reload_config`](crate::AppRuntime::reload_config) call fires them whenever it is made.
 
-use upwell_core::{
-    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, TypeDescriptor,
-};
+use upwell_core::DependencyDescriptor;
 use upwell_hooks::{HookKind, HookParam, HookParticipation};
 
 use super::super::RuntimeView;
-use super::HookOwners;
 use super::retirement::retire_displaced;
+use super::{HookOwners, event_dependency, failed_observers};
 use crate::RuntimeTransitionReport;
 use crate::runtime::report::TRANSITION_TARGET;
 
@@ -80,17 +78,7 @@ pub struct TransitionOutcomeContext {
 
 impl<K: HookKind<Cx = TransitionOutcomeContext>> HookParam<K> for RuntimeTransitionReport {
     fn dependency(_path: Option<&'static str>) -> DependencyDescriptor {
-        DependencyDescriptor {
-            name: "RuntimeTransitionReport",
-            ty: TypeDescriptor::of::<RuntimeTransitionReport>("RuntimeTransitionReport"),
-            cardinality: Cardinality::One,
-            optional: false,
-            dynamic: true,
-            qualifier: None,
-            config: false,
-            resolution: ResolutionMode::Eager,
-            observation: DependencyObservation::Snapshot,
-        }
+        event_dependency::<Self>("RuntimeTransitionReport")
     }
 
     fn extract(
@@ -137,21 +125,13 @@ where
     let fired = hooks.fire_all::<K>(&cx).await;
     let owners = HookOwners::new(view.resolved_components());
 
-    for (owner, outcome) in fired.observers {
-        let Err(error) = outcome else {
-            continue;
-        };
-        let category = match error {
-            upwell_hooks::Error::Panicked { .. } => "panicked",
-            _ => "failed",
-        };
-
+    for (component, outcome) in failed_observers(fired.observers, &owners) {
         tracing::warn!(
             target: TRANSITION_TARGET,
             attempt = report.attempt().get(),
             hook = K::NAME,
-            component = owners.id(&owner),
-            outcome = category,
+            component,
+            outcome = outcome.as_str(),
             "transition outcome observer failed"
         );
     }

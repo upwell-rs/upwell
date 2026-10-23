@@ -42,15 +42,12 @@
 
 use std::any::TypeId;
 
-use upwell_core::{
-    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, RuntimeGenerationId,
-    TypeDescriptor,
-};
+use upwell_core::{DependencyDescriptor, RuntimeGenerationId};
 use upwell_di::NodeAction;
 use upwell_hooks::{HookKind, HookParam, HookParticipation};
 
 use super::super::RuntimeView;
-use super::HookOwners;
+use super::{HookOwners, event_dependency, failed_observers};
 use crate::RuntimeTransitionReport;
 use crate::runtime::report::{TRANSITION_TARGET, TransitionAttemptId, TransitionOutcome};
 
@@ -112,17 +109,7 @@ pub struct RetirementContext {
 
 impl HookParam<ComponentRetired> for ComponentRetirement {
     fn dependency(_path: Option<&'static str>) -> DependencyDescriptor {
-        DependencyDescriptor {
-            name: "ComponentRetirement",
-            ty: TypeDescriptor::of::<ComponentRetirement>("ComponentRetirement"),
-            cardinality: Cardinality::One,
-            optional: false,
-            dynamic: true,
-            qualifier: None,
-            config: false,
-            resolution: ResolutionMode::Eager,
-            observation: DependencyObservation::Snapshot,
-        }
+        event_dependency::<Self>("ComponentRetirement")
     }
 
     fn extract(cx: &RetirementContext, _path: Option<&'static str>) -> upwell_hooks::Result<Self> {
@@ -197,23 +184,15 @@ async fn retire(base: &RuntimeView, owners: &HookOwners, retirement: ComponentRe
         .fire::<ComponentRetired>(&cx, |hook| Some(hook.component_ty.type_id) == ty)
         .await;
 
-    for (owner, outcome) in fired.observers {
-        let Err(error) = outcome else {
-            continue;
-        };
-        let category = match error {
-            upwell_hooks::Error::Panicked { .. } => "panicked",
-            _ => "failed",
-        };
-
+    for (owner, outcome) in failed_observers(fired.observers, owners) {
         tracing::warn!(
             target: TRANSITION_TARGET,
             attempt = retirement.attempt.get(),
             component = retirement.component,
             reason = retirement.reason.as_str(),
             hook = ComponentRetired::NAME,
-            owner = owners.id(&owner),
-            outcome = category,
+            owner,
+            outcome = outcome.as_str(),
             "component retirement hook failed"
         );
     }

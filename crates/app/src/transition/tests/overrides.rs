@@ -1,6 +1,7 @@
 //! Generation override seeds for framework singletons.
 
 use super::*;
+use crate::test_support::uncalled_hook;
 
 /// The framework-seeded hook-manager descriptor: typed identity, no factory, no
 /// snapshot adapter — generation-local by contract.
@@ -27,22 +28,11 @@ impl HookKind for OverrideProbeKind {
 /// The probe hook's nominal receiver type; the call is never invoked.
 struct OverrideProbeComponent;
 
-/// The boxed future shape of an erased hook call.
-type OverrideCallFuture<'a> =
-    Pin<Box<dyn Future<Output = upwell_hooks::Result<Box<dyn Any + Send>>> + Send + 'a>>;
-
-fn unreachable_override_call<'a>(
-    _: &'a (dyn ResolverCtx + Send + Sync),
-    _: &'a (dyn Any + Send + Sync),
-) -> OverrideCallFuture<'a> {
-    Box::pin(async { unreachable!("override probe hooks are never invoked") })
-}
-
 fn override_probe_manager() -> HookManager {
     HookManager::new(vec![HookDescriptor::of::<OverrideProbeKind>(
         1,
         TypeDescriptor::of::<OverrideProbeComponent>("OverrideProbeComponent"),
-        unreachable_override_call,
+        uncalled_hook,
     )])
 }
 
