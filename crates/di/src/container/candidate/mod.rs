@@ -1,11 +1,9 @@
-use std::any::TypeId;
-use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use futures::FutureExt;
 use tracing::{debug, info, instrument, trace};
-use upwell_core::{ResolverSet, Singleton, StaticScope};
+use upwell_core::{ResolverSet, Singleton};
 
 use super::{ComponentSource, ScopeContainer, ScopeRegistry, ScopeResolverSlot};
 use crate::construct::{ErasedOneShot, take_selection};
@@ -13,6 +11,13 @@ use crate::descriptors::component::ComponentConstructionContext;
 use crate::{
     BoxedComponent, ComponentChange, ComponentDescriptor, ComponentFactoryRole, Error, Injectable,
     ROOT_RESOLVER_ID, RootResolver,
+};
+
+mod validate;
+
+use validate::{
+    validate_candidate_inputs, validate_change_inputs, validate_factory_output,
+    validate_previous_inputs,
 };
 
 impl ScopeContainer {
@@ -124,70 +129,6 @@ impl ScopeContainer {
     }
 }
 
-fn validate_candidate_inputs(
-    order: &[&'static str],
-    retained: &[BoxedComponent],
-    registry: &ScopeRegistry,
-) -> crate::Result<Vec<ComponentDescriptor>> {
-    let mut types = HashSet::new();
-
-    for component in retained {
-        let Some(descriptor) = registry.component(component.ty.type_id) else {
-            return Err(Error::CandidateComponentMismatch {
-                component: component.ty.name,
-            });
-        };
-
-        if descriptor.id == ROOT_RESOLVER_ID {
-            return Err(Error::CandidateRuntimeBoundComponent {
-                component: descriptor.id,
-            });
-        }
-
-        if descriptor.scope.id() != Singleton::ID || !types.insert(component.ty.type_id) {
-            return Err(Error::CandidateComponentMismatch {
-                component: descriptor.id,
-            });
-        }
-    }
-
-    let mut descriptors = Vec::with_capacity(order.len());
-
-    for id in order {
-        let Some(descriptor) = registry.component_by_id(id) else {
-            return Err(Error::CandidateComponentMismatch { component: id });
-        };
-
-        if descriptor.scope.id() != Singleton::ID || !types.insert(descriptor.ty.type_id) {
-            return Err(Error::CandidateComponentMismatch {
-                component: descriptor.id,
-            });
-        }
-
-        descriptors.push(descriptor);
-    }
-
-    let expected = registry
-        .components()
-        .filter(|component| component.scope.id() == Singleton::ID)
-        .filter(|component| component.id != ROOT_RESOLVER_ID)
-        .map(|component| component.ty.type_id)
-        .collect::<HashSet<_>>();
-
-    if types != expected {
-        let component = registry
-            .components()
-            .filter(|component| component.scope.id() == Singleton::ID)
-            .filter(|component| component.id != ROOT_RESOLVER_ID)
-            .find(|component| !types.contains(&component.ty.type_id))
-            .map_or("<duplicate>", |component| component.id);
-
-        return Err(Error::CandidateComponentMismatch { component });
-    }
-
-    Ok(descriptors)
-}
-
 /// Builds one candidate component: through the one-shot factory its transition handler
 /// selects for `change`, else through the replacement factory when `previous` is present
 /// and declared, else through the ordinary effective factory. The previous snapshot and
@@ -274,82 +215,6 @@ async fn construct_declared(
     let factory = factory.ok_or(Error::MissingComponent(descriptor.name))?;
 
     (factory.construct)(context).await
-}
-
-/// Keys planned changes by component, accepting only one per component in `order` whose
-/// descriptor declares a transition handler.
-fn validate_change_inputs(
-    order: &[ComponentDescriptor],
-    changes: Vec<ComponentChange>,
-) -> crate::Result<HashMap<&'static str, ComponentChange>> {
-    let mut keyed = HashMap::with_capacity(changes.len());
-
-    for change in changes {
-        let component = change.component();
-        let accepted = match order.iter().find(|descriptor| descriptor.id == component) {
-            Some(descriptor) => descriptor.transition_handler()?.is_some(),
-
-            None => false,
-        };
-
-        if !accepted || keyed.insert(component, change).is_some() {
-            return Err(Error::CandidateComponentMismatch { component });
-        }
-    }
-
-    Ok(keyed)
-}
-
-/// Keys previous snapshots by type, accepting only one per component in `order` whose
-/// descriptor declares a replacement factory or a transition handler.
-fn validate_previous_inputs(
-    order: &[ComponentDescriptor],
-    previous: Vec<BoxedComponent>,
-) -> crate::Result<HashMap<TypeId, BoxedComponent>> {
-    let mut keyed = HashMap::with_capacity(previous.len());
-
-    for component in previous {
-        let type_id = component.ty.type_id;
-        let replaceable = order
-            .iter()
-            .find(|descriptor| descriptor.ty.type_id == type_id);
-        let accepted = match replaceable {
-            Some(descriptor) => {
-                descriptor.replacement_factory()?.is_some()
-                    || descriptor.transition_handler()?.is_some()
-            }
-
-            None => false,
-        };
-
-        if !accepted || keyed.insert(type_id, component).is_some() {
-            return Err(Error::CandidateComponentMismatch {
-                component: replaceable.map_or("<previous>", |descriptor| descriptor.id),
-            });
-        }
-    }
-
-    Ok(keyed)
-}
-
-fn validate_factory_output(
-    descriptor: ComponentDescriptor,
-    component: &BoxedComponent,
-) -> crate::Result<()> {
-    catch_unwind(AssertUnwindSafe(|| {
-        if component.ty.type_id == descriptor.ty.type_id {
-            return Ok(());
-        }
-
-        Err(Error::CandidateFactoryTypeMismatch {
-            component: descriptor.id,
-            expected: (descriptor.ty.type_name)(),
-            actual: (component.ty.type_name)(),
-        })
-    }))
-    .map_err(|_| Error::CandidateFactoryPanicked {
-        component: descriptor.id,
-    })?
 }
 
 fn register_candidate_providers(
