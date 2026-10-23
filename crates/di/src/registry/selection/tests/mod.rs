@@ -1,7 +1,11 @@
-use upwell_core::{DependencyDescriptor, Singleton, StaticScope, Transient, TypeDescriptor};
+use upwell_core::{
+    Cardinality, DependencyDescriptor, Singleton, StaticScope, Transient, TypeDescriptor,
+};
 
 use super::*;
 use crate::descriptors::ComponentFactoryDescriptor;
+use crate::error::Error;
+use crate::registry::ComponentRegistry;
 use crate::test_support::{component, dependency, no_dependencies, provider, unbuilt_factories};
 
 const NEAR_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/selection-near");

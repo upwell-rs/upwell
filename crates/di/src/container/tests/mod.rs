@@ -14,7 +14,7 @@ use crate::descriptors::component::from_boxed;
 use crate::{ComponentFactoryDescriptor, ComponentFactoryRole, Injectable};
 
 use super::*;
-use crate::registry::selection::select_single_provider;
+use crate::registry::selection::rules::select_single_provider;
 use crate::test_support::{no_dependencies, planned_provider, unerased};
 
 /// A throwaway intermediate scope for exercising child-container construction
