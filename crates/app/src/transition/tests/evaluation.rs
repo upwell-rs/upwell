@@ -13,7 +13,7 @@ fn app_evaluation_prepares_a_candidate_without_components() {
         RuntimeGenerationId::INITIAL,
         &registry,
         &evaluation,
-        &topology(),
+        &empty_topology(),
     )
     .expect("matching evaluation prepares");
 
@@ -28,8 +28,9 @@ fn non_empty_registry_prepares_through_the_validated_graph_boundary() {
         .components
         .push(upwell_di::root_resolver_descriptor());
 
-    let candidate = CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &registry, &topology())
-        .expect("non-empty candidate prepares");
+    let candidate =
+        CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &registry, &empty_topology())
+            .expect("non-empty candidate prepares");
 
     assert_eq!(candidate.components().len(), 1);
     assert!(
@@ -55,7 +56,7 @@ fn evaluation_from_another_di_catalog_is_rejected() {
         RuntimeGenerationId::INITIAL,
         &target,
         &evaluation,
-        &topology(),
+        &empty_topology(),
     );
     let Err(error) = result else {
         panic!("foreign DI catalog is rejected");
@@ -82,7 +83,7 @@ fn evaluation_from_another_app_binding_catalog_is_rejected() {
         RuntimeGenerationId::INITIAL,
         &target,
         &evaluation,
-        &topology(),
+        &empty_topology(),
     );
     let Err(error) = result else {
         panic!("foreign application binding catalog is rejected");
@@ -129,7 +130,7 @@ fn incremental_app_evaluation_remains_accepted_by_candidate_preparation() {
         RuntimeGenerationId::INITIAL,
         &registry,
         &changed,
-        &topology(),
+        &empty_topology(),
     )
     .expect("incremental evaluation retains application identity");
 }

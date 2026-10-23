@@ -9,7 +9,7 @@ fn live_rebind_plan(in_place: bool) -> (CandidateGraph, TransitionPlan) {
     let candidate = CandidateGraph::prepare(
         RuntimeGenerationId::INITIAL,
         &AppRegistry::default(),
-        &topology(),
+        &empty_topology(),
     )
     .expect("empty candidate validates");
     let plan = TransitionPlan {

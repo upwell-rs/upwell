@@ -22,8 +22,10 @@ use super::{
     ResolvedTransitionPlan, RestartReason, RestartRequired,
 };
 use crate::runtime::{AppConditionState, AppRuntime, PreparedRuntimeGeneration, RuntimeScopePlan};
-use crate::test_support::test_component;
-use crate::{AppRegistry, Error, RuntimeView, ScopeTopology};
+use crate::test_support::{
+    empty_topology, hook_manager_descriptor, seed_hook_manager, test_component,
+};
+use crate::{AppRegistry, Error, RuntimeView};
 use fixtures::*;
 
 const ENABLED: ConfigFactId = ConfigFactId::new("test::Settings", "settings", "enabled");
@@ -49,12 +51,6 @@ fn snapshot(enabled: bool) -> upwell_di::ConditionFactSnapshot {
         .expect("snapshot validates")
 }
 
-fn topology() -> crate::PreparedScopeTopology {
-    ScopeTopology::empty()
-        .prepare()
-        .expect("empty topology validates")
-}
-
 fn runtime_view(
     root: Arc<ScopeContainer>,
     scopes: Arc<ScopeRegistry>,
@@ -72,7 +68,7 @@ fn runtime_view(
         root,
         scopes,
         RuntimeScopePlan::new(
-            Arc::new(topology()),
+            Arc::new(empty_topology()),
             Arc::new(HashMap::new()),
             Arc::new(HashMap::new()),
         ),
@@ -155,7 +151,7 @@ fn active_graph(registry: &AppRegistry) -> EffectiveGraph {
 }
 
 fn candidate_graph(registry: &AppRegistry) -> CandidateGraph {
-    CandidateGraph::prepare(RuntimeGenerationId::INITIAL, registry, &topology())
+    CandidateGraph::prepare(RuntimeGenerationId::INITIAL, registry, &empty_topology())
         .expect("candidate graph validates")
 }
 

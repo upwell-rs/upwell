@@ -16,16 +16,18 @@ use upwell_core::{
     TypeDescriptor,
 };
 use upwell_di::{ComponentDescriptor, Singleton};
-use upwell_hooks::{HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookDescriptor, HookManager};
+use upwell_hooks::{HOOK_MANAGER_NAME, HookDescriptor, HookManager};
 
 use super::super::invalidation::invalidated_component_roots;
 use super::fixture::{
     ProbeComponent, build_probe_app, config_dir_of, factory_calls, lock_test_guard, reset_controls,
     write_probe_config,
 };
-use crate::test_support::{unbuilt_factories, uncalled_hook};
+use crate::AppRegistry;
+use crate::test_support::{
+    empty_topology, hook_manager_descriptor, unbuilt_factories, uncalled_hook,
+};
 use crate::transition::CandidateGraph;
-use crate::{AppRegistry, ScopeTopology};
 
 #[derive(Deserialize)]
 struct ReloadConfig;
@@ -192,29 +194,12 @@ planned_component!(
     || config_dependency::<shared_right::SharedConfig>(Some("shared"))
 );
 
-/// The framework-seeded hook-manager descriptor: typed identity, no factory —
-/// generation-local by contract.
-fn hook_manager_descriptor() -> ComponentDescriptor {
-    ComponentDescriptor::manual(
-        HOOK_MANAGER_ID,
-        HOOK_MANAGER_NAME,
-        TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-        &Singleton,
-    )
-}
-
-fn topology() -> crate::PreparedScopeTopology {
-    ScopeTopology::empty()
-        .prepare()
-        .expect("empty topology validates")
-}
-
 fn candidate(components: &[ComponentDescriptor], bindings: Vec<ConfigBinding>) -> CandidateGraph {
     let mut registry = AppRegistry::default();
     registry.components.extend(components.iter().copied());
     registry.config_bindings.extend(bindings);
 
-    CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &registry, &topology())
+    CandidateGraph::prepare(RuntimeGenerationId::INITIAL, &registry, &empty_topology())
         .expect("candidate graph validates")
 }
 

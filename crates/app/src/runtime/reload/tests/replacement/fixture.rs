@@ -6,7 +6,7 @@
 //! its fixed consumer `Counter` to be replaced. `Counter`'s replacement reads the
 //! previous instance through [`Previous`] and carries its hit count forward. Components
 //! use builder descriptors with unique IDs, so nothing registers into the link-time
-//! inventory. The tests share [`REPLACEMENT`], so [`TEST_GUARD`] serializes them.
+//! inventory. The tests share [`REPLACEMENT`], so [`lock_test_guard`] serializes them.
 
 use std::fs;
 use std::path::Path;
@@ -21,6 +21,8 @@ use upwell_di::{ComponentDescriptor, Previous, factories};
 use crate::App;
 use crate::test_support::test_component;
 
+pub(super) use crate::runtime::reload::tests::lock_test_guard;
+
 /// What `Counter`'s replacement factory does when the next transition invokes it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Replacement {
@@ -30,12 +32,6 @@ pub(super) enum Replacement {
 }
 
 static REPLACEMENT: std::sync::Mutex<Replacement> = std::sync::Mutex::new(Replacement::Carry);
-
-static TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-pub(super) async fn lock_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
-    TEST_GUARD.lock().await
-}
 
 pub(super) fn set_replacement(replacement: Replacement) {
     *REPLACEMENT.lock().expect("replacement control lock") = replacement;
