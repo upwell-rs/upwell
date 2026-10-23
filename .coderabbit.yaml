@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit reviews pull requests into `release/*` integration branches only. Pull requests into
+# `master` arrive through an already-reviewed integration PR, so they are not reviewed again.
+#
+# CodeRabbit always auto-reviews the default branch and has no setting that excludes it, so
+# automatic review is off and a review is opted in by the `coderabbit-review` label. The
+# `CodeRabbit routing` workflow adds that label to every pull request whose base is `release/*`
+# and removes it when the base moves elsewhere.
+reviews:
+  auto_review:
+    enabled: false
+    labels:
+      - coderabbit-review
