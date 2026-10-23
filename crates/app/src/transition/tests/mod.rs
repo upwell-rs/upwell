@@ -29,7 +29,7 @@ use crate::{AppRegistry, Error, RuntimeView};
 use fixtures::*;
 
 const ENABLED: ConfigFactId = ConfigFactId::new("test::Settings", "settings", "enabled");
-const SOURCE: upwell_core::DescriptorSource = upwell_core::descriptor_source!();
+const SOURCE: upwell_core::DescriptorSource = upwell_core::DescriptorSource::caller();
 
 #[derive(serde::Deserialize)]
 struct ForeignConfig;

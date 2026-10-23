@@ -133,7 +133,7 @@ fn condition_snapshot_extracts_scalars_from_staged_values() {
             vec![ConfigFactDescriptor {
                 id: ConfigFactId::new("FlagConfig", binding_path, "enabled"),
                 kind: ConditionScalarKind::Bool,
-                source: upwell_core::descriptor_source!(),
+                source: upwell_core::DescriptorSource::caller(),
             }]
         }
 
@@ -204,7 +204,7 @@ fn condition_snapshot_distinguishes_two_bindings_of_one_type() {
             vec![ConfigFactDescriptor {
                 id: ConfigFactId::new("FlagConfig", binding_path, "enabled"),
                 kind: ConditionScalarKind::Bool,
-                source: upwell_core::descriptor_source!(),
+                source: upwell_core::DescriptorSource::caller(),
             }]
         }
 

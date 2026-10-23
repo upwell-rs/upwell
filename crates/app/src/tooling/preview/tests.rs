@@ -57,7 +57,7 @@ impl ConditionFacts for PreviewAuth {
         vec![ConfigFactDescriptor {
             id: ConfigFactId::new("PreviewAuth", binding_path, "custom"),
             kind: ConditionScalarKind::Bool,
-            source: upwell_core::descriptor_source!(),
+            source: upwell_core::DescriptorSource::caller(),
         }]
     }
 

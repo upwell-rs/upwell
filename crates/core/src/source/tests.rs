@@ -21,3 +21,12 @@ fn caller_reports_the_calling_line() {
 
     assert_eq!(source.line, line + 1);
 }
+
+/// A descriptor static declared on one line.
+static DECLARED: (u32, DescriptorSource) = (line!(), DescriptorSource::caller());
+
+#[test]
+fn caller_in_a_static_reports_the_declaring_line() {
+    assert_eq!(DECLARED.1.line, DECLARED.0);
+    assert!(std::path::Path::new(DECLARED.1.file).ends_with("source/tests.rs"));
+}

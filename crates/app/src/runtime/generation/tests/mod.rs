@@ -19,7 +19,7 @@ use crate::test_support::{empty_condition, seed_hook_manager, unbuilt_factories}
 use crate::{AppRegistry, ScopeTopology};
 
 const ENABLED: ConfigFactId = ConfigFactId::new("test::GenerationConfig", "generation", "enabled");
-const SOURCE: DescriptorSource = upwell_core::descriptor_source!();
+const SOURCE: DescriptorSource = upwell_core::DescriptorSource::caller();
 
 static GENERATION_CONDITION: ConditionDescriptor = ConditionDescriptor {
     id: "generation-enabled",

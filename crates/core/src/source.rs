@@ -3,19 +3,15 @@
 
 use std::panic::Location;
 
-/// Captures the call site's source location for descriptor diagnostics.
-#[macro_export]
-macro_rules! descriptor_source {
-    () => {
-        $crate::DescriptorSource::new(file!(), line!(), column!())
-    };
-}
-
 /// Captures the call site as the [`ItemSource`] of the named item in the current module.
 #[macro_export]
 macro_rules! item_source {
     ($item:expr) => {
-        $crate::ItemSource::new($crate::descriptor_source!(), ::core::module_path!(), $item)
+        $crate::ItemSource::new(
+            $crate::DescriptorSource::caller(),
+            ::core::module_path!(),
+            $item,
+        )
     };
 }
 

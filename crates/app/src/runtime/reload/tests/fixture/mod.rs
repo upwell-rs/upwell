@@ -72,7 +72,7 @@ static PROBE_CONDITION_CALLBACK: ConditionCallback = ConditionCallback {
 
 static PROBE_CONDITION: ConditionDescriptor = ConditionDescriptor {
     id: "probe-enabled",
-    source: upwell_core::descriptor_source!(),
+    source: upwell_core::DescriptorSource::caller(),
     predicate: ConditionPredicate::Callback(&PROBE_CONDITION_CALLBACK),
 };
 
@@ -121,7 +121,7 @@ impl ConditionFacts for ProbeConfig {
         vec![ConfigFactDescriptor {
             id: ConfigFactId::new("test::ProbeConfig", binding_path, "enabled"),
             kind: ConditionScalarKind::Bool,
-            source: upwell_core::descriptor_source!(),
+            source: upwell_core::DescriptorSource::caller(),
         }]
     }
 
