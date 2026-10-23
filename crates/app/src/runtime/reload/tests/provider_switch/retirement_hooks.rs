@@ -15,7 +15,7 @@ use upwell_hooks::{HookDescriptor, HookParam, HookRouting};
 
 use super::fixture::{PrimaryAuthenticator, primary_component};
 use super::gate::{AuthGate, GATE_FACTORIES};
-use crate::test_support::{HookFuture, hook_receiver, test_component};
+use crate::test_support::{HookFuture, hook_call, hook_receiver, test_component};
 use crate::{ComponentRetired, ComponentRetirement, RetirementContext};
 
 /// A panic payload that must never reach a trace.
@@ -107,12 +107,9 @@ where
     Box::pin(retire_as::<C>(C::ID, ctx, cx))
 }
 
-fn audit_always_call<'a>(
-    ctx: &'a (dyn ResolverCtx + Send + Sync),
-    cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
-    Box::pin(retire_as::<RetirementAudit>(AUDIT_ALWAYS, ctx, cx))
-}
+hook_call!(audit_always_call, |ctx, cx| {
+    retire_as::<RetirementAudit>(AUDIT_ALWAYS, ctx, cx)
+});
 
 const fn retirement_hook(
     ordinal: u32,

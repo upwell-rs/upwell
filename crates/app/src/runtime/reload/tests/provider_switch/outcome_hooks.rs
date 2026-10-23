@@ -7,11 +7,11 @@
 use std::any::Any;
 use std::sync::Mutex;
 
-use upwell_core::{ResolverCtx, TypeDescriptor};
+use upwell_core::TypeDescriptor;
 use upwell_di::{Component, ComponentDescriptor, factories};
 use upwell_hooks::{HookDescriptor, HookKind, HookParam};
 
-use crate::test_support::{HookFuture, test_component};
+use crate::test_support::{hook_call, test_component};
 use crate::{
     AppRuntime, RuntimeTransitionReport, TransitionAborted, TransitionCommitted,
     TransitionOutcomeContext,
@@ -82,47 +82,37 @@ fn record(kind: &'static str, report: RuntimeTransitionReport, follow_up: Option
     });
 }
 
-fn committed_call<'a>(
-    _ctx: &'a (dyn ResolverCtx + Send + Sync),
-    cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
-    Box::pin(async move {
-        let report = report_of::<TransitionCommitted>(cx)?;
-        let controls = take_controls();
-        let follow_up = match &controls {
-            OutcomeControls::FollowUp(runtime) => Some(matches!(
-                runtime.reload_config().await,
-                Err(crate::Error::ReentrantReload { .. })
-            )),
-            _ => None,
-        };
+hook_call!(committed_call, |_ctx, cx| async move {
+    let report = report_of::<TransitionCommitted>(cx)?;
+    let controls = take_controls();
+    let follow_up = match &controls {
+        OutcomeControls::FollowUp(runtime) => Some(matches!(
+            runtime.reload_config().await,
+            Err(crate::Error::ReentrantReload { .. })
+        )),
+        _ => None,
+    };
 
-        record(TransitionCommitted::NAME, report, follow_up);
+    record(TransitionCommitted::NAME, report, follow_up);
 
-        match controls {
-            OutcomeControls::Fail => Err(upwell_hooks::Error::MissingParam("audit sink")),
-            OutcomeControls::Panic => panic!("{SECRET_OBSERVER_PANIC}"),
-            OutcomeControls::Record | OutcomeControls::FollowUp(_) => {
-                Ok(Box::new(()) as Box<dyn Any + Send>)
-            }
+    match controls {
+        OutcomeControls::Fail => Err(upwell_hooks::Error::MissingParam("audit sink")),
+        OutcomeControls::Panic => panic!("{SECRET_OBSERVER_PANIC}"),
+        OutcomeControls::Record | OutcomeControls::FollowUp(_) => {
+            Ok(Box::new(()) as Box<dyn Any + Send>)
         }
-    })
-}
+    }
+});
 
-fn aborted_call<'a>(
-    _ctx: &'a (dyn ResolverCtx + Send + Sync),
-    cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
-    Box::pin(async move {
-        record(
-            TransitionAborted::NAME,
-            report_of::<TransitionAborted>(cx)?,
-            None,
-        );
+hook_call!(aborted_call, |_ctx, cx| async move {
+    record(
+        TransitionAborted::NAME,
+        report_of::<TransitionAborted>(cx)?,
+        None,
+    );
 
-        Ok(Box::new(()) as Box<dyn Any + Send>)
-    })
-}
+    Ok(Box::new(()) as Box<dyn Any + Send>)
+});
 
 const OUTCOME_TY: TypeDescriptor = TypeDescriptor::of::<OutcomeLog>(OutcomeLog::NAME);
 

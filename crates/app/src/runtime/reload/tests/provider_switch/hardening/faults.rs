@@ -7,14 +7,12 @@ use std::any::Any;
 use std::sync::Mutex;
 
 use upwell_config::{ConfigReload, HookOutcome};
-use upwell_core::{
-    Cardinality, ConditionDescriptor, DependencyDescriptor, ResolverCtx, TypeDescriptor,
-};
+use upwell_core::{Cardinality, ConditionDescriptor, DependencyDescriptor, TypeDescriptor};
 use upwell_di::{Component, ComponentDescriptor, ProviderDescriptor, factories};
 use upwell_hooks::{HookDescriptor, HookRouting};
 
 use super::super::fixture::{AUTH_MODE, Authenticator};
-use crate::test_support::{HookFuture, test_component, unbuilt_factories};
+use crate::test_support::{hook_call, test_component, unbuilt_factories};
 
 /// What the sentinel's config-reload hook does.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -39,13 +37,10 @@ async fn construct_sentinel() -> Sentinel {
     Sentinel
 }
 
-fn sentinel_reload_call<'a>(
-    _ctx: &'a (dyn ResolverCtx + Send + Sync),
-    _cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
+hook_call!(sentinel_reload_call, |_ctx, _cx| {
     let fault = *CONFIG_HOOK_FAULT.lock().expect("config hook fault");
 
-    Box::pin(async move {
+    async move {
         match fault {
             ConfigHookFault::Accept => Ok(Box::new(HookOutcome::Unchanged) as Box<dyn Any + Send>),
             ConfigHookFault::Reject => Err(upwell_hooks::Error::Other(
@@ -53,8 +48,8 @@ fn sentinel_reload_call<'a>(
             )),
             ConfigHookFault::Panic => panic!("the sentinel config hook panicked"),
         }
-    })
-}
+    }
+});
 
 const SENTINEL_TY: TypeDescriptor = TypeDescriptor::of::<Sentinel>(Sentinel::NAME);
 

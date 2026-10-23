@@ -31,3 +31,19 @@ pub(crate) fn uncalled_hook<'a>(
 ) -> HookFuture<'a> {
     panic!("a planning test fired a hook")
 }
+
+/// Declares a hand-written [`HookCall`](upwell_hooks::HookCall) `$name` that binds the
+/// resolver context and the hook context to the closure's two parameters and boxes the
+/// future its body returns.
+macro_rules! hook_call {
+    ($name:ident, |$ctx:pat_param, $cx:pat_param| $body:expr) => {
+        fn $name<'a>(
+            $ctx: &'a (dyn ::upwell_core::ResolverCtx + Send + Sync),
+            $cx: &'a (dyn ::std::any::Any + Send + Sync),
+        ) -> $crate::test_support::HookFuture<'a> {
+            ::std::boxed::Box::pin($body)
+        }
+    };
+}
+
+pub(crate) use hook_call;

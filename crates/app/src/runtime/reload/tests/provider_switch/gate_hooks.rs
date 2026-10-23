@@ -9,13 +9,13 @@ use std::any::Any;
 use std::sync::Mutex;
 
 use upwell_config::CfgNext;
-use upwell_core::{ResolverCtx, TypeDescriptor};
+use upwell_core::TypeDescriptor;
 use upwell_di::{Component, ComponentDescriptor, NodeAction, ReasonKind, factories};
 use upwell_hooks::{HookDescriptor, HookKind, HookParam, HookRole, HookRouting};
 
 use super::fixture::{AuthConfig, PrimaryAuthenticator, observed_modes};
 use super::gate::{AuthGate, GATE_FACTORIES};
-use crate::test_support::{HookFuture, test_component};
+use crate::test_support::{hook_call, test_component};
 use crate::{
     AppRuntime, PendingTransition, TransitionDecision, TransitionHookContext, TransitionPhase,
     TransitionProposal, TransitionVerdict,
@@ -196,65 +196,35 @@ where
     Ok(Box::new(()))
 }
 
-fn gate_proposal_call<'a>(
-    _ctx: &'a (dyn ResolverCtx + Send + Sync),
-    cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
+hook_call!(gate_proposal_call, |_ctx, cx| {
     let behavior = behavior(|controls| controls.gate_proposal);
 
-    Box::pin(participate::<TransitionProposal>(
-        "gate-proposal",
-        cx,
-        behavior,
-    ))
-}
+    participate::<TransitionProposal>("gate-proposal", cx, behavior)
+});
 
-fn gate_decision_call<'a>(
-    _ctx: &'a (dyn ResolverCtx + Send + Sync),
-    cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
+hook_call!(gate_decision_call, |_ctx, cx| {
     let behavior = behavior(|controls| controls.gate_decision);
 
-    Box::pin(participate::<TransitionDecision>(
-        "gate-decision",
-        cx,
-        behavior,
-    ))
-}
+    participate::<TransitionDecision>("gate-decision", cx, behavior)
+});
 
-fn audit_targeted_call<'a>(
-    _ctx: &'a (dyn ResolverCtx + Send + Sync),
-    cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
-    Box::pin(participate::<TransitionProposal>(
-        "audit-targeted",
-        cx,
-        Behavior::Accept,
-    ))
-}
+hook_call!(audit_targeted_call, |_ctx, cx| {
+    participate::<TransitionProposal>("audit-targeted", cx, Behavior::Accept)
+});
 
-fn policy_call<'a>(
-    _ctx: &'a (dyn ResolverCtx + Send + Sync),
-    cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
+hook_call!(policy_call, |_ctx, cx| {
     let behavior = behavior(|controls| controls.policy);
 
-    Box::pin(participate::<TransitionProposal>("policy", cx, behavior))
-}
+    participate::<TransitionProposal>("policy", cx, behavior)
+});
 
-fn proposal_observer_call<'a>(
-    _ctx: &'a (dyn ResolverCtx + Send + Sync),
-    cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
-    Box::pin(observe::<TransitionProposal>("proposal-observer", cx))
-}
+hook_call!(proposal_observer_call, |_ctx, cx| {
+    observe::<TransitionProposal>("proposal-observer", cx)
+});
 
-fn decision_observer_call<'a>(
-    _ctx: &'a (dyn ResolverCtx + Send + Sync),
-    cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
-    Box::pin(observe::<TransitionDecision>("decision-observer", cx))
-}
+hook_call!(decision_observer_call, |_ctx, cx| {
+    observe::<TransitionDecision>("decision-observer", cx)
+});
 
 const GATE_TY: TypeDescriptor = TypeDescriptor::of::<AuthGate>(AuthGate::NAME);
 const AUDIT_TY: TypeDescriptor = TypeDescriptor::of::<AuditLog>(AuditLog::NAME);

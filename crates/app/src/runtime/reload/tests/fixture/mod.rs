@@ -15,8 +15,8 @@
 //! The factory and hook honor shared controls so a test can inject a failure or a
 //! cancellation point at a specific stage of the transaction. Cross-await controls are
 //! tokio-guarded; the synchronous config-deserialization log uses a `std::sync::Mutex`.
-//! [`lock_test_guard`](super::lock_test_guard) serializes the tests themselves under the default `cargo test`
-//! parallelism because they share the counters and controls.
+//! [`lock_test_guard`](super::lock_test_guard) serializes the tests themselves under the
+//! default `cargo test` parallelism because they share the counters and controls.
 
 use std::any::Any;
 use std::fs;
@@ -33,12 +33,12 @@ use upwell_config::{
 use upwell_core::{
     ConditionCallback, ConditionContext, ConditionDescriptor, ConditionInputId, ConditionPredicate,
     ConditionPurity, ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId,
-    DependencyDescriptor, ResolverCtx, TypeDescriptor,
+    DependencyDescriptor, TypeDescriptor,
 };
 use upwell_di::{Component, ComponentDescriptor, factories};
 use upwell_hooks::{HookDescriptor, HookKind, HookManager, HookParam};
 
-use crate::test_support::{HookFuture, hook_receiver, test_component};
+use crate::test_support::{hook_call, hook_receiver, test_component};
 use crate::{App, AppBuilder};
 
 mod controls;
@@ -181,45 +181,40 @@ fn probe_reload_deps() -> Vec<DependencyDescriptor> {
     vec![<CfgNext<ProbeConfig> as HookParam<ConfigReload>>::dependency(None)]
 }
 
-fn probe_reload_call<'a>(
-    ctx: &'a (dyn ResolverCtx + Send + Sync),
-    cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
-    Box::pin(async move {
-        let proposal = cx
-            .downcast_ref::<ReloadProposal>()
-            .expect("config reload hook context");
-        let receiver = hook_receiver::<ProbeComponent>(ctx)?;
-        let next = <CfgNext<ProbeConfig> as HookParam<ConfigReload>>::extract(proposal, None)?;
+hook_call!(probe_reload_call, |ctx, cx| async move {
+    let proposal = cx
+        .downcast_ref::<ReloadProposal>()
+        .expect("config reload hook context");
+    let receiver = hook_receiver::<ProbeComponent>(ctx)?;
+    let next = <CfgNext<ProbeConfig> as HookParam<ConfigReload>>::extract(proposal, None)?;
 
-        PROPOSED_TOKENS.lock().await.push(next.token);
-        RECEIVER_TOKENS.lock().await.push(receiver.observed);
-        RECEIVER_IDS
+    PROPOSED_TOKENS.lock().await.push(next.token);
+    RECEIVER_TOKENS.lock().await.push(receiver.observed);
+    RECEIVER_IDS
+        .lock()
+        .await
+        .push(Arc::as_ptr(&receiver) as usize);
+    HOOK_CALLS.fetch_add(1, Ordering::SeqCst);
+
+    if *HOOK_MUTATES_RECEIVER.lock().await {
+        receiver.mutated.store(true, Ordering::SeqCst);
+
+        // Recorded only after the mutation is applied, so an entry proves the
+        // receiver at this identity and token was actually mutated.
+        MUTATED_RECEIVERS
             .lock()
             .await
-            .push(Arc::as_ptr(&receiver) as usize);
-        HOOK_CALLS.fetch_add(1, Ordering::SeqCst);
+            .push((Arc::as_ptr(&receiver) as usize, receiver.observed));
+    }
 
-        if *HOOK_MUTATES_RECEIVER.lock().await {
-            receiver.mutated.store(true, Ordering::SeqCst);
+    if *HOOK_REJECT_TOKEN.lock().await == Some(next.token) {
+        return Err(upwell_hooks::Error::Other(
+            format!("rejecting the proposed token {}", next.token).into(),
+        ));
+    }
 
-            // Recorded only after the mutation is applied, so an entry proves the
-            // receiver at this identity and token was actually mutated.
-            MUTATED_RECEIVERS
-                .lock()
-                .await
-                .push((Arc::as_ptr(&receiver) as usize, receiver.observed));
-        }
-
-        if *HOOK_REJECT_TOKEN.lock().await == Some(next.token) {
-            return Err(upwell_hooks::Error::Other(
-                format!("rejecting the proposed token {}", next.token).into(),
-            ));
-        }
-
-        Ok(Box::new(HookOutcome::Unchanged) as Box<dyn Any + Send>)
-    })
-}
+    Ok(Box::new(HookOutcome::Unchanged) as Box<dyn Any + Send>)
+});
 
 /// A test-only hook kind a test fires explicitly through a manager of its choice —
 /// never by the reload pipeline — to show which receiver that manager's own resolver
@@ -233,22 +228,17 @@ impl HookKind for ManagerProbeKind {
     const NAME: &'static str = "manager_probe";
 }
 
-fn probe_manager_probe_call<'a>(
-    ctx: &'a (dyn ResolverCtx + Send + Sync),
-    _cx: &'a (dyn Any + Send + Sync),
-) -> HookFuture<'a> {
-    Box::pin(async move {
-        let receiver = hook_receiver::<ProbeComponent>(ctx)?;
+hook_call!(probe_manager_probe_call, |ctx, _cx| async move {
+    let receiver = hook_receiver::<ProbeComponent>(ctx)?;
 
-        MANAGER_PROBE_TOKENS.lock().await.push(receiver.observed);
-        MANAGER_PROBE_IDS
-            .lock()
-            .await
-            .push(Arc::as_ptr(&receiver) as usize);
+    MANAGER_PROBE_TOKENS.lock().await.push(receiver.observed);
+    MANAGER_PROBE_IDS
+        .lock()
+        .await
+        .push(Arc::as_ptr(&receiver) as usize);
 
-        Ok(Box::new(()) as Box<dyn Any + Send>)
-    })
-}
+    Ok(Box::new(()) as Box<dyn Any + Send>)
+});
 
 const PROBE_TY: TypeDescriptor = TypeDescriptor::of::<ProbeComponent>(ProbeComponent::NAME);
 
