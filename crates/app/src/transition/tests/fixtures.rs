@@ -122,10 +122,3 @@ pub(super) fn seed_root_resolver() -> BoxedComponent {
         value: Box::new(Injectable::into_stored(RootResolver::new())),
     }
 }
-
-pub(super) fn seed_hook_manager(hooks: &HookManager) -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-        value: Box::new(Injectable::into_stored(hooks.clone())),
-    }
-}

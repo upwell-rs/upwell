@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use upwell_config::{ConfigManager, ConfigReloader};
 use upwell_core::{ResolverSet, Scope, ScopeId, StaticScope, TypeDescriptor};
-use upwell_di::{BoxedComponent, EffectiveGraph, Injectable, ScopeContainer, ScopeRegistry};
-use upwell_hooks::{HOOK_MANAGER_NAME, HookManager};
+use upwell_di::{BoxedComponent, EffectiveGraph, ScopeContainer, ScopeRegistry};
+use upwell_hooks::HookManager;
 
 use super::*;
+use crate::test_support::{empty_condition, seed_hook_manager};
 use crate::{Error, ScopeBoundary, ScopeParent, ScopeTopology};
 
 const SESSION_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/session");
@@ -66,25 +67,6 @@ impl Scope for TestScope {
     }
 }
 
-fn empty_condition() -> Arc<AppConditionState> {
-    let registry = crate::AppRegistry::default();
-    let evaluation = registry
-        .evaluate_conditions(
-            [],
-            &upwell_di::ConditionFactSnapshot::new([]).expect("empty snapshot validates"),
-        )
-        .expect("empty evaluation succeeds");
-
-    Arc::new(AppConditionState::new(Arc::new(registry), evaluation))
-}
-
-fn seed_hook_manager() -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-        value: Box::new(Injectable::into_stored(HookManager::new(Vec::new()))),
-    }
-}
-
 /// A fresh empty generation over the test topology, prepared against `base`, plus the
 /// scope registry its root was built from.
 async fn prepared_generation(
@@ -97,7 +79,7 @@ async fn prepared_generation(
     );
     let root = ScopeContainer::build_root(
         &[],
-        vec![seed_hook_manager()],
+        vec![seed_hook_manager(&HookManager::new(Vec::new()))],
         ResolverSet::new(),
         Arc::clone(&registry),
     )

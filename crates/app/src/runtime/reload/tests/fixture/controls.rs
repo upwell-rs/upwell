@@ -3,6 +3,8 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+pub(crate) use crate::runtime::reload::tests::lock_test_guard;
+
 pub(super) static FACTORY_CALLS: AtomicUsize = AtomicUsize::new(0);
 pub(super) static HOOK_CALLS: AtomicUsize = AtomicUsize::new(0);
 pub(super) static STAGE_ENTRIES: AtomicUsize = AtomicUsize::new(0);
@@ -72,16 +74,6 @@ pub(super) static FACTORY_PARKED: tokio::sync::Notify = tokio::sync::Notify::con
 
 /// The gate the factory parks on while the test decides whether to cancel the reload.
 pub(super) static FACTORY_RELEASE: tokio::sync::Notify = tokio::sync::Notify::const_new();
-
-/// Serializes the reload tests: they share the factory/hook counters and the failure
-/// controls, so concurrent runs under the default `cargo test` parallelism must not
-/// interleave. Held for the entire body of each async test; await-safe, so no std
-/// guard ever crosses an await and no sleeps are needed.
-pub(super) static TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-pub(crate) async fn lock_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
-    TEST_GUARD.lock().await
-}
 
 /// Resets every counter and failure control. Call at the start of each test while
 /// holding [`lock_test_guard`].

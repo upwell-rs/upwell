@@ -26,6 +26,16 @@ mod runtime_reloader;
 mod transition_recipes;
 mod trigger;
 
+/// Serializes the reload tests, which share process-global fixture controls, under the
+/// default `cargo test` parallelism. Held for the entire body of each async test;
+/// await-safe, so no std guard ever crosses an await.
+static TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Locks [`TEST_GUARD`] for the rest of the calling test.
+pub(crate) async fn lock_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+    TEST_GUARD.lock().await
+}
+
 use crate::{RuntimeTransitionReport, TransitionFailure, TransitionOutcome, TransitionPhase};
 
 /// The `config` directory inside a fixture's temp dir, created on first use.

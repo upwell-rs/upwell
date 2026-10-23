@@ -9,13 +9,13 @@ use upwell_core::{
     ResolverSet, RuntimeGenerationId, TypeDescriptor,
 };
 use upwell_di::{
-    BoxedComponent, ComponentDescriptor, ComponentRegistry, ConditionFactSnapshot, EffectiveGraph,
-    Injectable, ScopeContainer, ScopeRegistry, Singleton,
+    ComponentDescriptor, ComponentRegistry, ConditionFactSnapshot, EffectiveGraph, ScopeContainer,
+    ScopeRegistry, Singleton,
 };
-use upwell_hooks::{HOOK_MANAGER_NAME, HookDescriptor, HookKind, HookManager};
+use upwell_hooks::{HookDescriptor, HookKind, HookManager};
 
 use super::*;
-use crate::test_support::{HookFuture, unbuilt_factories};
+use crate::test_support::{HookFuture, empty_condition, seed_hook_manager, unbuilt_factories};
 use crate::{AppRegistry, ScopeTopology};
 
 const ENABLED: ConfigFactId = ConfigFactId::new("test::GenerationConfig", "generation", "enabled");
@@ -69,31 +69,12 @@ fn condition_state(enabled: bool) -> Arc<AppConditionState> {
     Arc::new(AppConditionState::new(Arc::new(registry), evaluation))
 }
 
-fn empty_condition() -> Arc<AppConditionState> {
-    let registry = AppRegistry::default();
-    let evaluation = registry
-        .evaluate_conditions(
-            [],
-            &ConditionFactSnapshot::new([]).expect("empty snapshot validates"),
-        )
-        .expect("empty evaluation succeeds");
-
-    Arc::new(AppConditionState::new(Arc::new(registry), evaluation))
-}
-
 async fn prepared() -> PreparedRuntimeGeneration {
     prepared_with_condition(empty_condition()).await
 }
 
 async fn prepared_with_condition(condition: Arc<AppConditionState>) -> PreparedRuntimeGeneration {
     prepared_with_hooks(condition, HookManager::new(Vec::new()), ResolverSet::new()).await
-}
-
-fn seed_hook_manager(hooks: &HookManager) -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-        value: Box::new(Injectable::into_stored(hooks.clone())),
-    }
 }
 
 async fn prepared_with_hooks(

@@ -9,7 +9,7 @@
 //! every strategy has prepared.
 //!
 //! Components use builder descriptors with unique IDs, so nothing registers into the
-//! link-time inventory. The tests share the controls, so [`TEST_GUARD`] serializes them.
+//! link-time inventory. The tests share the controls, so [`lock_test_guard`] serializes them.
 
 use std::fs;
 use std::path::Path;
@@ -21,6 +21,8 @@ use tempfile::TempDir;
 use upwell_config::{ConfigManager, ConfigProperties, ResolverChain, Toml};
 
 use crate::App;
+
+pub(super) use crate::runtime::reload::tests::lock_test_guard;
 
 mod components;
 
@@ -64,12 +66,6 @@ static PARKED: tokio::sync::Notify = tokio::sync::Notify::const_new();
 static TALLY_PANICS: AtomicBool = AtomicBool::new(false);
 static BANNER_CONSTRUCTIONS: AtomicUsize = AtomicUsize::new(0);
 static VETOED_LABELS: Mutex<Vec<String>> = Mutex::new(Vec::new());
-static TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-pub(super) async fn lock_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
-    TEST_GUARD.lock().await
-}
-
 /// Selects what the next transition's handler returns. The handler resets it to
 /// [`OneShotMode::Decline`] once it selects, so later transitions fall back.
 pub(super) fn set_one_shot(mode: OneShotMode) {

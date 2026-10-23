@@ -3,17 +3,6 @@
 use super::*;
 use crate::test_support::uncalled_hook;
 
-/// The framework-seeded hook-manager descriptor: typed identity, no factory, no
-/// snapshot adapter — generation-local by contract.
-fn hook_manager_descriptor() -> ComponentDescriptor {
-    ComponentDescriptor::manual(
-        HOOK_MANAGER_ID,
-        HOOK_MANAGER_NAME,
-        TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-        &Singleton,
-    )
-}
-
 /// A hook kind registered only on override managers, so an override manager is
 /// distinguishable from the active generation's manager by catalog.
 struct OverrideProbeKind;

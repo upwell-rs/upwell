@@ -11,7 +11,7 @@
 //! [`AuthGate`](super::gate::AuthGate) consumer injects the effective provider, so the
 //! switch has an affected consumer to report. The fixture owns its statics alone and
 //! shares nothing with the probe fixture, but its own tests share [`OBSERVED_MODES`], so
-//! [`TEST_GUARD`] serializes them under the default `cargo test` parallelism.
+//! [`lock_test_guard`] serializes them under the default `cargo test` parallelism.
 
 use std::fs;
 use std::path::Path;
@@ -28,6 +28,8 @@ use upwell_hooks::HookDescriptor;
 
 use crate::test_support::test_component;
 use crate::{App, AppBuilder, ProtocolDefinition};
+
+pub(super) use crate::runtime::reload::tests::lock_test_guard;
 
 /// The trait both provider components implement and the dependency side resolves as
 /// `Arc<dyn Authenticator>`.
@@ -68,15 +70,6 @@ pub(super) fn panic_fallback_factory(panics: bool) {
 
 pub(super) fn panic_fact_extraction(panics: bool) {
     SCALARS_PANIC.store(panics, Ordering::SeqCst);
-}
-
-/// Serializes this fixture's tests so no concurrent construction pushes into
-/// [`OBSERVED_MODES`] between a clear and an exact-list assertion. Held for the entire
-/// body of each async test; await-safe, so no std guard ever crosses an await.
-static TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-pub(super) async fn lock_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
-    TEST_GUARD.lock().await
 }
 
 pub(super) async fn observed_modes() -> Vec<String> {

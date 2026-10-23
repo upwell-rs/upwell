@@ -15,7 +15,7 @@
 //! The factory and hook honor shared controls so a test can inject a failure or a
 //! cancellation point at a specific stage of the transaction. Cross-await controls are
 //! tokio-guarded; the synchronous config-deserialization log uses a `std::sync::Mutex`.
-//! [`TEST_GUARD`] serializes the tests themselves under the default `cargo test`
+//! [`lock_test_guard`](super::lock_test_guard) serializes the tests themselves under the default `cargo test`
 //! parallelism because they share the counters and controls.
 
 use std::any::Any;

@@ -43,10 +43,6 @@ test_component!(CallbackAuditor, "callback-auditor");
 /// How often the auditor's binding-only condition ran, across this module's tests.
 static AUDITOR_EVALUATIONS: AtomicUsize = AtomicUsize::new(0);
 
-/// Serializes this module's tests, which share [`AUDITOR_EVALUATIONS`], under the default
-/// `cargo test` parallelism. Await-safe, so no std guard crosses an await.
-static TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 const EXPORT: &str = "features.export";
 const TRANSPORT: &str = "transport.enabled";
 
@@ -212,7 +208,7 @@ fn exporter_active(app: &App<()>) -> bool {
 
 #[tokio::test]
 async fn a_callback_follows_binding_raw_and_eligibility_inputs_in_both_directions() {
-    let _guard = TEST_GUARD.lock().await;
+    let _guard = super::lock_test_guard().await;
     let (dir, app) = build_app(ALL_ON).await;
 
     let initial = exporter_active(&app);
@@ -252,7 +248,7 @@ async fn a_callback_follows_binding_raw_and_eligibility_inputs_in_both_direction
 
 #[tokio::test]
 async fn a_raw_path_change_without_binding_changes_still_reloads_the_condition() {
-    let _guard = TEST_GUARD.lock().await;
+    let _guard = super::lock_test_guard().await;
     let (dir, app) = build_app(ALL_ON).await;
     let before = app.runtime().generation();
 
@@ -278,7 +274,7 @@ async fn a_raw_path_change_without_binding_changes_still_reloads_the_condition()
 
 #[tokio::test]
 async fn an_unchanged_config_stays_a_no_op_for_raw_path_conditions() {
-    let _guard = TEST_GUARD.lock().await;
+    let _guard = super::lock_test_guard().await;
     let (_dir, app) = build_app(ALL_ON).await;
     let before = app.runtime().generation();
 
@@ -298,7 +294,7 @@ async fn an_unchanged_config_stays_a_no_op_for_raw_path_conditions() {
 
 #[tokio::test]
 async fn only_conditions_reading_a_changed_input_re_evaluate() {
-    let _guard = TEST_GUARD.lock().await;
+    let _guard = super::lock_test_guard().await;
     let (dir, app) = build_app(ALL_ON).await;
     let after_build = AUDITOR_EVALUATIONS.load(Ordering::SeqCst);
 
