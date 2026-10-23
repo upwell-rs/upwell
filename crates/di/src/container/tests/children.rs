@@ -1,6 +1,7 @@
 //! Child scope construction and component-source lifetime.
 
 use super::*;
+use crate::test_support::test_component;
 
 #[tokio::test]
 async fn empty_child_scope_retains_its_identity() {
@@ -79,15 +80,7 @@ async fn component_source_does_not_keep_a_scope_alive() {
     );
 }
 
+/// A component no registry knows about.
 struct NeverRegistered;
 
-impl Component for NeverRegistered {
-    type Handle = Arc<Self>;
-
-    const ID: &'static str = "never-registered";
-    const NAME: &'static str = "NeverRegistered";
-
-    fn into_handle(self) -> Self::Handle {
-        Arc::new(self)
-    }
-}
+test_component!(NeverRegistered, "never-registered");
