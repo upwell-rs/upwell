@@ -1,0 +1,32 @@
+name: CodeRabbit routing
+
+# Opts pull requests into `release/*` in to CodeRabbit review by labelling them `coderabbit-review`
+# (see `.coderabbit.yaml`), and removes the label when the base branch changes away from
+# `release/*`. Runs from the base branch's workflow file and never checks out pull request code,
+# so `pull_request_target` is safe here.
+on:
+  pull_request_target:
+    types: [opened, reopened, edited]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  label:
+    name: Route CodeRabbit review
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      LABEL: coderabbit-review
+    steps:
+      - name: Label release-branch pull requests
+        if: startsWith(github.event.pull_request.base.ref, 'release/')
+        run: gh pr edit "$PR" --add-label "$LABEL"
+
+      - name: Unlabel pull requests that moved off a release branch
+        if: >-
+          !startsWith(github.event.pull_request.base.ref, 'release/')
+          && contains(github.event.pull_request.labels.*.name, 'coderabbit-review')
+        run: gh pr edit "$PR" --remove-label "$LABEL"
