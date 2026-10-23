@@ -5,19 +5,19 @@ use super::*;
 #[test]
 fn framework_singletons_are_snapshot_capable_and_user_prebuilts_are_not() {
     assert!(
-        crate::app::SHUTDOWN_HANDLE_DESCRIPTOR
+        crate::app::prepare::seed::SHUTDOWN_HANDLE_DESCRIPTOR
             .generation_snapshot
             .is_some(),
         "the shutdown handle must be retainable across generations"
     );
     assert!(
-        crate::app::RUNTIME_RELOADER_DESCRIPTOR
+        crate::app::prepare::seed::RUNTIME_RELOADER_DESCRIPTOR
             .generation_snapshot
             .is_some(),
         "the runtime reloader must be retainable across generations"
     );
     assert!(
-        crate::app::HOOK_MANAGER_DESCRIPTOR
+        crate::app::prepare::seed::HOOK_MANAGER_DESCRIPTOR
             .generation_snapshot
             .is_none(),
         "the hook manager catalog and resolver routing stay generation-local"
@@ -32,7 +32,7 @@ fn framework_singletons_are_snapshot_capable_and_user_prebuilts_are_not() {
     let dirs =
         DirectoriesManager::from_path(std::env::temp_dir().join("upwell-app-descriptor-policy"));
 
-    crate::app::seed_directories(&dirs, &mut registry, &mut instances);
+    crate::app::prepare::seed::seed_directories(&dirs, &mut registry, &mut instances);
 
     for descriptor in &registry.components {
         assert!(
@@ -104,9 +104,9 @@ async fn framework_singletons_snapshot_out_of_a_built_root() {
     let dirs = DirectoriesManager::from_path(std::env::temp_dir().join("upwell-app-snapshot-test"));
 
     let descriptors = [
-        crate::app::SHUTDOWN_HANDLE_DESCRIPTOR,
-        crate::app::RUNTIME_RELOADER_DESCRIPTOR,
-        crate::app::HOOK_MANAGER_DESCRIPTOR,
+        crate::app::prepare::seed::SHUTDOWN_HANDLE_DESCRIPTOR,
+        crate::app::prepare::seed::RUNTIME_RELOADER_DESCRIPTOR,
+        crate::app::prepare::seed::HOOK_MANAGER_DESCRIPTOR,
         ComponentDescriptor::of::<DirectoriesManager>(),
         ComponentDescriptor::of::<Dir<ConfigDir>>(),
         root_resolver_descriptor(),
