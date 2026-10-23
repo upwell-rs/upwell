@@ -1,6 +1,9 @@
 //! Package, binary-target, and document identities and their validation.
 
-use crate::*;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::is_blank;
 
 /// Cargo package identity, when a target-local entry supplies it.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

@@ -1,6 +1,11 @@
 //! Canonicalization and validation of generated-CLI metadata.
 
-use crate::*;
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::{
+    CliCommand, CliMetadata, CliOwner, Resource, ValidationError, allowed_provenance_self_owner,
+    is_blank, parse_cli_provider_id,
+};
 
 pub(crate) fn canonicalize_cli(cli: &mut CliMetadata) {
     cli.providers.sort_by(|left, right| left.id.cmp(&right.id));

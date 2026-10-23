@@ -1,6 +1,12 @@
 //! Structural validation of tooling document resources and relationships.
 
-use crate::*;
+use std::collections::BTreeMap;
+
+use crate::{
+    DocumentIdentity, Facet, IdentityValidationError, Relationship, RelationshipKind, Resource,
+    ResourceKind, ValidationError, is_blank, is_namespaced, validate_package_identity,
+    validate_source_location,
+};
 
 pub(crate) fn validate_tooling_document_identity(
     identity: &DocumentIdentity,
