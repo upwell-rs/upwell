@@ -6,16 +6,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, ResolutionMode, ResolverSet, ScopeId, StaticScope,
-    Transient, TypeDescriptor,
+    Cardinality, DependencyDescriptor, ResolutionMode, ResolverSet, ScopeId, Singleton,
+    StaticScope, Transient, TypeDescriptor,
 };
 
-use crate::descriptors::component::from_boxed;
-use crate::{ComponentFactoryDescriptor, ComponentFactoryRole, Injectable};
-
+use super::resolver_slot::ScopeResolverSlotState;
 use super::*;
+use crate::descriptors::component::{ComponentConstructionContext, from_boxed};
+use crate::descriptors::{BoxedComponent, ComponentDescriptor, ProviderDescriptor};
+use crate::error::Error;
 use crate::registry::selection::rules::select_single_provider;
 use crate::test_support::{no_dependencies, planned_provider, unerased};
+use crate::{ComponentFactoryDescriptor, ComponentFactoryRole, Injectable};
 
 /// A throwaway intermediate scope for exercising child-container construction
 /// without depending on any protocol's concrete scopes.
