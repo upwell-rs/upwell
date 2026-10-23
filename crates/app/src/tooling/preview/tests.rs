@@ -304,9 +304,10 @@ fn a_probe_document_carries_the_redacted_preview() {
     };
     let decoded = TransitionPreviewRequest::from_env_value(&request.to_env_value())
         .expect("the request round-trips through its environment value");
-    let overlay = super::super::preview_overlay(&decoded).expect("the request is a valid overlay");
+    let overlay =
+        crate::tooling::probe::preview_overlay(&decoded).expect("the request is a valid overlay");
 
-    let document = super::super::project_prepared(&prepared, Some(&overlay))
+    let document = crate::tooling::probe::project_prepared(&prepared, Some(&overlay))
         .expect("the preparation projects");
     let json = document
         .to_canonical_json()
@@ -328,7 +329,7 @@ fn a_document_without_a_request_has_no_preview() {
     let (_fixture, prepared) = prepared(true);
 
     let document =
-        super::super::project_prepared(&prepared, None).expect("the preparation projects");
+        crate::tooling::probe::project_prepared(&prepared, None).expect("the preparation projects");
     let json = document.to_canonical_json().expect("the document is valid");
 
     assert_eq!(document.transition_preview, None);
