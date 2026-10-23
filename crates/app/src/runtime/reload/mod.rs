@@ -20,13 +20,13 @@
 //! Before the terminal commit, every recoverable error, hook rejection, failed candidate
 //! factory, or cancellation leaves the framework-owned publication state unchanged: the
 //! active runtime generation, the managed config tree and its live slots, the live cells
-//! retained consumers hold, and the config generation. The candidate — its root, its hook manager, and every newly constructed component
-//! instance — is dropped, so mutations held exclusively by those candidate instances
-//! disappear with it. Retained dependencies may alias the active generation's
-//! instances, so mutations a candidate factory or hook makes through them reach live
-//! components and are not rolled back. Arbitrary external, global, or I/O side effects
-//! (external systems, emitted messages, files) are likewise not rolled back and are the
-//! application's responsibility.
+//! retained consumers hold, and the config generation. The candidate — its root, its hook
+//! manager, and every newly constructed component instance — is dropped, so mutations held
+//! exclusively by those candidate instances disappear with it. Retained dependencies may
+//! alias the active generation's instances, so mutations a candidate factory or hook makes
+//! through them reach live components and are not rolled back. Arbitrary external, global,
+//! or I/O side effects (external systems, emitted messages, files) are likewise not rolled
+//! back and are the application's responsibility.
 //!
 //! # Invalidation policy
 //!
@@ -131,12 +131,13 @@
 //!
 //! At the terminal commit, the validated candidate becomes the authoritative runtime
 //! generation first, then the retained consumers' live cells are republished and the
-//! live config slots synchronously commit while both leases remain held. The staged commit advances the config generation
-//! exactly once per reload. An unchanged source is a no-op: it moves neither generation
-//! nor root. A pinned [`RuntimeView`](crate::RuntimeView) consistently pins one
-//! generation's root, graph, scopes, condition state, and hook catalog, but it does not
-//! freeze separately held live [`Cfg<T>`] cells. Those cells remain per-slot
-//! atomic at commit; no atomicity across handles is promised.
+//! live config slots synchronously commit while both leases remain held. The staged
+//! commit advances the config generation exactly once per reload. An unchanged source is
+//! a no-op: it moves neither generation nor root. A pinned
+//! [`RuntimeView`](crate::RuntimeView) consistently pins one generation's root, graph,
+//! scopes, condition state, and hook catalog, but it does not freeze separately held live
+//! [`Cfg<T>`] cells. Those cells remain per-slot atomic at commit; no atomicity across
+//! handles is promised.
 //!
 //! [`Cfg<T>`]: upwell_config::Cfg
 //!
