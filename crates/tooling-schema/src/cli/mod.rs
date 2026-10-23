@@ -1,6 +1,8 @@
 //! Generated-CLI metadata and contribution identities.
 
-use crate::*;
+use serde::{Deserialize, Serialize};
+
+use crate::is_blank;
 
 mod validate;
 

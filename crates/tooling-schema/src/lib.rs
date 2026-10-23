@@ -3,12 +3,7 @@
 //! The schema contains only stable textual identities and JSON data. It deliberately has no
 //! dependency on application runtime state, Clap, Cargo metadata, or a concrete protocol.
 
-use std::collections::{BTreeMap, BTreeSet};
-
 use semver::{Version, VersionReq};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use thiserror::Error;
 
 mod cli;
 mod diagnostic;

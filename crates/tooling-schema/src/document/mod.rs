@@ -1,6 +1,17 @@
 //! The tooling document.
 
-use crate::*;
+use std::collections::{BTreeMap, BTreeSet};
+
+use semver::{Version, VersionReq};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::{
+    CliMetadata, Diagnostic, DocumentIdentity, Facet, Relationship, Resource,
+    TOOLING_SCHEMA_VERSION, TransitionPreview, ValidationResult, canonicalize_cli,
+    canonicalize_diagnostics, is_blank, schema_requirement, validate_cli, validate_diagnostic,
+    validation_result,
+};
 
 mod error;
 mod validate;

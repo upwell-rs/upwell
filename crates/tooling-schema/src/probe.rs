@@ -1,6 +1,16 @@
 //! The target-local probe envelope and its outcome.
 
-use crate::*;
+use std::collections::BTreeMap;
+
+use semver::{Version, VersionReq};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::{
+    Diagnostic, DiagnosticValidationError, DocumentIdentity, IdentityValidationError, ResourceKind,
+    TOOLING_SCHEMA_VERSION, ToolingDocument, ValidationError, canonicalize_diagnostics, is_blank,
+    schema_requirement, validate_diagnostic, validate_document_identity,
+};
 
 /// Probe-specific context and diagnostics returned by a target-local tooling probe.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -1,6 +1,9 @@
 //! Tooling document validation errors.
 
-use crate::*;
+use semver::{Version, VersionReq};
+use thiserror::Error;
+
+use crate::{DiagnosticValidationError, RelationshipKind, ResourceKind, ValidationResult};
 
 /// A structural schema validation failure.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]

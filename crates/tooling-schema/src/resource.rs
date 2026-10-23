@@ -1,6 +1,11 @@
 //! Resources, facets, provenance, and the relationships between resources.
 
-use crate::*;
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::SourceLocation;
 
 /// Provenance shared by resources and diagnostics.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

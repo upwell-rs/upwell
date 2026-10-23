@@ -1,6 +1,12 @@
 //! Diagnostics and validation results.
 
-use crate::*;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::{
+    IdentityValidationError, SourceLocation, is_blank, is_namespaced, sort_dedup,
+    validate_source_location,
+};
 
 /// Diagnostic severity independent of process exit codes or transports.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
