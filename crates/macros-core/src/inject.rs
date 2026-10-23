@@ -367,62 +367,47 @@ pub fn register_factory(
     )
 }
 
-/// Emits an explicit `factory = path` factory entry: it appends a non-default
-/// [`ComponentFactoryDescriptor`] to the type's factory slice, driving the given
-/// async factory through the build-time `Factory` machinery (so the path's
-/// signature need not be visible — its deps come from its parameters' `FromContainer`
-/// impls). Overrides the field-injection default.
+/// A non-default `ComponentFactoryDescriptor` literal with id `id` that drives the async
+/// `factory` through the build-time `Factory` machinery, as `factories!` expands an entry:
+/// the factory's parameters supply both construction and the dependency edges, so its
+/// signature need not be visible to the macro.
+pub fn factory_descriptor(id: &TokenStream, factory: &TokenStream, paths: &Paths) -> TokenStream {
+    let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
+    let component_factory_role = paths.core("ComponentFactoryRole");
+    let dispatch_factory = paths.core("dispatch_factory");
+    let factory_dependencies = paths.core("factory_dependencies");
+
+    quote! {
+        #component_factory_descriptor {
+            id: #id,
+            construct: |cx| #dispatch_factory(#factory, cx),
+            dependencies: || #factory_dependencies(#factory),
+            role: #component_factory_role::Explicit,
+        }
+    }
+}
+
+/// Emits an explicit `factory = path` factory entry, appended to the type's factory slice;
+/// it overrides the field-injection default.
 pub fn explicit_factory(
     self_ident: &syn::Ident,
     factory_path: &syn::Path,
     registrations_slice: &syn::Ident,
     paths: &Paths,
 ) -> TokenStream {
-    let component_construction_context = paths.core("ComponentConstructionContext");
-    let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
-    let component_factory_role = paths.core("ComponentFactoryRole");
-    let dependency_descriptor = paths.core("DependencyDescriptor");
-    let dispatch_factory = paths.core("dispatch_factory");
-    let factory_dependencies = paths.core("factory_dependencies");
-    let boxed_component = paths.core("BoxedComponent");
-    let result = paths.core("DiResult");
-
-    let factory_literal = quote! {
-        #component_factory_descriptor {
-            id: concat!("factory:", stringify!(#factory_path)),
-            construct: __upwell_explicit_factory,
-            dependencies: __upwell_explicit_deps,
-            role: #component_factory_role::Explicit,
-        }
-    };
-    let register = register_factory(
-        self_ident,
-        registrations_slice,
-        &format_ident!("__UPWELL_EXPLICIT_FACTORY"),
-        &factory_literal,
+    let factory = factory_descriptor(
+        &quote!(concat!("factory:", stringify!(#factory_path))),
+        &quote!(#factory_path),
         paths,
     );
 
-    quote! {
-        fn __upwell_explicit_deps() -> ::std::vec::Vec<#dependency_descriptor> {
-            #factory_dependencies(#factory_path)
-        }
-
-        #[allow(unused_variables)]
-        fn __upwell_explicit_factory(
-            cx: &mut #component_construction_context,
-        ) -> ::core::pin::Pin<
-            ::std::boxed::Box<
-                dyn ::core::future::Future<
-                    Output = #result<#boxed_component>,
-                > + ::core::marker::Send + '_,
-            >,
-        > {
-            #dispatch_factory(#factory_path, cx)
-        }
-
-        #register
-    }
+    register_factory(
+        self_ident,
+        registrations_slice,
+        &format_ident!("__UPWELL_EXPLICIT_FACTORY"),
+        &factory,
+        paths,
+    )
 }
 
 /// One field's contribution: the value expression that builds it in the struct
