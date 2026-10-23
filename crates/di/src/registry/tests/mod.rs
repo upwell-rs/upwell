@@ -5,7 +5,10 @@ use crate::descriptors::{ComponentDescriptor, ComponentFactoryDescriptor, Compon
 use crate::test_support::{
     dependency, no_dependencies, planned, planned_provider, unbuilt_factories,
 };
-use upwell_core::{Cardinality, DependencyDescriptor, StaticScope, Transient, TypeDescriptor};
+use upwell_core::{
+    Cardinality, DependencyDescriptor, ResolutionMode, Singleton, StaticScope, Transient,
+    TypeDescriptor,
+};
 
 /// Local stand-in intermediate scopes (the captive rule only cares about rank
 /// ordering): `Connection` outranks `Request`, both between singleton and transient.
