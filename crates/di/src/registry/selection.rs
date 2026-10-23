@@ -183,7 +183,7 @@ impl ProviderSelectionModel {
         can_reach: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> Vec<SelectedDependency> {
         self.selected_dependencies(consumer, dependency, &|consumer, dependency| {
-            super::scope_allows_with(consumer, dependency, &can_reach)
+            super::scopes::scope_allows_with(consumer, dependency, &can_reach)
         })
     }
 
