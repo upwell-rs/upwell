@@ -10,7 +10,7 @@ use crate::descriptors::{ComponentDescriptor, ProviderDescriptor};
 use crate::error::Error;
 use crate::registry::selection::ProviderSelectionModel;
 
-/// Shared, immutable data a [`ScopeContainer`] needs to resolve beyond its own
+/// Shared, immutable data a [`ScopeContainer`](crate::ScopeContainer) needs to resolve beyond its own
 /// store: the `Transient` components it may construct on demand and the trait
 /// providers used to alias instances. Held behind an `Arc` and shared by every
 /// scope in an application (root, per-connection, per-request).
