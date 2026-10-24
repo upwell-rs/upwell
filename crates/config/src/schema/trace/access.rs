@@ -217,6 +217,25 @@ impl<'s> FirstVariant<'s> {
     }
 }
 
+impl FirstVariant<'_> {
+    /// Traces the selected variant's tuple or struct payload under the variant's name, so
+    /// positions of different variants of one enum keep separate candidate choices.
+    fn trace_payload<T>(
+        self,
+        trace: impl FnOnce(Tracer<'_, '_>) -> Result<T, TraceStop>,
+    ) -> Result<T, TraceStop> {
+        let mut payload = ValueSchema::Any;
+
+        self.state.enter(self.variant);
+
+        let traced = trace(Tracer::new(&mut payload, self.depth + 1, self.state));
+
+        self.state.leave();
+
+        traced
+    }
+}
+
 impl<'de> EnumAccess<'de> for FirstVariant<'_> {
     type Error = TraceStop;
     type Variant = Self;
@@ -245,13 +264,7 @@ impl<'de> VariantAccess<'de> for FirstVariant<'_> {
     }
 
     fn tuple_variant<V: Visitor<'de>>(self, len: usize, visitor: V) -> Result<V::Value, TraceStop> {
-        let mut payload = ValueSchema::Any;
-
-        de::Deserializer::deserialize_tuple(
-            Tracer::new(&mut payload, self.depth + 1, self.state),
-            len,
-            visitor,
-        )
+        self.trace_payload(|tracer| de::Deserializer::deserialize_tuple(tracer, len, visitor))
     }
 
     fn struct_variant<V: Visitor<'de>>(
@@ -259,13 +272,10 @@ impl<'de> VariantAccess<'de> for FirstVariant<'_> {
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, TraceStop> {
-        let mut payload = ValueSchema::Any;
+        let variant = self.variant;
 
-        de::Deserializer::deserialize_struct(
-            Tracer::new(&mut payload, self.depth + 1, self.state),
-            self.variant,
-            fields,
-            visitor,
-        )
+        self.trace_payload(|tracer| {
+            de::Deserializer::deserialize_struct(tracer, variant, fields, visitor)
+        })
     }
 }
