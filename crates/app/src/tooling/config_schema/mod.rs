@@ -98,9 +98,11 @@ fn binding_schema(binding: &ConfigBinding) -> Value {
     }
 }
 
-/// Nests `schema` under the dotted `path` of the root `properties`, keeping any properties a
-/// shorter binding path already placed at that node.
-fn insert_at_path(root: &mut Map<String, Value>, path: &str, mut schema: Value) {
+/// Nests `schema` under the dotted `path` of the root `properties`. Bindings arrive shortest
+/// path first, so a node already at `path` is another binding of the same path, and both
+/// schemas must hold (`allOf`). A path under a binding whose schema is not an object is left
+/// out of the tree; its own binding resource still carries its schema.
+fn insert_at_path(root: &mut Map<String, Value>, path: &str, schema: Value) {
     let mut segments = path.split('.').filter(|segment| !segment.is_empty());
     let Some(last) = segments.next_back() else {
         return;
@@ -111,25 +113,30 @@ fn insert_at_path(root: &mut Map<String, Value>, path: &str, mut schema: Value) 
         let node = properties
             .entry(segment.to_string())
             .or_insert_with(|| json!({ "type": "object", "properties": {} }));
+        let Some(nested) = node_properties(node) else {
+            return;
+        };
 
-        properties = node_properties(node);
+        properties = nested;
     }
 
-    if let Some(Value::Object(existing)) = properties
-        .remove(last)
-        .and_then(|mut node| node.get_mut("properties").map(Value::take))
-    {
-        node_properties(&mut schema).extend(existing);
-    }
+    let combined = match properties.remove(last) {
+        Some(existing) => json!({ "allOf": [existing, schema] }),
+        None => schema,
+    };
 
-    properties.insert(last.to_string(), schema);
+    properties.insert(last.to_string(), combined);
 }
 
-/// The `properties` map of an object schema node, created when absent.
-fn node_properties(node: &mut Value) -> &mut Map<String, Value> {
-    let object = node
-        .as_object_mut()
-        .expect("config schema nodes are objects");
+/// The `properties` map of an object schema node, created when absent, or `None` when the
+/// node declares a non-object `type`.
+fn node_properties(node: &mut Value) -> Option<&mut Map<String, Value>> {
+    let object = node.as_object_mut()?;
+
+    if object.get("type").is_some_and(|ty| ty != &json!("object")) {
+        return None;
+    }
+
     let properties = object
         .entry(String::from("properties"))
         .or_insert_with(|| json!({}));
@@ -138,7 +145,7 @@ fn node_properties(node: &mut Value) -> &mut Map<String, Value> {
         *properties = json!({});
     }
 
-    properties.as_object_mut().expect("normalized above")
+    properties.as_object_mut()
 }
 
 #[cfg(test)]

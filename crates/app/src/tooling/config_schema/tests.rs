@@ -235,3 +235,31 @@ fn binding_resources_carry_their_schema_facet_and_type_source() {
             .is_some_and(|path| path.ends_with("tests::HttpConfig"))
     );
 }
+
+#[test]
+fn bindings_sharing_a_path_must_all_hold() {
+    let mut root = Map::new();
+    let first = json!({ "type": "object", "required": ["a"], "properties": { "a": {} } });
+    let second = json!({ "oneOf": [{ "type": "object" }], "x-upwell-rust-type": "Second" });
+
+    insert_at_path(&mut root, "shared", first.clone());
+    insert_at_path(&mut root, "shared", second.clone());
+
+    assert_eq!(root["shared"], json!({ "allOf": [first, second] }));
+}
+
+#[test]
+fn deeper_paths_are_not_nested_under_a_scalar_binding() {
+    let mut root = Map::new();
+    let scalar = json!({ "type": "string" });
+
+    insert_at_path(&mut root, "name", scalar.clone());
+    insert_at_path(&mut root, "name.inner", json!({ "type": "integer" }));
+    insert_at_path(&mut root, "parent.child", json!({ "type": "integer" }));
+
+    assert_eq!(root["name"], scalar);
+    assert_eq!(
+        root["parent"]["properties"]["child"],
+        json!({ "type": "integer" })
+    );
+}
