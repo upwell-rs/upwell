@@ -256,8 +256,8 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
             .is_some_and(|label| label.ends_with("ToolingWsProtocol"))
     );
     assert!(
-        endpoint.labels["protocol-type"].ends_with("ToolingWsProtocol"),
-        "prepared endpoint retains stable protocol type identity"
+        endpoint.labels["protocol-name"].ends_with("ToolingWsProtocol"),
+        "prepared endpoint retains its protocol type path"
     );
     assert!(document.relationships.iter().any(|relationship| {
         relationship.kind == upwell_app::tooling_schema::RelationshipKind::Contains

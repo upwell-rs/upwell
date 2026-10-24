@@ -31,10 +31,6 @@ pub(super) fn project_endpoint(
                 String::from("protocol-name"),
                 endpoint.protocol_name.to_string(),
             ),
-            (
-                String::from("protocol-type"),
-                endpoint.protocol_name.to_string(),
-            ),
             (String::from("controller-count"), controllers.clone()),
         ]),
     );
