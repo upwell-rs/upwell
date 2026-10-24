@@ -20,10 +20,25 @@ fn typed_descriptors_carry_the_generation_snapshot_adapter() {
         "of::<T>() descriptors must be snapshot-capable"
     );
     assert!(
-        ComponentDescriptor::manual_of::<MetadataProbe>("custom:probe", "CustomProbe", &Singleton,)
+        ComponentDescriptor::of::<MetadataProbe>()
+            .with_identity("custom:probe", "CustomProbe")
             .generation_snapshot
             .is_some(),
-        "manual_of::<T>() framework seeds must be snapshot-capable"
+        "custom-identity framework seeds must be snapshot-capable"
+    );
+}
+
+#[test]
+fn with_identity_renames_the_component_and_its_type() {
+    let descriptor =
+        ComponentDescriptor::of::<MetadataProbe>().with_identity("custom:probe", "CustomProbe");
+
+    assert_eq!(descriptor.id, "custom:probe");
+    assert_eq!(descriptor.name, "CustomProbe");
+    assert_eq!(descriptor.ty.name, "CustomProbe");
+    assert_eq!(
+        descriptor.ty.type_id,
+        std::any::TypeId::of::<MetadataProbe>()
     );
 }
 

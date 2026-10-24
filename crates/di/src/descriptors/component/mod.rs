@@ -170,9 +170,10 @@ pub trait Wired {}
 /// # Pre-1.0 descriptor migration
 ///
 /// Handwritten literals must set [`generation_snapshot`](Self::generation_snapshot) to
-/// [`ComponentDescriptor::typed_snapshot::<T>()`] for a typed, retainable component or
-/// `None` for a raw/manual descriptor. Prefer [`of`](Self::of), [`manual`](Self::manual),
-/// or [`manual_of`](Self::manual_of); generated descriptors are updated automatically.
+/// `Some(GenerationSnapshot::of::<T>())` for a typed, retainable component or `None` for a
+/// raw/manual descriptor. Prefer [`of`](Self::of) (with
+/// [`with_identity`](Self::with_identity) for a custom identity) or
+/// [`manual`](Self::manual); generated descriptors are updated automatically.
 #[derive(Clone, Copy)]
 pub struct ComponentDescriptor {
     pub id: &'static str,
@@ -186,7 +187,7 @@ pub struct ComponentDescriptor {
     /// that declares none — and for every manually-seeded instance.
     pub hooks: fn() -> &'static [HookDescriptor],
     /// Hidden typed generation adapter. Set for generated/typed descriptors
-    /// ([`of`](Self::of), [`manual_of`](Self::manual_of), macro-generated literals);
+    /// ([`of`](Self::of) and macro-generated literals);
     /// `None` for raw [`manual`](Self::manual) descriptors, which are never
     /// retainable and expose no live cell.
     /// [`without_retention`](Self::without_retention) keeps it for live-cell access only.
@@ -210,7 +211,7 @@ impl ComponentDescriptor {
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
-            generation_snapshot: Self::typed_snapshot::<T>(),
+            generation_snapshot: Some(GenerationSnapshot::of::<T>()),
         }
     }
 
@@ -234,35 +235,6 @@ impl ComponentDescriptor {
             hooks: no_hooks,
             generation_snapshot: None,
         }
-    }
-
-    /// A descriptor for a framework-seeded typed instance (no factory) that carries
-    /// the typed generation-snapshot adapter, so the instance can be retained across
-    /// generations. Raw [`manual`](Self::manual) descriptors stay non-retainable.
-    #[doc(hidden)]
-    pub const fn manual_of<T: Component>(
-        id: &'static str,
-        name: &'static str,
-        scope: &'static dyn Scope,
-    ) -> Self {
-        Self {
-            id,
-            name,
-            ty: TypeDescriptor::of::<T>(name),
-            scope,
-            condition: None,
-            factories: no_factories,
-            hooks: no_hooks,
-            generation_snapshot: Self::typed_snapshot::<T>(),
-        }
-    }
-
-    /// The typed generation-snapshot adapter for `T`, for descriptor literals that
-    /// cannot go through [`of`](Self::of) — macro-generated descriptors and
-    /// handwritten literals with custom identity or factory slices.
-    #[doc(hidden)]
-    pub const fn typed_snapshot<T: Component>() -> Option<GenerationSnapshot> {
-        Some(GenerationSnapshot::of::<T>())
     }
 
     /// Whether a runtime transition can carry this component's instance into a later

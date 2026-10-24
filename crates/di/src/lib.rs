@@ -44,11 +44,11 @@ pub use descriptors::{
     BoxedComponent, COMPONENTS, Cardinality, Component, ComponentConstructionContext,
     ComponentDescriptor, ComponentFactories, ComponentFactory, ComponentFactoryDescriptor,
     ComponentFactoryRole, ConditionDescriptor, DeclaredScope, Dep, DependencyDescriptor,
-    DependencyObservation, DescriptorFor, Dynamic, Injectable, Live, LiveCell, LiveRebind, LiveRef,
-    PROVIDERS, Provide, ProviderDescriptor, ProviderMappingId, ProviderOf, ProviderOrder,
-    ProviderOrderDirection, Registration, RegistryFor, ResolutionMode, Scope, ScopeId,
-    ServiceComponent, Singleton, StaticScope, Transient, TypeDescriptor, UpwellDescriptor, Wired,
-    Wiring, erase_provider, provider_live_cell,
+    DependencyObservation, DescriptorFor, Dynamic, GenerationSnapshot, Injectable, Live, LiveCell,
+    LiveRebind, LiveRef, PROVIDERS, Provide, ProviderDescriptor, ProviderMappingId, ProviderOf,
+    ProviderOrder, ProviderOrderDirection, Registration, RegistryFor, ResolutionMode, Scope,
+    ScopeId, ServiceComponent, Singleton, StaticScope, Transient, TypeDescriptor, UpwellDescriptor,
+    Wired, Wiring, erase_provider, provider_live_cell,
 };
 pub use error::{
     DeferredTransientDependency, Error, InvalidFreshDependency, ProviderComponentMissing,

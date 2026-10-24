@@ -64,18 +64,15 @@ async fn by_value_snapshot_reboxes_a_fresh_stored_value() {
 }
 
 #[tokio::test]
-async fn manual_of_descriptor_snapshots_with_a_custom_identity() {
-    let descriptor = ComponentDescriptor::manual_of::<SharedService>(
-        "custom:shared",
-        "CustomShared",
-        &Singleton,
-    );
+async fn a_custom_identity_descriptor_snapshots() {
+    let descriptor =
+        ComponentDescriptor::of::<SharedService>().with_identity("custom:shared", "CustomShared");
     let active = Arc::new(SharedService { label: "active" });
     let root = root_with(&[descriptor], vec![seed(&descriptor, Arc::clone(&active))]).await;
 
     let snapshot = root
         .snapshot_singleton(descriptor)
-        .expect("manual_of framework seeds snapshot");
+        .expect("custom-identity framework seeds snapshot");
 
     let snapshot_cell = snapshot
         .downcast_ref::<Live<SharedService>>()

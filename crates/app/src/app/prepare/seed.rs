@@ -14,18 +14,16 @@ use crate::registry::AppRegistry;
 
 /// The framework-provided singleton injectable for triggering graceful shutdown.
 pub(crate) static SHUTDOWN_HANDLE_DESCRIPTOR: ComponentDescriptor =
-    ComponentDescriptor::manual_of::<ShutdownHandle>(
+    ComponentDescriptor::of::<ShutdownHandle>().with_identity(
         crate::builtins::shutdown::SHUTDOWN_HANDLE_ID,
         crate::builtins::shutdown::SHUTDOWN_HANDLE_NAME,
-        &SingletonScope,
     );
 
 /// The framework-provided singleton injectable for requesting a runtime reload.
 pub(crate) static RUNTIME_RELOADER_DESCRIPTOR: ComponentDescriptor =
-    ComponentDescriptor::manual_of::<RuntimeReloader>(
+    ComponentDescriptor::of::<RuntimeReloader>().with_identity(
         crate::builtins::reloader::RUNTIME_RELOADER_ID,
         crate::builtins::reloader::RUNTIME_RELOADER_NAME,
-        &SingletonScope,
     );
 
 /// The framework-provided singleton injectable that runs lifecycle/event hooks.

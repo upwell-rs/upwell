@@ -214,6 +214,17 @@ impl ComponentDescriptor {
         Self { hooks, ..self }
     }
 
+    /// Gives the component the stable ID `id` and the name `name` in place of its
+    /// [`Component`] constants, for framework-seeded instances with a custom identity.
+    pub const fn with_identity(self, id: &'static str, name: &'static str) -> Self {
+        Self {
+            id,
+            name,
+            ty: TypeDescriptor { name, ..self.ty },
+            ..self
+        }
+    }
+
     /// Places the component in `scope` instead of the singleton scope.
     pub const fn with_scope(self, scope: &'static dyn Scope) -> Self {
         Self { scope, ..self }
