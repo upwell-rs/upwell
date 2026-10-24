@@ -199,6 +199,7 @@ fn pick_greeter(change: &ComponentChange) -> Option<OneShot<Greeter>> {
             Err::<Greeter, &'static str>("unreachable")
         })),
         OneShotMode::Pending => Some(OneShot::new(|_tally: Arc<Tally>| async {
+            PARKED.notify_one();
             std::future::pending::<Greeter>().await
         })),
     }

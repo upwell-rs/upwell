@@ -86,7 +86,8 @@ pub(super) fn set_tally_panics(panics: bool) {
     TALLY_PANICS.store(panics, Ordering::SeqCst);
 }
 
-/// Resolves once a gate in [`GateMode::Park`] has parked a proposal.
+/// Resolves once a reload has parked, at a gate in [`GateMode::Park`] or in a
+/// [`OneShotMode::Pending`] factory.
 pub(super) async fn gate_parked() {
     PARKED.notified().await;
 }

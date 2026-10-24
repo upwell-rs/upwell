@@ -5,9 +5,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use tokio::time::timeout;
+
 use super::fixture::{
-    Greeter, OneShotMode, build_recipe_app, config_dir_of, lock_test_guard, set_one_shot,
-    write_recipe_config,
+    Greeter, OneShotMode, build_recipe_app, config_dir_of, gate_parked, lock_test_guard,
+    set_one_shot, write_recipe_config,
 };
 use super::relabel;
 use crate::{TransitionFailure, TransitionPhase};
@@ -145,14 +147,26 @@ async fn cancelling_a_one_shot_construction_leaves_no_partial_state() {
     let previous = greeter(&app);
     let generation = app.runtime().generation();
     let config_generation = app.runtime().config_generation();
+    let reloading = app.runtime().clone();
 
     set_one_shot(OneShotMode::Pending);
     write_recipe_config(&config_dir_of(&dir), "two");
 
-    let cancelled =
-        tokio::time::timeout(Duration::from_millis(100), app.runtime().reload_config()).await;
+    let task = tokio::spawn(async move { reloading.reload_config().await });
 
-    assert!(cancelled.is_err(), "the pending one-shot never completes");
+    timeout(Duration::from_secs(5), gate_parked())
+        .await
+        .expect("the reload parks in the pending one-shot factory");
+    task.abort();
+
+    let cancelled = task
+        .await
+        .expect_err("the aborted reload does not complete");
+
+    assert!(
+        cancelled.is_cancelled(),
+        "the reload was cancelled, not failed"
+    );
     assert_eq!(app.runtime().generation(), generation);
     assert_eq!(app.runtime().config_generation(), config_generation);
     assert!(Arc::ptr_eq(&previous, &greeter(&app)));
