@@ -187,7 +187,7 @@ pub use upwell_di::ScopeContainer;
 /// scope metadata or implement injectable authentication adapters.
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
 pub use upwell_di::{
-    BoxedComponent, Component, ComponentDescriptor, FromContainer, Injectable, Provide, Wiring,
+    BoxedComponent, Component, ComponentDescriptor, FromContainer, Injectable, Provided, Wiring,
 };
 
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]

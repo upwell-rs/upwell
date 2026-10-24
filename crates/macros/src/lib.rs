@@ -10,7 +10,7 @@
 //! | `#[methods]`                | impl block | lifecycle methods — an `#[init]` constructor (an explicit factory), transition recipes and hooks |
 //! | `#[init]`                   | method     | marker consumed by `#[methods]` |
 //! | `#[replace]` / `#[transition]` / `#[hot_update]` | method | transition-recipe markers consumed by `#[methods]` |
-//! | `#[injectable]`             | trait      | `Provide<dyn Trait>` impl (under `di-check`) |
+//! | `#[injectable]`             | trait      | `Provided<dyn Trait>` impl (under `di-check`) |
 //! | `#[config]`                 | struct/enum | `ConfigProperties` impl (with field `#[default = ".."]` templated defaults); auto-registers a binding when given `#[config(path = "..")]` |
 //! | [`app!`]                    | declaration | named typestate host, configured builder, and feature-gated CLI/tooling entry |
 //!
@@ -679,7 +679,7 @@ pub fn app(input: TokenStream) -> TokenStream {
 /// descriptor to be read through the trait object. Wasm targets retain the
 /// original trait because the DI descriptor types are native-only.
 ///
-/// Under the `di-check` feature it emits `impl Provide<dyn Trait> for Wiring` so
+/// Under the `di-check` feature it emits `impl Provided<dyn Trait> for Wiring` so
 /// a single `Arc<dyn Trait>` dependency type-checks; the trait must be `Send +
 /// Sync` (state it as a supertrait) and object-safe.
 #[proc_macro_attribute]

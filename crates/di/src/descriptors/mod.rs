@@ -9,7 +9,7 @@ pub use component::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole,
     DeclaredScope, Dep, Dynamic, GenerationSnapshot, Injectable, Live, LiveCell, LiveRebind,
-    LiveRef, Provide, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
+    LiveRef, Provided, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
     Registration, ServiceComponent, Wired, Wiring,
 };
 

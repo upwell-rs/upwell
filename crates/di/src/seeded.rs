@@ -34,4 +34,4 @@ impl Injectable for HookManager {
 
 /// Under `di-check`, the hook manager is framework-seeded, so it is always provided.
 #[cfg(feature = "di-check")]
-impl crate::descriptors::Provide<HookManager> for crate::descriptors::Wiring {}
+impl crate::descriptors::Provided<HookManager> for crate::descriptors::Wiring {}

@@ -45,7 +45,7 @@ pub use descriptors::{
     ComponentDescriptor, ComponentFactories, ComponentFactory, ComponentFactoryDescriptor,
     ComponentFactoryRole, ConditionDescriptor, DeclaredScope, Dep, DependencyDescriptor,
     DependencyObservation, DescriptorFor, Dynamic, GenerationSnapshot, Injectable, Live, LiveCell,
-    LiveRebind, LiveRef, PROVIDERS, Provide, ProviderDescriptor, ProviderMappingId, ProviderOf,
+    LiveRebind, LiveRef, PROVIDERS, Provided, ProviderDescriptor, ProviderMappingId, ProviderOf,
     ProviderOrder, ProviderOrderDirection, Registration, RegistryFor, ResolutionMode, Scope,
     ScopeId, ServiceComponent, Singleton, StaticScope, Transient, TypeDescriptor, UpwellDescriptor,
     Wired, Wiring, erase_provider, provider_live_cell,

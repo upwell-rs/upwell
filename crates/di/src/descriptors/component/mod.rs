@@ -128,15 +128,15 @@ impl<H: Injectable> AsRef<H> for Dynamic<H> {
     }
 }
 
-/// Compile-time dependency marker: `Wiring: Provide<T>` holds when some component
+/// Compile-time dependency marker: `Wiring: Provided<T>` holds when some component
 /// in scope provides `T`. Under the `di-check` feature, the macros emit
-/// `impl Provide<Self> for Wiring` for every component and a bound per concrete
+/// `impl Provided<Self> for Wiring` for every component and a bound per concrete
 /// dependency, so a missing provider is a `cargo check` error.
 #[diagnostic::on_unimplemented(
     message = "no component provides `{T}`",
     note = "add a component for `{T}`, or mark the dependency `Dynamic<{T}>` if it is provided at runtime"
 )]
-pub trait Provide<T: ?Sized> {}
+pub trait Provided<T: ?Sized> {}
 
 /// A concrete component that provides the trait object `T`.
 ///
@@ -148,12 +148,12 @@ pub trait ProviderOf<T: ?Sized> {
     fn upcast(this: Arc<Self>) -> Arc<T>;
 }
 
-/// The crate-wide anchor that each component's `Provide` impl attaches to. A
-/// dependency assertion is the bound `Wiring: Provide<Dep>`.
+/// The crate-wide anchor that each component's `Provided` impl attaches to. A
+/// dependency assertion is the bound `Wiring: Provided<Dep>`.
 pub struct Wiring;
 
 /// Marker that all of a component's dependencies are provided. Under `di-check`
-/// the macros emit `impl Wired for T where Wiring: Provide<Dep>, ..` carrying
+/// the macros emit `impl Wired for T where Wiring: Provided<Dep>, ..` carrying
 /// *every* single dependency (concrete and trait-object) as a lazy bound.
 pub trait Wired {}
 

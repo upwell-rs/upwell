@@ -195,4 +195,4 @@ pub fn register_topic_bus<P: PubSubProtocol>(registry: &mut upwell_app::AppRegis
 }
 
 #[cfg(feature = "di-check")]
-impl<P: PubSubProtocol> upwell_di::Provide<TopicBus<P>> for upwell_di::Wiring {}
+impl<P: PubSubProtocol> upwell_di::Provided<TopicBus<P>> for upwell_di::Wiring {}

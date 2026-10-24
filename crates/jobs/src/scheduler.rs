@@ -419,7 +419,7 @@ impl Component for JobScheduler {
 /// Under `di-check`, the scheduler is plugin-seeded, so it is always provided — letting a user
 /// component inject `Arc<JobScheduler>` to schedule jobs at run time.
 #[cfg(feature = "di-check")]
-impl upwell_di::Provide<JobScheduler> for upwell_di::Wiring {}
+impl upwell_di::Provided<JobScheduler> for upwell_di::Wiring {}
 
 /// The scheduler's construction factory: resolves the injected [`RootResolver`] and builds it.
 fn scheduler_construct<'a>(

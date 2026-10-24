@@ -417,11 +417,11 @@ pub fn explicit_factory(
 struct FieldPlan {
     value: TokenStream,
     dependency: Option<TokenStream>,
-    /// The `Provide<Target>` type to assert eagerly for this field, when it is a
+    /// The `Provided<Target>` type to assert eagerly for this field, when it is a
     /// required *concrete* dependency (trait-object / optional / dynamic / multi
     /// edges are not eagerly asserted in the per-macro path).
     check: Option<TokenStream>,
-    /// The `Provide<Target>` type for the lazy `Wired` bound — every required
+    /// The `Provided<Target>` type for the lazy `Wired` bound — every required
     /// single dependency, *including* trait objects (checked only via `app!`).
     wired: Option<TokenStream>,
 }
@@ -707,7 +707,7 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
         qualifier,
     );
 
-    // A required, concrete single edge is `Provide`-checkable; trait-object,
+    // A required, concrete single edge is `Provided`-checkable; trait-object,
     // optional, and dynamic edges are not asserted in the per-macro path.
     let handle_is_trait = matches!(&handle, syn::Type::TraitObject(_))
         || matches!(attr::arc_inner_type(&handle), Ok(inner) if matches!(inner, syn::Type::TraitObject(_)));

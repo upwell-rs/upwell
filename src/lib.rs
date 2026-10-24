@@ -50,7 +50,7 @@ pub use upwell_di::{
     EffectiveGraph, Factory, FactoryIdentity, FactoryOutput, Fresh, FreshFromContainer,
     FromContainer, GenerationSnapshot, HotUpdate, HotUpdateFactory, HotUpdateOutput, Injectable,
     Lazy, Live, LiveCell, LiveRebind, LiveRef, NodeAction, OneShot, PROVIDERS, PlannedNode,
-    Previous, Provide, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
+    Previous, Provided, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
     ReasonKind, Registration, RegistryFor, ReplacementFactory, RootResolver, ScopeContainer,
     ScopeRegistry, ServiceComponent, StaleGraphCandidate, TransitionPlan, TransitionReason,
     UpwellDescriptor, ValidatedConditionEvaluation, Wired, Wiring, dependency_of,

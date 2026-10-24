@@ -97,5 +97,5 @@ per-protocol macro crates (e.g. `upwell-rpc-macros`) are siblings, not dependent
 |---|---|
 | `cli` *(default)* | Generate application-specific Clap types and `run`/`run_with` dispatch for named hosts. |
 | `tooling` | Generate each named host's private target-local tooling entry. |
-| `di-check` | Emit compile-time dependency-injection checks (`impl Provide<Self> for Wiring` per component, plus a `Wiring: Provide<Dep>` bound per concrete dependency). Forwards to `upwell-macros-core/di-check`. |
+| `di-check` | Emit compile-time dependency-injection checks (`impl Provided<Self> for Wiring` per component, plus a `Wiring: Provided<Dep>` bound per concrete dependency). Forwards to `upwell-macros-core/di-check`. |
 | `hybrid-registry` | Force generated registration through `inventory`; Apple/Mach-O hosts select it automatically. |
