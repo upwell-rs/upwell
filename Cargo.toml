@@ -251,7 +251,7 @@ tungstenite = [
 # published `tsify` `into_wasm_abi` path (no git dependency needed).
 wasm-ts = ["upwell-axum?/wasm-ts"]
 
-# Emit compile-time dependency-injection checks (a `Wiring: Provide<Dep>` bound
+# Emit compile-time dependency-injection checks (a `Wiring: Provided<Dep>` bound
 # per concrete dependency). A missing provider becomes a `cargo check` error.
 di-check = [
     "upwell-macros/di-check",

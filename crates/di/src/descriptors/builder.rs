@@ -216,6 +216,8 @@ impl ComponentDescriptor {
 
     /// Gives the component the stable ID `id` and the name `name` in place of its
     /// [`Component`] constants, for framework-seeded instances with a custom identity.
+    /// The type descriptor is renamed too, so `ty.name` becomes `name` rather than
+    /// `T::NAME`.
     pub const fn with_identity(self, id: &'static str, name: &'static str) -> Self {
         Self {
             id,

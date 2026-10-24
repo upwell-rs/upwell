@@ -14,7 +14,7 @@ categories.workspace = true
 # Make `PeerInfo` an Upwell DI injectable (so a connection-scoped component can depend
 # on it). Pulls in `upwell-di`; off by default so the transport stays standalone.
 di = ["dep:upwell-di"]
-# Additionally emit the compile-time `Provide<PeerInfo>` impl for di-check.
+# Additionally emit the compile-time `Provided<PeerInfo>` impl for di-check.
 di-check = ["di", "upwell-di/di-check"]
 
 [dependencies]

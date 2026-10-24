@@ -40,7 +40,7 @@ impl ConditionFacts for BenchConfig {
         vec![ConfigFactDescriptor {
             id: ConfigFactId::new("bench::BenchConfig", binding_path, "gated"),
             kind: ConditionScalarKind::Bool,
-            source: upwell_core::descriptor_source!(),
+            source: upwell_core::DescriptorSource::caller(),
         }]
     }
 
@@ -75,7 +75,7 @@ async fn gated() -> Gated {
 
 static GATED_CONDITION: ConditionDescriptor = ConditionDescriptor {
     id: "bench-gated",
-    source: upwell_core::descriptor_source!(),
+    source: upwell_core::DescriptorSource::caller(),
     predicate: ConditionPredicate::ConfigBool(GATED_FACT),
 };
 
