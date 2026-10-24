@@ -159,24 +159,24 @@ pub fn field_injection_component(
     scope_path: &syn::Path,
     registrations_slice: &syn::Ident,
     emit_default_factory: bool,
+    condition: &TokenStream,
     paths: &Paths,
 ) -> TokenStream {
     let self_ident = item.ident.clone();
     let boxed_component = paths.core("BoxedComponent");
     let component_construction_context = paths.core("ComponentConstructionContext");
     let component_descriptor = paths.core("ComponentDescriptor");
+    let generation_snapshot = paths.core("GenerationSnapshot");
     let component_factories = paths.core("ComponentFactories");
     let component_hooks = paths.core("ComponentHooks");
     let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
+    let component_factory_role = paths.core("ComponentFactoryRole");
     let components_slice = paths.core("COMPONENTS");
     let dependency_descriptor = paths.core("DependencyDescriptor");
     let component = paths.core("Component");
     let injectable = paths.core("Injectable");
     let distributed_slice = paths.core("linkme::distributed_slice");
     let linkme_crate = paths.core("linkme");
-    let inventory = paths.core("inventory");
-    let registration = paths.core("Registration");
-    let descriptor_for = paths.core("DescriptorFor");
     let result = paths.core("DiResult");
     let type_descriptor = paths.core("TypeDescriptor");
     let descriptor_trait = paths.core("Descriptor");
@@ -250,24 +250,18 @@ pub fn field_injection_component(
 
         let factory_literal = quote! {
             #component_factory_descriptor {
+                id: "default",
                 construct: __upwell_factory,
                 dependencies: __upwell_deps,
-                default: true,
+                role: #component_factory_role::Default,
             }
         };
-        let register_default = crate::backend::dual_backend(
-            quote! {
-                #inventory::submit! {
-                    #descriptor_for::<#self_ident, #component_factory_descriptor>::new(#factory_literal)
-                }
-            },
-            quote! {
-                #[#distributed_slice(#registrations_slice)]
-                #[linkme(crate = #linkme_crate)]
-                #[allow(unsafe_code)]
-                static __UPWELL_DEFAULT_FACTORY: #registration =
-                    #registration::Factory(#factory_literal);
-            },
+        let register_default = register_factory(
+            &self_ident,
+            registrations_slice,
+            &format_ident!("__UPWELL_DEFAULT_FACTORY"),
+            &factory_literal,
+            paths,
         );
 
         quote! {
@@ -315,6 +309,8 @@ pub fn field_injection_component(
         crate::di::wired_impl(&self_ident, &[], paths)
     };
 
+    let declared_ty = crate::source::declared_type(&self_ident, &self_ident, &name, paths);
+
     quote! {
         #default_factory
 
@@ -322,10 +318,12 @@ pub fn field_injection_component(
             #component_descriptor {
                 id: #id,
                 name: #name,
-                ty: #type_descriptor::of::<#self_ident>(#name),
+                ty: #declared_ty,
                 scope: &#scope_path,
+                condition: #condition,
                 factories: <#self_ident as #component_factories>::factories,
                 hooks: <#self_ident as #component_hooks>::hooks,
+                generation_snapshot: ::core::option::Option::Some(#generation_snapshot::of::<#self_ident>()),
             };
 
         impl #descriptor_trait<#component_descriptor> for #self_ident {
@@ -339,72 +337,78 @@ pub fn field_injection_component(
     }
 }
 
-/// Emits an explicit `factory = path` factory entry: it appends a non-default
-/// [`ComponentFactoryDescriptor`] to the type's factory slice, driving the given
-/// async factory through the build-time `Factory` machinery (so the path's
-/// signature need not be visible — its deps come from its parameters' `FromContainer`
-/// impls). Overrides the field-injection default.
-pub fn explicit_factory(
-    self_ident: &syn::Ident,
-    factory_path: &syn::Path,
+/// Appends `factory`, a `ComponentFactoryDescriptor` literal, to `self_ty`'s registrations:
+/// an `inventory` submission, or a `static` named `name` in its `linkme` slice.
+pub fn register_factory(
+    self_ty: &impl ToTokens,
     registrations_slice: &syn::Ident,
+    name: &syn::Ident,
+    factory: &TokenStream,
     paths: &Paths,
 ) -> TokenStream {
-    let component_construction_context = paths.core("ComponentConstructionContext");
     let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
-    let dependency_descriptor = paths.core("DependencyDescriptor");
-    let dispatch_factory = paths.core("dispatch_factory");
-    let factory_dependencies = paths.core("factory_dependencies");
-    let boxed_component = paths.core("BoxedComponent");
     let distributed_slice = paths.core("linkme::distributed_slice");
     let linkme_crate = paths.core("linkme");
     let inventory = paths.core("inventory");
     let registration = paths.core("Registration");
     let descriptor_for = paths.core("DescriptorFor");
-    let result = paths.core("DiResult");
 
-    let factory_literal = quote! {
-        #component_factory_descriptor {
-            construct: __upwell_explicit_factory,
-            dependencies: __upwell_explicit_deps,
-            default: false,
-        }
-    };
-    let register = crate::backend::dual_backend(
+    crate::backend::dual_backend(
         quote! {
             #inventory::submit! {
-                #descriptor_for::<#self_ident, #component_factory_descriptor>::new(#factory_literal)
+                #descriptor_for::<#self_ty, #component_factory_descriptor>::new(#factory)
             }
         },
         quote! {
             #[#distributed_slice(#registrations_slice)]
             #[linkme(crate = #linkme_crate)]
             #[allow(unsafe_code)]
-            static __UPWELL_EXPLICIT_FACTORY: #registration =
-                #registration::Factory(#factory_literal);
+            static #name: #registration = #registration::Factory(#factory);
         },
-    );
+    )
+}
+
+/// A non-default `ComponentFactoryDescriptor` literal with id `id` that drives the async
+/// `factory` through the build-time `Factory` machinery, as `factories!` expands an entry:
+/// the factory's parameters supply both construction and the dependency edges, so its
+/// signature need not be visible to the macro.
+pub fn factory_descriptor(id: &TokenStream, factory: &TokenStream, paths: &Paths) -> TokenStream {
+    let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
+    let component_factory_role = paths.core("ComponentFactoryRole");
+    let dispatch_factory = paths.core("dispatch_factory");
+    let factory_dependencies = paths.core("factory_dependencies");
 
     quote! {
-        fn __upwell_explicit_deps() -> ::std::vec::Vec<#dependency_descriptor> {
-            #factory_dependencies(#factory_path)
+        #component_factory_descriptor {
+            id: #id,
+            construct: |cx| #dispatch_factory(#factory, cx),
+            dependencies: || #factory_dependencies(#factory),
+            role: #component_factory_role::Explicit,
         }
-
-        #[allow(unused_variables)]
-        fn __upwell_explicit_factory(
-            cx: &mut #component_construction_context,
-        ) -> ::core::pin::Pin<
-            ::std::boxed::Box<
-                dyn ::core::future::Future<
-                    Output = #result<#boxed_component>,
-                > + ::core::marker::Send + '_,
-            >,
-        > {
-            #dispatch_factory(#factory_path, cx)
-        }
-
-        #register
     }
+}
+
+/// Emits an explicit `factory = path` factory entry, appended to the type's factory slice;
+/// it overrides the field-injection default.
+pub fn explicit_factory(
+    self_ident: &syn::Ident,
+    factory_path: &syn::Path,
+    registrations_slice: &syn::Ident,
+    paths: &Paths,
+) -> TokenStream {
+    let factory = factory_descriptor(
+        &quote!(concat!("factory:", stringify!(#factory_path))),
+        &quote!(#factory_path),
+        paths,
+    );
+
+    register_factory(
+        self_ident,
+        registrations_slice,
+        &format_ident!("__UPWELL_EXPLICIT_FACTORY"),
+        &factory,
+        paths,
+    )
 }
 
 /// One field's contribution: the value expression that builds it in the struct
@@ -413,11 +417,11 @@ pub fn explicit_factory(
 struct FieldPlan {
     value: TokenStream,
     dependency: Option<TokenStream>,
-    /// The `Provide<Target>` type to assert eagerly for this field, when it is a
+    /// The `Provided<Target>` type to assert eagerly for this field, when it is a
     /// required *concrete* dependency (trait-object / optional / dynamic / multi
     /// edges are not eagerly asserted in the per-macro path).
     check: Option<TokenStream>,
-    /// The `Provide<Target>` type for the lazy `Wired` bound — every required
+    /// The `Provided<Target>` type for the lazy `Wired` bound — every required
     /// single dependency, *including* trait objects (checked only via `app!`).
     wired: Option<TokenStream>,
 }
@@ -473,16 +477,25 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
     let config_store = paths.core("ConfigStore");
     let resolver_ctx_ext = paths.core("ResolverCtxExt");
 
+    let dependency_observation = paths.core("DependencyObservation");
     let dep = |handle: &syn::Type,
                kind: TokenStream,
                optional: bool,
                dynamic: bool,
                qualifier: TokenStream| {
-        let dep_name_str = match attr::arc_inner_type(handle) {
-            Ok(inner) => inner.to_token_stream().to_string(),
-            Err(_) => handle.to_token_stream().to_string(),
-        };
+        let dep_name_str = attr::arc_inner_type(handle)
+            .ok()
+            .or_else(|| attr::dep_inner(handle))
+            .map_or_else(
+                || handle.to_token_stream().to_string(),
+                |inner| inner.to_token_stream().to_string(),
+            );
         let dep_name = LitStr::new(&dep_name_str, handle.span());
+        let observation = if attr::dep_inner(handle).is_some() {
+            quote!(#dependency_observation::Live)
+        } else {
+            quote!(#dependency_observation::Snapshot)
+        };
 
         quote! {
             #dependency_descriptor {
@@ -494,6 +507,7 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
                 qualifier: #qualifier,
                 config: false,
                 resolution: #resolution_mode::Eager,
+                observation: #observation,
             }
         }
     };
@@ -606,6 +620,7 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
                 qualifier: #qualifier,
                 config: true,
                 resolution: #resolution_mode::Eager,
+                observation: #dependency_observation::Live,
             }
         };
 
@@ -692,7 +707,7 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
         qualifier,
     );
 
-    // A required, concrete single edge is `Provide`-checkable; trait-object,
+    // A required, concrete single edge is `Provided`-checkable; trait-object,
     // optional, and dynamic edges are not asserted in the per-macro path.
     let handle_is_trait = matches!(&handle, syn::Type::TraitObject(_))
         || matches!(attr::arc_inner_type(&handle), Ok(inner) if matches!(inner, syn::Type::TraitObject(_)));

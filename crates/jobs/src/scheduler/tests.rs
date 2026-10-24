@@ -41,7 +41,7 @@ fn descriptor_carries_a_non_default_factory() {
     let factories = (descriptor.factories)();
 
     assert_eq!(factories.len(), 1);
-    assert!(!factories[0].default);
+    assert_eq!(factories[0].role, upwell_di::ComponentFactoryRole::Explicit);
 }
 
 /// The scheduler needs no live container for dynamic jobs — the runner closure captures its

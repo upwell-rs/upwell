@@ -82,6 +82,7 @@ fn terminal_report_preserves_line_without_column() {
                 file: String::from("src/main.rs"),
                 line: Some(12),
                 column: None,
+                rust_path: None,
             }],
             ..Diagnostic::default()
         }],
@@ -116,6 +117,7 @@ fn terminal_report_escapes_controls_in_shared_diagnostics() {
                 file: String::from("src/main.rs\r\u{1b}"),
                 line: Some(12),
                 column: None,
+                rust_path: None,
             }],
             fix: Some(String::from("fix\nthis\rnow")),
         }],

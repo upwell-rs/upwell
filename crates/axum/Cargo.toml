@@ -114,6 +114,7 @@ serde-wasm-bindgen = { workspace = true, optional = true }
 # streaming/ws/hyper client backends that need a real runtime and sockets.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 upwell-app = { workspace = true }
+upwell-macros = { workspace = true }
 upwell-core = { workspace = true }
 upwell-di = { workspace = true }
 upwell-config = { workspace = true }

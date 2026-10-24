@@ -1,0 +1,5 @@
+error: a `#[transition]` handler only selects a factory and cannot be `async`; do async work in the `OneShot` factory it returns
+ --> tests/ui/recipes/async_handler.rs:9:5
+  |
+9 |     async fn pick(_change: &ComponentChange) -> Option<OneShot<Self>> {
+  |     ^^^^^

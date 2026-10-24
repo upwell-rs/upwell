@@ -27,7 +27,9 @@ fn relation_family(index: &GraphIndex, edge: &Relationship) -> Option<GraphRelat
             Some(GraphRelationFamily::Dependencies)
         }
         RelationshipKind::Provides if composition => Some(GraphRelationFamily::Composition),
-        RelationshipKind::Provides => Some(GraphRelationFamily::Dependencies),
+        RelationshipKind::Provides | RelationshipKind::Gates => {
+            Some(GraphRelationFamily::Dependencies)
+        }
         RelationshipKind::OpensScope => Some(GraphRelationFamily::Scopes),
         RelationshipKind::Hooks => Some(GraphRelationFamily::Lifecycle),
         RelationshipKind::Contains
@@ -83,7 +85,7 @@ fn semantic_orientation(edge: &Relationship) -> (&str, &str) {
         | RelationshipKind::OrdersBefore
         | RelationshipKind::Validates => (&edge.to, &edge.from),
         RelationshipKind::DependsOn | RelationshipKind::OrdersAfter => (&edge.from, &edge.to),
-        RelationshipKind::Hooks => (&edge.to, &edge.from),
+        RelationshipKind::Hooks | RelationshipKind::Gates => (&edge.to, &edge.from),
         _ => (&edge.from, &edge.to),
     }
 }

@@ -13,7 +13,8 @@ use std::sync::Arc;
 use upwell_core::{Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, DependencyDescriptor, Injectable,
+    ComponentFactoryDescriptor, ComponentFactoryRole, DependencyDescriptor, GenerationSnapshot,
+    Injectable,
 };
 use upwell_hooks::no_hooks;
 use upwell_transport::CodecError;
@@ -141,6 +142,10 @@ impl<P: PubSubProtocol> Injectable for TopicBus<P> {
     fn from_stored(stored: &Self) -> Self {
         stored.clone()
     }
+
+    fn snapshot_stored(stored: &Self) -> Option<Self> {
+        Some(stored.clone())
+    }
 }
 
 fn topic_bus_dependencies() -> Vec<DependencyDescriptor> {
@@ -160,9 +165,10 @@ fn construct_topic_bus<P: PubSubProtocol>(
 
 fn topic_bus_factories<P: PubSubProtocol>() -> &'static [ComponentFactoryDescriptor] {
     &[ComponentFactoryDescriptor {
+        id: "static",
         construct: construct_topic_bus::<P>,
         dependencies: topic_bus_dependencies,
-        default: true,
+        role: ComponentFactoryRole::Default,
     }]
 }
 
@@ -176,8 +182,10 @@ pub fn topic_bus_descriptor<P: PubSubProtocol>() -> ComponentDescriptor {
         name,
         ty: TypeDescriptor::of::<TopicBus<P>>(name),
         scope: &Singleton,
+        condition: None,
         factories: topic_bus_factories::<P>,
         hooks: no_hooks,
+        generation_snapshot: Some(GenerationSnapshot::of::<TopicBus<P>>()),
     }
 }
 
@@ -187,4 +195,4 @@ pub fn register_topic_bus<P: PubSubProtocol>(registry: &mut upwell_app::AppRegis
 }
 
 #[cfg(feature = "di-check")]
-impl<P: PubSubProtocol> upwell_di::Provide<TopicBus<P>> for upwell_di::Wiring {}
+impl<P: PubSubProtocol> upwell_di::Provided<TopicBus<P>> for upwell_di::Wiring {}

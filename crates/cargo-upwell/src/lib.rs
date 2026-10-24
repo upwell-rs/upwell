@@ -25,9 +25,10 @@ pub use command::{
 pub use discovery::{CargoExecutable, DiscoveryError, DiscoveryRequest, discover};
 use fs2::FileExt as _;
 pub use graph::{
-    CliArgumentOwnership, CliCommandOwnership, CliOwnershipSummary, GraphDirection, GraphEmitError,
-    GraphQuery, GraphQueryError, GraphRelationFamily, GraphSelectorKind, GraphSource, GraphView,
-    ResourceExplanation, explain_resource, query_failure_graph, query_graph,
+    CliArgumentOwnership, CliCommandOwnership, CliOwnershipSummary, ConditionStep, GraphDirection,
+    GraphEmitError, GraphQuery, GraphQueryError, GraphRelationFamily, GraphSelectorKind,
+    GraphSource, GraphView, ProviderSelection, ResolvedConsumer, ResourceExplanation,
+    explain_resource, query_failure_graph, query_graph,
 };
 pub use init::{
     Catalog, CatalogError, GitReference, InitError, InitRequest, InitResult, TemplateEntry,
@@ -104,11 +105,13 @@ pub fn run_probe(
     run_probe_with_options(request, cancellation, ProbeOptions::default())
 }
 
-/// Presentation options for one complete application probe.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// Presentation and request options for one complete application probe.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProbeOptions {
     /// Show Cargo's human-readable build output on this process's stderr.
     pub show_cargo_output: bool,
+    /// A proposed config change the probe previews against the prepared application.
+    pub transition_preview: Option<upwell_tooling_schema::TransitionPreviewRequest>,
 }
 
 /// Discovers, builds, and executes one selected application probe with presentation options.
@@ -151,17 +154,22 @@ pub fn run_probe_with_options(
         target: Box::new(target.clone()),
         source: Box::new(source),
     })?;
-    let probe = execute_probe(
+    let mut probe = execute_probe(
         &build.executable,
         &workspace.target_directory,
         &target,
         Some(&workspace.workspace_root),
+        options.transition_preview.as_ref(),
         cancellation,
     )
     .map_err(|source| ProbeRequestError::Probe {
         target: Box::new(target.clone()),
         source: Box::new(source),
     })?;
+
+    probe
+        .envelope
+        .set_workspace_root(workspace.workspace_root.display().to_string());
 
     let probe = ToolingProbe {
         workspace,

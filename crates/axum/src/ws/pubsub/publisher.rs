@@ -79,14 +79,14 @@ where
 }
 
 /// Under `di-check`, a `Publisher<T>` resolves from its protocol's shared bus, so it is provided
-/// exactly when that bus is — the guarantee is conditioned on `Wiring: Provide<TopicBus<T::Protocol>>`
+/// exactly when that bus is — the guarantee is conditioned on `Wiring: Provided<TopicBus<T::Protocol>>`
 /// (STOMP marks its bus provided). A custom protocol whose bus is never registered therefore fails
 /// the compile-time check instead of passing it and blowing up at injection time.
 #[cfg(feature = "di-check")]
-impl<T> upwell_di::Provide<Publisher<T>> for upwell_di::Wiring
+impl<T> upwell_di::Provided<Publisher<T>> for upwell_di::Wiring
 where
     T: Topic,
     T::Protocol: PubSubProtocol,
-    upwell_di::Wiring: upwell_di::Provide<TopicBus<T::Protocol>>,
+    upwell_di::Wiring: upwell_di::Provided<TopicBus<T::Protocol>>,
 {
 }

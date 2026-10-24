@@ -30,10 +30,10 @@ impl Store {
 
 ## Internal role
 
-`Dir<K>` and `DirectoriesManager` implement [`Component`](upwell_di::Component)/[`Injectable`](upwell_di::Injectable) from `upwell-di`, so they resolve through the DI container like any other component (and under `di-check` are framework-seeded via [`Provide`](upwell_di::Provide)). `upwell-config` consumes [`DirectoriesManager::entries`] — the directory namespace as plain `(label, path)` data — to build a `${@config}`/`${@runtime}`/… templating resolver without ever naming the individual `Dir` kind types. `upwell-app` seeds the manager so directory resolution is defined once for the whole application.
+`Dir<K>` and `DirectoriesManager` implement [`Component`](upwell_di::Component)/[`Injectable`](upwell_di::Injectable) from `upwell-di`, so they resolve through the DI container like any other component (and under `di-check` are framework-seeded via [`Provided`](upwell_di::Provided)). `upwell-config` consumes [`DirectoriesManager::entries`] — the directory namespace as plain `(label, path)` data — to build a `${@config}`/`${@runtime}`/… templating resolver without ever naming the individual `Dir` kind types. `upwell-app` seeds the manager so directory resolution is defined once for the whole application.
 
 ## Feature flags
 
 | Feature | Effect |
 |---|---|
-| `di-check` | Forwards to `upwell-di/di-check`, enabling the framework-seeded [`Provide`](upwell_di::Provide) impls so `Dir<K>` and `DirectoriesManager` satisfy compile-time DI checks. |
+| `di-check` | Forwards to `upwell-di/di-check`, enabling the framework-seeded [`Provided`](upwell_di::Provided) impls so `Dir<K>` and `DirectoriesManager` satisfy compile-time DI checks. |

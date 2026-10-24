@@ -339,6 +339,7 @@ fn primary_sources(diagnostic: &cargo_metadata::diagnostic::Diagnostic) -> Vec<S
                 file: span.file_name.clone(),
                 line: Some(line),
                 column: Some(column),
+                rust_path: None,
             })
         })
         .collect()

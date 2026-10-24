@@ -11,8 +11,8 @@ This is a `proc-macro = true` crate whose entry points are thin shims: each forw
 streams to the matching `expand` function in [`upwell-macros-core`](../macros-core), the ordinary
 library that holds all the parsing and codegen (a proc-macro crate can only export proc-macros).
 It exposes the framework's core, protocol-agnostic macros — `#[component]`, `#[config]`,
-`#[methods]`, `#[injectable]`, and `app!` — which span
-components/DI, configuration, and lifecycle. Protocol-specific macros (`#[service]`, `#[handlers]`,
+`#[methods]`, `#[injectable]`, `#[when]`, and `app!` — which span
+components/DI, conditional availability, configuration, and lifecycle. Protocol-specific macros (`#[service]`, `#[handlers]`,
 `#[rpc]`) live in their own crates; only the core stays here. Errors surface as `compile_error!` via
 the core, never a panic.
 
@@ -46,6 +46,29 @@ impl Pool {
 }
 ```
 
+The same block declares how a singleton is carried across a runtime transition: a `#[replace]`
+method builds the new instance from `Previous<Self>`, a `#[transition]` handler picks a one-shot
+factory for one change, and a `#[hot_update]` method prepares an in-place update. Each generates
+the descriptor the `factories!` builder declares; see the
+[transition strategies guide](../../docs/transition-strategies.md).
+
+`#[when(<bool expr>)]`, placed below a component macro, makes the component eligible only while
+the expression holds. The expression is ordinary Rust. A `#[config(path = ..)]` type used as a
+receiver reads its staged value, a component used as a receiver reads its eligibility, and
+`resolve("<path>")` reads a raw config path:
+
+```rust
+#[component(provide = dyn Authenticator, primary)]
+#[when(AuthConfig.mode == AuthMode::Custom)]
+struct CustomAuthenticator;
+```
+
+`cargo upwell inspect` evaluates a condition for the supplied config only when its expression
+stays inside a closed subset: input field reads, `==` / `!=` against literals, unit enum
+variants, constants and `Some(..)` / `None`, `&&`, `||`, `!`, `X.eligible()`, and
+`resolve("<path>")`. Any other expression, such as one calling a method or a macro, is trusted
+code that tooling never runs. It shows that condition's inputs and source text as not evaluated.
+
 `app!` defines a named lifecycle host and its configured builder, selecting a protocol via its
 `protocol:` field. Code that needs local values or post-declaration builder mutation should use
 `App::<Protocol>::builder(name).auto_discover()` directly.
@@ -74,5 +97,5 @@ per-protocol macro crates (e.g. `upwell-rpc-macros`) are siblings, not dependent
 |---|---|
 | `cli` *(default)* | Generate application-specific Clap types and `run`/`run_with` dispatch for named hosts. |
 | `tooling` | Generate each named host's private target-local tooling entry. |
-| `di-check` | Emit compile-time dependency-injection checks (`impl Provide<Self> for Wiring` per component, plus a `Wiring: Provide<Dep>` bound per concrete dependency). Forwards to `upwell-macros-core/di-check`. |
+| `di-check` | Emit compile-time dependency-injection checks (`impl Provided<Self> for Wiring` per component, plus a `Wiring: Provided<Dep>` bound per concrete dependency). Forwards to `upwell-macros-core/di-check`. |
 | `hybrid-registry` | Force generated registration through `inventory`; Apple/Mach-O hosts select it automatically. |

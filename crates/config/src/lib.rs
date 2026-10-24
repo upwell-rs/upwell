@@ -11,6 +11,7 @@
 //! The parser's substitution failure type is [`TemplateError`]; the managed layer's
 //! load/bind failure type is [`ConfigError`].
 
+pub mod condition;
 mod de;
 mod defaults;
 mod error;
@@ -18,22 +19,27 @@ pub mod format;
 mod managed;
 mod parse;
 mod resolve;
+pub mod schema;
 mod value;
 
 pub use de::{ValueDeserializer, from_value, from_value_in};
 pub use defaults::{DefaultSpec, EnumTag};
 pub use error::{TemplateError, TemplateErrorKind};
 pub use resolve::{EnvResolver, MapResolver, ResolveCtx, Resolver, ResolverChain};
+/// The declaration positions [`schema`] records, re-exported so `#[config]` expands under an
+/// `upwell = ::upwell_config` root.
+pub use upwell_core::{DescriptorSource, ItemSource};
 pub use value::{ConfigStr, ConfigValue, Placeholder, Segment};
 
 pub use managed::Toml;
 #[cfg(feature = "yaml")]
 pub use managed::Yaml;
 pub use managed::{
-    CONFIG_BINDINGS, CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, Cfg, CfgNext, ChangedBinding,
-    ComponentHookReport, ConfigBinding, ConfigBindingDescriptor, ConfigDefaults, ConfigError,
-    ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError, ConfigReloadReport,
-    ConfigReloader, ConfigStore, ContainerConfigExt, DirectoriesResolver, Dynamic, Format,
-    FormatId, HookOutcome, ReloadProposal, ReloadTriggers, ReloadableConfig, spawn_reload_triggers,
-    stop_reload_triggers,
+    BindingFacts, CONFIG_BINDINGS, Cfg, CfgNext, ChangedBinding, ComponentHookReport,
+    ConditionFactSource, ConditionFacts, ConfigBinding, ConfigBindingDescriptor, ConfigDefaults,
+    ConfigError, ConfigManager, ConfigOverlay, ConfigOverlayError, ConfigProperties, ConfigReload,
+    ConfigReloadError, ConfigReloader, ConfigStore, ContainerConfigExt, DirectoriesResolver,
+    Dynamic, Format, FormatId, HookOutcome, ReloadCause, ReloadProposal, ReloadSummary,
+    ReloadTarget, ReloadTriggers, ReloadableConfig, StagedConfig, StagedReload,
+    spawn_reload_triggers, stop_reload_triggers,
 };

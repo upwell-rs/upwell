@@ -1,0 +1,127 @@
+use upwell_core::condition::scope::ConditionInputRejection;
+use upwell_core::{ConditionInputId, ConditionScalarKind, ConfigFactId, ProviderMappingId};
+
+use super::AvailabilityEdge;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConditionError {
+    #[error(transparent)]
+    Registry(crate::Error),
+    #[error("duplicate component id: {0}")]
+    DuplicateComponentId(&'static str),
+    #[error("unknown component id: {0}")]
+    UnknownComponentId(String),
+    #[error("duplicate provider mapping id: {0}")]
+    DuplicateProviderMapping(ProviderMappingId),
+    #[error(
+        "provider mapping for trait '{trait_type}' and qualifier '{qualifier}' has no component"
+    )]
+    MissingProviderComponent {
+        trait_type: &'static str,
+        qualifier: &'static str,
+    },
+    #[error("duplicate config fact descriptor: {0:?}")]
+    DuplicateFactDescriptor(ConfigFactId),
+    #[error("duplicate supplied config fact: {0:?}")]
+    DuplicateFactValue(ConfigFactId),
+    #[error("missing supplied config fact: {0:?}")]
+    MissingFactValue(ConfigFactId),
+    #[error("unknown supplied config fact: {0:?}")]
+    UnknownFactValue(ConfigFactId),
+    #[error("duplicate supplied config input: {0:?}")]
+    DuplicateConfigInput(ConditionInputId),
+    #[error("missing supplied config input: {0:?}")]
+    MissingConfigInput(ConditionInputId),
+    #[error("the previous condition evaluation belongs to another catalog")]
+    EvaluationCatalogMismatch,
+    #[error("a tooling condition evaluation left conditions undecided and cannot seed a reload")]
+    IncompleteEvaluation,
+    #[error("config fact kind mismatch for {fact:?}: expected {expected:?}, found {actual:?}")]
+    FactKindMismatch {
+        fact: ConfigFactId,
+        expected: ConditionScalarKind,
+        actual: ConditionScalarKind,
+    },
+    #[error("duplicate condition id '{condition_id}' on component '{component_id}'")]
+    DuplicateConditionId {
+        component_id: &'static str,
+        condition_id: &'static str,
+    },
+    #[error(
+        "condition '{condition_id}' on '{component_id}' references missing config fact {fact:?}"
+    )]
+    MissingFactReference {
+        component_id: &'static str,
+        condition_id: &'static str,
+        fact: ConfigFactId,
+    },
+    #[error(
+        "condition '{condition_id}' on '{component_id}' references missing component '{referenced}'"
+    )]
+    MissingComponentReference {
+        component_id: &'static str,
+        condition_id: &'static str,
+        referenced: &'static str,
+    },
+    #[error(
+        "condition '{condition_id}' on '{component_id}' references missing provider mapping {provider}"
+    )]
+    MissingProviderReference {
+        component_id: &'static str,
+        condition_id: &'static str,
+        provider: ProviderMappingId,
+    },
+    #[error("condition callback on '{component_id}' at '{condition_id}' has an empty kind")]
+    EmptyCallbackKind {
+        component_id: &'static str,
+        condition_id: &'static str,
+    },
+    #[error(
+        "condition callback on '{component_id}' at '{condition_id}' describes a read of undeclared input {input:?}"
+    )]
+    UndeclaredExpressionRead {
+        component_id: &'static str,
+        condition_id: &'static str,
+        input: ConditionInputId,
+    },
+    #[error("condition callback on '{component_id}' at '{condition_id}' failed: {rejection}")]
+    CallbackInputRejected {
+        component_id: &'static str,
+        condition_id: &'static str,
+        rejection: ConditionInputRejection,
+    },
+    #[error("conditional component '{component_id}' uses unsupported scope '{scope}'")]
+    UnsupportedScope {
+        component_id: &'static str,
+        scope: upwell_core::ScopeId,
+    },
+    #[error("factory-less component '{0}' cannot be conditional")]
+    ConditionalManualComponent(&'static str),
+    #[error("manual registration cannot override conditional component '{0}'")]
+    ConditionalManualOverride(&'static str),
+    #[error(
+        "condition availability cycle: {}; remove one of these eligibility conditions so \
+         eligibility no longer depends on itself",
+        cycle_path(.0)
+    )]
+    AvailabilityCycle(Vec<AvailabilityEdge>),
+}
+
+/// Renders a cycle as `a -[condition]-> b -[not condition]-> a`.
+fn cycle_path(cycle: &[AvailabilityEdge]) -> String {
+    let mut path = cycle
+        .first()
+        .map(|edge| edge.from.to_string())
+        .unwrap_or_default();
+
+    for edge in cycle {
+        let negation = if edge.negated { "not " } else { "" };
+
+        path.push_str(&format!(
+            " -[{negation}{}]-> {}",
+            edge.condition_id, edge.to
+        ));
+    }
+
+    path
+}

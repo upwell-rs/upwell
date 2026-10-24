@@ -1,0 +1,42 @@
+error[E0592]: duplicate definitions with name `__upwell_replace`
+  --> tests/ui/recipes/duplicate_recipe_across_blocks.rs:9:14
+   |
+ 9 |     async fn carry(_previous: Previous<Self>) -> Self {
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ duplicate definitions for `__upwell_replace`
+...
+17 |     async fn carry_again(_previous: Previous<Self>) -> Self {
+   |              ---------------------------------------------- other definition for `__upwell_replace`
+
+error[E0034]: multiple applicable items in scope
+  --> tests/ui/recipes/duplicate_recipe_across_blocks.rs:9:14
+   |
+ 9 |     async fn carry(_previous: Previous<Self>) -> Self {
+   |              ^^^^^ multiple `__upwell_replace` found
+   |
+note: candidate #1 is defined in an impl for the type `Ledger`
+  --> tests/ui/recipes/duplicate_recipe_across_blocks.rs:9:14
+   |
+ 9 |     async fn carry(_previous: Previous<Self>) -> Self {
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: candidate #2 is defined in an impl for the type `Ledger`
+  --> tests/ui/recipes/duplicate_recipe_across_blocks.rs:17:14
+   |
+17 |     async fn carry_again(_previous: Previous<Self>) -> Self {
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0034]: multiple applicable items in scope
+  --> tests/ui/recipes/duplicate_recipe_across_blocks.rs:17:14
+   |
+17 |     async fn carry_again(_previous: Previous<Self>) -> Self {
+   |              ^^^^^^^^^^^ multiple `__upwell_replace` found
+   |
+note: candidate #1 is defined in an impl for the type `Ledger`
+  --> tests/ui/recipes/duplicate_recipe_across_blocks.rs:9:14
+   |
+ 9 |     async fn carry(_previous: Previous<Self>) -> Self {
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: candidate #2 is defined in an impl for the type `Ledger`
+  --> tests/ui/recipes/duplicate_recipe_across_blocks.rs:17:14
+   |
+17 |     async fn carry_again(_previous: Previous<Self>) -> Self {
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

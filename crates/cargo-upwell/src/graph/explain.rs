@@ -13,6 +13,7 @@ use super::model::{
     CliArgumentOwnership, CliCommandOwnership, CliOwnershipSummary, ResourceExplanation,
 };
 use super::query::relevant_diagnostics;
+use super::selection::provider_selection;
 
 /// Explains one exact stable resource ID or exact case-sensitive unique resource name.
 pub fn explain_resource(
@@ -28,6 +29,8 @@ pub fn explain_resource(
     let diagnostics = relevant_diagnostics(&index.document.diagnostics, &selected);
     let cli_providers = index.relevant_cli_providers(&selected);
     let cli_ownership = index.cli_ownership(&resource, &cli_providers);
+    let selection = provider_selection(&index, &resource);
+    let transition = index.document.transition_preview.clone();
 
     Ok(ResourceExplanation {
         schema: TOOLING_SCHEMA_VERSION,
@@ -38,6 +41,8 @@ pub fn explain_resource(
         diagnostics,
         cli_providers,
         cli_ownership,
+        selection,
+        transition,
     })
 }
 

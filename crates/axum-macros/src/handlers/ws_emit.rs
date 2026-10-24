@@ -30,6 +30,11 @@ pub(super) fn emit(handlers: &AxumHandlers, cx: &HandlerContext, out: &mut Token
         let destination = &spec.destination;
         let builder = &spec.builder;
         let handler = spec.handler_name.to_string();
+        let source = upwell_macros_core::source::item_source(
+            spec.handler_name.span(),
+            &upwell_macros_core::source::associated_item(self_ty, &spec.handler_name),
+            paths,
+        );
         let payload = spec
             .payload
             .as_ref()
@@ -62,6 +67,7 @@ pub(super) fn emit(handlers: &AxumHandlers, cx: &HandlerContext, out: &mut Token
                     mode: #mode,
                     reply: #reply,
                     codec: #type_descriptor::of::<#codec>(#codec_name),
+                    source: ::core::option::Option::Some(#source),
                 },
                 |runtime| {
                     let svc = runtime

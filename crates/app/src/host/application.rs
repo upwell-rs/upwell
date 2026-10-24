@@ -284,6 +284,7 @@ pub async fn prepare_setup_host_context<H: AppHost>(
     let builder = H::configure(&mut context, builder).await?;
     let builder = H::before_build(&mut context, builder).await?;
     let prepared = builder
+        .execution_mode(context.mode())
         .prepare()
         .map_err(|source| PhaseError::new(LifecyclePhase::Prepare, source))?;
 
@@ -358,7 +359,7 @@ where
     P: ProtocolDefinition,
     H: upwell_di::Injectable,
 {
-    let container = std::sync::Arc::clone(app.container());
+    let container = app.container();
     let consumer = consumer.to_string();
 
     async move {

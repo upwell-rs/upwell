@@ -64,7 +64,9 @@ fn envelope() -> ProbeEnvelope {
                 file: String::from("src/lib.rs"),
                 line: Some(1),
                 column: Some(1),
+                rust_path: None,
             }),
+            workspace_root: None,
         },
         ProbeFailure {
             phase: None,

@@ -2,7 +2,7 @@ use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
 use upwell_core::{ScopeId, Singleton, StaticScope, Transient};
-use upwell_di::{ComponentDescriptor, ProviderSelectionModel, topological_sort};
+use upwell_di::{ComponentDescriptor, EffectiveGraph, ProviderSelectionModel, topological_sort};
 
 use super::PreparedScopeTopology;
 
@@ -48,6 +48,23 @@ impl ScopePlan {
             orders,
             seed_destinations: partitions.seed_destinations,
         })
+    }
+
+    /// The root construction order: `graph`'s singleton order mapped back to these
+    /// singletons, reusing the order the effective graph already computed instead of
+    /// sorting the singletons a second time.
+    pub(crate) fn root_order(&self, graph: &EffectiveGraph) -> Vec<ComponentDescriptor> {
+        let by_id = self
+            .singletons
+            .iter()
+            .map(|component| (component.id, *component))
+            .collect::<HashMap<_, _>>();
+
+        graph
+            .singleton_order()
+            .iter()
+            .filter_map(|id| by_id.get(id).copied())
+            .collect()
     }
 }
 

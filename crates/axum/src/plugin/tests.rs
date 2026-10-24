@@ -63,6 +63,7 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
                     shape: crate::HttpOutputShape::Unary,
                     responses: &[],
                 },
+                source: Some(upwell_core::item_source!("ToolingController::health")),
             },
             crate::HttpRouteDescriptor {
                 handler: "health",
@@ -76,6 +77,7 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
                     shape: crate::HttpOutputShape::Unary,
                     responses: &[],
                 },
+                source: None,
             },
         ]
     }
@@ -125,6 +127,61 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
         Some("GET /api/health")
     );
     assert_eq!(route.display.as_ref().unwrap().details["handler"], "health");
+
+    let source = route
+        .provenance
+        .as_ref()
+        .and_then(|provenance| provenance.source.as_ref())
+        .expect("the macro-recorded route source is projected");
+
+    assert!(
+        std::path::Path::new(&source.file).ends_with("plugin/tests.rs"),
+        "{}",
+        source.file
+    );
+    assert_eq!(
+        source.rust_path.as_deref(),
+        Some("upwell_axum::plugin::tests::ToolingController::health")
+    );
+}
+
+#[cfg(all(feature = "tooling", feature = "openapi"))]
+#[test]
+fn prepared_axum_projects_enabled_openapi_routes_beside_controller_routes() {
+    let config = upwell_config::ConfigManager::<upwell_config::Toml>::from_str(
+        "[axum]\nbase_path = \"/api\"\n\n[axum.openapi]\nenabled = true\njson_path = \"/spec.json\"\n",
+    )
+    .expect("test config parses");
+    let document = upwell_app::App::<super::Axum>::builder("axum-openapi-tooling")
+        .config_source(config)
+        .prepare()
+        .expect("Axum prepares")
+        .tooling_document()
+        .expect("Axum tooling projects");
+    let route = document
+        .resources
+        .iter()
+        .find(|resource| {
+            resource.labels.get("kind").map(String::as_str) == Some("http-route")
+                && resource.labels.get("mounted-by").map(String::as_str) == Some("openapi")
+        })
+        .expect("the OpenAPI document route is projected as an HTTP route");
+    let display = route.display.as_ref().expect("route display");
+    let source = route
+        .provenance
+        .as_ref()
+        .and_then(|provenance| provenance.source.as_ref())
+        .expect("the mounting declaration is projected");
+
+    assert_eq!(display.label.as_deref(), Some("GET /api/spec.json"));
+    assert_eq!(display.details["handler"], "openapi_json");
+    assert_eq!(
+        source.rust_path.as_deref(),
+        Some("upwell_axum::openapi::serve_json")
+    );
+    assert!(document.relationships.iter().any(|relationship| {
+        relationship.from == "protocol:upwell/axum" && relationship.to == route.id
+    }));
 }
 
 #[cfg(all(feature = "tooling", feature = "ws"))]
@@ -164,6 +221,7 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
 
     use super::AxumAppBuilder as _;
 
+    let registered_at = line!() + 3;
     let document = upwell_app::App::<super::Axum>::builder("axum-websocket-tooling")
         .config_source(upwell_config::ConfigManager::<upwell_config::Dynamic>::empty())
         .register_ws::<ToolingWsProtocol>("/events")
@@ -177,7 +235,19 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
         .find(|resource| resource.labels.get("kind") == Some(&String::from("websocket-endpoint")))
         .expect("websocket endpoint resource exists");
 
+    let source = endpoint
+        .provenance
+        .as_ref()
+        .and_then(|provenance| provenance.source.as_ref())
+        .expect("the register_ws call site is projected");
+
     assert_eq!(endpoint.labels["path"], "/events");
+    assert!(
+        std::path::Path::new(&source.file).ends_with("plugin/tests.rs"),
+        "{}",
+        source.file
+    );
+    assert_eq!(source.line, Some(registered_at));
     assert!(
         endpoint
             .display
@@ -186,8 +256,8 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
             .is_some_and(|label| label.ends_with("ToolingWsProtocol"))
     );
     assert!(
-        endpoint.labels["protocol-type"].ends_with("ToolingWsProtocol"),
-        "prepared endpoint retains stable protocol type identity"
+        endpoint.labels["protocol-name"].ends_with("ToolingWsProtocol"),
+        "prepared endpoint retains its protocol type path"
     );
     assert!(document.relationships.iter().any(|relationship| {
         relationship.kind == upwell_app::tooling_schema::RelationshipKind::Contains

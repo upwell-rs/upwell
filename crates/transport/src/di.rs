@@ -24,4 +24,4 @@ impl upwell_di::Injectable for PeerInfo {
 /// Under `di-check`, `PeerInfo` is framework-seeded into every connection scope, so the
 /// compile-time checker treats it as always provided.
 #[cfg(feature = "di-check")]
-impl upwell_di::Provide<PeerInfo> for upwell_di::Wiring {}
+impl upwell_di::Provided<PeerInfo> for upwell_di::Wiring {}

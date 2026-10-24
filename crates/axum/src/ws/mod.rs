@@ -24,7 +24,7 @@ use futures::future::BoxFuture;
 use tokio::time::Duration;
 use upwell_app::{AppRegistry, AppRuntime};
 use upwell_config::ContainerConfigExt;
-use upwell_core::TypeDescriptor;
+use upwell_core::{ItemSource, TypeDescriptor};
 use upwell_di::{BoxedComponent, ScopeContainer};
 
 /// How long the framework waits for a WS close handshake to flush before abandoning the socket.
@@ -178,6 +178,8 @@ pub struct WsMessageDescriptor {
     pub reply: Option<TypeDescriptor>,
     /// Codec used symmetrically for payload and reply bodies.
     pub codec: TypeDescriptor,
+    /// The handler method's declaration, when the registering macro recorded it.
+    pub source: Option<ItemSource>,
 }
 
 impl WsRouteDescriptor {
@@ -482,7 +484,7 @@ impl upwell_di::Injectable for WebsocketUpgradeMeta {
 }
 
 #[cfg(feature = "di-check")]
-impl upwell_di::Provide<WebsocketUpgradeMeta> for upwell_di::Wiring {}
+impl upwell_di::Provided<WebsocketUpgradeMeta> for upwell_di::Wiring {}
 
 pub(crate) static WEBSOCKET_UPGRADE_META_DESCRIPTOR: upwell_di::ComponentDescriptor =
     upwell_di::ComponentDescriptor::manual(
@@ -519,7 +521,7 @@ impl upwell_di::Injectable for WsConnectionMeta {
 }
 
 #[cfg(feature = "di-check")]
-impl upwell_di::Provide<WsConnectionMeta> for upwell_di::Wiring {}
+impl upwell_di::Provided<WsConnectionMeta> for upwell_di::Wiring {}
 
 pub(crate) static WS_CONNECTION_META_DESCRIPTOR: upwell_di::ComponentDescriptor =
     upwell_di::ComponentDescriptor::manual(
@@ -802,9 +804,8 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
                 };
 
                 let connection = match runtime
-                    .open_scope(
+                    .open_scope_from_root(
                         &crate::scope::WebsocketConnection,
-                        Arc::clone(runtime.root()),
                         vec![upgrade_seed, connection_seed],
                     )
                     .await

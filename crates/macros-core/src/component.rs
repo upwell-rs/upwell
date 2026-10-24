@@ -12,11 +12,12 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{ItemStruct, LitStr};
+use syn::{GenericArgument, ItemStruct, LitStr, PathArguments, Type};
 
 use crate::attr::ComponentArgs;
 use crate::extend::{ComponentContext, ComponentExt};
 use crate::paths::Paths;
+use crate::when::{self, Condition};
 use crate::{di, handle, inject, provide};
 
 pub fn expand<Ext: ComponentExt>(
@@ -25,12 +26,33 @@ pub fn expand<Ext: ComponentExt>(
     paths: &Paths,
 ) -> syn::Result<TokenStream> {
     let self_ident = item.ident.clone();
+    let condition = match when::take(&mut item.attrs)
+        .and_then(|whens| Condition::lower(whens, args.scope.as_ref(), paths))
+    {
+        Ok(condition) => condition,
+
+        Err(error) => return Ok(condition_failed(error, &item)),
+    };
+
+    if args.retainable {
+        for field in &item.fields {
+            if contains_live_slot(&field.ty) {
+                return Err(syn::Error::new_spanned(
+                    &field.ty,
+                    "`retainable` components cannot contain Dep<T>, Cfg<T>, or Live<T> fields",
+                ));
+            }
+        }
+    }
+
     let providers = provide::generate_providers(&self_ident, &args, paths);
-    let handle = handle::handle_impl(&self_ident, args.by_value, paths);
+    let handle = handle::handle_impl(&self_ident, args.by_value, args.retainable, paths);
     let handle_associated_type = &handle.associated_type;
     let handle_method = &handle.method;
     let injectable = &handle.injectable;
     let provide_impl = di::provide_impl(&self_ident, paths);
+    let condition_input = when::component_input(&self_ident, paths);
+    let condition_items = &condition.items;
 
     let id = args
         .id
@@ -92,9 +114,11 @@ pub fn expand<Ext: ComponentExt>(
         &scope_path,
         &registrations_slice,
         emit_default,
+        &condition.root,
         paths,
     );
     let component = paths.core("Component");
+    let declared_scope = paths.core("DeclaredScope");
 
     // A router-class component (a service, a controller) forces the lazy `Wired` graph check
     // at its own definition — a missing dependency provider is an error here, not deferred to
@@ -123,13 +147,21 @@ pub fn expand<Ext: ComponentExt>(
             #handle_method
         }
 
+        impl #declared_scope for #self_ident {
+            type Scope = #scope_path;
+        }
+
         #injectable
 
         #provide_impl
 
+        #condition_input
+
         #registrations_infra
 
         const _: () = {
+            #condition_items
+
             #factory
 
             #explicit
@@ -149,6 +181,39 @@ pub fn expand<Ext: ComponentExt>(
 
         #ext
     })
+}
+
+/// Reports a malformed `#[when]` while keeping the item, so its lowered `#[when]` markers still
+/// use the attribute import and the error is not buried under unused-import warnings.
+fn condition_failed(error: syn::Error, item: &ItemStruct) -> TokenStream {
+    let error = error.into_compile_error();
+
+    quote! {
+        #error
+
+        #item
+    }
+}
+
+fn contains_live_slot(ty: &Type) -> bool {
+    match ty {
+        Type::Path(path) => path.path.segments.iter().any(|segment| {
+            matches!(segment.ident.to_string().as_str(), "Dep" | "Cfg" | "Live")
+                || match &segment.arguments {
+                    PathArguments::AngleBracketed(arguments) => arguments.args.iter().any(|arg| {
+                        matches!(arg, GenericArgument::Type(inner) if contains_live_slot(inner))
+                    }),
+                    _ => false,
+                }
+        }),
+        Type::Array(array) => contains_live_slot(&array.elem),
+        Type::Group(group) => contains_live_slot(&group.elem),
+        Type::Paren(paren) => contains_live_slot(&paren.elem),
+        Type::Reference(reference) => contains_live_slot(&reference.elem),
+        Type::Slice(slice) => contains_live_slot(&slice.elem),
+        Type::Tuple(tuple) => tuple.elems.iter().any(contains_live_slot),
+        _ => false,
+    }
 }
 
 #[cfg(test)]

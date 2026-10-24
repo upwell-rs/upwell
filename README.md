@@ -65,6 +65,7 @@ Pick what you need with features (`cli` and `di-check` are enabled by default):
 | `uuid` | `Uuid` support for templated STOMP topics |
 | `yaml` | YAML config sources alongside TOML |
 | `watch` | reload config on file change |
+| `serde` | serialize redacted runtime transition reports for tooling and telemetry |
 | `tracing-subscriber` | the `init_tracing` helper |
 | `wasm-ts` | opt into the newer `tsify` `Ts<T>` wasm ABI for the browser client |
 | `di-check` *(default)* | compile-time DI graph validation |
@@ -247,6 +248,8 @@ async fn main() -> Result<(), upwell::CliError> {
 Both `#[service]`/`#[handlers]`/`#[rpc]` (RPC) and `#[controller]`/`#[handlers]`/`#[get]` (HTTP)
 share the same base machinery: `#[component]` dependencies, `#[config]` values, `Inject<T>`
 route-level DI, and `#[hook(..)]` lifecycle/config-reload hooks.
+Runtime transitions (config reloads that change the component graph) expose proposal, decision,
+outcome and retirement hooks; see the [transition hooks guide](docs/transition-hooks.md).
 
 ## Typed clients
 
@@ -388,6 +391,9 @@ startup or a specific deployment model.
 
 ## Examples
 
+* `examples/conditional` — conditional components switched at runtime: a config-gated
+  `Authenticator` provider, live, reconstructed and state-carrying consumers, transition hooks,
+  and rollback when a replacement fails (`cargo run -p upwell-example-conditional`).
 * `examples/daemon` — a complete RPC daemon: cross-module DI, merged config, and build-time
   DI-graph validation.
 * `examples/http` — a complete HTTP + WebSocket + STOMP app whose library also compiles to a wasm
