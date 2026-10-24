@@ -60,6 +60,7 @@ unit_component!(
 pub(super) const fn live_service_provider<T>() -> ProviderDescriptor
 where
     T: Component + upwell_di::ProviderOf<dyn LiveService>,
+    T::Handle: upwell_di::Injectable<Stored = upwell_di::Live<T>>,
 {
     ProviderDescriptor {
         erase: |_| panic!("transition planning must not erase components"),

@@ -251,10 +251,56 @@ impl ComponentDescriptor {
 impl ProviderDescriptor {
     /// Maps component `T` to the trait object `P` it provides, under the qualifier
     /// `T::ID`, non-primary, with priority `0` and no ordering constraints.
-    /// `trait_name` is the trait object as written (`"dyn Trait"`).
+    /// `trait_name` is the trait object as written (`"dyn Trait"`). `T` must be stored in
+    /// a [`Live<T>`] cell (an `Arc<T>` or `Dep<T>` handle), so a by-value component cannot
+    /// be mapped to a trait:
+    ///
+    /// ```compile_fail,E0271
+    /// # use std::sync::Arc;
+    /// # use upwell_di::{Component, Injectable, ProviderDescriptor, ProviderOf};
+    /// trait Greeter: Send + Sync {}
+    ///
+    /// #[derive(Clone)]
+    /// struct ByValue;
+    ///
+    /// impl Greeter for ByValue {}
+    ///
+    /// impl Component for ByValue {
+    ///     type Handle = Self;
+    ///
+    ///     const ID: &'static str = "by-value";
+    ///     const NAME: &'static str = "ByValue";
+    ///
+    ///     fn into_handle(self) -> Self {
+    ///         self
+    ///     }
+    /// }
+    ///
+    /// impl Injectable for ByValue {
+    ///     type Target = Self;
+    ///     type Stored = Self;
+    ///
+    ///     fn into_stored(self) -> Self {
+    ///         self
+    ///     }
+    ///
+    ///     fn from_stored(stored: &Self) -> Self {
+    ///         stored.clone()
+    ///     }
+    /// }
+    ///
+    /// impl ProviderOf<dyn Greeter> for ByValue {
+    ///     fn upcast(this: Arc<Self>) -> Arc<dyn Greeter> {
+    ///         this
+    ///     }
+    /// }
+    ///
+    /// static GREETER: ProviderDescriptor = ProviderDescriptor::of::<ByValue, dyn Greeter>("dyn Greeter");
+    /// ```
     pub const fn of<T, P>(trait_name: &'static str) -> Self
     where
         T: Component + ProviderOf<P>,
+        T::Handle: Injectable<Stored = Live<T>>,
         P: ?Sized + Send + Sync + 'static,
     {
         Self {
@@ -306,15 +352,21 @@ impl BoxedComponent {
 /// Re-erases a built `T` as the trait object `P` for storage under the trait's key.
 /// The [`ProviderDescriptor::erase`] every provider of `P` declared through
 /// [`ProviderDescriptor::of`] or `provide = dyn Trait` uses.
+///
+/// The `Live<T>` bound on `T`'s handle makes the downcast hold by construction: the
+/// container only erases the box `T`'s own descriptor built, and
+/// [`BoxedComponent::new`] stores `T` as its handle's `Stored` type. A mismatch is a
+/// container bug, so it panics rather than surfacing as a recoverable error.
 pub fn erase_provider<T, P>(concrete: &BoxedComponent) -> BoxedComponent
 where
     T: Component + ProviderOf<P>,
+    T::Handle: Injectable<Stored = Live<T>>,
     P: ?Sized + Send + Sync + 'static,
 {
     let shared = concrete
         .value
         .downcast_ref::<Live<T>>()
-        .expect("provider concrete type mismatch")
+        .expect("the container erases only the concrete box the provider's own descriptor built")
         .snapshot();
     let erased: Arc<P> = T::upcast(shared);
 

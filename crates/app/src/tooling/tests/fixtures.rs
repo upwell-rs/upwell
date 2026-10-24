@@ -316,6 +316,7 @@ pub(super) static FIRST_BEFORE_SECOND: [ProviderOrder; 1] = [ProviderOrder {
 const fn ordered_provider<T>(qualifier: &'static str) -> ProviderDescriptor
 where
     T: Component + upwell_di::ProviderOf<dyn OrderedProvider>,
+    T::Handle: upwell_di::Injectable<Stored = upwell_di::Live<T>>,
 {
     ProviderDescriptor {
         erase: |_| panic!("tooling projection never erases providers"),

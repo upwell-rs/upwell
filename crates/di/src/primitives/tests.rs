@@ -8,8 +8,8 @@ use crate::container::ScopeResolverSlot;
 use crate::error::Error;
 use crate::test_support::test_component;
 use crate::{
-    BoxedComponent, Component, ComponentDescriptor, ProviderDescriptor, ProviderOf, ScopeContainer,
-    ScopeRegistry, factories,
+    BoxedComponent, Component, ComponentDescriptor, Injectable, Live, ProviderDescriptor,
+    ProviderOf, ScopeContainer, ScopeRegistry, factories,
 };
 
 const VISIBLE_SCOPE_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/fresh-visible");
@@ -114,6 +114,7 @@ fn transient_descriptor() -> ComponentDescriptor {
 fn branch_provider<T>() -> ProviderDescriptor
 where
     T: Component + ProviderOf<dyn BranchProvider>,
+    T::Handle: Injectable<Stored = Live<T>>,
 {
     ProviderDescriptor::of::<T, dyn BranchProvider>("dyn BranchProvider").qualifier("shared")
 }
