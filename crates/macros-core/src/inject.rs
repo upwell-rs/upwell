@@ -166,6 +166,7 @@ pub fn field_injection_component(
     let boxed_component = paths.core("BoxedComponent");
     let component_construction_context = paths.core("ComponentConstructionContext");
     let component_descriptor = paths.core("ComponentDescriptor");
+    let generation_snapshot = paths.core("GenerationSnapshot");
     let component_factories = paths.core("ComponentFactories");
     let component_hooks = paths.core("ComponentHooks");
     let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
@@ -322,7 +323,7 @@ pub fn field_injection_component(
                 condition: #condition,
                 factories: <#self_ident as #component_factories>::factories,
                 hooks: <#self_ident as #component_hooks>::hooks,
-                generation_snapshot: #component_descriptor::typed_snapshot::<#self_ident>(),
+                generation_snapshot: ::core::option::Option::Some(#generation_snapshot::of::<#self_ident>()),
             };
 
         impl #descriptor_trait<#component_descriptor> for #self_ident {

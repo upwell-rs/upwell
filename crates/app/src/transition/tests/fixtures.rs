@@ -87,7 +87,7 @@ test_component!(Retainable, "retainable", provides dyn Svc);
 
 /// A framework-style seed descriptor: typed identity, no factory, snapshot adapter.
 pub(super) fn retainable_descriptor() -> ComponentDescriptor {
-    ComponentDescriptor::manual_of::<Retainable>("retainable", "Retainable", &Singleton)
+    ComponentDescriptor::of::<Retainable>().with_identity("retainable", "Retainable")
 }
 
 pub(super) fn svc_provider() -> ProviderDescriptor {

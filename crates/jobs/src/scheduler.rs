@@ -35,8 +35,8 @@ use tracing::info;
 use upwell_core::{DependencyDescriptor, ResolverCtx, ResolverCtxExt, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, ComponentFactoryRole, ComponentSource, Result as DiResult,
-    RootResolver, Singleton, dispatch_factory, factory_dependencies,
+    ComponentFactoryDescriptor, ComponentFactoryRole, ComponentSource, GenerationSnapshot,
+    Result as DiResult, RootResolver, Singleton, dispatch_factory, factory_dependencies,
 };
 use upwell_hooks::{Error as HookError, HookDescriptor, HookKind, Result as HookResult, Startup};
 
@@ -502,7 +502,7 @@ impl upwell_core::Descriptor<ComponentDescriptor> for JobScheduler {
         condition: None,
         factories: scheduler_factories,
         hooks: scheduler_hooks,
-        generation_snapshot: ComponentDescriptor::typed_snapshot::<JobScheduler>(),
+        generation_snapshot: Some(GenerationSnapshot::of::<JobScheduler>()),
     };
 }
 

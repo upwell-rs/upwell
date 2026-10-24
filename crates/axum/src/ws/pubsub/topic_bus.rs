@@ -13,7 +13,8 @@ use std::sync::Arc;
 use upwell_core::{Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, ComponentFactoryRole, DependencyDescriptor, Injectable,
+    ComponentFactoryDescriptor, ComponentFactoryRole, DependencyDescriptor, GenerationSnapshot,
+    Injectable,
 };
 use upwell_hooks::no_hooks;
 use upwell_transport::CodecError;
@@ -184,7 +185,7 @@ pub fn topic_bus_descriptor<P: PubSubProtocol>() -> ComponentDescriptor {
         condition: None,
         factories: topic_bus_factories::<P>,
         hooks: no_hooks,
-        generation_snapshot: ComponentDescriptor::typed_snapshot::<TopicBus<P>>(),
+        generation_snapshot: Some(GenerationSnapshot::of::<TopicBus<P>>()),
     }
 }
 

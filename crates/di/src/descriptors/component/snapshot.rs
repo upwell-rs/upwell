@@ -35,8 +35,10 @@ impl Retention {
 }
 
 impl GenerationSnapshot {
-    /// The typed snapshot of `T`: retained across generations, with live access.
-    pub(super) const fn of<T: Component>() -> Self {
+    /// The typed snapshot of `T`: retained across generations, with live access. Set by
+    /// [`ComponentDescriptor::of`] and by descriptor literals that cannot use it.
+    #[doc(hidden)]
+    pub const fn of<T: Component>() -> Self {
         Self {
             retention: Some(Retention {
                 snapshot: generation_snapshot_adapter::<T>,

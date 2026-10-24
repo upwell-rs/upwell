@@ -4,11 +4,9 @@ use super::*;
 
 #[tokio::test]
 async fn snapshot_rejects_a_non_singleton_descriptor() {
-    let descriptor = ComponentDescriptor::manual_of::<SharedService>(
-        "snapshot-shared",
-        "SharedService",
-        &SnapshotRequestScope,
-    );
+    let descriptor = ComponentDescriptor::of::<SharedService>()
+        .with_identity("snapshot-shared", "SharedService")
+        .with_scope(&SnapshotRequestScope);
     let typed = ComponentDescriptor::of::<SharedService>();
     let root = root_with(
         &[typed],

@@ -215,11 +215,8 @@ impl Injectable for UnretainedByValue {
 #[tokio::test]
 async fn typed_handle_without_snapshot_contract_requires_distinct_restart() {
     let unretained = || {
-        ComponentDescriptor::manual_of::<UnretainedByValue>(
-            UnretainedByValue::ID,
-            UnretainedByValue::NAME,
-            &Singleton,
-        )
+        ComponentDescriptor::of::<UnretainedByValue>()
+            .with_identity(UnretainedByValue::ID, UnretainedByValue::NAME)
     };
     let active_hooks = HookManager::new(Vec::new());
     let active = active_view(
