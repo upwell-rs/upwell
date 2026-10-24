@@ -96,4 +96,4 @@ impl Injectable for RuntimeReloader {
 
 /// Under `di-check`, the reloader is framework-seeded, so it is always provided.
 #[cfg(feature = "di-check")]
-impl upwell_di::Provide<RuntimeReloader> for upwell_di::Wiring {}
+impl upwell_di::Provided<RuntimeReloader> for upwell_di::Wiring {}

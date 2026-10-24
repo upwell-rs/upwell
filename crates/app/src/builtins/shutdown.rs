@@ -47,4 +47,4 @@ impl Injectable for ShutdownHandle {
 
 /// Under `di-check`, the handle is framework-seeded, so it is always provided.
 #[cfg(feature = "di-check")]
-impl upwell_di::Provide<ShutdownHandle> for upwell_di::Wiring {}
+impl upwell_di::Provided<ShutdownHandle> for upwell_di::Wiring {}
