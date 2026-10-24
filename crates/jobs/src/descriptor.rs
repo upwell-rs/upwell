@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use upwell_core::TypeDescriptor;
+use upwell_core::{ItemSource, TypeDescriptor};
 use upwell_di::RootResolver;
 
 use crate::run::JobRunContext;
@@ -39,6 +39,8 @@ pub struct JobDescriptor {
     /// The job's execution options (overlap policy, timeout, jitter, …), parsed from the
     /// extra `#[job(..)]` keys. [`JobOptions::default`] preserves the original behaviour.
     pub options: JobOptions,
+    /// The job method's declaration.
+    pub source: ItemSource,
 }
 
 impl std::fmt::Debug for JobDescriptor {

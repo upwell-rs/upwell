@@ -3,8 +3,10 @@ use upwell_tooling_schema::{Diagnostic, DiagnosticSeverity, ProbeFailure};
 use super::{contribution_id, contributor_id};
 use crate::{ContributionProvenance, InstallationOrigin, InstallationProvenance};
 
+mod details;
 mod di;
 
+pub(in crate::tooling) use details::*;
 pub(in crate::tooling) use di::di_failure;
 
 pub(super) fn app_diagnostics(error: &crate::Error, phase: Option<String>) -> Option<ProbeFailure> {
@@ -16,6 +18,10 @@ pub(super) fn app_diagnostics(error: &crate::Error, phase: Option<String>) -> Op
             .collect(),
         crate::Error::PluginPlan(error) => vec![plugin_plan_diagnostic(error)],
         crate::Error::ScopeTopology(error) => vec![scope_topology_diagnostic(error)],
+        crate::Error::UndecidedConditionGraph {
+            not_evaluated,
+            source,
+        } => undecided_graph_diagnostics(not_evaluated, source),
         _ => return None,
     };
 
@@ -26,6 +32,35 @@ pub(super) fn app_diagnostics(error: &crate::Error, phase: Option<String>) -> Op
         diagnostics,
         resource_kinds,
     })
+}
+
+/// The validation failure of the decidable graph, followed by one warning per component
+/// whose condition tooling did not evaluate.
+fn undecided_graph_diagnostics(not_evaluated: &[&str], source: &crate::Error) -> Vec<Diagnostic> {
+    let mut diagnostics = match app_diagnostics(source, None) {
+        Some(failure) => failure.diagnostics,
+
+        None => {
+            let (code, message, _, resources, sources, hint) = app_failure(source, None);
+
+            vec![details_diagnostic(code, message, resources, sources, hint)]
+        }
+    };
+
+    diagnostics.extend(not_evaluated.iter().map(|component| Diagnostic {
+        code: String::from("upwell/tooling-condition-not-evaluated"),
+        severity: DiagnosticSeverity::Warning,
+        message: String::from(
+            "This component's condition needs a trusted callback, so tooling left it out of the graph.",
+        ),
+        resources: vec![super::component_resource(component)],
+        sources: Vec::new(),
+        fix: Some(String::from(
+            "Write the #[when] expression inside the tooling-evaluable subset, or run the application to decide it.",
+        )),
+    }));
+
+    diagnostics
 }
 
 pub(super) fn diagnostic_resource_kinds(

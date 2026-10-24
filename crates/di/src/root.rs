@@ -114,4 +114,4 @@ pub const fn root_resolver_descriptor() -> crate::ComponentDescriptor {
 
 /// Under `di-check`, the root resolver is framework-seeded, so it is always provided.
 #[cfg(feature = "di-check")]
-impl crate::descriptors::Provide<RootResolver> for crate::descriptors::Wiring {}
+impl crate::descriptors::Provided<RootResolver> for crate::descriptors::Wiring {}

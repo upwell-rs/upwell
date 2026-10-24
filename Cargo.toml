@@ -2,6 +2,7 @@
 members = [
     ".",
     "crates/*",
+    "examples/conditional",
     "examples/daemon",
     "examples/http",
     "examples/jobs",
@@ -15,7 +16,7 @@ edition = "2024"
 license = "MIT"
 authors = ["Emil Schütt <emil.schutt@gmail.com>"]
 repository = "https://github.com/upwell-rs/upwell"
-homepage = "https://github.com/upwell-rs/upwell"
+homepage = "https://upwell-docs-production.up.railway.app/"
 keywords = ["application", "rpc", "framework", "async", "ioc"]
 categories = ["network-programming", "asynchronous"]
 
@@ -127,7 +128,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi",
 # hardcode `::tsify`/`::wasm_bindgen`, so a wasm client crate depends on `tsify` + `wasm-bindgen`
 # directly (see the http example). Clean dep tree (serde + wasm-bindgen + gloo-utils) — no
 # openssl/rsa. Listed here only to pin the version the docs/examples reference.
-tsify = "0.5"
+tsify = "0.5.6"
 # OpenAPI: utoipa owns the spec model. `#[dto]`/`#[handlers]` emit its `ToSchema`/`#[utoipa::path]`
 # tokens (gated inside our macros); the plugin folds per-route operations + schemas into a
 # `utoipa::openapi::OpenApi`. Pure serde dep tree — no openssl/rsa. `macros` pulls the derive/attr.
@@ -139,6 +140,8 @@ utoipa-redoc = { version = "6", features = ["axum"] }
 utoipa-rapidoc = { version = "6", features = ["axum"] }
 utoipa-scalar = { version = "0.3", features = ["axum"] }
 syn = { version = "2", features = ["full"] }
+# Compile-fail UI tests for the macro diagnostics (dev-only; no TLS or crypto deps).
+trybuild = "1"
 quote = "1"
 proc-macro2 = "1"
 
@@ -248,7 +251,7 @@ tungstenite = [
 # published `tsify` `into_wasm_abi` path (no git dependency needed).
 wasm-ts = ["upwell-axum?/wasm-ts"]
 
-# Emit compile-time dependency-injection checks (a `Wiring: Provide<Dep>` bound
+# Emit compile-time dependency-injection checks (a `Wiring: Provided<Dep>` bound
 # per concrete dependency). A missing provider becomes a `cargo check` error.
 di-check = [
     "upwell-macros/di-check",
@@ -279,6 +282,10 @@ watch = [
     "upwell-rpc?/watch",
     "upwell-axum?/watch",
 ]
+
+# Serialize redacted runtime transition reports (`RuntimeTransitionReport`) for tooling and
+# telemetry. Reports carry stable IDs and categories only, never config values.
+serde = ["upwell-app/serde"]
 
 # Force the `inventory` registration backend (Apple/Mach-O targets auto-select it via the macro
 # crate's build script). A marker feature — it activates no dependency (`inventory` is an
@@ -330,10 +337,23 @@ tempfile = { workspace = true }
 # example, a crate using those macros with `openapi` needs `utoipa` as a direct dependency; a
 # dev-dependency covers the tests without affecting downstream users.
 utoipa = { workspace = true }
+trybuild = { workspace = true }
+
+[[test]]
+name = "tooling_probe_process"
+path = "tests/tooling_probe_process.rs"
+required-features = ["cli", "tooling"]
 
 [[bin]]
 name = "tooling_probe_fixture"
 path = "tests/tooling_probe_process/fixture.rs"
+test = false
+bench = false
+required-features = ["cli", "tooling"]
+
+[[bin]]
+name = "tooling_preview_fixture"
+path = "tests/tooling_preview_process/fixture.rs"
 test = false
 bench = false
 required-features = ["cli", "tooling"]

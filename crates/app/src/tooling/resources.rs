@@ -4,11 +4,12 @@ use upwell_core::{Singleton, StaticScope, Transient};
 use upwell_tooling_schema::{Provenance, RelationshipKind, ResourceKind};
 
 use super::{
-    Projection, component_id, config_binding_id, contribution_provenance, lifecycle_resource,
-    scope_id,
+    Projection, component_id, config_binding_id, contribution_provenance, item_location,
+    lifecycle_resource, scope_id, type_location, with_source,
 };
 use crate::ProtocolDefinition;
 
+mod condition;
 mod dependency;
 
 impl<D: ProtocolDefinition> Projection<'_, D> {
@@ -133,7 +134,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
 
         for binding in &bindings {
             let id = config_binding_id((binding.ty.type_name)(), &binding.path);
-            let ty = self.type_resource((binding.ty.type_name)(), binding.ty.name);
+            let ty = self.type_resource(&binding.ty);
             let provenance = self
                 .app
                 .plugin_plan()
@@ -144,7 +145,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
                 &id,
                 ResourceKind::ConfigBinding,
                 binding.ty.name,
-                provenance,
+                with_source(provenance, type_location(&binding.ty)),
                 BTreeMap::from([
                     (String::from("path"), binding.path.clone()),
                     (String::from("redacted"), String::from("true")),
@@ -154,6 +155,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
             self.relationship(RelationshipKind::Binds, &id, &ty, []);
         }
 
+        self.project_config_schema(&bindings);
         self.project_config_sources();
     }
 
@@ -173,7 +175,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
                     &id,
                     ResourceKind::Hook,
                     hook.kind,
-                    None,
+                    with_source(None, hook.source.as_ref().and_then(item_location)),
                     BTreeMap::from([(String::from("ordinal"), hook.ordinal.to_string())]),
                 );
                 self.relationship(RelationshipKind::Hooks, &component_resource, &id, []);

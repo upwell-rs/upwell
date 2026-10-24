@@ -256,6 +256,7 @@ pub(crate) enum InspectResourceKind {
     Contribution,
     Contributor,
     PluginSlot,
+    Condition,
 }
 
 /// CLI provider kind accepted by inspection filters.

@@ -1,0 +1,17 @@
+error: `#[when]` takes a boolean condition expression: `#[when(<expr>)]`
+ --> tests/ui/when/malformed.rs:4:1
+  |
+4 | #[when]
+  | ^^^^^^^
+
+error: expected a single boolean expression, optionally preceded by `id = "..",`
+ --> tests/ui/when/malformed.rs:8:13
+  |
+8 | #[when(true false)]
+  |             ^^^^^
+
+error: expected a boolean condition expression; an explicit id is written `id = "..", <expr>`
+  --> tests/ui/when/malformed.rs:12:8
+   |
+12 | #[when(id = "named")]
+   |        ^^^^^^^^^^^^

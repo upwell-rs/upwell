@@ -140,21 +140,93 @@ pub fn mount(
 
     validate_config(config)?;
 
+    let plan = MountPlan::of(config);
     let doc = build_openapi(&config.title, &config.version, base_path);
     let spec_url = spec_url(base_path, &config.json_path);
 
-    // Swagger UI serves its own copy of the spec at `json_path`; every other choice (a UI that
-    // inlines the doc, references our endpoint, or no UI at all) needs us to serve the JSON.
-    let swagger_owns_json =
-        cfg!(feature = "openapi-swagger-ui") && matches!(config.ui, OpenApiUi::Swagger);
-
-    let router = if swagger_owns_json {
-        router
-    } else {
-        serve_json(router, &config.json_path, doc.clone())
+    let router = match plan.json {
+        JsonServer::Framework => serve_json(router, &config.json_path, doc.clone()),
+        JsonServer::SwaggerUi => router,
     };
 
     Ok(mount_ui(router, config, doc, &spec_url))
+}
+
+/// What the OpenAPI surface mounts for one enabled configuration — the single decision both
+/// [`mount`] and the tooling projection read, so the routes tooling reports are the routes served.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct MountPlan {
+    /// Who serves the JSON document at `json_path`.
+    pub(crate) json: JsonServer,
+    /// The UI actually mounted at `ui_path`: configured *and* compiled into this build.
+    pub(crate) ui: Option<OpenApiUi>,
+}
+
+/// The server of the OpenAPI JSON document route.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum JsonServer {
+    /// The framework's own `GET {json_path}` route.
+    Framework,
+    /// Swagger UI, which serves its own copy of the document at `json_path`.
+    SwaggerUi,
+}
+
+impl MountPlan {
+    /// The plan for an enabled `config`. Swagger UI serves its own copy of the spec; every other
+    /// choice (a UI that inlines the doc, references our endpoint, or no UI) needs ours.
+    pub(crate) fn of(config: &OpenApiConfig) -> Self {
+        let ui = ui_is_compiled(config.ui).then_some(config.ui);
+        let json = if ui == Some(OpenApiUi::Swagger) {
+            JsonServer::SwaggerUi
+        } else {
+            JsonServer::Framework
+        };
+
+        Self { json, ui }
+    }
+}
+
+/// The routes [`mount`] serves for `config`, relative to the global base path, for tooling.
+///
+/// Read from the same [`MountPlan`] as [`mount`], so a disabled surface or a UI whose crate feature
+/// is absent reports exactly what the router serves.
+#[cfg(feature = "tooling")]
+pub(crate) fn mounted_routes(config: &OpenApiConfig) -> Vec<crate::plugin::tooling::MountedRoute> {
+    use crate::plugin::tooling::{MountedRoute, MountedRouteOwner};
+
+    let mut routes = Vec::new();
+
+    if !config.enabled {
+        return routes;
+    }
+
+    let plan = MountPlan::of(config);
+    let json_summary = match plan.json {
+        JsonServer::Framework => String::from("OpenAPI document"),
+        JsonServer::SwaggerUi => String::from("OpenAPI document (served by Swagger UI)"),
+    };
+
+    routes.push(MountedRoute {
+        owner: MountedRouteOwner::OpenApi,
+        method: "GET",
+        path: config.json_path.clone(),
+        handler: "openapi_json",
+        summary: json_summary,
+        source: upwell_core::item_source!("serve_json"),
+    });
+
+    if let Some(ui) = plan.ui {
+        routes.push(MountedRoute {
+            owner: MountedRouteOwner::OpenApi,
+            method: "GET",
+            path: config.ui_path.clone(),
+            handler: "openapi_ui",
+            summary: format!("{ui:?} OpenAPI UI"),
+            source: upwell_core::item_source!("mount_ui"),
+        });
+    }
+
+    routes
 }
 
 /// Rejects a configuration whose JSON and UI routes would collide: identical paths, or a `json_path`

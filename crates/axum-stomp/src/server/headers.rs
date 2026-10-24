@@ -117,6 +117,6 @@ impl Injectable for StompSession {
 mod di_check {
     use super::{StompHeaders, StompSession};
 
-    impl upwell_axum::Provide<StompHeaders> for upwell_axum::Wiring {}
-    impl upwell_axum::Provide<StompSession> for upwell_axum::Wiring {}
+    impl upwell_axum::Provided<StompHeaders> for upwell_axum::Wiring {}
+    impl upwell_axum::Provided<StompSession> for upwell_axum::Wiring {}
 }

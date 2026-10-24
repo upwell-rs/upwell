@@ -17,8 +17,8 @@ proc-macro = true
 default = ["cli"]
 cli = ["upwell-macros-core/cli"]
 tooling = ["upwell-macros-core/tooling"]
-# Emit compile-time dependency-injection checks: `impl Provide<Self> for Wiring`
-# per component, plus a `Wiring: Provide<Dep>` bound per concrete dependency.
+# Emit compile-time dependency-injection checks: `impl Provided<Self> for Wiring`
+# per component, plus a `Wiring: Provided<Dep>` bound per concrete dependency.
 di-check = ["upwell-macros-core/di-check"]
 # Force the `inventory` registration backend at codegen time (Apple/Mach-O hosts select it
 # automatically). Forwarded to the shared codegen crate.

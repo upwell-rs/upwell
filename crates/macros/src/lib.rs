@@ -7,9 +7,10 @@
 //! | Macro                       | Applies to | Produces |
 //! |-----------------------------|------------|----------|
 //! | `#[component]`              | struct     | `Component` impl + a factory (field-injection default, `factory = path`, or `default_factory = false` for a manual instance) |
-//! | `#[methods]`                | impl block | lifecycle methods — an `#[init]` constructor (an explicit factory) |
+//! | `#[methods]`                | impl block | lifecycle methods — an `#[init]` constructor (an explicit factory), transition recipes and hooks |
 //! | `#[init]`                   | method     | marker consumed by `#[methods]` |
-//! | `#[injectable]`             | trait      | `Provide<dyn Trait>` impl (under `di-check`) |
+//! | `#[replace]` / `#[transition]` / `#[hot_update]` | method | transition-recipe markers consumed by `#[methods]` |
+//! | `#[injectable]`             | trait      | `Provided<dyn Trait>` impl (under `di-check`) |
 //! | `#[config]`                 | struct/enum | `ConfigProperties` impl (with field `#[default = ".."]` templated defaults); auto-registers a binding when given `#[config(path = "..")]` |
 //! | [`app!`]                    | declaration | named typestate host, configured builder, and feature-gated CLI/tooling entry |
 //!
@@ -169,7 +170,8 @@ pub fn config(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Registers a component's lifecycle methods from an inherent `impl` block.
 ///
-/// Today that is the `#[init]` constructor — an explicit factory that overrides the
+/// That is the `#[init]` constructor, the transition recipes and `#[hook]` methods. The
+/// `#[init]` constructor is an explicit factory that overrides the
 /// field-injection default. Works on any component (`#[component]` or `#[service]`),
 /// so a plain component gets a full-flexibility constructor (sync or async, any
 /// injectable parameter — `Arc<T>`, `Cfg<T>`, `Vec<Arc<dyn Tr>>`, a by-value
@@ -178,6 +180,40 @@ pub fn config(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The constructor's parameters are its dependencies (resolved from the container)
 /// and its return is `Self` or `Result<Self, E>`; a non-`async` constructor is
 /// wrapped to async. Two `#[init]`s on one type is a compile error.
+///
+/// # Transition recipes
+///
+/// A singleton component declares how a runtime transition may carry it across a reload
+/// with at most one method of each marker. Each generates the descriptor
+/// `factories![replace | transition | hot_update "<marker>:<method>" => Type::method]`
+/// declares:
+///
+/// - `#[replace]` — a static state-aware replacement, `(Previous<Self>, deps..) -> Self` or
+///   `Result<Self, E>`;
+/// - `#[transition]` — a transition handler, a plain
+///   `fn(&ComponentChange) -> Option<OneShot<Self>>`;
+/// - `#[hot_update]` — an in-place update preparation,
+///   `(Previous<Self>, deps..) -> HotUpdate<Self>` or `Result<HotUpdate<Self>, E>`, for a
+///   component stored as `Arc<Self>`.
+///
+/// A replacement or hot update may be sync or `async`, and may resolve only dependencies the
+/// ordinary factory declares, and must take `Previous<Self>` first. A recipe on a
+/// non-singleton `scope`, a generic recipe, a second recipe of one kind, or a method carrying
+/// more than one factory marker or a `#[hook]` beside one is a compile error. See
+/// `docs/transition-strategies.md` for when the runtime uses each recipe.
+///
+/// ```ignore
+/// #[methods]
+/// impl Ledger {
+///     #[init]
+///     async fn open(clock: Arc<Clock>) -> Self { Self { clock, entries: 0 } }
+///
+///     #[replace]
+///     async fn carry(previous: Previous<Self>, clock: Arc<Clock>) -> Self {
+///         Self { clock, entries: previous.entries }
+///     }
+/// }
+/// ```
 ///
 /// # Arguments
 ///
@@ -643,10 +679,58 @@ pub fn app(input: TokenStream) -> TokenStream {
 /// descriptor to be read through the trait object. Wasm targets retain the
 /// original trait because the DI descriptor types are native-only.
 ///
-/// Under the `di-check` feature it emits `impl Provide<dyn Trait> for Wiring` so
+/// Under the `di-check` feature it emits `impl Provided<dyn Trait> for Wiring` so
 /// a single `Arc<dyn Trait>` dependency type-checks; the trait must be `Send +
 /// Sync` (state it as a supertrait) and object-safe.
 #[proc_macro_attribute]
 pub fn injectable(attr: TokenStream, item: TokenStream) -> TokenStream {
     upwell_macros_core::injectable(attr.into(), item.into()).into()
+}
+
+/// Makes a component eligible only while a boolean condition holds.
+///
+/// Place `#[when(<expr>)]` **below** `#[component]`, `#[service]` or `#[controller]`; the
+/// component macro reads it. The body is an ordinary Rust expression of type `bool`, kept
+/// with its exact semantics (short-circuiting included), and may call any function. Its
+/// inputs are derived from the syntax:
+///
+/// - An UpperCamelCase type used as a field or method receiver is an input. A
+///   `#[config(path = ..)]` type reads as its staged value (`AuthConfig.mode`); a component
+///   reads as its eligibility (`AuditTransport.eligible()`). Any other type is a compile
+///   error at that token. `Type::Variant` paths are left alone.
+/// - `resolve::<T>("<path>")` (from `upwell::condition`) reads a config path that no type
+///   binds. The path must be a string literal. A missing key gives `None`; a value that
+///   does not deserialize into `T` rejects the candidate.
+///
+/// Evaluation answers only these declared inputs, so a helper function that reads another
+/// input fails the evaluation instead of creating a hidden dependency. Inputs follow Rust
+/// privacy: read `pub`/`pub(crate)` fields or getters.
+///
+/// Stacked `#[when]`s combine with AND. Each condition's id is derived from its expression,
+/// or set with `#[when(id = "..", <expr>)]`, so declaration order never changes selection.
+/// Conditions apply to singleton components only.
+///
+/// ```ignore
+/// use upwell::condition::resolve;
+/// use upwell::{component, when};
+///
+/// #[component(provide = dyn Authenticator)]
+/// pub struct DefaultAuthenticator;
+///
+/// #[component(provide = dyn Authenticator, primary)]
+/// #[when(AuthConfig.mode == AuthMode::Custom)]
+/// pub struct CustomAuthenticator;
+///
+/// #[component]
+/// #[when(AuthConfig.audit && AuditTransport.eligible())]
+/// #[when(resolve("features.audit_export") == Some(true))]
+/// pub struct AuditExporter;
+/// ```
+///
+/// # Errors
+///
+/// Used without a component macro, or above one, the attribute emits a `compile_error!`.
+#[proc_macro_attribute]
+pub fn when(attr: TokenStream, item: TokenStream) -> TokenStream {
+    upwell_macros_core::when(attr.into(), item.into()).into()
 }

@@ -139,6 +139,7 @@ where
         priority: 0,
         ordering: &[],
         erase: erase::<T>,
+        live: upwell_di::provider_live_cell::<dyn Svc>,
     }
 }
 
@@ -228,13 +229,10 @@ pub async fn build_graph(entries: &[Entry], width: usize, layers: usize) -> Arc<
     );
     assert!(layers >= 1 && layers <= LAYER_SCOPES.len(), "1..=8 layers");
 
-    let registry = Arc::new(ScopeRegistry::new(
-        HashMap::new(),
-        HashMap::new(),
-        Vec::new(),
-        HashMap::new(),
-    )
-    .expect("empty scope registry validates"));
+    let registry = Arc::new(
+        ScopeRegistry::new(HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
+            .expect("empty scope registry validates"),
+    );
 
     let root = &entries[0..width];
     let root_descs: Vec<ComponentDescriptor> = root.iter().map(|entry| entry.desc).collect();
@@ -285,16 +283,18 @@ pub async fn build_with_providers(entries: &[Entry], count: usize) -> Arc<ScopeC
     }
     .provider_order(&components)
     .expect("benchmark provider ordering validates");
-    let registry = Arc::new(ScopeRegistry::new(
-        HashMap::new(),
-        components
-            .iter()
-            .map(|component| (component.ty.type_id, *component))
-            .collect(),
-        providers,
-        provider_order,
-    )
-    .expect("provider scope registry validates"));
+    let registry = Arc::new(
+        ScopeRegistry::new(
+            HashMap::new(),
+            components
+                .iter()
+                .map(|component| (component.ty.type_id, *component))
+                .collect(),
+            providers,
+            provider_order,
+        )
+        .expect("provider scope registry validates"),
+    );
 
     let seeds: Vec<BoxedComponent> = slice.iter().map(|entry| (entry.make)()).collect();
 

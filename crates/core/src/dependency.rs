@@ -36,6 +36,14 @@ pub enum ResolutionMode {
     Fresh,
 }
 
+/// Whether a consumer keeps one resolved snapshot or follows a compatible live binding.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DependencyObservation {
+    #[default]
+    Snapshot,
+    Live,
+}
+
 impl Cardinality {
     /// Whether an edge of this cardinality requires at least one value to exist.
     /// Multi-valued edges (`Collection`/`Keyed`) accept zero.
@@ -70,4 +78,6 @@ pub struct DependencyDescriptor {
     pub config: bool,
     /// Resolution timing and reconstruction behavior for this edge.
     pub resolution: ResolutionMode,
+    /// Whether the injected handle observes later compatible binding changes.
+    pub observation: DependencyObservation,
 }

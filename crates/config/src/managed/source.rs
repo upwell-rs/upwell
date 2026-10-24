@@ -6,17 +6,21 @@ use serde::de::DeserializeOwned;
 use tracing::{debug, info, instrument, trace};
 use upwell_dirs::DirectoriesManager;
 
+use crate::condition::ResolvedConfig;
 use crate::resolve::{ResolveCtx, ResolvedDependency};
 use crate::{ConfigValue, Resolver, ResolverChain, from_value_in};
 
-use super::{CONFIG_BINDINGS, ConfigBinding, ConfigError, ConfigProperties, DirectoriesResolver};
+use super::{
+    CONFIG_BINDINGS, ConfigBinding, ConfigError, ConfigOverlay, ConfigProperties,
+    DirectoriesResolver,
+};
 
 /// A parser from source text to the normalized config tree.
 type Parser = fn(&str) -> Result<ConfigValue, crate::TemplateError>;
 
-/// Which automatic reload triggers a [`ConfigManager`] requests, beyond the always-available
-/// manual [`ConfigReloader::reload`](super::ConfigReloader::reload). The daemon reads
-/// these at `serve`/`run` and spawns the matching background tasks.
+/// Which automatic reload triggers a [`ConfigManager`] requests, beyond manual reloads through
+/// the application runtime. The daemon reads these at `serve`/`run` and spawns the matching
+/// background tasks.
 #[derive(Clone, Copy, Debug)]
 pub struct ReloadTriggers {
     /// Reload on `SIGHUP` (Unix only).
@@ -335,6 +339,27 @@ impl<F> ConfigManager<F> {
         Ok(value)
     }
 
+    /// Renders the subtree at `path` for a component condition's raw `resolve` read,
+    /// or `None` when the path is absent.
+    pub fn resolve_raw(&self, path: &str) -> Result<Option<ResolvedConfig>, ConfigError> {
+        self.resolve_raw_in(&self.root, path)
+    }
+
+    /// [`resolve_raw`](Self::resolve_raw) against an explicit base tree, so a reload can
+    /// resolve raw condition inputs from its candidate tree before adopting it.
+    pub(crate) fn resolve_raw_in(
+        &self,
+        base: &ConfigValue,
+        path: &str,
+    ) -> Result<Option<ResolvedConfig>, ConfigError> {
+        ResolvedConfig::render(base, path, &self.resolvers).map_err(|source| {
+            ConfigError::Substitution {
+                path: path.to_string(),
+                source,
+            }
+        })
+    }
+
     /// Like [`get`](Self::get), but for a [`ConfigProperties`] type: its `#[default = ".."]`
     /// field defaults are merged *under* the file values before deserializing, so a missing
     /// field falls back to its (possibly templated) default and resolves through the normal
@@ -608,16 +633,17 @@ impl<F> ConfigManager<F> {
     /// Re-reads every retained source from disk and rebuilds a fresh merged tree
     /// (defaults seeded), **without** adopting it. Rebuilding from empty in the
     /// original merge order preserves precedence: if profile `b` changed, `c` still
-    /// overrides `b` and `b` overrides `a`. Returns the new tree for diffing.
-    pub(crate) fn reread(&self) -> Result<ConfigValue, ConfigError> {
+    /// overrides `b` and `b` overrides `a`. A non-empty `overlay` merges above every
+    /// source, before defaults fill the remaining gaps. Returns the new tree for diffing.
+    pub(crate) fn reread(&self, overlay: &ConfigOverlay) -> Result<ConfigValue, ConfigError> {
         let parsers = parsers_for(self.format);
-
         let mut root = ConfigValue::Table(Vec::new());
 
         for source in &self.sources {
             merge_file(&mut root, source, &parsers)?;
         }
 
+        overlay.apply(&mut root);
         seed_defaults_into(&mut root, &self.bindings);
 
         Ok(root)
@@ -821,7 +847,7 @@ fn merge_stem(
 
 /// Deep-merges `overlay` into `base`: tables recurse key-by-key, every other value
 /// (scalar or array) replaces the base value wholesale.
-fn merge_into(base: &mut ConfigValue, overlay: ConfigValue) {
+pub(super) fn merge_into(base: &mut ConfigValue, overlay: ConfigValue) {
     let ConfigValue::Table(overlay_entries) = overlay else {
         *base = overlay;
         return;

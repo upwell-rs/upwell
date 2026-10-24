@@ -12,8 +12,11 @@ categories.workspace = true
 
 [features]
 default = []
-# Emit compile-time DI checks (`Wiring: Provide<Dep>` bounds).
+# Emit compile-time DI checks (`Wiring: Provided<Dep>` bounds).
 di-check = []
+# Serialize the transition-planning vocabulary (actions, reasons, demand identities) for
+# redacted transition reports, tooling, and telemetry.
+serde = ["dep:serde"]
 
 [dependencies]
 upwell-core = { workspace = true }
@@ -25,6 +28,10 @@ tokio = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
 
 # Sets the `upwell_hybrid` cfg (target-correct here) so the registration read-side can branch on
 # the active backend if it ever needs to.

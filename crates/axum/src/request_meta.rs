@@ -70,7 +70,7 @@ impl Injectable for RequestMeta {
 }
 
 #[cfg(feature = "di-check")]
-impl upwell_di::Provide<RequestMeta> for upwell_di::Wiring {}
+impl upwell_di::Provided<RequestMeta> for upwell_di::Wiring {}
 
 /// The framework-provided request-scoped injectable for the incoming request's native data.
 ///

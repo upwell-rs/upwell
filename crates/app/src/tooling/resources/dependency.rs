@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, ResolutionMode, Singleton, StaticScope, Transient,
+    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, Singleton,
+    StaticScope, Transient,
 };
 use upwell_di::{DependencyTarget, ProviderDescriptor};
 use upwell_tooling_schema::{RelationshipKind, ResourceKind};
@@ -9,6 +10,7 @@ use upwell_tooling_schema::{RelationshipKind, ResourceKind};
 use super::super::snapshot::{ComponentSnapshot, ConstructionPlanEntry, DependencySnapshot};
 use super::super::{
     Projection, component_id, config_binding_id, contribution_provenance, provider_id, scope_id,
+    type_location, with_source,
 };
 use crate::ProtocolDefinition;
 
@@ -66,8 +68,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
                 let [(_, before), (_, after)] = pair else {
                     continue;
                 };
-                let trait_resource =
-                    self.type_resource((before.trait_ty.type_name)(), before.trait_ty.name);
+                let trait_resource = self.type_resource(&before.trait_ty);
 
                 self.relationship(
                     RelationshipKind::OrdersBefore,
@@ -128,7 +129,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
     fn project_component(&mut self, component: &ComponentSnapshot) {
         let descriptor = component.descriptor;
         let id = component_id(descriptor.id);
-        let ty = self.type_resource((descriptor.ty.type_name)(), descriptor.ty.name);
+        let ty = self.type_resource(&descriptor.ty);
         let scope = scope_id(descriptor.scope.id().as_str());
         let construction = if descriptor.scope.id() == Transient::ID {
             if component.has_factory {
@@ -179,7 +180,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
             &id,
             ResourceKind::Component,
             descriptor.name,
-            provenance,
+            with_source(provenance, type_location(&descriptor.ty)),
             labels,
         );
         self.relationship(RelationshipKind::Provides, &id, &ty, []);
@@ -197,7 +198,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
 
     pub(super) fn project_dependency(&mut self, owner: &str, dependency: &DependencySnapshot) {
         let descriptor = &dependency.descriptor;
-        let target = self.type_resource((descriptor.ty.type_name)(), descriptor.ty.name);
+        let target = self.type_resource(&descriptor.ty);
         let mut labels = dependency_labels(descriptor);
 
         if descriptor.config {
@@ -270,10 +271,9 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
         }
     }
 
-    fn project_provider(&mut self, provider: &ProviderDescriptor) {
+    pub(super) fn project_provider(&mut self, provider: &ProviderDescriptor) {
         let id = provider_id(provider);
-        let trait_resource =
-            self.type_resource((provider.trait_ty.type_name)(), provider.trait_ty.name);
+        let trait_resource = self.type_resource(&provider.trait_ty);
         let component = self.app.component_resource_id(provider.concrete_ty.type_id);
         let order = self
             .app
@@ -303,7 +303,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
             &id,
             ResourceKind::Provider,
             provider.trait_ty.name,
-            provenance,
+            with_source(provenance, type_location(&provider.concrete_ty)),
             labels,
         );
         self.relationship(RelationshipKind::Provides, &id, &trait_resource, []);
@@ -314,7 +314,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
     }
 }
 
-fn dependency_labels(dependency: &DependencyDescriptor) -> BTreeMap<String, String> {
+pub(super) fn dependency_labels(dependency: &DependencyDescriptor) -> BTreeMap<String, String> {
     let cardinality = match dependency.cardinality {
         Cardinality::One => "one",
         Cardinality::Collection => "collection",
@@ -326,11 +326,16 @@ fn dependency_labels(dependency: &DependencyDescriptor) -> BTreeMap<String, Stri
         ResolutionMode::Lazy => "lazy",
         ResolutionMode::Fresh => "fresh",
     };
+    let observation = match dependency.observation {
+        DependencyObservation::Snapshot => "snapshot",
+        DependencyObservation::Live => "live",
+    };
     let mut labels = BTreeMap::from([
         (String::from("cardinality"), cardinality.to_string()),
         (String::from("dynamic"), dependency.dynamic.to_string()),
         (String::from("name"), dependency.name.to_string()),
         (String::from("optional"), dependency.optional.to_string()),
+        (String::from("observation"), observation.to_string()),
         (String::from("resolution"), resolution.to_string()),
     ]);
 

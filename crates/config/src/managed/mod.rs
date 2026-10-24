@@ -7,28 +7,32 @@
 //! shorthand that resolves only when exactly one binding of that type exists.
 
 mod dirs;
+mod handle;
+mod overlay;
 mod reload;
 mod source;
 mod store;
 mod trigger;
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
 use serde::de::DeserializeOwned;
 
-use upwell_core::TypeDescriptor;
-use upwell_di::{BoxedComponent, Injectable, Live, LiveRef};
+use upwell_core::{ConditionScalar, ConfigFactDescriptor, ConfigFactId, TypeDescriptor};
+use upwell_di::BoxedComponent;
 
 pub use dirs::DirectoriesResolver;
+pub use handle::{Cfg, CfgNext};
+pub use overlay::{ConfigOverlay, ConfigOverlayError};
 use reload::ConfigSlot;
 pub use reload::{
-    CONFIG_RELOADER_ID, CONFIG_RELOADER_NAME, ChangedBinding, ComponentHookReport, ConfigReload,
-    ConfigReloadError, ConfigReloadReport, ConfigReloader, HookOutcome, ReloadProposal,
-    ReloadableConfig,
+    ChangedBinding, ComponentHookReport, ConfigReload, ConfigReloadError, ConfigReloader,
+    HookOutcome, ReloadProposal, ReloadableConfig, StagedConfig, StagedReload,
 };
 pub use store::{ConfigStore, ContainerConfigExt};
-pub use trigger::{spawn_reload_triggers, stop_reload_triggers};
+pub use trigger::{
+    ReloadCause, ReloadSummary, ReloadTarget, spawn_reload_triggers, stop_reload_triggers,
+};
 
 use crate::DefaultSpec;
 
@@ -91,138 +95,6 @@ pub enum ConfigError {
     },
 }
 
-/// An injected configuration value, bound from a property path.
-///
-/// Backed by a shared [`Live<T>`] slot, so a config reload swaps the value in place
-/// and every holder observes it on the next read; snapshots taken earlier stay
-/// pinned. The path is supplied at the injection site via `#[config("...")]` (or
-/// omitted for the sole-binding shorthand). Read with [`get`](Self::get) (a guard)
-/// or [`snapshot`](Self::snapshot) (an owned `Arc`).
-pub struct Cfg<T> {
-    live: Live<T>,
-    path: Arc<str>,
-    committed_snapshot: Arc<Mutex<source::ConfigSnapshot>>,
-}
-
-impl<T: Send + Sync + 'static> Cfg<T> {
-    /// Wraps a freshly bound value with the property path it was bound at.
-    pub(crate) fn new(
-        value: T,
-        path: impl Into<Arc<str>>,
-        committed_snapshot: source::ConfigSnapshot,
-    ) -> Self {
-        Self {
-            live: Live::new(Arc::new(value)),
-            path: path.into(),
-            committed_snapshot: Arc::new(Mutex::new(committed_snapshot)),
-        }
-    }
-
-    /// A guard pinning the current value, dereferencing to `T`, for short reads.
-    pub fn get(&self) -> LiveRef<'_, T> {
-        self.live.get()
-    }
-
-    /// An owned `Arc` snapshot of the current value — stable once taken.
-    pub fn snapshot(&self) -> Arc<T> {
-        self.live.snapshot()
-    }
-
-    /// The property path this value was bound from.
-    pub fn path(&self) -> &str {
-        &self.path
-    }
-
-    /// Publishes a re-bound value into the slot. Used by a config reload at commit.
-    #[allow(dead_code)]
-    pub(crate) fn replace(&self, value: Arc<T>) {
-        self.live.replace(value);
-    }
-
-    pub(crate) fn committed_snapshot(&self) -> source::ConfigSnapshot {
-        self.committed_snapshot
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-
-    pub(crate) fn replace_snapshot(&self, snapshot: source::ConfigSnapshot) {
-        *self
-            .committed_snapshot
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
-    }
-}
-
-impl<T: Send + Sync + 'static> Clone for Cfg<T> {
-    fn clone(&self) -> Self {
-        Self {
-            live: self.live.clone(),
-            path: Arc::clone(&self.path),
-            committed_snapshot: Arc::clone(&self.committed_snapshot),
-        }
-    }
-}
-
-impl<T: Send + Sync + 'static> Injectable for Cfg<T> {
-    type Target = T;
-    type Stored = Self;
-
-    fn into_stored(self) -> Self {
-        self
-    }
-
-    fn from_stored(stored: &Self) -> Self {
-        stored.clone()
-    }
-}
-
-/// A **proposed** configuration value handed to a `#[hook(ConfigReload)]` method during a
-/// reload, before it is committed. Read-only; derefs to `T`. If every hook accepts the
-/// proposal the value is committed into its [`Cfg<T>`] slot, otherwise it is discarded.
-pub struct CfgNext<T> {
-    value: Arc<T>,
-    path: Arc<str>,
-}
-
-impl<T> CfgNext<T> {
-    pub(crate) fn new(value: Arc<T>, path: Arc<str>) -> Self {
-        Self { value, path }
-    }
-
-    /// The proposed value.
-    pub fn get(&self) -> &T {
-        &self.value
-    }
-
-    /// An owned `Arc` of the proposed value.
-    pub fn snapshot(&self) -> Arc<T> {
-        Arc::clone(&self.value)
-    }
-
-    /// The property path this value was bound from.
-    pub fn path(&self) -> &str {
-        &self.path
-    }
-}
-
-impl<T> Clone for CfgNext<T> {
-    fn clone(&self) -> Self {
-        Self {
-            value: Arc::clone(&self.value),
-            path: Arc::clone(&self.path),
-        }
-    }
-}
-
-impl<T> std::ops::Deref for CfgNext<T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        &self.value
-    }
-}
-
 /// A struct bindable from a configuration subtree, injectable as [`Cfg<Self>`].
 ///
 /// Implemented by `#[config]`; the type must also be
@@ -241,6 +113,12 @@ pub trait ConfigProperties: DeserializeOwned + Send + Sync + 'static + Sized {
     /// [`ConfigManager::get_config`](crate::ConfigManager::get_config)). For runtime access
     /// through a value or trait object, use [`ConfigDefaults::defaults`].
     const DEFAULTS: DefaultSpec = DefaultSpec::none();
+
+    /// The type's declared fields, docs, and declaration, emitted by the `#[config]` macro.
+    ///
+    /// Defaults to [`ConfigSchema::UNDECLARED`](crate::schema::ConfigSchema::UNDECLARED), in which
+    /// case tooling traces the type's `Deserialize` impl for its shape instead.
+    const SCHEMA: crate::schema::ConfigSchema = crate::schema::ConfigSchema::UNDECLARED;
 
     /// Deserializes this type from the subtree at `path` (filling missing fields from
     /// [`DEFAULTS`](Self::DEFAULTS)) and wraps it as a stored `Cfg<Self>` handle.
@@ -273,6 +151,78 @@ pub trait ConfigProperties: DeserializeOwned + Send + Sync + 'static + Sized {
 /// type-erased manager can build reload slots without naming the config type.
 pub type SlotThunk = fn(&ConfigManager, &BoxedComponent, &str) -> Option<Box<dyn ReloadableConfig>>;
 
+/// The condition-fact extraction thunks captured from a config type: its declared fact
+/// descriptors and an erased scalar extractor over a staged value. Both receive the
+/// registered binding path, so one type bound at several paths emits distinct fact ids.
+#[derive(Clone, Copy)]
+pub struct BindingFacts {
+    pub descriptors: fn(&'static str) -> Vec<ConfigFactDescriptor>,
+    pub scalars: fn(&'static str, &dyn std::any::Any) -> Vec<(ConfigFactId, ConditionScalar)>,
+}
+
+/// A config type whose values expose typed facts to component conditions.
+///
+/// Implemented manually per type (macro support is deferred); registered per binding
+/// path through [`ConditionFactSource::of`] so the transactional reload can extract the
+/// scalars of every staged binding of the type. The registered path is supplied to both
+/// methods, so the same type bound at several paths produces distinct
+/// [`ConfigFactId`]s per binding.
+pub trait ConditionFacts: ConfigProperties {
+    /// The typed facts this type exposes at `binding_path`, identified by this type's
+    /// name, the binding path, and the property path within the value.
+    fn condition_facts(binding_path: &'static str) -> Vec<ConfigFactDescriptor>;
+
+    /// The current scalar values of [`condition_facts`](Self::condition_facts) at
+    /// `binding_path`, in the same order.
+    fn condition_scalars(&self, binding_path: &'static str)
+    -> Vec<(ConfigFactId, ConditionScalar)>;
+}
+
+/// One registered condition-fact source: a config type's facts at one binding path.
+#[derive(Clone)]
+pub struct ConditionFactSource {
+    pub ty: TypeDescriptor,
+    pub path: &'static str,
+    pub facts: BindingFacts,
+}
+
+impl std::fmt::Debug for ConditionFactSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConditionFactSource")
+            .field("ty", &self.ty)
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ConditionFactSource {
+    /// Registers the condition facts of type `T` at `path`. The path is part of every
+    /// fact id the source emits, so it must outlive the registration — hence
+    /// `&'static str`.
+    pub fn of<T: ConditionFacts>(path: &'static str) -> Self {
+        Self {
+            ty: TypeDescriptor::of::<T>(T::NAME),
+            path,
+            facts: BindingFacts {
+                descriptors: T::condition_facts,
+                scalars: condition_scalars_erased::<T>,
+            },
+        }
+    }
+}
+
+/// Captures `T`'s condition scalars from an erased staged value. Staged binding values
+/// erase to `T` itself, so a plain downcast covers every production caller.
+fn condition_scalars_erased<T: ConditionFacts>(
+    binding_path: &'static str,
+    value: &dyn std::any::Any,
+) -> Vec<(ConfigFactId, ConditionScalar)> {
+    value
+        .downcast_ref::<T>()
+        .map(|value| value.condition_scalars(binding_path))
+        .unwrap_or_default()
+}
+
 #[derive(Clone)]
 pub struct ConfigBinding {
     pub ty: TypeDescriptor,
@@ -280,6 +230,8 @@ pub struct ConfigBinding {
     pub bind: fn(&ConfigManager, &str) -> Result<BoxedComponent, ConfigError>,
     pub slot: SlotThunk,
     pub defaults: DefaultSpec,
+    /// The bound type's value shape, for tooling.
+    pub describe: fn() -> crate::schema::ValueSchema,
 }
 
 impl ConfigBinding {
@@ -287,11 +239,15 @@ impl ConfigBinding {
     /// and compile-time defaults.
     pub fn of<T: ConfigProperties>(path: impl Into<String>) -> Self {
         Self {
-            ty: TypeDescriptor::of::<T>(T::NAME),
+            ty: TypeDescriptor {
+                source: T::SCHEMA.source,
+                ..TypeDescriptor::of::<T>(T::NAME)
+            },
             path: path.into(),
             bind: T::bind,
             slot: T::slot,
             defaults: T::DEFAULTS,
+            describe: crate::schema::config_value_schema::<T>,
         }
     }
 }
@@ -317,6 +273,8 @@ pub struct ConfigBindingDescriptor {
     pub bind: fn(&ConfigManager, &str) -> Result<BoxedComponent, ConfigError>,
     pub slot: SlotThunk,
     pub defaults: DefaultSpec,
+    /// The bound type's value shape, for tooling.
+    pub describe: fn() -> crate::schema::ValueSchema,
 }
 
 impl ConfigBindingDescriptor {
@@ -328,6 +286,10 @@ impl ConfigBindingDescriptor {
             bind: self.bind,
             slot: self.slot,
             defaults: self.defaults,
+            describe: self.describe,
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

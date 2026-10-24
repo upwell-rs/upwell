@@ -156,7 +156,9 @@ fn envelope() -> ProbeEnvelope {
                 file: String::from(file!()),
                 line: None,
                 column: None,
+                rust_path: None,
             }),
+            workspace_root: None,
         },
         ProbeFailure {
             phase: Some(String::from("setup")),

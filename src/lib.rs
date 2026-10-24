@@ -29,19 +29,34 @@ pub mod scope {
     pub use upwell_rpc::scope::{Connection, Request}; // should not be here, should be in crate::daemon with the rest of the daemon related items
 }
 
+/// Component condition descriptors, callback inputs, and [`resolve`](condition::resolve),
+/// the raw config read a condition callback may make.
+#[cfg(not(target_family = "wasm"))]
+pub mod condition {
+    pub use upwell_config::condition::{ResolvedConfig, resolve};
+    pub use upwell_core::condition::*;
+}
+
 // ---------------------------------------------------------------------------
 // DI engine: descriptors, container, factories, registry.
 // ---------------------------------------------------------------------------
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_di::{
-    BoxedComponent, COMPONENTS, Component, ComponentConstructionContext, ComponentContainer,
-    ComponentDescriptor, ComponentFactories, ComponentFactory, ComponentFactoryDescriptor,
-    ComponentRegistry, ComponentSource, Deferred, Dep, DescriptorFor, Dynamic, Factory,
-    FactoryOutput, Fresh, FreshFromContainer, FromContainer, Injectable, Lazy, Live, LiveRef,
-    PROVIDERS, Provide, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
-    Registration, RegistryFor, RootResolver, ScopeContainer, ScopeRegistry, ServiceComponent,
-    UpwellDescriptor, Wired, Wiring, dispatch_factory, factory_dependencies, from_boxed,
-    topological_sort,
+    BoxedComponent, COMPONENTS, Component, ComponentChange, ComponentConstructionContext,
+    ComponentContainer, ComponentDescriptor, ComponentFactories, ComponentFactory,
+    ComponentFactoryDescriptor, ComponentFactoryRole, ComponentRegistry, ComponentSource,
+    ConditionCatalog, ConditionDecision, ConditionDependency, ConditionError, ConditionEvaluation,
+    ConditionFactSnapshot, ConditionOutcome, DeclaredScope, Deferred, Dep, DescriptorFor, Dynamic,
+    EffectiveGraph, Factory, FactoryIdentity, FactoryOutput, Fresh, FreshFromContainer,
+    FromContainer, GenerationSnapshot, HotUpdate, HotUpdateFactory, HotUpdateOutput, Injectable,
+    Lazy, Live, LiveCell, LiveRebind, LiveRef, NodeAction, OneShot, PROVIDERS, PlannedNode,
+    Previous, Provided, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
+    ReasonKind, Registration, RegistryFor, ReplacementFactory, RootResolver, ScopeContainer,
+    ScopeRegistry, ServiceComponent, StaleGraphCandidate, TransitionPlan, TransitionReason,
+    UpwellDescriptor, ValidatedConditionEvaluation, Wired, Wiring, dependency_of,
+    dependency_of_observed, dispatch_factory, dispatch_hot_update, dispatch_replacement,
+    dispatch_transition, erase_provider, factories, factory_dependencies, from_boxed,
+    hot_update_dependencies, provider_live_cell, replacement_dependencies, topological_sort,
 };
 /// The DI layer's own error/result, exposed under distinct names so macro-generated
 /// **factory** code can name them without colliding with another layer's `Error`/`Result`.
@@ -53,8 +68,8 @@ pub use upwell_di::{Error as DiError, Result as DiResult};
 // ---------------------------------------------------------------------------
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_hooks::{
-    ComponentHooks, HookCall, HookDescriptor, HookKind, HookManager, HookParam, Shutdown, Startup,
-    no_hooks,
+    ComponentHooks, FiredHook, FiredHooks, HookCall, HookDescriptor, HookKind, HookManager,
+    HookParam, HookParticipation, HookRole, HookRouting, Shutdown, Startup, no_hooks,
 };
 /// The hook layer's own error/result, exposed under distinct names so macro-generated hook
 /// code can name them without colliding with another layer's `Error`/`Result`.
@@ -71,12 +86,15 @@ pub use upwell_dirs::{Dir, DirKind, DirectoriesManager};
 // Config: Cfg, ConfigManager, reload, the config store, the directory resolver.
 // ---------------------------------------------------------------------------
 #[cfg(not(target_family = "wasm"))]
+pub use upwell_config::schema;
+#[cfg(not(target_family = "wasm"))]
 pub use upwell_config::{
-    CONFIG_BINDINGS, Cfg, CfgNext, ChangedBinding, ComponentHookReport, ConfigBinding,
-    ConfigBindingDescriptor, ConfigDefaults, ConfigError, ConfigManager, ConfigProperties,
-    ConfigReload, ConfigReloadError, ConfigReloadReport, ConfigReloader, ConfigStore,
-    ContainerConfigExt, DefaultSpec, DirectoriesResolver, EnumTag, HookOutcome, ReloadProposal,
-    ReloadTriggers, ReloadableConfig, spawn_reload_triggers, stop_reload_triggers,
+    BindingFacts, CONFIG_BINDINGS, Cfg, CfgNext, ChangedBinding, ComponentHookReport,
+    ConditionFactSource, ConditionFacts, ConfigBinding, ConfigBindingDescriptor, ConfigDefaults,
+    ConfigError, ConfigManager, ConfigProperties, ConfigReload, ConfigReloadError, ConfigReloader,
+    ConfigStore, ContainerConfigExt, DefaultSpec, DirectoriesResolver, EnumTag, HookOutcome,
+    ReloadCause, ReloadProposal, ReloadSummary, ReloadTarget, ReloadTriggers, ReloadableConfig,
+    StagedConfig, StagedReload, spawn_reload_triggers, stop_reload_triggers,
 };
 
 // ---------------------------------------------------------------------------
@@ -92,19 +110,26 @@ pub use upwell_app::HostLifecycleCapabilities;
 pub use upwell_app::contribute;
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_app::{
-    App, AppBuilder, AppHost, AppRegistry, AppRuntime, AppStage, ApplicationPluginRegistrar,
-    BootstrapContext, Built, CompositionDiagnostic, CompositionDiagnostics, CompositionDirective,
-    CompositionEdge, CompositionPhase, CompositionTarget, ContributionId, ContributionProvenance,
-    Contributor, EarlyPluginCatalog, EarlyPluginPlan, EffectivePluginPlan, ExecutionMode,
-    HostError, IdErrorKind, Initial, InstallationOrigin, InstallationProvenance,
-    InvalidCompositionId, LifecyclePhase, LogFormat, LoggingConfig, PhaseError, Plugin,
+    App, AppBuilder, AppConditionEvaluation, AppConditionState, AppHost, AppRegistry, AppRuntime,
+    AppStage, ApplicationPluginRegistrar, BootstrapContext, Built, CandidateGraph,
+    ComponentRetired, ComponentRetirement, ComponentTransitionReport, CompositionDiagnostic,
+    CompositionDiagnostics, CompositionDirective, CompositionEdge, CompositionPhase,
+    CompositionTarget, ContributionId, ContributionProvenance, Contributor, DisplacedGeneration,
+    EarlyPluginCatalog, EarlyPluginPlan, EffectivePluginPlan, ExecutionMode, HostError,
+    IdErrorKind, Initial, InstallationOrigin, InstallationProvenance, InvalidCompositionId,
+    LifecyclePhase, LogFormat, LoggingConfig, PendingTransition, PhaseError, PhaseTiming, Plugin,
     PluginContribution, PluginContributionKind, PluginContributions, PluginDeclaration, PluginId,
     PluginPlanError, PluginRelation, PluginResolutionPlan, PluginSlotId, PluginWithOptions,
-    PreBuild, PreBuildContext, PreparedApp, PreparedProtocol, ProtocolDefinition, ProtocolId,
-    ProtocolPluginRegistrar, ProtocolRuntime, RelationKind, RelationTarget, ReplacementDecision,
-    ResolvedPlugin, ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError, Serve,
-    ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents,
-    SuppressionDecision, ValidationContext, build_host, build_host_context, build_prepared_host,
+    PreBuild, PreBuildContext, PreparedApp, PreparedProtocol, PreparedScopeTopology,
+    ProtocolDefinition, ProtocolId, ProtocolPluginRegistrar, ProtocolRuntime, RelationKind,
+    RelationTarget, ReplacementDecision, ResolvedPlugin, RestartReason, RestartRequired,
+    RetirementContext, RetirementReason, RuntimeReloader, RuntimeTransitionReport, RuntimeView,
+    ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError, Serve, ServerConfig, Setup,
+    ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents, SuppressionDecision, TransitionAborted,
+    TransitionAttemptId, TransitionCommitted, TransitionDecision, TransitionFailure,
+    TransitionHookContext, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,
+    TransitionOutcomeContext, TransitionPhase, TransitionProposal, TransitionRejection,
+    TransitionVerdict, ValidationContext, build_host, build_host_context, build_prepared_host,
     extend_late_plugins, prepare_host, prepare_host_context, prepare_setup_host_context,
     resolve_early_plugins, resolve_host_dependency, resolve_host_plugin_catalog,
     retain_host_plugin_catalog, serve_host, setup_host, setup_host_context,
@@ -164,7 +189,7 @@ pub use upwell_transport::{
 // always available; the RPC daemon macros (`service`/`handlers`/`rpc`) live in the `daemon`
 // module behind the `daemon` feature.
 // ---------------------------------------------------------------------------
-pub use upwell_macros::{app, component, config, injectable, methods};
+pub use upwell_macros::{app, component, config, injectable, methods, when};
 
 /// Re-exported so macro-generated code can reference the `#[distributed_slice]` attribute
 /// through the facade crate without user crates depending on `linkme` directly. The generated
@@ -231,7 +256,7 @@ pub mod config {
     pub use upwell_config::Yaml;
 }
 
-/// Framework builtins: the seeded [`ShutdownHandle`] injectable, the opt-in
+/// Framework builtins: the seeded [`ShutdownHandle`] and [`RuntimeReloader`] injectables, the opt-in
 /// [`ServerConfig`] / [`LoggingConfig`] property structs, and the feature-gated
 /// `init_tracing` subscriber helper.
 #[cfg(not(target_family = "wasm"))]
@@ -404,7 +429,7 @@ pub mod axum {
 pub mod prelude {
     // The macros are built for the host and usable from any target (their generated server code is
     // gated out on wasm); the framework *types* are the daemon-stack surface, compiled out on wasm.
-    pub use crate::{app, component, config, injectable, methods};
+    pub use crate::{app, component, config, injectable, methods, when};
 
     #[cfg(not(target_family = "wasm"))]
     pub use crate::{

@@ -11,11 +11,11 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use serde::{Deserialize, Serialize};
 use upwell_axum::client::{Form, HttpBody, Json};
 use upwell_axum_stomp::{JsonCodec, StompCodec};
 use upwell_rpc::Responder;
 use upwell_transport::{StreamDecode, StreamEncode};
-use serde::{Deserialize, Serialize};
 
 /// A representative response payload: a couple of scalars and two collections, so serialization
 /// does real work rather than measuring dispatch over a single field.

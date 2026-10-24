@@ -361,11 +361,15 @@ impl<K: DirKind> Injectable for Dir<K> {
     fn from_stored(stored: &Self) -> Self {
         stored.clone()
     }
+
+    fn snapshot_stored(stored: &Self) -> Option<Self> {
+        Some(stored.clone())
+    }
 }
 
 /// Under `di-check`, every `Dir<K>` is framework-seeded, so it is always provided.
 #[cfg(feature = "di-check")]
-impl<K: DirKind> upwell_di::Provide<Dir<K>> for upwell_di::Wiring {}
+impl<K: DirKind> upwell_di::Provided<Dir<K>> for upwell_di::Wiring {}
 
 /// How a [`DirectoriesManager`] resolves directories.
 #[derive(Clone)]
@@ -502,11 +506,15 @@ impl Injectable for DirectoriesManager {
     fn from_stored(stored: &Self) -> Self {
         stored.clone()
     }
+
+    fn snapshot_stored(stored: &Self) -> Option<Self> {
+        Some(stored.clone())
+    }
 }
 
 /// Under `di-check`, the manager is framework-seeded, so it is always provided.
 #[cfg(feature = "di-check")]
-impl upwell_di::Provide<DirectoriesManager> for upwell_di::Wiring {}
+impl upwell_di::Provided<DirectoriesManager> for upwell_di::Wiring {}
 
 #[cfg(test)]
 mod tests;

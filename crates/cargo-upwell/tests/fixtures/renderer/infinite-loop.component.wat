@@ -2,7 +2,7 @@
 ;; proves the host's epoch deadline independently of fuel exhaustion.
 (component
   (core module $renderer
-    (memory (export "memory") 1)
+    (memory (export "memory") 64)
     (global $heap (mut i32) (i32.const 4096))
 
     (func (export "cabi_realloc")

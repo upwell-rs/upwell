@@ -35,8 +35,8 @@ use tracing::info;
 use upwell_core::{DependencyDescriptor, ResolverCtx, ResolverCtxExt, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, ComponentSource, Result as DiResult, RootResolver, Singleton,
-    dispatch_factory, factory_dependencies,
+    ComponentFactoryDescriptor, ComponentFactoryRole, ComponentSource, GenerationSnapshot,
+    Result as DiResult, RootResolver, Singleton, dispatch_factory, factory_dependencies,
 };
 use upwell_hooks::{Error as HookError, HookDescriptor, HookKind, Result as HookResult, Startup};
 
@@ -419,7 +419,7 @@ impl Component for JobScheduler {
 /// Under `di-check`, the scheduler is plugin-seeded, so it is always provided — letting a user
 /// component inject `Arc<JobScheduler>` to schedule jobs at run time.
 #[cfg(feature = "di-check")]
-impl upwell_di::Provide<JobScheduler> for upwell_di::Wiring {}
+impl upwell_di::Provided<JobScheduler> for upwell_di::Wiring {}
 
 /// The scheduler's construction factory: resolves the injected [`RootResolver`] and builds it.
 fn scheduler_construct<'a>(
@@ -434,9 +434,10 @@ fn scheduler_deps() -> Vec<DependencyDescriptor> {
 }
 
 static SCHEDULER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: scheduler_construct,
     dependencies: scheduler_deps,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 
 fn scheduler_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -498,8 +499,10 @@ impl upwell_core::Descriptor<ComponentDescriptor> for JobScheduler {
         name: SCHEDULER_NAME,
         ty: TypeDescriptor::of::<JobScheduler>(SCHEDULER_NAME),
         scope: &Singleton,
+        condition: None,
         factories: scheduler_factories,
         hooks: scheduler_hooks,
+        generation_snapshot: Some(GenerationSnapshot::of::<JobScheduler>()),
     };
 }
 

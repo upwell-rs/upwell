@@ -1,0 +1,5 @@
+error: a `#[replace]` recipe is an associated function and cannot take `self`
+ --> tests/ui/recipes/receiver.rs:9:20
+  |
+9 |     async fn carry(&self) -> Self {
+  |                    ^^^^^

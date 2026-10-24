@@ -1,0 +1,91 @@
+error[E0277]: `Settings` cannot be read by a component condition
+  --> tests/ui/when/unknown_receiver.rs:15:8
+   |
+15 | #[when(Settings.enabled)]
+   |        ^^^^^^^^ not a condition input
+   |
+help: the trait `ConditionInput` is not implemented for `Settings`
+  --> tests/ui/when/unknown_receiver.rs:4:1
+   |
+ 4 | pub struct Settings {
+   | ^^^^^^^^^^^^^^^^^^^
+   = note: a `#[when]` receiver must be a `#[config(path = ..)]` type or a component; read other config paths with `resolve("<path>")`
+help: the following other types implement trait `ConditionInput`
+  --> tests/ui/when/unknown_receiver.rs:14:1
+   |
+14 | #[component]
+   | ^^^^^^^^^^^^ `PlainType`
+...
+18 | #[component]
+   | ^^^^^^^^^^^^ `ConfigWithoutPath`
+   = note: this error originates in the attribute macro `component` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `Settings` cannot be read by a component condition
+  --> tests/ui/when/unknown_receiver.rs:15:8
+   |
+14 | #[component]
+   | ------------ in this attribute macro expansion
+15 | #[when(Settings.enabled)]
+   |        ^^^^^^^^ not a condition input
+   |
+help: the trait `ConditionInput` is not implemented for `Settings`
+  --> tests/ui/when/unknown_receiver.rs:4:1
+   |
+ 4 | pub struct Settings {
+   | ^^^^^^^^^^^^^^^^^^^
+   = note: a `#[when]` receiver must be a `#[config(path = ..)]` type or a component; read other config paths with `resolve("<path>")`
+help: the following other types implement trait `ConditionInput`
+  --> tests/ui/when/unknown_receiver.rs:14:1
+   |
+14 | #[component]
+   | ^^^^^^^^^^^^ `PlainType`
+...
+18 | #[component]
+   | ^^^^^^^^^^^^ `ConfigWithoutPath`
+   = note: this error originates in the attribute macro `component` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `Unbound` cannot be read by a component condition
+  --> tests/ui/when/unknown_receiver.rs:19:8
+   |
+19 | #[when(Unbound.enabled)]
+   |        ^^^^^^^ not a condition input
+   |
+help: the trait `ConditionInput` is not implemented for `Unbound`
+  --> tests/ui/when/unknown_receiver.rs:10:1
+   |
+10 | pub struct Unbound {
+   | ^^^^^^^^^^^^^^^^^^
+   = note: a `#[when]` receiver must be a `#[config(path = ..)]` type or a component; read other config paths with `resolve("<path>")`
+help: the following other types implement trait `ConditionInput`
+  --> tests/ui/when/unknown_receiver.rs:14:1
+   |
+14 | #[component]
+   | ^^^^^^^^^^^^ `PlainType`
+...
+18 | #[component]
+   | ^^^^^^^^^^^^ `ConfigWithoutPath`
+   = note: this error originates in the attribute macro `component` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `Unbound` cannot be read by a component condition
+  --> tests/ui/when/unknown_receiver.rs:19:8
+   |
+18 | #[component]
+   | ------------ in this attribute macro expansion
+19 | #[when(Unbound.enabled)]
+   |        ^^^^^^^ not a condition input
+   |
+help: the trait `ConditionInput` is not implemented for `Unbound`
+  --> tests/ui/when/unknown_receiver.rs:10:1
+   |
+10 | pub struct Unbound {
+   | ^^^^^^^^^^^^^^^^^^
+   = note: a `#[when]` receiver must be a `#[config(path = ..)]` type or a component; read other config paths with `resolve("<path>")`
+help: the following other types implement trait `ConditionInput`
+  --> tests/ui/when/unknown_receiver.rs:14:1
+   |
+14 | #[component]
+   | ^^^^^^^^^^^^ `PlainType`
+...
+18 | #[component]
+   | ^^^^^^^^^^^^ `ConfigWithoutPath`
+   = note: this error originates in the attribute macro `component` (in Nightly builds, run with -Z macro-backtrace for more info)

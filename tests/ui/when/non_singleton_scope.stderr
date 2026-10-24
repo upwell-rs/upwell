@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: `#[when]` conditions require a singleton component; remove `scope` or the condition
+ --> tests/ui/when/non_singleton_scope.rs:4:1
+  |
+4 | #[component(scope = transient)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_::_` failed here

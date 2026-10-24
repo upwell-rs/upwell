@@ -1,0 +1,316 @@
+use std::{fmt, future::Future, pin::Pin};
+
+use upwell_core::{DependencyDescriptor, Singleton, StaticScope, UpwellDescriptor};
+use upwell_hooks::HookDescriptor;
+
+use super::{BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor};
+
+/// Async factory function pointer for constructing a component.
+pub type ComponentFactory =
+    for<'a> fn(
+        &'a mut ComponentConstructionContext,
+    ) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + 'a>>;
+
+/// How the container uses one of a component's construction recipes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComponentFactoryRole {
+    /// The field-injection default, used only when no explicit factory exists.
+    Default,
+    /// An `#[init]` or `factory = path` constructor, preferred over the default.
+    Explicit,
+    /// A static state-aware replacement, used only when a runtime transition replaces an
+    /// active instance. It reads the previous instance through
+    /// [`Previous`](crate::Previous) and may resolve only dependencies the effective
+    /// ordinary factory also declares.
+    Replacement,
+    /// A transition handler: receives the planned change for its component and selects
+    /// a one-shot factory for that transition, or declines so the declared strategy
+    /// applies. It declares no dependencies of its own.
+    Transition,
+    /// An explicit hot-update preparation, used only when a runtime transition keeps the
+    /// active instance and updates it in place. It reads the instance through
+    /// [`Previous`](crate::Previous) and may resolve only dependencies the effective
+    /// ordinary factory also declares.
+    HotUpdate,
+}
+
+impl fmt::Display for ComponentFactoryRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let role = match self {
+            Self::Default => "default",
+            Self::Explicit => "explicit",
+            Self::Replacement => "replacement",
+            Self::Transition => "transition handler",
+            Self::HotUpdate => "hot-update",
+        };
+
+        f.write_str(role)
+    }
+}
+
+/// One way to construct a component, carrying the dependencies *that constructor*
+/// needs (zero or many).
+///
+/// A component owns a slice of these (its `{Type}Factories` distributed slice): the
+/// `#[component]`/`#[service]` field-injection [`Default`](ComponentFactoryRole::Default)
+/// plus any [`Explicit`](ComponentFactoryRole::Explicit) factories contributed by an
+/// `#[init]` or `factory = path`, and at most one
+/// [`Replacement`](ComponentFactoryRole::Replacement). The effective ordinary one is chosen
+/// by [`ComponentDescriptor::effective_factory`].
+#[derive(Clone, Copy)]
+pub struct ComponentFactoryDescriptor {
+    /// Stable identity of this construction recipe within its owning component.
+    ///
+    /// This identity is part of graph transition comparison. Change it whenever the recipe's
+    /// construction semantics change. IDs must be non-empty and unique within a component.
+    pub id: &'static str,
+    pub construct: ComponentFactory,
+    /// The factory's dependency edges, reported at runtime. Read only at build.
+    pub dependencies: fn() -> Vec<DependencyDescriptor>,
+    pub role: ComponentFactoryRole,
+}
+
+impl fmt::Debug for ComponentFactoryDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ComponentFactoryDescriptor")
+            .field("id", &self.id)
+            .field("dependencies", &(self.dependencies)())
+            .field("role", &self.role)
+            .finish_non_exhaustive()
+    }
+}
+
+impl UpwellDescriptor for ComponentFactoryDescriptor {}
+
+/// The merged element type of a component's single `{Type}Registrations` `linkme` slice.
+///
+/// Folding factories and hooks into one element type lets the base `#[component]` declare **one**
+/// distributed slice — hence one linker section — instead of two. The `inventory` backend does
+/// not use this: there, factories and hooks stay in separate `DescriptorFor` buckets (extra
+/// collections cost no sections), so this enum is a linkme-path-only concern.
+#[derive(Clone, Copy)]
+pub enum Registration {
+    Factory(ComponentFactoryDescriptor),
+    Hook(HookDescriptor),
+}
+
+impl Registration {
+    /// Wraps a factory.
+    pub const fn factory(descriptor: ComponentFactoryDescriptor) -> Self {
+        Self::Factory(descriptor)
+    }
+
+    /// Wraps a hook.
+    pub const fn hook(descriptor: HookDescriptor) -> Self {
+        Self::Hook(descriptor)
+    }
+
+    /// The factory, if this entry is one.
+    pub fn as_factory(&self) -> Option<&ComponentFactoryDescriptor> {
+        match self {
+            Self::Factory(factory) => Some(factory),
+
+            Self::Hook(_) => None,
+        }
+    }
+
+    /// The hook, if this entry is one.
+    pub fn as_hook(&self) -> Option<&HookDescriptor> {
+        match self {
+            Self::Hook(hook) => Some(hook),
+
+            Self::Factory(_) => None,
+        }
+    }
+}
+
+impl UpwellDescriptor for Registration {}
+
+/// A component type's own construction factories.
+///
+/// Implemented for each `#[component]`/`#[service]` by the macro to return that
+/// type's `{Type}Factories` distributed slice.
+pub trait ComponentFactories {
+    /// Every factory contributed to this component type.
+    fn factories() -> &'static [ComponentFactoryDescriptor];
+}
+
+/// The scope marker a `#[component]` declares, named at the type level.
+///
+/// Implemented by `#[component]` and `#[service]`, so the transition recipes an impl-block
+/// macro declares (`#[replace]`, `#[transition]`, `#[hot_update]`) are checked against
+/// the singleton scope at compile time. A hand-written component declares its recipes with
+/// [`factories!`](crate::factories) instead, and registry validation checks the scope.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` declares transition recipes but is not a `#[component]`",
+    note = "declare the recipes of a hand-written component with `factories!`"
+)]
+pub trait DeclaredScope: Component {
+    /// The scope marker type from `#[component(scope = ..)]`, `Singleton` when omitted.
+    type Scope;
+}
+
+impl ComponentDescriptor {
+    /// The factory the container should use: an explicit one if present (the default
+    /// is its fallback), or `None` for a manually-provided instance (no ordinary
+    /// factory). Errors if more than one explicit factory exists for the type.
+    /// Replacement factories never take part in this choice.
+    pub fn effective_factory(&self) -> crate::Result<Option<&'static ComponentFactoryDescriptor>> {
+        let mut explicit = self.factories_with(ComponentFactoryRole::Explicit);
+        let first = explicit.next();
+
+        if first.is_some() && explicit.next().is_some() {
+            return Err(crate::Error::AmbiguousFactory(self.name.to_string()));
+        }
+
+        match first {
+            Some(factory) => Ok(Some(factory)),
+
+            None => Ok(self.factories_with(ComponentFactoryRole::Default).next()),
+        }
+    }
+
+    /// The static state-aware replacement factory, if the component declares one.
+    /// Errors if it declares more than one.
+    pub fn replacement_factory(
+        &self,
+    ) -> crate::Result<Option<&'static ComponentFactoryDescriptor>> {
+        self.transition_role(ComponentFactoryRole::Replacement)
+    }
+
+    /// The transition handler, if the component declares one. Errors if it declares
+    /// more than one.
+    pub fn transition_handler(&self) -> crate::Result<Option<&'static ComponentFactoryDescriptor>> {
+        self.transition_role(ComponentFactoryRole::Transition)
+    }
+
+    /// The hot-update preparation, if the component declares one. Errors if it declares
+    /// more than one.
+    pub fn hot_update_factory(&self) -> crate::Result<Option<&'static ComponentFactoryDescriptor>> {
+        self.transition_role(ComponentFactoryRole::HotUpdate)
+    }
+
+    /// The single recipe a component declares for a transition-only `role`.
+    fn transition_role(
+        &self,
+        role: ComponentFactoryRole,
+    ) -> crate::Result<Option<&'static ComponentFactoryDescriptor>> {
+        let mut recipes = self.factories_with(role);
+        let first = recipes.next();
+
+        if first.is_some() && recipes.next().is_some() {
+            return Err(crate::Error::AmbiguousTransitionFactory {
+                component: self.name.to_string(),
+                role,
+            });
+        }
+
+        Ok(first)
+    }
+
+    fn factories_with(
+        &self,
+        role: ComponentFactoryRole,
+    ) -> impl Iterator<Item = &'static ComponentFactoryDescriptor> {
+        (self.factories)()
+            .iter()
+            .filter(move |factory| factory.role == role)
+    }
+
+    /// Validates factory identities and the transition-recipe contract: a replacement,
+    /// transition handler or hot update needs an ordinary factory, and a replacement or
+    /// hot update may resolve only dependencies that factory declares, so the planned
+    /// construction order stays authoritative for it.
+    pub(crate) fn validate_factories(&self) -> crate::Result<()> {
+        let mut ids = std::collections::HashSet::new();
+
+        for factory in (self.factories)() {
+            if factory.id.is_empty() {
+                return Err(crate::Error::EmptyFactoryId(self.name.to_string()));
+            }
+
+            if !ids.insert(factory.id) {
+                return Err(crate::Error::DuplicateFactoryId {
+                    component: self.name.to_string(),
+                    factory: factory.id.to_string(),
+                });
+            }
+        }
+
+        let recipes = [
+            self.replacement_factory()?,
+            self.transition_handler()?,
+            self.hot_update_factory()?,
+        ];
+
+        for recipe in recipes.into_iter().flatten() {
+            self.validate_transition_recipe(recipe)?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_transition_recipe(&self, recipe: &ComponentFactoryDescriptor) -> crate::Result<()> {
+        if self.scope.id() != Singleton::ID {
+            return Err(crate::Error::TransitionRecipeOutOfScope {
+                component: self.name.to_string(),
+                role: recipe.role,
+                scope: self.scope.name(),
+            });
+        }
+
+        let Some(ordinary) = self.effective_factory()? else {
+            return Err(crate::Error::TransitionRecipeWithoutFactory {
+                component: self.name.to_string(),
+                role: recipe.role,
+            });
+        };
+
+        self.require_declared(
+            &(ordinary.dependencies)(),
+            &(recipe.dependencies)(),
+            recipe.role,
+        )
+    }
+
+    /// Requires every edge in `requested` to be covered by an edge of the ordinary
+    /// factory's `declared` dependencies.
+    pub(crate) fn require_declared(
+        &self,
+        declared: &[DependencyDescriptor],
+        requested: &[DependencyDescriptor],
+        role: ComponentFactoryRole,
+    ) -> crate::Result<()> {
+        let undeclared = requested
+            .iter()
+            .find(|dependency| !declared.iter().any(|edge| stands_in_for(edge, dependency)));
+
+        match undeclared {
+            Some(dependency) => Err(crate::Error::UndeclaredTransitionDependency {
+                component: self.name.to_string(),
+                role,
+                dependency: dependency.name.to_string(),
+            }),
+
+            None => Ok(()),
+        }
+    }
+}
+
+/// Whether the replacement edge `replacement` is covered by the ordinary edge `ordinary`
+/// in the planned graph, so the replacement demands nothing the planner did not schedule.
+///
+/// The target (`ty`, `qualifier`, `cardinality`, `config`), the `resolution` mode and the
+/// `dynamic` validation exemption must match. A replacement may treat a required edge as
+/// optional, never the reverse. `name` is display-only and `observation` is ignored: a
+/// replacement may read a `Dep<T>` edge as a fixed `Arc<T>` or the reverse.
+fn stands_in_for(ordinary: &DependencyDescriptor, replacement: &DependencyDescriptor) -> bool {
+    ordinary.ty.type_id == replacement.ty.type_id
+        && ordinary.qualifier == replacement.qualifier
+        && ordinary.cardinality == replacement.cardinality
+        && ordinary.config == replacement.config
+        && ordinary.resolution == replacement.resolution
+        && ordinary.dynamic == replacement.dynamic
+        && (replacement.optional || !ordinary.optional)
+}

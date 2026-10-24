@@ -28,4 +28,4 @@ app.serve(TcpTransport::bind("127.0.0.1:7000").await?).await
 | Feature | Effect |
 |---|---|
 | `di` | make [`PeerInfo`] an Upwell DI injectable (pulls in `upwell-di`); off by default so the transport stays standalone |
-| `di-check` | additionally emit the compile-time `Provide<PeerInfo>` impl for di-check (implies `di`) |
+| `di-check` | additionally emit the compile-time `Provided<PeerInfo>` impl for di-check (implies `di`) |

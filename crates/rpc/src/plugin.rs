@@ -178,6 +178,10 @@ impl PreparedProtocol for PreparedRpc {
                     (String::from("route-count"), service.rpcs.len().to_string()),
                 ]),
             );
+
+            if let Some(source) = service.descriptor.ty.source {
+                contributions.resource_source(&service_id, source);
+            }
             contributions.resource_display(
                 &service_id,
                 ResourceDisplay {
@@ -214,6 +218,10 @@ impl PreparedProtocol for PreparedRpc {
                     rpc.name,
                     BTreeMap::from([(String::from("kind"), String::from("rpc-route"))]),
                 );
+
+                if let Some(source) = rpc.source {
+                    contributions.resource_source(&rpc_id, source);
+                }
                 let operation = operation_kind(rpc.operation);
                 let parameters = rpc
                     .parameters

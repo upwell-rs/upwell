@@ -1,0 +1,19 @@
+error: `resolve` takes one string-literal config path, so the condition declares it statically
+ --> tests/ui/when/resolve_non_literal.rs:7:16
+  |
+7 | #[when(resolve(FLAG) == Some(true))]
+  |                ^^^^
+
+error: `resolve` takes one string-literal config path, so the condition declares it statically
+  --> tests/ui/when/resolve_non_literal.rs:11:8
+   |
+11 | #[when(resolve::<bool>() == Some(true))]
+   |        ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `upwell::condition::resolve`
+ --> tests/ui/when/resolve_non_literal.rs:1:5
+  |
+1 | use upwell::condition::resolve;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

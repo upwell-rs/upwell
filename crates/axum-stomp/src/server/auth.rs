@@ -372,7 +372,7 @@ where
 }
 
 #[cfg(feature = "di-check")]
-impl upwell_axum::Provide<StompPrincipal> for upwell_axum::Wiring {}
+impl upwell_axum::Provided<StompPrincipal> for upwell_axum::Wiring {}
 
 #[cfg(test)]
 #[path = "auth/tests.rs"]

@@ -1,0 +1,74 @@
+//! Tests for the transactional config-and-graph reload entry point.
+//!
+//! Each test drives [`AppRuntime::reload_config`](crate::AppRuntime::reload_config)
+//! over a file-backed app with one condition-gated component whose factory injects
+//! `Cfg<T>` and whose `ConfigReload` hook records the proposed value, so the tests can
+//! prove which store each stage of the transaction resolved through — and that every
+//! failure or cancellation before the terminal commit leaves the complete previous
+//! generation, config values included, active.
+
+mod callback_inputs;
+mod cancellation;
+mod candidate_failure;
+mod concurrency;
+mod condition_panic;
+mod fixture;
+mod graph_reuse;
+mod hook_rejection;
+mod invalidation;
+mod manager_consumer;
+mod noop;
+mod provider_switch;
+mod publication;
+mod replacement;
+mod report;
+mod runtime_reloader;
+mod transition_recipes;
+mod trigger;
+
+/// Serializes the reload tests, which share process-global fixture controls, under the
+/// default `cargo test` parallelism. Held for the entire body of each async test;
+/// await-safe, so no std guard ever crosses an await.
+static TEST_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Locks [`TEST_GUARD`] for the rest of the calling test.
+pub(crate) async fn lock_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+    TEST_GUARD.lock().await
+}
+
+use crate::{RuntimeTransitionReport, TransitionFailure, TransitionOutcome, TransitionPhase};
+
+/// The `config` directory inside a fixture's temp dir, created on first use.
+fn config_dir_of(dir: &tempfile::TempDir) -> std::path::PathBuf {
+    let config_dir = dir.path().join("config");
+
+    std::fs::create_dir_all(&config_dir).expect("create config dir");
+
+    config_dir
+}
+
+/// Splits a rejected reload's error into its redacted report and the original error.
+fn rejected(error: crate::Error) -> (RuntimeTransitionReport, crate::Error) {
+    match error {
+        crate::Error::TransitionRejected(rejection) => rejection.into_parts(),
+        other => panic!("expected a rejected transition, got {other:?}"),
+    }
+}
+
+/// Asserts that a rejected report names the failing phase and redacted category.
+fn assert_rejected(
+    report: &RuntimeTransitionReport,
+    phase: TransitionPhase,
+    failure: TransitionFailure,
+) {
+    assert_eq!(
+        report.outcome(),
+        &TransitionOutcome::Rejected { phase, failure },
+        "the report names the rejecting phase and category"
+    );
+    assert_eq!(
+        report.runtime_generation(),
+        report.base_generation(),
+        "a rejected attempt leaves the base generation current"
+    );
+}

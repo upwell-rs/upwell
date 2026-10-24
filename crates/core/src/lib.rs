@@ -9,18 +9,30 @@
 //! It contains no runtime, no container, no config, and no protocol code. Those live in
 //! `upwell-di`, `upwell-config`, `upwell-hooks`, and `upwell-daemon`.
 
+pub mod condition;
 pub mod dependency;
 pub mod descriptor;
+pub mod generation;
 pub mod id;
 pub mod resolver;
 pub mod scope;
+pub mod source;
 pub mod types;
 
-pub use dependency::{Cardinality, DependencyDescriptor, ResolutionMode};
+pub use condition::{
+    ConditionCallback, ConditionContext, ConditionDescriptor, ConditionExpression, ConditionInput,
+    ConditionInputId, ConditionInputRead, ConditionInputValue, ConditionPredicate,
+    ConditionPredicateKind, ConditionPurity, ConditionScalar, ConditionScalarKind,
+    ConditionScalarLiteral, ConfigBindingId, ConfigFactDescriptor, ConfigFactId, Eligibility,
+    ProviderMappingId,
+};
+pub use dependency::{Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode};
 pub use descriptor::{Descriptor, DescriptorFor, RegistryFor, RuntimeDescriptor, UpwellDescriptor};
+pub use generation::RuntimeGenerationId;
 pub use id::{FRAMEWORK_NAMESPACE, IdErrorKind, InvalidNamespacedId, NamespacedIdType};
 pub use resolver::{Resolver, ResolverCtx, ResolverCtxExt, ResolverSet};
 pub use scope::{
     InvalidScopeId, InvalidScopeIdReason, Scope, ScopeId, Singleton, StaticScope, Transient,
 };
+pub use source::{DescriptorSource, ItemSource};
 pub use types::{TypeDescriptor, type_id_of};

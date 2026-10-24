@@ -6,7 +6,7 @@ use upwell_config::{ConfigManager, Toml};
 use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, ComponentConstructionContext, ComponentDescriptor, ComponentFactoryDescriptor,
-    ProviderDescriptor, Singleton,
+    ComponentFactoryRole, ProviderDescriptor, Singleton,
 };
 use upwell_tooling_schema::{DocumentIdentity, Relationship, RelationshipKind, ToolingDocument};
 
@@ -41,6 +41,7 @@ fn aggregate_dependencies() -> Vec<DependencyDescriptor> {
             qualifier: Some("shared"),
             config: false,
             resolution: ResolutionMode::Eager,
+            observation: upwell_core::DependencyObservation::Snapshot,
         },
         DependencyDescriptor {
             name: "FreshAggregateTraits",
@@ -51,20 +52,23 @@ fn aggregate_dependencies() -> Vec<DependencyDescriptor> {
             qualifier: None,
             config: false,
             resolution: ResolutionMode::Fresh,
+            observation: upwell_core::DependencyObservation::Snapshot,
         },
     ]
 }
 
 static PROVIDER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: fake_factory,
     dependencies: no_dependencies,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 
 static CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
+    id: "static",
     construct: fake_factory,
     dependencies: aggregate_dependencies,
-    default: false,
+    role: ComponentFactoryRole::Explicit,
 }];
 
 fn provider_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -84,8 +88,10 @@ static PROVIDER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     name: "AggregateProvider",
     ty: TypeDescriptor::of::<AggregateProvider>("AggregateProvider"),
     scope: &Singleton,
+    condition: None,
     factories: provider_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 static CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
@@ -93,8 +99,10 @@ static CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     name: "AggregateConsumer",
     ty: TypeDescriptor::of::<AggregateConsumer>("AggregateConsumer"),
     scope: &Singleton,
+    condition: None,
     factories: consumer_factories,
     hooks: upwell_hooks::no_hooks,
+    generation_snapshot: None,
 };
 
 static PROVIDER: ProviderDescriptor = ProviderDescriptor {
@@ -105,6 +113,7 @@ static PROVIDER: ProviderDescriptor = ProviderDescriptor {
     priority: 0,
     ordering: &[],
     erase: erase_unreachable,
+    live: |_| None,
 };
 
 #[test]
@@ -213,14 +222,11 @@ fn conflicting_dependency_facts_are_sorted_and_schema_unique() {
 
 #[test]
 fn projection_aggregates_dependencies_to_the_same_type_and_provider() {
-    let mut builder = App::<()>::builder("relationship-aggregation")
+    let document = App::<()>::builder("relationship-aggregation")
         .config_source(ConfigManager::<Toml>::empty())
         .component_descriptor(&PROVIDER_COMPONENT)
-        .component_descriptor(&CONSUMER_COMPONENT);
-
-    builder.registry_mut().providers.push(PROVIDER);
-
-    let document = builder
+        .component_descriptor(&CONSUMER_COMPONENT)
+        .provider_descriptor(&PROVIDER)
         .prepare()
         .expect("aggregation fixture prepares")
         .tooling_document()

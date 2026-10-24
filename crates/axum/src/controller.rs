@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use upwell_app::AppRuntime;
-use upwell_core::{TypeDescriptor, UpwellDescriptor};
+use upwell_core::{ItemSource, TypeDescriptor, UpwellDescriptor};
 
 /// One `#[handlers]` block's route-group builder, tagged with its controller type `C`.
 ///
@@ -41,6 +41,8 @@ pub struct HttpRouteDescriptor {
     pub inputs: &'static [HttpInputDescriptor],
     /// Semantic response payload and transport shape.
     pub output: HttpOutputDescriptor,
+    /// The handler method's declaration, when the registering macro recorded it.
+    pub source: Option<ItemSource>,
 }
 
 /// One named placeholder in an HTTP route template.

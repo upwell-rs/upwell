@@ -10,14 +10,16 @@ mod index;
 mod model;
 mod query;
 mod relation;
+mod selection;
 
 pub use crate::TOOLING_SCHEMA_VERSION;
 pub use error::{GraphEmitError, GraphQueryError, GraphSelectorKind};
 pub use explain::explain_resource;
 pub use failure::query_failure_graph;
 pub use model::{
-    CliArgumentOwnership, CliCommandOwnership, CliOwnershipSummary, GraphDirection, GraphQuery,
-    GraphRelationFamily, GraphSource, GraphView, ResourceExplanation,
+    CliArgumentOwnership, CliCommandOwnership, CliOwnershipSummary, ConditionStep, GraphDirection,
+    GraphQuery, GraphRelationFamily, GraphSource, GraphView, ProviderSelection, ResolvedConsumer,
+    ResourceExplanation,
 };
 pub use query::query_graph;
 

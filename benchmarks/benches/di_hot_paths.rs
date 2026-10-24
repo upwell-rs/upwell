@@ -14,9 +14,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use tokio::runtime::Runtime;
 use upwell_benchmarks::di;
 use upwell_core::{Resolver, ResolverSet};
-use tokio::runtime::Runtime;
+use upwell_di::Live;
 
 macro_rules! resolver_types {
     ($($name:ident),+ $(,)?) => {
@@ -158,12 +159,23 @@ fn extract_shapes(c: &mut Criterion) {
     group.finish();
 }
 
+/// Publishing a new instance into a live slot: the whole cost a `Dep<T>` consumer pays when
+/// a reload rebinds it in place instead of reconstructing it.
+fn live_replace(c: &mut Criterion) {
+    let live = Live::new(Arc::new(0_u64));
+    let next = Arc::new(1_u64);
+
+    c.bench_function("live_slot_replace", |bencher| {
+        bencher.iter(|| live.replace(black_box(Arc::clone(&next))));
+    });
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default()
         .warm_up_time(Duration::from_secs(2))
         .measurement_time(Duration::from_secs(5))
         .sample_size(60);
-    targets = resolver_set_clone, resolve_by_scope_depth, extract_shapes
+    targets = resolver_set_clone, resolve_by_scope_depth, extract_shapes, live_replace
 }
 criterion_main!(benches);
