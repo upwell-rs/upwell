@@ -160,8 +160,6 @@ jobs:
       - name: Build nextest archive
         shell: bash
         run: cargo nextest archive --workspace --all-features --locked --archive-file nextest-linux.tar.zst
-      - name: Validate generated projects
-        run: cargo test -p cargo-upwell --test init --locked
       - name: Compile-fail UI tests
         run: just test-ui
       - name: Upload nextest archive

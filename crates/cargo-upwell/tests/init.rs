@@ -1,3 +1,12 @@
+//! End-to-end `cargo upwell init` runs against the built-in template catalog.
+//!
+//! Every test here clones the external `upwell-template-*` repositories at the tag pinned by
+//! `TEMPLATE_TAG` and builds the generated project against this workspace. The templates still
+//! target the released 0.20 API while 1.0 breaks it, so these tests are ignored by default and
+//! run neither in CI nor in `just test`. Run them on demand with `just test-templates`. Catalog
+//! parsing, local template expansion and workspace registration stay covered by the unit tests
+//! in `src/init/tests.rs`.
+
 mod common;
 
 use std::path::{Path, PathBuf};
@@ -8,10 +17,8 @@ use upwell_test_utils::{TempFixture, run_command};
 static GENERATED_PROJECTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
+#[ignore = "builds projects from the external template repositories pinned by TEMPLATE_TAG; run with `just test-templates`"]
 fn built_in_application_is_immediately_usable_by_all_tooling_surfaces() {
-    if skip_remote_template_tests() {
-        return;
-    }
     let _serial = GENERATED_PROJECTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -72,10 +79,8 @@ fn built_in_application_is_immediately_usable_by_all_tooling_surfaces() {
 }
 
 #[test]
+#[ignore = "builds projects from the external template repositories pinned by TEMPLATE_TAG; run with `just test-templates`"]
 fn built_in_workspace_plugin_and_protocol_templates_compile() {
-    if skip_remote_template_tests() {
-        return;
-    }
     let _serial = GENERATED_PROJECTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -114,10 +119,8 @@ fn built_in_workspace_plugin_and_protocol_templates_compile() {
 }
 
 #[test]
+#[ignore = "builds projects from the external template repositories pinned by TEMPLATE_TAG; run with `just test-templates`"]
 fn workspace_registration_adds_the_committed_project_once() {
-    if skip_remote_template_tests() {
-        return;
-    }
     let _serial = GENERATED_PROJECTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -162,10 +165,8 @@ fn workspace_registration_adds_the_committed_project_once() {
 }
 
 #[test]
+#[ignore = "builds projects from the external template repositories pinned by TEMPLATE_TAG; run with `just test-templates`"]
 fn failed_workspace_registration_removes_the_generated_project() {
-    if skip_remote_template_tests() {
-        return;
-    }
     let _serial = GENERATED_PROJECTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -239,10 +240,6 @@ fn configure_nested_cargo(command: &mut Command) {
 
 fn dependencies_available(project: &Path) -> bool {
     cargo(project, ["generate-lockfile"]).status.success()
-}
-
-fn skip_remote_template_tests() -> bool {
-    std::env::var_os("UPWELL_SKIP_GENERATED_PROJECT_BUILDS").is_some()
 }
 
 fn assert_success(output: &Output, context: &str) {
