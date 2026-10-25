@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use upwell_core::{ResolverSet, ScopeId, Singleton, StaticScope, TypeDescriptor};
+use upwell_core::{ResolverSet, Scope, ScopeId, Singleton, TypeDescriptor};
 
 use crate::container::ScopeContainer;
 use crate::test_support::test_component;
@@ -104,7 +104,7 @@ impl Injectable for PanickingHandle {
 
 struct SnapshotRequestScope;
 
-impl StaticScope for SnapshotRequestScope {
+impl Scope for SnapshotRequestScope {
     const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/snapshot-request");
     const RANK: u8 = 1;
     const NAME: &'static str = "SnapshotRequest";

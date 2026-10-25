@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 
-use upwell_core::{ResolutionMode, Scope, ScopeId};
+use upwell_core::{ResolutionMode, ScopeId, ScopeKey};
 
 use crate::descriptors::{ComponentDescriptor, ProviderDescriptor};
 
@@ -210,8 +210,8 @@ impl ProviderSelectionModel {
         trait_id: TypeId,
         qualifier: Option<&str>,
         resolution: ResolutionMode,
-        consumer: &dyn Scope,
-        can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
+        consumer: ScopeKey,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> Vec<String> {
         self.providers_for_trait(trait_id)
             .iter()
@@ -229,8 +229,8 @@ impl ProviderSelectionModel {
         &self,
         trait_id: TypeId,
         qualifier: Option<&str>,
-        consumer: &dyn Scope,
-        can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
+        consumer: ScopeKey,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> bool {
         self.providers_for_trait(trait_id)
             .iter()
@@ -246,9 +246,9 @@ impl ProviderSelectionModel {
 
     fn is_visible(
         &self,
-        consumer: &dyn Scope,
+        consumer: ScopeKey,
         provider: &ProviderDescriptor,
-        can_access: &(impl Fn(&dyn Scope, &'static dyn Scope) -> bool + ?Sized),
+        can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
     ) -> bool {
         can_access(
             consumer,

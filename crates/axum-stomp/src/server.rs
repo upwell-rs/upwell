@@ -38,7 +38,7 @@ use stomp_parser::server::{ConnectedFrameBuilder, ErrorFrame, ReceiptFrameBuilde
 use tokio::sync::mpsc;
 use upwell_axum::axum::extract::ws::{Message, WebSocket};
 use upwell_axum::{
-    AppRuntime, BoxedComponent, ComponentDescriptor, ScopeContainer, TypeDescriptor,
+    AppRuntime, BoxedComponent, ComponentDescriptor, Scope, ScopeContainer, TypeDescriptor,
     WebsocketMessageScope,
 };
 
@@ -63,21 +63,21 @@ static STOMP_HEADERS_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manu
     "__upwell_stomp_headers",
     "StompHeaders",
     TypeDescriptor::of::<StompHeaders>("StompHeaders"),
-    &WebsocketMessageScope,
+    WebsocketMessageScope::KEY,
 );
 
 static STOMP_SESSION_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
     "__upwell_stomp_session",
     "StompSession",
     TypeDescriptor::of::<StompSession>("StompSession"),
-    &WebsocketMessageScope,
+    WebsocketMessageScope::KEY,
 );
 
 static STOMP_PRINCIPAL_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
     "__upwell_stomp_principal",
     "StompPrincipal",
     TypeDescriptor::of::<StompPrincipal>("StompPrincipal"),
-    &WebsocketMessageScope,
+    WebsocketMessageScope::KEY,
 );
 
 /// STOMP's protocol-specific instantiation of the neutral topic bus.
@@ -550,7 +550,7 @@ impl Stomp {
 
         let scope = match self
             .runtime
-            .open_scope(&WebsocketMessageScope, Arc::clone(connection), seeds)
+            .open_scope(WebsocketMessageScope::KEY, Arc::clone(connection), seeds)
             .await
         {
             Ok(scope) => scope,

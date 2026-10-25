@@ -101,7 +101,7 @@ async fn root_never_falls_back_to_an_active_parent() {
         "active-dependency",
         "CandidateDependency",
         TypeDescriptor::of::<CandidateDependency>("CandidateDependency"),
-        &Singleton,
+        Singleton::KEY,
     );
     let active = ScopeContainer::build_root(
         &[dependency],
@@ -282,7 +282,7 @@ async fn builder_recreates_and_attaches_the_root_resolver() {
         "candidate-dependency",
         "CandidateDependency",
         TypeDescriptor::of::<CandidateDependency>("CandidateDependency"),
-        &Singleton,
+        Singleton::KEY,
     );
     let resolver = crate::root_resolver_descriptor();
     let retained = BoxedComponent::new(CandidateDependency("candidate"));

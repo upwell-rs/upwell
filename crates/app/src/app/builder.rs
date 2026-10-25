@@ -1,7 +1,7 @@
 use upwell_config::{
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigManager, ConfigProperties,
 };
-use upwell_core::{Descriptor, Singleton as SingletonScope, TypeDescriptor};
+use upwell_core::{Descriptor, Scope, Singleton as SingletonScope, TypeDescriptor};
 use upwell_di::{BoxedComponent, Component, ComponentDescriptor, Injectable, ProviderDescriptor};
 use upwell_dirs::DirectoriesManager;
 
@@ -113,7 +113,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             T::ID,
             T::NAME,
             TypeDescriptor::of::<T>(T::NAME),
-            &SingletonScope,
+            SingletonScope::KEY,
         ));
 
         self.instances.push(BoxedComponent {

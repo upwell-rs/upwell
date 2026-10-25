@@ -1,6 +1,7 @@
 //! Structural transition planning: retention, replacement, retirement order and identity.
 
 use super::*;
+use upwell_core::Scope;
 
 #[test]
 fn provider_switch_retains_live_consumer_and_replaces_fixed_closure() {
@@ -123,7 +124,7 @@ fn singleton_to_scoped_change_still_retires_the_active_singleton() {
         .iter_mut()
         .find(|component| component.id == "unrelated")
         .expect("unrelated component exists");
-    unrelated.scope = &RequestScope;
+    unrelated.scope = RequestScope::KEY;
     let candidate = EffectiveGraph::build(
         RuntimeGenerationId::INITIAL,
         &candidate_registry,

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use upwell_core::{
     ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
     ConfigFactDescriptor, ConfigFactId, DescriptorSource, Resolver, ResolverCtxExt, ResolverSet,
-    RuntimeGenerationId, TypeDescriptor,
+    RuntimeGenerationId, Scope, TypeDescriptor,
 };
 use upwell_di::{
     ComponentDescriptor, ComponentRegistry, ConditionFactSnapshot, EffectiveGraph, ScopeContainer,
@@ -33,7 +33,7 @@ static GENERATION_COMPONENT: ComponentDescriptor = ComponentDescriptor::manual(
     "generation_component",
     "GenerationComponent",
     TypeDescriptor::of::<GenerationComponent>("GenerationComponent"),
-    &Singleton,
+    Singleton::KEY,
 )
 .with_condition(&GENERATION_CONDITION)
 .with_factories(unbuilt_factories!("static", Vec::new, Default));

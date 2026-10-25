@@ -44,12 +44,23 @@ invocations. A missing context is a typed error, never a panic.
 
 ### Scope identity moves onto the type
 
-Today a scope is a `&'static dyn Scope` value: `ScopeBoundary::new` takes `&'static T` and
-descriptors store `scope: &'static dyn Scope`. A scope type with parameter fields cannot be a
-static, so identity moves onto the type through `StaticScope`'s `ID`, `NAME` and `RANK` constants,
-and parameters become per-instance values. This is a breaking change to `ComponentDescriptor`
-and the topology types, and lands first because placements, layouts and seeds (#345, #347) are
-designed against it.
+Before #404 a scope was a `&'static dyn Scope` value: `ScopeBoundary::new` took `&'static T` and
+descriptors stored `scope: &'static dyn Scope`. A scope type with parameter fields cannot be a
+static, so identity moved onto the type and parameters become per-instance values. This was a
+breaking change to `ComponentDescriptor` and the topology types, landed first because placements,
+layouts and seeds (#345, #347) are designed against it.
+
+Implemented in #404 (owner, 2026-10-25):
+
+- `StaticScope` is renamed to `Scope`, and the old object-safe `Scope` trait is removed. A scope
+  type declares `ID`, `RANK`, `NAME` and optionally `IS_TRANSIENT`.
+- Descriptors, containers and topologies carry a `Copy` `ScopeKey` (`S::KEY`, or
+  `ScopeKey::of::<S>()`), compared and hashed by ID.
+- `ScopeBoundary::new::<S>(&[ScopeParent::Root, ScopeParent::of::<Connection>()])` declares every
+  opening parent. `PreparedScopeTopology` precomputes each boundary's chains; a dependency is
+  reachable only when its scope is on every chain of the consumer (`common_ancestors`).
+- Scope plans still order one component list per scope, over the common ancestors. Per-chain
+  placements come with #345.
 
 
 ### Scope values: zero-sized or parameterised

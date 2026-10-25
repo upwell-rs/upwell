@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, ResolutionMode, ResolverSet, ScopeId, Singleton,
-    StaticScope, Transient, TypeDescriptor,
+    Cardinality, DependencyDescriptor, ResolutionMode, ResolverSet, Scope, ScopeId, Singleton,
+    Transient, TypeDescriptor,
 };
 
 use super::resolver_slot::ScopeResolverSlotState;
@@ -25,31 +25,15 @@ struct TestScope;
 struct SameNameScope;
 
 impl Scope for TestScope {
-    fn id(&self) -> ScopeId {
-        ScopeId::new("test/container").expect("valid test scope ID")
-    }
-
-    fn rank(&self) -> u8 {
-        1
-    }
-
-    fn name(&self) -> &'static str {
-        "Test"
-    }
+    const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/container");
+    const RANK: u8 = 1;
+    const NAME: &'static str = "Test";
 }
 
 impl Scope for SameNameScope {
-    fn id(&self) -> ScopeId {
-        ScopeId::new("test/same-name").expect("valid test scope ID")
-    }
-
-    fn rank(&self) -> u8 {
-        1
-    }
-
-    fn name(&self) -> &'static str {
-        "Test"
-    }
+    const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/same-name");
+    const RANK: u8 = 1;
+    const NAME: &'static str = "Test";
 }
 
 const FRESH_TARGET_SCOPE_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/fresh-target");
@@ -57,7 +41,7 @@ const FRESH_OWNER_SCOPE_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test
 
 struct FreshTargetScope;
 
-impl StaticScope for FreshTargetScope {
+impl Scope for FreshTargetScope {
     const ID: ScopeId = FRESH_TARGET_SCOPE_ID;
     const RANK: u8 = 2;
     const NAME: &'static str = "FreshTarget";
@@ -65,7 +49,7 @@ impl StaticScope for FreshTargetScope {
 
 struct FreshOwnerScope;
 
-impl StaticScope for FreshOwnerScope {
+impl Scope for FreshOwnerScope {
     const ID: ScopeId = FRESH_OWNER_SCOPE_ID;
     const RANK: u8 = 1;
     const NAME: &'static str = "FreshOwner";

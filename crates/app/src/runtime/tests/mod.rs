@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use upwell_config::{ConfigManager, ConfigReloader};
-use upwell_core::{ResolverSet, Scope, ScopeId, StaticScope, TypeDescriptor};
+use upwell_core::{ResolverSet, Scope, ScopeId, TypeDescriptor};
 use upwell_di::{BoxedComponent, EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
@@ -14,58 +14,55 @@ use crate::{Error, ScopeBoundary, ScopeParent, ScopeTopology};
 const SESSION_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/session");
 const REQUEST_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/request");
 const OTHER_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/other");
+const SHARED_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/shared");
 
 struct Session;
 struct Request;
 
-impl StaticScope for Session {
+/// A scope opened under either the root or a session.
+struct Shared;
+
+impl Scope for Session {
     const ID: ScopeId = SESSION_ID;
     const RANK: u8 = 100;
     const NAME: &'static str = "Session";
 }
 
-impl StaticScope for Request {
+impl Scope for Request {
     const ID: ScopeId = REQUEST_ID;
     const RANK: u8 = 50;
     const NAME: &'static str = "Request";
 }
 
-static SESSION: Session = Session;
-static REQUEST: Request = Request;
-static OTHER: TestScope = TestScope::new(OTHER_ID, "Other", 25);
-static REQUEST_ALIAS: TestScope = TestScope::new(REQUEST_ID, "Caller Metadata", 1);
-static BOUNDARIES: [ScopeBoundary; 2] = [
-    ScopeBoundary::new(&SESSION, ScopeParent::Root),
-    ScopeBoundary::new(&REQUEST, ScopeParent::Boundary(SESSION_ID)),
+impl Scope for Shared {
+    const ID: ScopeId = SHARED_ID;
+    const RANK: u8 = 40;
+    const NAME: &'static str = "Shared";
+}
+
+/// An undeclared scope, for rejecting openings of unknown boundaries.
+struct Other;
+
+/// A scope sharing [`Request`]'s stable identity under different metadata.
+struct RequestAlias;
+
+impl Scope for Other {
+    const ID: ScopeId = OTHER_ID;
+    const RANK: u8 = 25;
+    const NAME: &'static str = "Other";
+}
+
+impl Scope for RequestAlias {
+    const ID: ScopeId = REQUEST_ID;
+    const RANK: u8 = 1;
+    const NAME: &'static str = "Caller Metadata";
+}
+
+static BOUNDARIES: [ScopeBoundary; 3] = [
+    ScopeBoundary::new::<Session>(&[ScopeParent::Root]),
+    ScopeBoundary::new::<Request>(&[ScopeParent::Boundary(SESSION_ID)]),
+    ScopeBoundary::new::<Shared>(&[ScopeParent::Root, ScopeParent::of::<Session>()]),
 ];
-
-/// A scope with test-controlled stable identity and metadata.
-#[derive(Debug)]
-struct TestScope {
-    id: ScopeId,
-    name: &'static str,
-    rank: u8,
-}
-
-impl TestScope {
-    const fn new(id: ScopeId, name: &'static str, rank: u8) -> Self {
-        Self { id, name, rank }
-    }
-}
-
-impl Scope for TestScope {
-    fn id(&self) -> ScopeId {
-        self.id
-    }
-
-    fn rank(&self) -> u8 {
-        self.rank
-    }
-
-    fn name(&self) -> &'static str {
-        self.name
-    }
-}
 
 /// A fresh empty generation over the test topology, prepared against `base`, plus the
 /// scope registry its root was built from.
@@ -98,6 +95,7 @@ async fn prepared_generation(
             Arc::new(HashMap::from([
                 (SESSION_ID, Vec::new()),
                 (REQUEST_ID, Vec::new()),
+                (SHARED_ID, Vec::new()),
             ])),
             Arc::new(seed_destinations),
         ),

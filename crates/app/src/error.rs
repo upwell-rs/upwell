@@ -45,13 +45,16 @@ pub enum Error {
         parent: ScopeId,
     },
 
-    /// A child was opened over a parent other than its declared parent.
-    #[error("scope '{child}' requires parent '{expected}', but parent '{actual}' was supplied")]
+    /// A child was opened over a parent it does not declare.
+    #[error(
+        "scope '{child}' opens only under {}, but parent '{actual}' was supplied",
+        quoted_ids(.expected)
+    )]
     InvalidScopeParent {
         /// The requested child boundary.
         child: ScopeId,
-        /// The topology-declared parent identity.
-        expected: ScopeId,
+        /// Every topology-declared parent identity, in declaration order.
+        expected: Box<[ScopeId]>,
         /// The supplied parent container's identity.
         actual: ScopeId,
     },
@@ -263,3 +266,11 @@ impl From<upwell_config::ConfigReloadError> for Error {
 
 /// The app-layer result type.
 pub type Result<T, E = Error> = core::result::Result<T, E>;
+
+/// Renders `ids` as a comma-separated list of quoted IDs for error messages.
+fn quoted_ids(ids: &[ScopeId]) -> String {
+    ids.iter()
+        .map(|id| format!("'{id}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}

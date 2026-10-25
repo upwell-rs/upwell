@@ -17,7 +17,7 @@
 //! [`Injectable`]: upwell_core::Injectable
 
 use proc_macro2::TokenStream;
-use quote::{ToTokens, format_ident, quote};
+use quote::{ToTokens, format_ident, quote, quote_spanned};
 use syn::{Expr, ExprLit, Field, Fields, ItemStruct, Lit, LitStr, Meta, spanned::Spanned};
 
 use crate::{attr, paths::Paths};
@@ -167,6 +167,7 @@ pub fn field_injection_component(
     let component_construction_context = paths.core("ComponentConstructionContext");
     let component_descriptor = paths.core("ComponentDescriptor");
     let generation_snapshot = paths.core("GenerationSnapshot");
+    let scope_trait = paths.core("Scope");
     let component_factories = paths.core("ComponentFactories");
     let component_hooks = paths.core("ComponentHooks");
     let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
@@ -310,6 +311,7 @@ pub fn field_injection_component(
     };
 
     let declared_ty = crate::source::declared_type(&self_ident, &self_ident, &name, paths);
+    let scope_key = quote_spanned! {scope_path.span()=> <#scope_path as #scope_trait>::KEY };
 
     quote! {
         #default_factory
@@ -319,7 +321,7 @@ pub fn field_injection_component(
                 id: #id,
                 name: #name,
                 ty: #declared_ty,
-                scope: &#scope_path,
+                scope: #scope_key,
                 condition: #condition,
                 factories: <#self_ident as #component_factories>::factories,
                 hooks: <#self_ident as #component_hooks>::hooks,

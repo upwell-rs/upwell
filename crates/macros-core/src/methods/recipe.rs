@@ -315,7 +315,7 @@ fn descriptor(recipe: &Recipe, factory: &TokenStream, paths: &Paths) -> TokenStr
 /// singleton scope.
 fn singleton_assertion(self_ty: &Type, recipe: &Recipe, paths: &Paths) -> TokenStream {
     let declared_scope = paths.core("DeclaredScope");
-    let static_scope = paths.core("StaticScope");
+    let static_scope = paths.core("Scope");
     let singleton = paths.core("scope::Singleton");
     let message = LitStr::new(
         &format!(

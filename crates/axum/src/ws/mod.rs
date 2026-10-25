@@ -24,7 +24,7 @@ use futures::future::BoxFuture;
 use tokio::time::Duration;
 use upwell_app::{AppRegistry, AppRuntime};
 use upwell_config::ContainerConfigExt;
-use upwell_core::{ItemSource, TypeDescriptor};
+use upwell_core::{ItemSource, Scope, TypeDescriptor};
 use upwell_di::{BoxedComponent, ScopeContainer};
 
 /// How long the framework waits for a WS close handshake to flush before abandoning the socket.
@@ -491,7 +491,7 @@ pub(crate) static WEBSOCKET_UPGRADE_META_DESCRIPTOR: upwell_di::ComponentDescrip
         "__upwell_websocket_upgrade_meta",
         "WebsocketUpgradeMeta",
         TypeDescriptor::of::<WebsocketUpgradeMeta>("WebsocketUpgradeMeta"),
-        &crate::scope::WebsocketConnection,
+        crate::scope::WebsocketConnection::KEY,
     );
 
 /// Metadata selected while accepting one WebSocket upgrade.
@@ -528,7 +528,7 @@ pub(crate) static WS_CONNECTION_META_DESCRIPTOR: upwell_di::ComponentDescriptor 
         "__upwell_ws_connection_meta",
         "WsConnectionMeta",
         TypeDescriptor::of::<WsConnectionMeta>("WsConnectionMeta"),
-        &crate::scope::WebsocketConnection,
+        crate::scope::WebsocketConnection::KEY,
     );
 
 /// Tracks peer activity without spawning a feeder or timer task. A silent connection is probed
@@ -805,7 +805,7 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
 
                 let connection = match runtime
                     .open_scope_from_root(
-                        &crate::scope::WebsocketConnection,
+                        crate::scope::WebsocketConnection::KEY,
                         vec![upgrade_seed, connection_seed],
                     )
                     .await

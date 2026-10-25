@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
-use upwell_core::{ScopeId, Singleton, StaticScope, Transient};
+use upwell_core::{Scope, ScopeId, Singleton, Transient};
 use upwell_di::{ComponentDescriptor, EffectiveGraph, ProviderSelectionModel, topological_sort};
 
 use super::PreparedScopeTopology;
@@ -176,7 +176,7 @@ impl DescriptorPartitions {
     ) -> HashSet<TypeId> {
         let mut prebuilt = root.clone();
 
-        for ancestor in topology.ancestors(scope) {
+        for ancestor in topology.common_ancestors(scope).iter().copied() {
             if ancestor == Singleton::ID {
                 continue;
             }

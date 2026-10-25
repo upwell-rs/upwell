@@ -46,7 +46,7 @@
 use std::any::type_name;
 use std::sync::Arc;
 
-use upwell_core::{ConditionDescriptor, Scope, TypeDescriptor};
+use upwell_core::{ConditionDescriptor, ScopeKey, TypeDescriptor};
 use upwell_hooks::HookDescriptor;
 
 use super::component::{
@@ -228,7 +228,7 @@ impl ComponentDescriptor {
     }
 
     /// Places the component in `scope` instead of the singleton scope.
-    pub const fn with_scope(self, scope: &'static dyn Scope) -> Self {
+    pub const fn with_scope(self, scope: ScopeKey) -> Self {
         Self { scope, ..self }
     }
 

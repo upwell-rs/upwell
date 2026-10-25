@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use upwell_core::{
     ConditionCallback, ConditionDescriptor, ConditionInputId, ConditionPredicate,
-    ConditionScalarKind, ConfigFactDescriptor, ConfigFactId, StaticScope,
+    ConditionScalarKind, ConfigFactDescriptor, ConfigFactId, Scope,
 };
 
 use super::{ConditionCatalog, ConditionError, ConditionFactSnapshot};

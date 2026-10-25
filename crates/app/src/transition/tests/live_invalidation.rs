@@ -1,6 +1,7 @@
 //! Runtime invalidation of live-observing consumers and their closures.
 
 use super::*;
+use upwell_core::Scope;
 
 unit_component!(
     LiveInvalidatedConsumer,
@@ -29,7 +30,7 @@ async fn construct_closure_transient(_: Arc<LiveInvalidatedConsumer>) -> Closure
 
 fn closure_transient() -> ComponentDescriptor {
     ComponentDescriptor::of::<ClosureTransient>()
-        .with_scope(&Transient)
+        .with_scope(Transient::KEY)
         .with_factories(upwell_di::factories!["closure-transient" => construct_closure_transient])
         .without_retention()
 }

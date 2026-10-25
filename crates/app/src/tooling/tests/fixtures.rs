@@ -215,7 +215,7 @@ pub(super) static ALTERNATE_COMPONENT: ComponentDescriptor = ComponentDescriptor
     AlternateComponent::ID,
     AlternateComponent::NAME,
     TypeDescriptor::of::<AlternateComponent>(AlternateComponent::NAME),
-    &Singleton,
+    Singleton::KEY,
 );
 
 pub(super) static RELOAD_HOOKS: [upwell_hooks::HookDescriptor; 1] =
@@ -368,5 +368,5 @@ pub(super) static DISPLACED_COMPONENT: ComponentDescriptor = ComponentDescriptor
     "protocol-projected-component",
     "ProtocolProjectedComponent",
     TypeDescriptor::of::<ProjectedComponent>(ProjectedComponent::NAME),
-    &Singleton,
+    Singleton::KEY,
 );

@@ -1,6 +1,7 @@
 //! Factory-backed transients stay Fresh-resolvable in candidate registries.
 
 use super::*;
+use upwell_core::Scope;
 
 #[derive(Clone)]
 struct TransientSeed;
@@ -98,7 +99,7 @@ fn fresh_holder(factories: fn() -> &'static [ComponentFactoryDescriptor]) -> Com
         id: "fresh-holder",
         name: "FreshHolder",
         ty: TypeDescriptor::of::<FreshHolder>("FreshHolder"),
-        scope: &Singleton,
+        scope: Singleton::KEY,
         condition: None,
         factories,
         hooks: upwell_hooks::no_hooks,
@@ -111,7 +112,7 @@ fn transient_seed() -> ComponentDescriptor {
         id: "transient-seed",
         name: "TransientSeed",
         ty: TypeDescriptor::of::<TransientSeed>("TransientSeed"),
-        scope: &Transient,
+        scope: Transient::KEY,
         condition: None,
         factories: transient_seed_factories,
         hooks: upwell_hooks::no_hooks,

@@ -70,7 +70,7 @@ fn validate_accepts_manual_component_descriptor() {
         "pg_pool_manual",
         "PgPool",
         TypeDescriptor::of::<u16>("PgPool"),
-        &Singleton,
+        Singleton::KEY,
     );
     let with = ComponentRegistry {
         components: vec![BACKUP_REPO, manual],
@@ -86,7 +86,7 @@ fn resolved_components_preserve_registration_order_through_manual_override() {
         "pg_pool_manual",
         "PgPool",
         TypeDescriptor::of::<u16>("PgPool"),
-        &Singleton,
+        Singleton::KEY,
     );
     let registry = ComponentRegistry {
         components: vec![PG_POOL, BACKUP_REPO, manual],

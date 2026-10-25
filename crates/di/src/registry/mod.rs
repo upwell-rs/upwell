@@ -14,7 +14,7 @@ pub use selection::{
     SelectedDependency,
 };
 
-use upwell_core::{Scope, ScopeId};
+use upwell_core::{ScopeId, ScopeKey};
 
 use crate::descriptors::{COMPONENTS, ComponentDescriptor, PROVIDERS, ProviderDescriptor};
 use crate::error::Error;
@@ -166,7 +166,7 @@ impl ComponentRegistry {
         &self,
         components: &[ComponentDescriptor],
         selection: &selection::ProviderSelectionModel,
-        can_access: impl Fn(&dyn Scope, &dyn Scope) -> bool,
+        can_access: impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<()> {
         self.validate_component_ids(components)?;
         selection::validate_provider_components(components, &self.providers)?;

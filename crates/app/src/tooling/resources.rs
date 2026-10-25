@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use upwell_core::{Singleton, StaticScope, Transient};
+use upwell_core::{Scope, Singleton, Transient};
 use upwell_tooling_schema::{Provenance, RelationshipKind, ResourceKind};
 
 use super::{
@@ -109,7 +109,6 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
 
         for boundary in self.app.scope_topology().boundaries() {
             let id = scope_id(boundary.id().as_str());
-            let parent = scope_id(boundary.parent().id().as_str());
 
             self.resource(
                 &id,
@@ -125,7 +124,12 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
                     (String::from("scope-id"), boundary.id().as_str().to_string()),
                 ]),
             );
-            self.relationship(RelationshipKind::OpensScope, &parent, &id, []);
+
+            for parent in boundary.parents() {
+                let parent = scope_id(parent.id().as_str());
+
+                self.relationship(RelationshipKind::OpensScope, &parent, &id, []);
+            }
         }
     }
 

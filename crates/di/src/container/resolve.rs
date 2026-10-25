@@ -3,7 +3,7 @@
 use std::any::TypeId;
 use std::sync::Arc;
 
-use upwell_core::{ResolutionMode, Transient};
+use upwell_core::{ResolutionMode, Scope, Transient};
 
 use super::{ScopeContainer, construct_transient, construct_transient_provider};
 use crate::descriptors::component::{ComponentConstructionContext, SharedStore};
@@ -107,7 +107,7 @@ impl ScopeContainer {
     /// `Injectable` subset that [`resolve`](Self::resolve) covers.
     pub async fn extract<H: crate::construct::FromContainer>(self: &Arc<Self>) -> crate::Result<H> {
         let cx = ComponentConstructionContext::new_with_slot(
-            &Transient,
+            Transient::KEY,
             Some(Arc::clone(self)),
             Arc::clone(&self.registry),
             self.resolvers().clone(),

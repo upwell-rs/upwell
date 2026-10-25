@@ -6,7 +6,7 @@ use super::*;
 async fn snapshot_rejects_a_non_singleton_descriptor() {
     let descriptor = ComponentDescriptor::of::<SharedService>()
         .with_identity("snapshot-shared", "SharedService")
-        .with_scope(&SnapshotRequestScope);
+        .with_scope(SnapshotRequestScope::KEY);
     let typed = ComponentDescriptor::of::<SharedService>();
     let root = root_with(
         &[typed],

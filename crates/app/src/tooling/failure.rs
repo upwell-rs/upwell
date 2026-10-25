@@ -270,8 +270,10 @@ pub(super) fn scope_topology_resources(error: &crate::ScopeTopologyError) -> Vec
     match error {
         ScopeTopologyError::DuplicateId { id }
         | ScopeTopologyError::ReservedId { id }
+        | ScopeTopologyError::NoParents { id }
         | ScopeTopologyError::SelfParent { id } => vec![scope_resource(*id)],
-        ScopeTopologyError::MissingParent { id, parent } => {
+        ScopeTopologyError::MissingParent { id, parent }
+        | ScopeTopologyError::DuplicateParent { id, parent } => {
             vec![scope_resource(*id), scope_resource(*parent)]
         }
         ScopeTopologyError::Cycle { members } => {

@@ -5,7 +5,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, Singleton,
+    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, Scope, Singleton,
     TypeDescriptor,
 };
 
@@ -77,7 +77,7 @@ pub(crate) const fn planned(
         id,
         name: id,
         ty,
-        scope: &Singleton,
+        scope: Singleton::KEY,
         condition: None,
         factories,
         hooks: upwell_hooks::no_hooks,

@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use upwell_core::{Resolver, ResolverCtx, ResolverSet, Scope};
+use upwell_core::{Resolver, ResolverCtx, ResolverSet, ScopeKey};
 
 use crate::descriptors::{Component, Injectable, component::ScopeStore};
 
@@ -36,7 +36,7 @@ pub(crate) use transient::{
 /// resolving components by type — used by hooks and config-targeted resolution) plus
 /// any *external* resolvers (the config store) threaded in at build.
 pub struct ScopeContainer {
-    scope: &'static dyn Scope,
+    scope: ScopeKey,
     store: ScopeStore,
     parent: Option<Arc<ScopeContainer>>,
     registry: Arc<ScopeRegistry>,
@@ -79,7 +79,7 @@ impl ComponentSource {
 
 impl ScopeContainer {
     /// The scope this container holds.
-    pub fn scope(&self) -> &'static dyn Scope {
+    pub fn scope(&self) -> ScopeKey {
         self.scope
     }
 
@@ -132,7 +132,7 @@ impl ScopeContainer {
         })
     }
 
-    pub(crate) fn can_access(&self, scope: &'static dyn Scope) -> bool {
+    pub(crate) fn can_access(&self, scope: ScopeKey) -> bool {
         if scope.is_transient() || self.scope.id() == scope.id() {
             return true;
         }

@@ -1,7 +1,9 @@
 use std::ops::Deref;
 use std::{any::Any, fmt, sync::Arc};
 
-use upwell_core::{ConditionDescriptor, DependencyDescriptor, Scope, Singleton, TypeDescriptor};
+use upwell_core::{
+    ConditionDescriptor, DependencyDescriptor, Scope, ScopeKey, Singleton, TypeDescriptor,
+};
 use upwell_hooks::{HookDescriptor, no_hooks};
 
 mod context;
@@ -179,7 +181,7 @@ pub struct ComponentDescriptor {
     pub id: &'static str,
     pub name: &'static str,
     pub ty: TypeDescriptor,
-    pub scope: &'static dyn Scope,
+    pub scope: ScopeKey,
     /// Optional root condition. Provider mappings inherit this component's eligibility.
     pub condition: Option<&'static ConditionDescriptor>,
     pub factories: fn() -> &'static [ComponentFactoryDescriptor],
@@ -207,7 +209,7 @@ impl ComponentDescriptor {
             id: T::ID,
             name: T::NAME,
             ty: TypeDescriptor::of::<T>(T::NAME),
-            scope: &Singleton,
+            scope: Singleton::KEY,
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
@@ -223,7 +225,7 @@ impl ComponentDescriptor {
         id: &'static str,
         name: &'static str,
         ty: TypeDescriptor,
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
     ) -> Self {
         Self {
             id,

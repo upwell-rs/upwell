@@ -4,7 +4,7 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 
-use upwell_core::{Cardinality, ResolutionMode, Scope};
+use upwell_core::{Cardinality, ResolutionMode, ScopeKey};
 
 use super::ComponentRegistry;
 use super::dependencies::unselectable_provider;
@@ -30,7 +30,7 @@ impl ComponentRegistry {
         &self,
         components: &[ComponentDescriptor],
         model: &selection::ProviderSelectionModel,
-        can_access: &impl Fn(&dyn Scope, &dyn Scope) -> bool,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<()> {
         let by_type: HashMap<TypeId, ComponentDescriptor> = components
             .iter()
@@ -120,13 +120,13 @@ impl ComponentRegistry {
         &self,
         components: &[ComponentDescriptor],
         model: &selection::ProviderSelectionModel,
-        can_access: &impl Fn(&dyn Scope, &dyn Scope) -> bool,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<()> {
         let by_type: HashMap<TypeId, ComponentDescriptor> = components
             .iter()
             .map(|component| (component.ty.type_id, *component))
             .collect();
-        let scope_of: HashMap<TypeId, &'static dyn Scope> = components
+        let scope_of: HashMap<TypeId, ScopeKey> = components
             .iter()
             .map(|component| (component.ty.type_id, component.scope))
             .collect();
@@ -225,7 +225,7 @@ impl ComponentRegistry {
         consumer: &ComponentDescriptor,
         dependency: &upwell_core::DependencyDescriptor,
         by_type: &HashMap<TypeId, ComponentDescriptor>,
-        can_access: &impl Fn(&dyn Scope, &dyn Scope) -> bool,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<Vec<ComponentDescriptor>> {
         if let Some(component) = by_type.get(&dependency.ty.type_id) {
             return Ok(vec![*component]);

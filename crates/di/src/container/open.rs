@@ -4,7 +4,7 @@ use std::any::{Any, TypeId};
 use std::sync::Arc;
 
 use tracing::{debug, error, info, instrument, trace};
-use upwell_core::{ResolverSet, Scope, Singleton};
+use upwell_core::{ResolverSet, Scope, ScopeKey, Singleton};
 
 use super::{ComponentSource, ScopeContainer, ScopeRegistry, ScopeResolverSlot};
 use crate::descriptors::component::{ComponentConstructionContext, ScopeStore};
@@ -17,7 +17,7 @@ impl ScopeContainer {
     /// the rebuilt target cannot observe components from its shorter-lived owner.
     pub(super) fn container_for_scope(
         self: &Arc<Self>,
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
     ) -> Option<Arc<ScopeContainer>> {
         if self.scope.id() == scope.id() {
             return Some(Arc::clone(self));
@@ -43,7 +43,13 @@ impl ScopeContainer {
         registry: Arc<ScopeRegistry>,
     ) -> crate::Result<Arc<ScopeContainer>> {
         let root = Self::build(
-            &Singleton, None, registry, order, instances, externals, None,
+            Singleton::KEY,
+            None,
+            registry,
+            order,
+            instances,
+            externals,
+            None,
         )
         .await?;
 
@@ -60,7 +66,7 @@ impl ScopeContainer {
     /// Empty scopes still receive a container so every declared logical boundary
     /// retains its stable identity in the runtime chain.
     pub async fn open_child(
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
         parent: Arc<ScopeContainer>,
         registry: Arc<ScopeRegistry>,
         order: &[ComponentDescriptor],
@@ -74,7 +80,7 @@ impl ScopeContainer {
     /// Opens a child scope while retaining one opaque runtime-generation state object.
     #[doc(hidden)]
     pub async fn open_child_with_generation_lease<T: Any + Send + Sync>(
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
         parent: Arc<ScopeContainer>,
         registry: Arc<ScopeRegistry>,
         order: &[ComponentDescriptor],
@@ -93,7 +99,7 @@ impl ScopeContainer {
     }
 
     async fn open_child_inner(
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
         parent: Arc<ScopeContainer>,
         registry: Arc<ScopeRegistry>,
         order: &[ComponentDescriptor],
@@ -133,7 +139,7 @@ impl ScopeContainer {
     /// parent chain. The frozen container is built with [`Arc::new_cyclic`] so it can
     /// hold its own [`ComponentSource`] (a `Weak` self-reference) in its resolver set.
     async fn build(
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
         parent: Option<Arc<ScopeContainer>>,
         registry: Arc<ScopeRegistry>,
         order: &[ComponentDescriptor],

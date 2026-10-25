@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use upwell::axum::axum::body::{self, Body};
-use upwell::axum::axum::extract::Request as HttpRequest;
+use upwell::axum::axum::extract::Request as RawRequest;
 use upwell::axum::axum::http::StatusCode;
 use upwell::axum::axum::http::header::AUTHORIZATION;
 use upwell::axum::axum::middleware::Next;
@@ -81,7 +81,7 @@ async fn axum_config_is_automatic_and_enforces_body_and_request_limits() {
     let too_large = router
         .clone()
         .oneshot(
-            HttpRequest::builder()
+            RawRequest::builder()
                 .method("POST")
                 .uri("/configured/echo")
                 .body(Body::from("12345"))
@@ -93,7 +93,7 @@ async fn axum_config_is_automatic_and_enforces_body_and_request_limits() {
 
     let timed_out = router
         .oneshot(
-            HttpRequest::builder()
+            RawRequest::builder()
                 .uri("/configured/slow")
                 .body(Body::empty())
                 .unwrap(),
@@ -133,7 +133,7 @@ struct GlobalMw {
 }
 
 impl AxumMiddleware for GlobalMw {
-    async fn handle(&self, req: HttpRequest, next: Next) -> Response {
+    async fn handle(&self, req: RawRequest, next: Next) -> Response {
         self.log.record("global");
 
         next.run(req).await
@@ -146,7 +146,7 @@ struct ControllerMw {
 }
 
 impl AxumMiddleware for ControllerMw {
-    async fn handle(&self, req: HttpRequest, next: Next) -> Response {
+    async fn handle(&self, req: RawRequest, next: Next) -> Response {
         self.log.record("controller");
 
         next.run(req).await
@@ -159,7 +159,7 @@ struct PathMw {
 }
 
 impl AxumMiddleware for PathMw {
-    async fn handle(&self, req: HttpRequest, next: Next) -> Response {
+    async fn handle(&self, req: RawRequest, next: Next) -> Response {
         self.log.record("path");
 
         next.run(req).await
@@ -187,7 +187,7 @@ async fn raw_layer_and_global_controller_path_middleware_run_in_order() {
     // A plain `axum::middleware::from_fn` closure — standard ecosystem middleware, not our
     // `AxumMiddleware` trait — reaching into the request's DI scope the same way `Inject` does,
     // to prove raw middleware isn't a second-class citizen relative to the DI-backed kind.
-    let raw_layer = axum_middleware::from_fn(|req: HttpRequest, next: Next| async move {
+    let raw_layer = axum_middleware::from_fn(|req: RawRequest, next: Next| async move {
         if let Some(scope) = req.extensions().get::<ScopeHandle>().cloned()
             && let Ok(log) = scope.0.extract::<CallLog>().await
         {
@@ -209,7 +209,7 @@ async fn raw_layer_and_global_controller_path_middleware_run_in_order() {
 
     let response = router
         .oneshot(
-            HttpRequest::builder()
+            RawRequest::builder()
                 .uri("/order/hit")
                 .body(Body::empty())
                 .unwrap(),
@@ -236,7 +236,7 @@ struct SharedMw {
 }
 
 impl AxumMiddleware for SharedMw {
-    async fn handle(&self, req: HttpRequest, next: Next) -> Response {
+    async fn handle(&self, req: RawRequest, next: Next) -> Response {
         self.calls.fetch_add(1, Ordering::SeqCst);
 
         next.run(req).await
@@ -272,7 +272,7 @@ async fn same_middleware_type_shares_one_instance_across_attach_points() {
 
     let response = router
         .oneshot(
-            HttpRequest::builder()
+            RawRequest::builder()
                 .uri("/shared/hit")
                 .body(Body::empty())
                 .unwrap(),
@@ -351,7 +351,7 @@ async fn request_scoped_component_reads_request_meta_and_is_shared() {
 
     let response = router
         .oneshot(
-            HttpRequest::builder()
+            RawRequest::builder()
                 .uri("/auth/whoami")
                 .header("authorization", "Bearer abc123")
                 .header("cookie", "session_id=sess-xyz")

@@ -1,6 +1,6 @@
 use std::{fmt, future::Future, pin::Pin};
 
-use upwell_core::{DependencyDescriptor, Singleton, StaticScope, UpwellDescriptor};
+use upwell_core::{DependencyDescriptor, Scope, Singleton, UpwellDescriptor};
 use upwell_hooks::HookDescriptor;
 
 use super::{BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor};

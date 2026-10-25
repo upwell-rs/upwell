@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use upwell_core::{ResolverSet, ScopeId, Singleton, StaticScope};
+use upwell_core::{ResolverSet, Scope, ScopeId, Singleton};
 
 use crate::container::ScopeContainer;
 use crate::test_support::test_component;
@@ -133,7 +133,7 @@ async fn provider_target_yields_the_trait_slot_dep_consumers_share() {
 async fn non_singleton_and_unmapped_targets_store_no_live_cell() {
     struct OtherScope;
 
-    impl StaticScope for OtherScope {
+    impl Scope for OtherScope {
         const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/live-other");
         const RANK: u8 = 1;
         const NAME: &'static str = "LiveOther";

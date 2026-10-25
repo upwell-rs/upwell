@@ -1,4 +1,4 @@
-use super::{InvalidScopeIdReason, Scope, ScopeId, Singleton, StaticScope, Transient};
+use super::{InvalidScopeIdReason, Scope, ScopeId, ScopeKey, Singleton, Transient};
 use crate::NamespacedIdType;
 
 const FIRST_ID: ScopeId = crate::namespaced_id!(ScopeId, "test/first");
@@ -13,7 +13,7 @@ crate::namespaced_id_type!(
 /// A test scope sharing its display label and rank with [`SecondScope`].
 struct FirstScope;
 
-impl StaticScope for FirstScope {
+impl Scope for FirstScope {
     const ID: ScopeId = FIRST_ID;
     const RANK: u8 = 100;
     const NAME: &'static str = "Shared";
@@ -22,7 +22,7 @@ impl StaticScope for FirstScope {
 /// A test scope sharing its display label and rank with [`FirstScope`].
 struct SecondScope;
 
-impl StaticScope for SecondScope {
+impl Scope for SecondScope {
     const ID: ScopeId = SECOND_ID;
     const RANK: u8 = 100;
     const NAME: &'static str = "Shared";
@@ -72,8 +72,8 @@ fn shared_id_trait_inspects_and_compares_categories_without_erasing_identity() {
 
 #[test]
 fn stable_identity_is_distinct_from_display_label_and_rank() {
-    let first: &dyn Scope = &FirstScope;
-    let second: &dyn Scope = &SecondScope;
+    let first = FirstScope::KEY;
+    let second = SecondScope::KEY;
 
     assert_eq!(first.name(), second.name());
     assert_eq!(first.rank(), second.rank());
@@ -84,10 +84,22 @@ fn stable_identity_is_distinct_from_display_label_and_rank() {
 
 #[test]
 fn framework_scopes_have_reserved_stable_ids() {
-    let singleton: &dyn Scope = &Singleton;
-    let transient: &dyn Scope = &Transient;
+    let singleton = Singleton::KEY;
+    let transient = Transient::KEY;
 
     assert_eq!(singleton.id().as_str(), "upwell/singleton");
     assert_eq!(transient.id().as_str(), "upwell/transient");
     assert!(transient.is_transient());
+}
+
+#[test]
+fn scope_keys_compare_by_identity_and_capture_type_metadata() {
+    let first = ScopeKey::of::<FirstScope>();
+
+    assert_eq!(first, FirstScope::KEY);
+    assert_ne!(first, SecondScope::KEY);
+    assert_eq!(first.name(), "Shared");
+    assert_eq!(first.rank(), 100);
+    assert!(!first.is_transient());
+    assert_eq!(Singleton::KEY.rank(), u8::MAX);
 }

@@ -3,7 +3,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use upwell_config::{ConfigManager, Toml};
-use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, TypeDescriptor};
+use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, Scope, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, ComponentConstructionContext, ComponentDescriptor, ComponentFactoryDescriptor,
     ComponentFactoryRole, ProviderDescriptor, Singleton,
@@ -87,7 +87,7 @@ static PROVIDER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     id: "aggregate-provider",
     name: "AggregateProvider",
     ty: TypeDescriptor::of::<AggregateProvider>("AggregateProvider"),
-    scope: &Singleton,
+    scope: Singleton::KEY,
     condition: None,
     factories: provider_factories,
     hooks: upwell_hooks::no_hooks,
@@ -98,7 +98,7 @@ static CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     id: "aggregate-consumer",
     name: "AggregateConsumer",
     ty: TypeDescriptor::of::<AggregateConsumer>("AggregateConsumer"),
-    scope: &Singleton,
+    scope: Singleton::KEY,
     condition: None,
     factories: consumer_factories,
     hooks: upwell_hooks::no_hooks,

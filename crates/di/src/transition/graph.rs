@@ -4,7 +4,7 @@ use std::any::TypeId;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
-use upwell_core::{RuntimeGenerationId, ScopeId, Singleton, StaticScope, Transient};
+use upwell_core::{RuntimeGenerationId, Scope, ScopeId, Singleton, Transient};
 
 use super::plan::{self, LiveClosure};
 use super::{

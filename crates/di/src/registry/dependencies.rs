@@ -3,7 +3,7 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
-use upwell_core::{Cardinality, Scope, ScopeId};
+use upwell_core::{Cardinality, ScopeId, ScopeKey};
 
 use super::ComponentRegistry;
 use super::scopes::{scope_allows_by_rank, scope_allows_with};
@@ -45,7 +45,7 @@ impl ComponentRegistry {
         &self,
         components: &[ComponentDescriptor],
         model: &selection::ProviderSelectionModel,
-        can_access: &impl Fn(&dyn Scope, &dyn Scope) -> bool,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<()> {
         let available: HashSet<TypeId> = components.iter().map(|c| c.ty.type_id).collect();
 
@@ -190,7 +190,7 @@ pub(super) fn unselectable_provider(
                 dependency: type_name.clone(),
                 dependency_type: type_name,
                 component_scope: consumer.scope.id(),
-                dependency_scope: <upwell_core::Transient as upwell_core::StaticScope>::ID,
+                dependency_scope: <upwell_core::Transient as upwell_core::Scope>::ID,
             },
         ));
     }

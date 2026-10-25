@@ -35,7 +35,7 @@ use upwell_axum::client::{
 };
 #[cfg(not(target_family = "wasm"))]
 use upwell_axum::{
-    MessageReply, SOCKET_SEND_TIMEOUT, WebsocketMessageScope, WebsocketProtocol,
+    MessageReply, SOCKET_SEND_TIMEOUT, Scope, WebsocketMessageScope, WebsocketProtocol,
     WsControllerDescriptor, WsDispatchError, WsHandlerFn, WsIdle, WsRespond, WsShutdown,
 };
 use upwell_axum::{MessagingProtocol, TopicCodec};
@@ -252,7 +252,11 @@ impl JsonWs {
         let result = match self.routes.get(inbound.dest.as_str()) {
             Some(handler) => match self
                 .runtime
-                .open_scope(&WebsocketMessageScope, Arc::clone(connection), Vec::new())
+                .open_scope(
+                    WebsocketMessageScope::KEY,
+                    Arc::clone(connection),
+                    Vec::new(),
+                )
                 .await
             {
                 Ok(scope) => handler(inbound.payload, scope).await,

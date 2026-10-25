@@ -5,7 +5,7 @@
 use std::future::Future;
 
 use upwell_config::{Cfg, ConfigBinding, ConfigProperties, ConfigStore};
-use upwell_core::{Descriptor, Singleton, TypeDescriptor};
+use upwell_core::{Descriptor, Scope, Singleton, TypeDescriptor};
 use upwell_di::{BoxedComponent, Component, ComponentDescriptor, Injectable};
 
 use crate::lifecycle::ShutdownSignal;
@@ -116,7 +116,7 @@ impl<'a> PreBuildContext<'a> {
             T::ID,
             T::NAME,
             TypeDescriptor::of::<T>(T::NAME),
-            &Singleton,
+            Singleton::KEY,
         ));
         self.instances.push(BoxedComponent {
             ty: TypeDescriptor::of::<T>(T::NAME),

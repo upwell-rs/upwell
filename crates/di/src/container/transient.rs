@@ -3,7 +3,7 @@
 use std::any::TypeId;
 use std::sync::Arc;
 
-use upwell_core::Transient;
+use upwell_core::{Scope, Transient};
 
 use super::{ScopeContainer, ScopeRegistry, ScopeResolverSlot};
 use crate::descriptors::component::{ComponentConstructionContext, SharedStore};
@@ -35,7 +35,7 @@ async fn construct_transient_boxed(
         .unwrap_or_default();
 
     let mut cx = ComponentConstructionContext::with_store(
-        &Transient,
+        Transient::KEY,
         parent,
         Arc::clone(registry),
         externals,

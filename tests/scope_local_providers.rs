@@ -8,14 +8,14 @@ use std::{
 };
 
 use upwell::{
-    ComponentDescriptor, ComponentRegistry, Descriptor, PROVIDERS, ResolverSet, ScopeContainer,
-    ScopeId, ScopeRegistry, StaticScope, component, injectable, topological_sort,
+    ComponentDescriptor, ComponentRegistry, Descriptor, PROVIDERS, ResolverSet, Scope,
+    ScopeContainer, ScopeId, ScopeRegistry, component, injectable, topological_sort,
 };
 
 /// A throwaway child scope for scope-local provider selection tests.
 struct ChildScope;
 
-impl StaticScope for ChildScope {
+impl Scope for ChildScope {
     const ID: ScopeId = upwell::namespaced_id!(ScopeId, "test/provider-child");
     const RANK: u8 = 1;
     const NAME: &'static str = "Child";
@@ -150,7 +150,7 @@ async fn child_scope_consumer_waits_for_its_scope_local_provider() {
     assert_eq!(names, ["ChildLocalChoice", "ScopedChoiceConsumer"]);
 
     let order: Vec<ComponentDescriptor> = order.into_iter().copied().collect();
-    let child = ScopeContainer::open_child(&ChildScope, root, registry, &order, Vec::new())
+    let child = ScopeContainer::open_child(ChildScope::KEY, root, registry, &order, Vec::new())
         .await
         .expect("child scope builds");
 
@@ -215,7 +215,7 @@ async fn ambiguous_local_set_waits_for_all_locals_before_parent_fallback() {
     assert_eq!(names.len(), 3);
 
     let order: Vec<ComponentDescriptor> = order.into_iter().copied().collect();
-    let child = ScopeContainer::open_child(&ChildScope, root, registry, &order, Vec::new())
+    let child = ScopeContainer::open_child(ChildScope::KEY, root, registry, &order, Vec::new())
         .await
         .expect("child scope builds");
 
@@ -317,7 +317,7 @@ async fn qualified_edge_without_local_match_does_not_wait_for_unrelated_locals()
     assert_eq!(names, ["QualifiedChoiceConsumer", "OtherLocalProvider"]);
 
     let order: Vec<ComponentDescriptor> = order.into_iter().copied().collect();
-    let child = ScopeContainer::open_child(&ChildScope, root, registry, &order, Vec::new())
+    let child = ScopeContainer::open_child(ChildScope::KEY, root, registry, &order, Vec::new())
         .await
         .expect("child scope builds");
 

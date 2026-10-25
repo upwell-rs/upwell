@@ -19,7 +19,7 @@
 
 use std::sync::{Arc, OnceLock, Weak};
 
-use upwell_core::TypeDescriptor;
+use upwell_core::{Scope, TypeDescriptor};
 
 use crate::construct::FromContainer;
 use crate::container::ScopeContainer;
@@ -108,7 +108,7 @@ pub const fn root_resolver_descriptor() -> crate::ComponentDescriptor {
         ROOT_RESOLVER_ID,
         ROOT_RESOLVER_NAME,
         TypeDescriptor::of::<RootResolver>(ROOT_RESOLVER_NAME),
-        &upwell_core::Singleton,
+        upwell_core::Singleton::KEY,
     )
 }
 
