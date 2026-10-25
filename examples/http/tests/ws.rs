@@ -98,6 +98,40 @@ impl Sock {
     }
 }
 
+#[test]
+fn mounted_message_handlers_register_entries_in_the_message_scope() {
+    let environment = TestEnvironment::new("upwell-http-ws-entries-");
+    let prepared = WebsocketTestApplication::builder()
+        .expect("app builder")
+        .config_source(environment.config())
+        .directories(environment.directories())
+        .register_ws::<JsonWs>("/ws")
+        .prepare()
+        .expect("app prepares");
+
+    let entries = prepared
+        .entries()
+        .entries()
+        .iter()
+        .filter(|entry| entry.key.namespace() == "ws")
+        .map(|entry| {
+            (
+                entry.key.as_str(),
+                entry.scope.id(),
+                (entry.targets)().len(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        entries,
+        [
+            ("ws/sock.greet", WebsocketMessage::ID, 0),
+            ("ws/sock.ticket", WebsocketMessage::ID, 1),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn ws_controller_dispatches_and_injects() {
     let environment = TestEnvironment::new("upwell-http-ws-");
