@@ -1,5 +1,0 @@
-error: `pingAll` cannot name an entry: an entry key uses the handler name, which must start with a lowercase ASCII letter or digit and contain only lowercase ASCII letters, digits, `.`, `_` or `-`; rename it in snake_case
-  --> tests/ui/entries/camel_case_handler.rs:11:14
-   |
-11 |     async fn pingAll() -> u32 {
-   |              ^^^^^^^

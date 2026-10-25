@@ -1,14 +1,13 @@
 use upwell::daemon::{handlers, service};
 
-/// A service whose method name cannot form an entry key.
+/// A service whose method name has no ASCII `snake_case` form.
 #[service(id = "calc")]
 struct Calc;
 
 #[handlers]
 impl Calc {
     #[rpc]
-    #[allow(non_snake_case)]
-    async fn pingAll() -> u32 {
+    async fn grüßen() -> u32 {
         1
     }
 }

@@ -52,10 +52,9 @@ fn emit_http(handlers: &AxumHandlers, cx: &super::HandlerContext, out: &mut Toke
     let http_response_descriptor = paths.plugin("HttpResponseDescriptor");
     let http_response_body_descriptor = paths.plugin("HttpResponseBodyDescriptor");
     let type_descriptor = paths.core("TypeDescriptor");
-    let descriptor_trait = paths.core("Descriptor");
+    let entry_key_owner = paths.core("EntryKeyOwner");
     let from_container = paths.core("FromContainer");
     let entry_key = paths.core("entry_key");
-    let controller_descriptor = paths.plugin("ControllerDescriptor");
     let controller_trait = paths.plugin("Controller");
     let routes_slice = handlers
         .routes_slice
@@ -199,7 +198,7 @@ fn emit_http(handlers: &AxumHandlers, cx: &super::HandlerContext, out: &mut Toke
                 source: ::core::option::Option::Some(#source),
                 key: #entry_key!(
                     "http/",
-                    <#self_ty as #descriptor_trait<#controller_descriptor>>::DESCRIPTOR.id,
+                    <#self_ty as #entry_key_owner>::KEY_SEGMENT,
                     ".",
                     #key_segment,
                 ),

@@ -144,6 +144,7 @@ syn = { version = "2", features = ["full"] }
 trybuild = "1"
 quote = "1"
 proc-macro2 = "1"
+heck = "0.5"
 
 [package]
 name = "upwell"
