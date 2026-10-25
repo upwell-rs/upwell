@@ -185,3 +185,6 @@ bench *targets:
 
         cargo bench --manifest-path benchmarks/Cargo.toml --locked "${args[@]}"
     fi
+
+bench-lock:
+    cargo metadata --manifest-path benchmarks/Cargo.toml --format-version 1 > /dev/null
