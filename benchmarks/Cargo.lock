@@ -1633,6 +1633,7 @@ dependencies = [
 name = "upwell-benchmarks"
 version = "0.0.0"
 dependencies = [
+ "axum",
  "criterion",
  "futures",
  "postcard",
@@ -1641,6 +1642,7 @@ dependencies = [
  "serde_urlencoded",
  "tokio",
  "tokio-util",
+ "tower",
  "upwell-app",
  "upwell-axum",
  "upwell-axum-stomp",

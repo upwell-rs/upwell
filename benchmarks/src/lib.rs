@@ -1,6 +1,6 @@
 //! Shared support for the Upwell benchmark suite.
 //!
-//! Five concerns the individual benches reuse:
+//! Six concerns the individual benches reuse:
 //!
 //! - [`alloc`] — a tracking global allocator recording allocation *count*, cumulative *bytes*, and
 //!   *live* bytes, so a bench can measure heap traffic and a test can prove a hot path leaks
@@ -12,9 +12,11 @@
 //! - [`graph`] — large factory-backed singleton graphs for measuring graph preparation.
 //! - [`reload`] — file-backed applications over those graphs for measuring whole reload
 //!   transitions.
+//! - [`http`] — in-process raw axum and Upwell routers for measuring per-request cost.
 
 pub mod alloc;
 pub mod di;
 pub mod graph;
+pub mod http;
 pub mod measure;
 pub mod reload;
