@@ -1,52 +1,47 @@
 //! Entry-key segments for macro-registered entry points.
+//!
+//! Entry keys are `<protocol>/<owner segment>.<handler segment>`. Both segments are derived
+//! from Rust names or owner IDs by converting them to `snake_case`, so `listUsers`, `r#type`
+//! and `"Calc Service"` all form keys (`list_users`, `type`, `calc_service`). Only a name that
+//! has no such form, such as one with non-ASCII letters, is rejected.
 
+use heck::ToSnakeCase;
+use proc_macro2::Span;
 use syn::ext::IdentExt;
 use syn::{Ident, LitStr};
 
-/// The entry-key segment naming a handler method: its name without a raw-identifier prefix.
-///
-/// Entry keys are `<protocol>/<owner ID>.<handler>`, so the name must itself be a valid key
-/// segment: lowercase ASCII letters, digits, `.`, `_` or `-`, starting with a letter or
-/// digit. Anything else is rejected here, at the method, instead of failing the key's
-/// constant evaluation.
+/// The entry-key segment naming a handler method: its name without a raw-identifier prefix,
+/// in `snake_case`.
 pub fn handler_segment(handler: &Ident) -> syn::Result<LitStr> {
     let name = handler.unraw().to_string();
 
-    if !is_segment(&name) {
-        return Err(syn::Error::new(
-            handler.span(),
-            format!(
-                "`{name}` cannot name an entry: an entry key uses the handler name, which must \
-                 start with a lowercase ASCII letter or digit and contain only lowercase ASCII \
-                 letters, digits, `.`, `_` or `-`; rename it in snake_case"
-            ),
-        ));
-    }
-
-    Ok(LitStr::new(&name, handler.span()))
+    segment(&name, handler.span(), "name an entry")
 }
 
-/// Validates the stable ID of an entry owner (a service or controller), which entry keys
-/// embed as `<protocol>/<owner ID>.<handler>`.
-///
-/// Every `/`-separated part of the ID must be a valid key segment, as for
-/// [`handler_segment`]. The error spans the ID, or the type when the ID is defaulted from it.
-pub fn owner_id(id: &LitStr) -> syn::Result<()> {
-    let value = id.value();
+/// The entry-key segment naming an entry owner (a service or controller): its stable ID with
+/// every `/`-separated part in `snake_case`. The error spans the ID, or the type when the ID
+/// is defaulted from it.
+pub fn owner_segment(id: &LitStr) -> syn::Result<LitStr> {
+    segment(&id.value(), id.span(), "identify an entry owner")
+}
 
-    if !value.split('/').all(is_segment) {
+fn segment(name: &str, span: Span, role: &str) -> syn::Result<LitStr> {
+    let parts = name
+        .split('/')
+        .map(ToSnakeCase::to_snake_case)
+        .collect::<Vec<_>>();
+
+    if !parts.iter().all(|part| is_segment(part)) {
         return Err(syn::Error::new(
-            id.span(),
+            span,
             format!(
-                "`{value}` cannot identify an entry owner: entry keys embed this ID, whose \
-                 `/`-separated parts must start with a lowercase ASCII letter or digit and \
-                 contain only lowercase ASCII letters, digits, `.`, `_` or `-`; set a valid \
-                 `id = \"..\"`"
+                "`{name}` cannot {role}: an entry key needs it in snake_case ASCII (lowercase \
+                 letters, digits, `.`, `_` or `-`), and it has no such form"
             ),
         ));
     }
 
-    Ok(())
+    Ok(LitStr::new(&parts.join("/"), span))
 }
 
 fn is_segment(name: &str) -> bool {

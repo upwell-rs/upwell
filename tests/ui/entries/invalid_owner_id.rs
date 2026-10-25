@@ -1,7 +1,7 @@
 use upwell::daemon::{handlers, service};
 
-/// A service whose ID cannot form an entry key.
-#[service(id = "Calc Service")]
+/// A service whose ID has no ASCII `snake_case` form.
+#[service(id = "日本")]
 struct Calc;
 
 #[handlers]

@@ -55,6 +55,8 @@ struct ControllerContext {
     type_name: LitStr,
     id: LitStr,
     name: LitStr,
+    /// The controller's entry-key segment: its ID in `snake_case`.
+    key_segment: LitStr,
     paths: Paths,
     /// The controller type's `#[doc]` attributes, forwarded onto the generated client(s).
     docs: Vec<syn::Attribute>,
@@ -121,13 +123,12 @@ impl<T: ComponentExt> ParseItem<ComponentContext> for AxumRouter<T> {
             ));
         }
 
-        upwell_macros_core::entry::owner_id(&cx.id)?;
-
         self.context = Some(ControllerContext {
             ident: cx.ident.clone(),
             type_name: cx.type_name.clone(),
             id: cx.id.clone(),
             name: cx.name.clone(),
+            key_segment: upwell_macros_core::entry::owner_segment(&cx.id)?,
             paths: paths.clone(),
             docs: cx.docs.clone(),
         });
@@ -175,6 +176,7 @@ impl<T: ComponentExt> AxumRouter<T> {
             type_name,
             id,
             name,
+            key_segment,
             paths,
             docs,
         } = cx;
@@ -189,6 +191,7 @@ impl<T: ComponentExt> AxumRouter<T> {
             .unwrap_or_else(|| format_ident!("{}Routes", ident));
 
         let descriptor_trait = paths.core("Descriptor");
+        let entry_key_owner = paths.core("EntryKeyOwner");
         let declared_ty = upwell_macros_core::source::declared_type(ident, ident, type_name, paths);
         let distributed_slice = paths.core("linkme::distributed_slice");
         let linkme_crate = paths.core("linkme");
@@ -322,6 +325,10 @@ impl<T: ComponentExt> AxumRouter<T> {
                     const DESCRIPTOR: #controller_descriptor = __UPWELL_CONTROLLER_DESCRIPTOR;
                 }
 
+                impl #entry_key_owner for #ident {
+                    const KEY_SEGMENT: &'static str = #key_segment;
+                }
+
                 #[#distributed_slice(#controllers_slice)]
                 #[linkme(crate = #linkme_crate)]
                 static #controller_static: #controller_descriptor = __UPWELL_CONTROLLER_DESCRIPTOR;
@@ -351,6 +358,7 @@ impl<T: ComponentExt> AxumRouter<T> {
             type_name,
             id,
             name,
+            key_segment,
             paths,
             docs,
         } = cx;
@@ -361,6 +369,7 @@ impl<T: ComponentExt> AxumRouter<T> {
             .unwrap_or_else(|| format_ident!("{}WsRoutes", ident));
 
         let descriptor_trait = paths.core("Descriptor");
+        let entry_key_owner = paths.core("EntryKeyOwner");
         let declared_ty = upwell_macros_core::source::declared_type(ident, ident, type_name, paths);
         let distributed_slice = paths.core("linkme::distributed_slice");
         let linkme_crate = paths.core("linkme");
@@ -447,6 +456,10 @@ impl<T: ComponentExt> AxumRouter<T> {
 
                 impl #descriptor_trait<#ws_descriptor> for #ident {
                     const DESCRIPTOR: #ws_descriptor = __UPWELL_WS_CONTROLLER_DESCRIPTOR;
+                }
+
+                impl #entry_key_owner for #ident {
+                    const KEY_SEGMENT: &'static str = #key_segment;
                 }
 
                 #[#distributed_slice(#ws_controllers_slice)]

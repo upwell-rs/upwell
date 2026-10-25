@@ -1,45 +1,43 @@
+use proc_macro2::Span;
 use quote::format_ident;
 use syn::{Ident, LitStr};
 
 use super::*;
 
-#[test]
-fn snake_case_and_raw_handler_names_form_segments() {
-    let raw: Ident = syn::parse_str("r#type").expect("raw identifier parses");
+fn owner(id: &str) -> syn::Result<String> {
+    owner_segment(&LitStr::new(id, Span::call_site())).map(|segment| segment.value())
+}
 
-    let plain = handler_segment(&format_ident!("list_users")).expect("snake case is valid");
-    let unraw = handler_segment(&raw).expect("the raw prefix is dropped");
+fn handler(name: &str) -> syn::Result<String> {
+    let ident: Ident = syn::parse_str(name).expect("test handler name parses");
 
-    assert_eq!(plain.value(), "list_users");
-    assert_eq!(unraw.value(), "type");
+    handler_segment(&ident).map(|segment| segment.value())
 }
 
 #[test]
-fn owner_ids_must_be_key_segments_between_slashes() {
-    let valid = LitStr::new("billing/users", proc_macro2::Span::call_site());
-    let spaced = LitStr::new("Calc Service", proc_macro2::Span::call_site());
-
-    assert!(owner_id(&valid).is_ok());
-    assert!(owner_id(&spaced).is_err_and(|error| {
-        error
-            .to_string()
-            .contains("`Calc Service` cannot identify an entry owner")
-    }));
+fn handler_names_normalize_to_snake_case() {
+    assert_eq!(handler("list_users").expect("snake case"), "list_users");
+    assert_eq!(handler("listUsers").expect("camel case"), "list_users");
+    assert_eq!(handler("r#type").expect("raw identifier"), "type");
+    assert_eq!(handler("_private").expect("leading underscore"), "private");
 }
 
 #[test]
-fn names_outside_the_segment_alphabet_are_rejected() {
-    let camel = handler_segment(&format_ident!("listUsers")).map(|segment| segment.value());
-    let leading = handler_segment(&format_ident!("_private")).map(|segment| segment.value());
+fn owner_ids_normalize_each_part() {
+    assert_eq!(owner("calc").expect("plain"), "calc");
+    assert_eq!(owner("Calc Service").expect("spaced"), "calc_service");
+    assert_eq!(
+        owner("Billing/UserAccounts").expect("nested"),
+        "billing/user_accounts"
+    );
+}
 
-    assert!(camel.is_err_and(|error| {
-        error
-            .to_string()
-            .contains("`listUsers` cannot name an entry")
-    }));
-    assert!(leading.is_err_and(|error| {
-        error
-            .to_string()
-            .contains("`_private` cannot name an entry")
-    }));
+#[test]
+fn names_without_an_ascii_snake_case_form_are_rejected() {
+    let unicode = handler_segment(&format_ident!("grüßen")).map(|segment| segment.value());
+
+    assert!(
+        unicode.is_err_and(|error| error.to_string().contains("`grüßen` cannot name an entry"))
+    );
+    assert!(owner("日本").is_err());
 }

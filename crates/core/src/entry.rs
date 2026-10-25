@@ -11,6 +11,15 @@ crate::namespaced_id_type!(
     "entry"
 );
 
+/// The segment an entry owner (a service or controller) contributes to its entries' keys:
+/// its stable ID normalized to `snake_case`. Emitted by the owner's macro, read by the macros
+/// that register its entries.
+#[doc(hidden)]
+pub trait EntryKeyOwner {
+    /// The owner's key segment.
+    const KEY_SEGMENT: &'static str;
+}
+
 /// Builds an [`EntryKey`] at compile time by joining string constants, so a macro can derive
 /// an entry's key from its owner's stable ID (`"http/", <owner ID>, ".", "handler"`).
 ///
