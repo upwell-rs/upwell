@@ -21,7 +21,7 @@ pub trait EntryKeyOwner {
 }
 
 /// Builds an [`EntryKey`] at compile time by joining string constants, so a macro can derive
-/// an entry's key from its owner's stable ID (`"http/", <owner ID>, ".", "handler"`).
+/// an entry's key from its owner's key segment (`"http/", <owner segment>, ".", "handler"`).
 ///
 /// Every part must be a constant expression. Compilation fails when the joined text is not a
 /// valid namespaced identifier.
@@ -82,8 +82,8 @@ pub const fn join<const N: usize>(parts: &[&str]) -> [u8; N] {
 pub const fn key_from_bytes(bytes: &'static [u8]) -> EntryKey {
     if !bytes.is_ascii() {
         panic!(
-            "an entry key derived from an owner's stable ID is not a valid namespaced \
-             identifier; owner IDs must use lowercase ASCII letters, digits, '.', '_' or '-'"
+            "an entry key joined from constant parts is not a valid namespaced identifier; \
+             each segment must use lowercase ASCII letters, digits, '.', '_' or '-'"
         );
     }
 
@@ -93,8 +93,8 @@ pub const fn key_from_bytes(bytes: &'static [u8]) -> EntryKey {
     match EntryKey::new(value) {
         Ok(key) => key,
         Err(_) => panic!(
-            "an entry key derived from an owner's stable ID is not a valid namespaced \
-             identifier; owner IDs must use lowercase ASCII letters, digits, '.', '_' or '-'"
+            "an entry key joined from constant parts is not a valid namespaced identifier; \
+             each segment must use lowercase ASCII letters, digits, '.', '_' or '-'"
         ),
     }
 }
