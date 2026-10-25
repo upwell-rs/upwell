@@ -81,8 +81,9 @@ fn index_by_type(components: &[ComponentDescriptor]) -> HashMap<TypeId, Componen
         .collect()
 }
 
-/// Rejects a deferred edge of `consumer` whose selected target is transient. `lookup` finds
-/// a registered component by type.
+/// Rejects a deferred edge of `consumer` whose selected target is transient, or whose
+/// visible providers include none deferred resolution can select (a tie, or transient
+/// providers only). `lookup` finds a registered component by type.
 pub(super) fn check_deferred(
     model: &selection::ProviderSelectionModel,
     lookup: &impl Fn(TypeId) -> Option<ComponentDescriptor>,

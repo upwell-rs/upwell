@@ -43,33 +43,43 @@ pub enum DependencyFault {
     },
 }
 
-/// The stand-in consumer an edge is checked as: per-edge validation reads only a
-/// consumer's identity and scope, never its own dependencies.
+/// The consumer one dependency edge is checked for.
+#[derive(Clone, Copy, Debug)]
+pub struct DependencyConsumer {
+    /// The consumer's stable identity, reported as the consumer of validation trace events.
+    pub id: &'static str,
+    /// The scope the consumer lives in.
+    pub scope: ScopeKey,
+}
+
+/// The type of the stand-in component a [`DependencyConsumer`] is checked as: per-edge
+/// validation reads only a consumer's identity and scope, never its own dependencies.
 struct EdgeConsumer;
 
 impl ProviderSelectionModel {
-    /// Checks that `dependency` resolves from a consumer living in `consumer`.
+    /// Checks that `dependency` resolves for `consumer`.
     ///
     /// Runs exactly the per-edge checks component validation runs, in the same order:
     /// provider existence and selection, deferred targets, forced-fresh targets, then the
     /// target scopes. `can_reach` has the meaning of
     /// [`ComponentRegistry::validate_with_scope_reachability`](crate::ComponentRegistry::validate_with_scope_reachability).
-    /// Failures with no per-edge meaning, such as a target with ambiguous factories, are
-    /// returned as errors.
+    /// Like component validation, it emits provider-selection trace events, naming the
+    /// consumer by its [`id`](DependencyConsumer::id). Failures with no per-edge meaning,
+    /// such as a target with ambiguous factories, are returned as errors.
     pub fn dependency_fault(
         &self,
         dependency: &DependencyDescriptor,
-        consumer: ScopeKey,
+        consumer: DependencyConsumer,
         can_reach: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<Option<DependencyFault>> {
         let can_access = |consumer, dependency| scope_allows_with(consumer, dependency, &can_reach);
         let lookup = |type_id| self.component(type_id);
         let is_component = |type_id| self.component(type_id).is_some();
         let consumer = ComponentDescriptor::manual(
-            "edge-consumer",
-            "edge consumer",
+            consumer.id,
+            consumer.id,
             TypeDescriptor::of::<EdgeConsumer>("EdgeConsumer"),
-            consumer,
+            consumer.scope,
         );
         let checked = check_dependency(self, &is_component, &consumer, dependency, &can_access)
             .and_then(|()| check_deferred(self, &lookup, &consumer, dependency, &can_access))
@@ -103,12 +113,9 @@ fn fault(error: Error) -> crate::Result<DependencyFault> {
             scope: fresh.dependency_scope,
         },
         Error::UnsupportedFreshFactory {
-            component,
-            component_id,
+            component_id: Some(component),
             ..
-        } => DependencyFault::FreshWithoutFactory {
-            component: component_id.unwrap_or(component),
-        },
+        } => DependencyFault::FreshWithoutFactory { component },
         other => return Err(other),
     };
 

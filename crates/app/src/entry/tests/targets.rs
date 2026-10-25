@@ -91,3 +91,30 @@ fn config_targets_need_exactly_one_binding() {
         EntryError::AmbiguousConfig { paths, .. } if paths.len() == 2
     ));
 }
+
+#[test]
+fn fresh_targets_need_a_reachable_scope_and_a_factory() {
+    let unreachable = registry(vec![EntryDescriptor::new::<
+        Session,
+        (upwell_di::Fresh<Arc<RequestData>>,),
+    >(key("test/fresh-unreachable"))]);
+    let factoryless = registry(vec![EntryDescriptor::new::<
+        Session,
+        (upwell_di::Fresh<Arc<Shared>>,),
+    >(key("test/fresh-factoryless"))]);
+
+    let unreachable = entry_error(validate(&unreachable));
+    let factoryless = entry_error(validate(&factoryless));
+
+    assert!(matches!(
+        unreachable,
+        EntryError::FreshUnreachable {
+            scope: REQUEST_ID,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &factoryless,
+        EntryError::FreshWithoutFactory { component, .. } if component == "shared"
+    ));
+}

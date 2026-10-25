@@ -1,5 +1,5 @@
 use upwell_core::{DependencyDescriptor, EntryKey, Scope, ScopeId, Singleton};
-use upwell_di::{DependencyFault, ProviderSelectionModel};
+use upwell_di::{DependencyConsumer, DependencyFault, ProviderSelectionModel};
 
 use super::EntryDescriptor;
 use crate::error::quoted;
@@ -224,7 +224,7 @@ pub(crate) fn validate_targets(
                     .map(|fault| config_error(entry, &target, fault))
             } else {
                 selection
-                    .dependency_fault(&target, entry.scope, can_reach)?
+                    .dependency_fault(&target, consumer(entry), can_reach)?
                     .map(|fault| dependency_error(entry, &target, fault))
             };
 
@@ -235,6 +235,13 @@ pub(crate) fn validate_targets(
     }
 
     Ok(())
+}
+
+fn consumer(entry: &EntryDescriptor) -> DependencyConsumer {
+    DependencyConsumer {
+        id: entry.key.as_str(),
+        scope: entry.scope,
+    }
 }
 
 fn dependency_error(

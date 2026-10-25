@@ -20,6 +20,11 @@ fn fault(
     consumer: upwell_core::ScopeKey,
     can_reach: fn(ScopeId, ScopeId) -> bool,
 ) -> Option<DependencyFault> {
+    let consumer = DependencyConsumer {
+        id: "test/consumer",
+        scope: consumer,
+    };
+
     model
         .dependency_fault(dependency, consumer, can_reach)
         .expect("the edge has a per-edge outcome")
@@ -31,6 +36,7 @@ fn model(providers: Vec<ProviderDescriptor>) -> ProviderSelectionModel {
         component::<Twin>("twin", factory).with_scope(NearScope::KEY),
         component::<Far>("far", factory).with_scope(FarScope::KEY),
         component::<TransientProvider>("transient", factory).with_scope(Transient::KEY),
+        component::<Manual>("manual", manual).with_scope(NearScope::KEY),
     ];
     let registry = ComponentRegistry {
         components: components.clone(),
@@ -174,4 +180,20 @@ fn fresh_targets_must_live_in_a_reachable_scope() {
         Some(DependencyFault::FreshUnreachable { scope: NEAR_ID })
     );
     assert_eq!(fault(&model, &fresh, NearScope::KEY, reaches), None);
+}
+
+#[test]
+fn fresh_targets_must_have_a_factory() {
+    let model = model(Vec::new());
+    let fresh = DependencyDescriptor {
+        resolution: ResolutionMode::Fresh,
+        ..concrete::<Manual>("manual")
+    };
+
+    assert_eq!(
+        fault(&model, &fresh, NearScope::KEY, reaches),
+        Some(DependencyFault::FreshWithoutFactory {
+            component: String::from("manual")
+        })
+    );
 }
