@@ -19,6 +19,7 @@ pub mod attr;
 pub mod backend;
 pub mod client;
 pub mod di;
+pub mod entry;
 pub mod extend;
 pub mod gate;
 pub mod handle;

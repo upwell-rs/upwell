@@ -427,6 +427,7 @@ fn expand_method(
     let from_container = paths.core("FromContainer");
     let entry_key = paths.core("entry_key");
     let ret = handler_return_type(paths);
+    let key_segment = upwell_macros_core::entry::handler_segment(method_ident)?;
     let targets = param_types
         .iter()
         .filter_map(|ty| attr::first_type_arg(ty, "Inject"))
@@ -494,7 +495,7 @@ fn expand_method(
                 "rpc/",
                 <#self_ty as #descriptor_trait<#service_descriptor>>::DESCRIPTOR.id,
                 ".",
-                #method_name,
+                #key_segment,
             ),
             targets: || ::std::vec![#(#targets),*],
         }
