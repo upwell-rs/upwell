@@ -5,8 +5,12 @@
 
 use std::collections::HashSet;
 
+use upwell_app::{EntryDescriptor, EntryOwner};
+use upwell_core::Scope;
+
 use crate::descriptors::{RpcDescriptor, ServiceDescriptor};
 use crate::error::Error;
+use crate::scope::Request;
 
 /// A service header with its RPCs, drawn from the service's own per-service slice.
 pub struct ResolvedService {
@@ -33,6 +37,24 @@ pub fn resolved_services(services: &[ServiceDescriptor]) -> Vec<ResolvedService>
             }
         })
         .collect()
+}
+
+/// One entry per RPC method, running in the request scope and owned by its service.
+pub(crate) fn rpc_entries(
+    services: &[ResolvedService],
+) -> impl Iterator<Item = EntryDescriptor> + '_ {
+    services.iter().flat_map(|service| {
+        service.rpcs.iter().map(|rpc| EntryDescriptor {
+            key: rpc.key,
+            scope: Request::KEY,
+            targets: rpc.targets,
+            owner: Some(EntryOwner {
+                ty: service.descriptor.ty,
+                operation: rpc.name,
+            }),
+            source: rpc.source,
+        })
+    })
 }
 
 /// Validates the RPC surface: unique service ids, non-empty services, and unique RPC

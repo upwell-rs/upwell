@@ -65,7 +65,12 @@ impl ProtocolDefinition for Rpc {
     const SCOPE_TOPOLOGY: upwell_app::ScopeTopology = SCOPE_TOPOLOGY;
 
     fn register(&self, registry: &mut AppRegistry) {
+        let services = crate::routes::resolved_services(&self.services);
+
         registry.components.push(PEER_INFO_DESCRIPTOR);
+        registry
+            .entries
+            .extend(crate::routes::rpc_entries(&services));
     }
 
     fn prepare(self, context: &ValidationContext<'_>) -> crate::Result<Self::Prepared> {

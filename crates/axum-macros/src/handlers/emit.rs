@@ -52,6 +52,10 @@ fn emit_http(handlers: &AxumHandlers, cx: &super::HandlerContext, out: &mut Toke
     let http_response_descriptor = paths.plugin("HttpResponseDescriptor");
     let http_response_body_descriptor = paths.plugin("HttpResponseBodyDescriptor");
     let type_descriptor = paths.core("TypeDescriptor");
+    let descriptor_trait = paths.core("Descriptor");
+    let from_container = paths.core("FromContainer");
+    let entry_key = paths.core("entry_key");
+    let controller_descriptor = paths.plugin("ControllerDescriptor");
     let controller_trait = paths.plugin("Controller");
     let routes_slice = handlers
         .routes_slice
@@ -125,6 +129,15 @@ fn emit_http(handlers: &AxumHandlers, cx: &super::HandlerContext, out: &mut Toke
         );
         let method = route.verb.to_string().to_ascii_uppercase();
         let path = &route.path;
+        let targets = route
+            .inputs
+            .iter()
+            .filter(|input| input.source == "Injected")
+            .map(|input| {
+                let ty = &input.ty;
+
+                quote!(<#ty as #from_container>::dependency())
+            });
         let input_descriptors = route.inputs.iter().map(|input| {
             let name = &input.name;
             let source = format_ident!("{}", input.source);
@@ -183,6 +196,13 @@ fn emit_http(handlers: &AxumHandlers, cx: &super::HandlerContext, out: &mut Toke
                     responses: &[#(#responses),*],
                 },
                 source: ::core::option::Option::Some(#source),
+                key: #entry_key!(
+                    "http/",
+                    <#self_ty as #descriptor_trait<#controller_descriptor>>::DESCRIPTOR.id,
+                    ".",
+                    #handler,
+                ),
+                targets: || ::std::vec![#(#targets),*],
             }
         }
     });

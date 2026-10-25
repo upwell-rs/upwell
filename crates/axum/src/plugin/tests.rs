@@ -64,9 +64,11 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
                     responses: &[],
                 },
                 source: Some(upwell_core::item_source!("ToolingController::health")),
+                key: upwell_core::namespaced_id!(upwell_core::EntryKey, "http/tooling.health"),
+                targets: Vec::new,
             },
             crate::HttpRouteDescriptor {
-                handler: "health",
+                handler: "ready",
                 method: "GET",
                 path: "/ready",
                 path_parameters: &[],
@@ -78,6 +80,8 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
                     responses: &[],
                 },
                 source: None,
+                key: upwell_core::namespaced_id!(upwell_core::EntryKey, "http/tooling.ready"),
+                targets: Vec::new,
             },
         ]
     }
@@ -117,8 +121,19 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
         })
         .expect("health route resource exists");
 
+    let entries = document
+        .resources
+        .iter()
+        .filter(|resource| resource.kind == upwell_app::tooling_schema::ResourceKind::Entry)
+        .map(|resource| resource.id.as_str())
+        .collect::<Vec<_>>();
+
     assert_eq!(routes.len(), 2);
     assert_ne!(routes[0].id, routes[1].id);
+    assert_eq!(
+        entries,
+        ["entry:http/tooling.health", "entry:http/tooling.ready"]
+    );
     assert_eq!(
         route
             .display
