@@ -138,6 +138,24 @@ async fn sync_all(customers: Arc<CustomerRepo>, sync: ScopeOpener<CustomerSync>)
   - `.enter(future)`: propagation only. The future runs inside the scope and reaches its values
     through declared `Current<T>` dependencies.
 
+### Request data in protocol scopes
+
+Protocol scopes keep request data in three tiers, so scope params stay cheap and non-secret:
+
+| Tier | What | Where |
+|---|---|---|
+| Identity params | Request ID, method, matched route or RPC method name, peer address | Fields on the protocol's scope type, e.g. `Request { id, method, route }`, `Call { id, method }`. They label the scope's log span. |
+| Request-bound data | Headers, cookies, query | `RequestMeta`, a lazy seed built only when declared (#347). |
+| The request itself | Body, raw request head | Stays with the protocol's dispatch and its native extractors. |
+
+- Full request data is not stored in the scope. Copying the head on every request is the cost #343
+  removes, it would duplicate native extractors, and it would expose credentials to every reader
+  of the task-local context.
+- Request-bound sources are protocol-neutral: `RequestMeta` is built from a protocol-provided
+  request-head source, not from axum's `Parts`. Any HTTP server can then back the same scope types
+  (see #223), including a purpose-built Upwell server.
+- The exact identity fields per protocol are decided in #353.
+
 ### Isolation between instances
 
 - Every scope instance owns its own slots. Scoped components are never shared between instances.
