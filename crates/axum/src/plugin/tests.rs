@@ -87,7 +87,7 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
     }
 
     let controller = crate::ControllerDescriptor {
-        id: "tooling-controller",
+        id: "tooling",
         name: "ToolingController",
         ty: upwell_core::TypeDescriptor::of::<ToolingController>("ToolingController"),
         base: "/api",

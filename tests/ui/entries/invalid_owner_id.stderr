@@ -4,7 +4,7 @@ error[E0080]: evaluation panicked: an entry key derived from an owner's stable I
 7 | #[handlers]
   | ^^^^^^^^^^^ evaluation of `_::__UPWELL_RPCS::KEY` failed inside this call
   |
-note: inside `upwell::entry::key_from_utf8`
+note: inside `upwell::entry::key_from_bytes`
  --> $RUST/core/src/panic.rs
   |
   |           $crate::panicking::panic_fmt($crate::const_format_args!($($t)+));

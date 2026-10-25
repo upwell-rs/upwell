@@ -23,7 +23,7 @@ macro_rules! entry_key {
         const PARTS: &[&str] = &[$($part),+];
         const LEN: usize = $crate::entry::joined_len(PARTS);
         const BYTES: [u8; LEN] = $crate::entry::join::<LEN>(PARTS);
-        const KEY: $crate::EntryKey = $crate::entry::key_from_utf8(&BYTES);
+        const KEY: $crate::EntryKey = $crate::entry::key_from_bytes(&BYTES);
 
         KEY
     }};
@@ -67,11 +67,19 @@ pub const fn join<const N: usize>(parts: &[&str]) -> [u8; N] {
 }
 
 /// Validates joined key bytes, for [`entry_key!`].
+///
+/// A valid key is ASCII, so non-ASCII bytes are rejected before the bytes are read as text.
 #[doc(hidden)]
-pub const fn key_from_utf8(bytes: &'static [u8]) -> EntryKey {
-    let Ok(value) = core::str::from_utf8(bytes) else {
-        panic!("an entry key must be UTF-8");
-    };
+pub const fn key_from_bytes(bytes: &'static [u8]) -> EntryKey {
+    if !bytes.is_ascii() {
+        panic!(
+            "an entry key derived from an owner's stable ID is not a valid namespaced \
+             identifier; owner IDs must use lowercase ASCII letters, digits, '.', '_' or '-'"
+        );
+    }
+
+    // SAFETY: the bytes were just checked to be ASCII, which is always valid UTF-8.
+    let value = unsafe { core::str::from_utf8_unchecked(bytes) };
 
     match EntryKey::new(value) {
         Ok(key) => key,

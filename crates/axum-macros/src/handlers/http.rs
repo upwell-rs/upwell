@@ -18,6 +18,8 @@ pub(super) struct HttpRouteContext<'a> {
 /// One route claimed from a method.
 pub(super) struct RouteSpec {
     pub(super) handler_name: Ident,
+    /// The handler's entry-key segment, validated at the method.
+    pub(super) key_segment: LitStr,
     pub(super) verb: Ident,
     pub(super) path: LitStr,
     pub(super) middleware: Vec<Path>,
@@ -172,6 +174,7 @@ pub(super) fn build_route(
 
     Ok(RouteSpec {
         handler_name: method.sig.ident.clone(),
+        key_segment: upwell_macros_core::entry::handler_segment(&method.sig.ident)?,
         verb: route_attr.verb.clone(),
         path: route_attr.path.clone(),
         middleware: route_attr.middleware.clone(),

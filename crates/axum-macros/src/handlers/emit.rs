@@ -129,6 +129,7 @@ fn emit_http(handlers: &AxumHandlers, cx: &super::HandlerContext, out: &mut Toke
         );
         let method = route.verb.to_string().to_ascii_uppercase();
         let path = &route.path;
+        let key_segment = &route.key_segment;
         let targets = route
             .inputs
             .iter()
@@ -200,7 +201,7 @@ fn emit_http(handlers: &AxumHandlers, cx: &super::HandlerContext, out: &mut Toke
                     "http/",
                     <#self_ty as #descriptor_trait<#controller_descriptor>>::DESCRIPTOR.id,
                     ".",
-                    #handler,
+                    #key_segment,
                 ),
                 targets: || ::std::vec![#(#targets),*],
             }
