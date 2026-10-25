@@ -2,8 +2,8 @@
 //!
 //! Entry keys are `<protocol>/<owner segment>.<handler segment>`. Both segments are derived
 //! from Rust names or owner IDs by converting them to `snake_case`, so `listUsers`, `r#type`
-//! and `"Calc Service"` all form keys (`list_users`, `type`, `calc_service`). Only a name that
-//! has no such form, such as one with non-ASCII letters, is rejected.
+//! and `"Calc Service"` all form key segments (`list_users`, `type`, `calc_service`). Only a
+//! name that has no such form, such as one with non-ASCII letters, is rejected.
 
 use heck::ToSnakeCase;
 use proc_macro2::Span;
