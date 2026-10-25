@@ -29,6 +29,8 @@ postcard = { version = "1", features = ["use-std"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 tokio-util = "0.7"
 futures = "0.3"
+axum = "0.8"
+tower = { version = "0.5", features = ["util"] }
 
 [[bench]]
 name = "di_hot_paths"
@@ -64,4 +66,8 @@ harness = false
 
 [[bench]]
 name = "reload_allocations"
+harness = false
+
+[[bench]]
+name = "http_request"
 harness = false

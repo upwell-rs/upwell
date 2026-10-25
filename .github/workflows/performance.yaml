@@ -47,6 +47,7 @@ jobs:
           - ws_pubsub_fanout
           - reload_transition
           - reload_allocations
+          - http_request
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
