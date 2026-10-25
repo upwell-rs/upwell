@@ -26,6 +26,29 @@ pub fn handler_segment(handler: &Ident) -> syn::Result<LitStr> {
     Ok(LitStr::new(&name, handler.span()))
 }
 
+/// Validates the stable ID of an entry owner (a service or controller), which entry keys
+/// embed as `<protocol>/<owner ID>.<handler>`.
+///
+/// Every `/`-separated part of the ID must be a valid key segment, as for
+/// [`handler_segment`]. The error spans the ID, or the type when the ID is defaulted from it.
+pub fn owner_id(id: &LitStr) -> syn::Result<()> {
+    let value = id.value();
+
+    if !value.split('/').all(is_segment) {
+        return Err(syn::Error::new(
+            id.span(),
+            format!(
+                "`{value}` cannot identify an entry owner: entry keys embed this ID, whose \
+                 `/`-separated parts must start with a lowercase ASCII letter or digit and \
+                 contain only lowercase ASCII letters, digits, `.`, `_` or `-`; set a valid \
+                 `id = \"..\"`"
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
 fn is_segment(name: &str) -> bool {
     let mut bytes = name.bytes();
     let starts_well = bytes

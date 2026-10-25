@@ -91,6 +91,8 @@ impl<T: ComponentExt> ParseItem<ComponentContext> for Router<T> {
             ));
         }
 
+        upwell_macros_core::entry::owner_id(&cx.id)?;
+
         self.context = Some(RouterContext {
             ident: cx.ident.clone(),
             type_name: cx.type_name.clone(),
