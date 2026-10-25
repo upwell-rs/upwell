@@ -1,11 +1,12 @@
 use upwell_config::{
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigManager, ConfigProperties,
 };
-use upwell_core::{Descriptor, Scope, Singleton as SingletonScope, TypeDescriptor};
+use upwell_core::{Descriptor, EntryKey, Scope, Singleton as SingletonScope, TypeDescriptor};
 use upwell_di::{BoxedComponent, Component, ComponentDescriptor, Injectable, ProviderDescriptor};
 use upwell_dirs::DirectoriesManager;
 
 use super::App;
+use crate::entry::{EntryDescriptor, EntryTargets};
 use crate::host::ExecutionMode;
 use crate::plugin::{EarlyPluginCatalog, Plugin, PluginCatalog, PluginWithOptions};
 use crate::protocol::ProtocolDefinition;
@@ -180,6 +181,22 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
     /// [`ProviderDescriptor::of`].
     pub fn provider_descriptor(mut self, descriptor: &'static ProviderDescriptor) -> Self {
         self.registry.add_provider(*descriptor);
+
+        self
+    }
+
+    /// Registers an entry into scope `S` that injects `T`, a tuple of injectable types, under
+    /// the stable identity `key`.
+    ///
+    /// Preparation fails when `S` is not opened by the active protocol, or when a target
+    /// cannot be resolved from `S`.
+    pub fn scope_entry<S: Scope, T: EntryTargets>(self, key: EntryKey) -> Self {
+        self.entry_descriptor(EntryDescriptor::new::<S, T>(key))
+    }
+
+    /// Registers an entry descriptor, for entries assembled without a typed target tuple.
+    pub fn entry_descriptor(mut self, descriptor: EntryDescriptor) -> Self {
+        self.registry.entries.push(descriptor);
 
         self
     }

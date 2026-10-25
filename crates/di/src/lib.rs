@@ -57,8 +57,8 @@ pub use error::{
 };
 pub use primitives::{Deferred, Fresh, FreshFromContainer, Lazy};
 pub use registry::{
-    ComponentRegistry, DependencySelectionReason, DependencySelectionStage, DependencyTarget,
-    ProviderSelectionModel, SelectedDependency,
+    ComponentRegistry, DependencyFault, DependencySelectionReason, DependencySelectionStage,
+    DependencyTarget, ProviderSelectionModel, SelectedDependency,
 };
 pub use root::{ROOT_RESOLVER_ID, ROOT_RESOLVER_NAME, RootResolver, root_resolver_descriptor};
 pub use transition::{

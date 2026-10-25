@@ -169,6 +169,10 @@ fn scope_id(id: &str) -> String {
     format!("scope:{id}")
 }
 
+fn entry_id(key: upwell_core::EntryKey) -> String {
+    format!("entry:{key}")
+}
+
 fn type_id(rust_type: &str) -> String {
     format!("type:{rust_type}")
 }

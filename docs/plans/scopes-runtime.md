@@ -63,6 +63,25 @@ Implemented in #404 (owner, 2026-10-25):
 - Scope plans still order one component list per scope, over the common ancestors. Per-chain
   placements come with #345.
 
+### Entries
+
+Every unit of work that runs in a scope is an entry (#358). Entries are what entry plans (#348)
+and openers (#346) key on, so all of them share one table regardless of where they come from.
+
+Entry table, first slice of #358:
+
+- An `EntryDescriptor` carries a stable namespaced `EntryKey`, the scope as a `ScopeKey`, its
+  injected targets as dependency edges, and an optional owner (type plus operation) so tooling can
+  group protocol entries under their controller or service (#360).
+- Protocols push entries in `ProtocolDefinition::register`, plugins contribute them with
+  provenance, and code that opens a scope itself registers with `scope_entry::<S, Deps>(key)`.
+- Preparation sorts entries by key into an `EntryTable` and assigns dense `EntryId`s. It rejects
+  duplicate keys, the transient scope, and scopes the protocol does not open.
+- Each target must resolve from the entry's scope under the same rules component edges follow:
+  reachable on every chain, a unique single provider, one config binding. Every candidate graph
+  checks this again, so a reload that removes a target's provider is rejected.
+- An entry references its scope's seeds rather than listing seed types; typed seeds are #347.
+
 
 ### Scope values: zero-sized or parameterised
 

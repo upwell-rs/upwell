@@ -12,6 +12,7 @@
 pub mod condition;
 pub mod dependency;
 pub mod descriptor;
+pub mod entry;
 pub mod generation;
 pub mod id;
 pub mod resolver;
@@ -28,6 +29,7 @@ pub use condition::{
 };
 pub use dependency::{Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode};
 pub use descriptor::{Descriptor, DescriptorFor, RegistryFor, RuntimeDescriptor, UpwellDescriptor};
+pub use entry::EntryKey;
 pub use generation::RuntimeGenerationId;
 pub use id::{FRAMEWORK_NAMESPACE, IdErrorKind, InvalidNamespacedId, NamespacedIdType};
 pub use resolver::{Resolver, ResolverCtx, ResolverCtxExt, ResolverSet};

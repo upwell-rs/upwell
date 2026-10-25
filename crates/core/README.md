@@ -6,7 +6,7 @@ Part of the [Upwell](../../README.md) framework — the bottom of the dependency
 
 ## Role
 
-`upwell-core` is the leaf crate: it depends on nothing internal, and everything else depends on it. It defines the *vocabulary* the layers above use to talk about dependency injection without committing to a runtime — the by-type [`Descriptor`] and [`TypeDescriptor`] seam, the dependency-edge model ([`DependencyDescriptor`], [`Cardinality`]), component [`Scope`] types ([`Singleton`], [`Transient`]) and their copyable [`ScopeKey`], and the [`Resolver`]/[`ResolverCtx`]/[`ResolverSet`] abstraction through which all dependency resolution flows. It contains no container, no config, and no protocol code — those live in `upwell-di`, `upwell-config`, and the protocol crates.
+`upwell-core` is the leaf crate: it depends on nothing internal, and everything else depends on it. It defines the *vocabulary* the layers above use to talk about dependency injection without committing to a runtime — the by-type [`Descriptor`] and [`TypeDescriptor`] seam, the dependency-edge model ([`DependencyDescriptor`], [`Cardinality`]), component [`Scope`] types ([`Singleton`], [`Transient`]) and their copyable [`ScopeKey`], the stable [`EntryKey`] of an entry point, and the [`Resolver`]/[`ResolverCtx`]/[`ResolverSet`] abstraction through which all dependency resolution flows. It contains no container, no config, and no protocol code — those live in `upwell-di`, `upwell-config`, and the protocol crates.
 
 ## Usage
 

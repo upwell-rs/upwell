@@ -68,4 +68,5 @@ fn selected_types(selected: &[SelectedDependency]) -> Vec<TypeId> {
 }
 
 mod eager;
+mod fault;
 mod fresh;

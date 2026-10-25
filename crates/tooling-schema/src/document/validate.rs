@@ -208,6 +208,9 @@ pub(crate) fn validate_relationship_kinds(
                 ResourceKind::Component | ResourceKind::Condition
             )
         ),
+        RelationshipKind::Enters => {
+            from.kind == ResourceKind::Entry && to.kind == ResourceKind::Scope
+        }
         RelationshipKind::Contains => valid_contains_relationship(&from.kind, &to.kind),
         RelationshipKind::Contributes => valid_contribution_relationship(&from.kind, &to.kind),
         _ => true,
@@ -237,7 +240,10 @@ fn valid_contribution_relationship(from: &ResourceKind, to: &ResourceKind) -> bo
     let owned = *to == ResourceKind::Contribution;
     let projected_target = matches!(
         to,
-        ResourceKind::Component | ResourceKind::Provider | ResourceKind::ConfigBinding
+        ResourceKind::Component
+            | ResourceKind::Provider
+            | ResourceKind::ConfigBinding
+            | ResourceKind::Entry
     );
 
     (owner && owned)

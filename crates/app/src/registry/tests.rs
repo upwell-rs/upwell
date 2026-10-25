@@ -51,9 +51,7 @@ fn component() -> ComponentDescriptor {
 fn resolves_component_descriptor_by_concrete_type() {
     let registry = AppRegistry {
         components: vec![ComponentDescriptor::of::<RegisteredComponent>()],
-        providers: Vec::new(),
-        config_bindings: Vec::new(),
-        condition_facts: Vec::new(),
+        ..Default::default()
     };
 
     let descriptor = registry
@@ -69,9 +67,7 @@ fn resolves_component_descriptor_by_concrete_type() {
 fn missing_unqualified_config_binding_is_missing_not_ambiguous() {
     let registry = AppRegistry {
         components: vec![component()],
-        providers: Vec::new(),
-        config_bindings: Vec::new(),
-        condition_facts: Vec::new(),
+        ..Default::default()
     };
 
     let err = registry.validate().expect_err("config binding is missing");
@@ -97,7 +93,7 @@ fn multiple_unqualified_config_bindings_are_ambiguous() {
             ConfigBinding::of::<TestConfig>("one"),
             ConfigBinding::of::<TestConfig>("two"),
         ],
-        condition_facts: Vec::new(),
+        ..Default::default()
     };
 
     let err = registry

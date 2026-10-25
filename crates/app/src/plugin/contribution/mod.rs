@@ -1,7 +1,12 @@
+//! Attributed plugin contributions: the collector plugins emit into, and how the effective
+//! plan lowers their emissions into the application registry.
+
+mod macros;
+#[cfg(feature = "tooling")]
+mod reconcile;
+
 use std::collections::BTreeSet;
 
-#[cfg(feature = "tooling")]
-use std::any::TypeId;
 #[cfg(feature = "tooling")]
 use std::collections::BTreeMap;
 
@@ -9,6 +14,12 @@ use upwell_config::{ConfigBinding, ConfigProperties};
 use upwell_core::{Descriptor, NamespacedIdType};
 use upwell_di::{ComponentDescriptor, ProviderDescriptor};
 
+#[cfg(feature = "tooling")]
+pub(crate) use reconcile::PluginContributionReconciliation;
+#[cfg(feature = "tooling")]
+use reconcile::{PluginContributionKey, PluginContributionObservation, reconcile_contributions};
+
+use crate::entry::EntryDescriptor;
 use crate::{
     AppRegistry, ContributionId, ContributionProvenance, Contributor, InstallationProvenance,
     PluginId, PluginResolutionPlan,
@@ -24,6 +35,8 @@ pub enum PluginContributionKind {
     Provider,
     /// A configuration binding contributed before config resolution.
     ConfigBinding,
+    /// An entry point contributed to the application's entry table.
+    Entry,
 }
 
 /// Public immutable metadata for one effective plugin contribution.
@@ -199,6 +212,11 @@ impl PluginContributions {
         );
     }
 
+    /// Contributes an entry point.
+    pub fn entry(&mut self, id: ContributionId, descriptor: EntryDescriptor) {
+        self.push(id, ContributionPayload::Entry(descriptor));
+    }
+
     /// Returns this plugin's owner-scoped generic tooling metadata collector.
     #[cfg(feature = "tooling")]
     pub fn tooling(&mut self) -> &mut crate::ToolingContributions {
@@ -324,6 +342,9 @@ impl CollectedPluginPlan {
                 ContributionPayload::ConfigBinding(binding) => {
                     registry.config_bindings.push(binding);
                 }
+                ContributionPayload::Entry(descriptor) => {
+                    registry.entries.push(descriptor);
+                }
             }
         }
 
@@ -340,156 +361,6 @@ impl CollectedPluginPlan {
             cli_parser_metadata: self.cli_parser_metadata,
         }
     }
-}
-
-/// Emits explicit app-neutral plugin contributions with stable namespaced identities.
-///
-/// The macro takes an explicit mutable [`PluginContributions`] target followed by any supported
-/// sections in the order shown below. Every left-hand string is a stable, namespaced
-/// [`ContributionId`], not the ID of the component or provider payload.
-///
-/// ```text
-/// contribute! {
-///     to <collector expression>,
-///     components: [
-///         "<contribution id>" => type <component type>,
-///         "<contribution id>" => <ComponentDescriptor expression>,
-///     ],
-///     providers: [
-///         "<contribution id>" => <ProviderDescriptor expression>,
-///     ],
-///     configs: [
-///         "<contribution id>" => <ConfigProperties type> => <config path expression>,
-///     ],
-/// }
-/// ```
-///
-/// Each section is optional, but sections that are present must follow that order. Entries and
-/// sections may have trailing commas.
-///
-/// In `components`, `type T` is the preferred form and requires `T` to implement
-/// `Descriptor<ComponentDescriptor>`. An expression is the explicit escape hatch for a dynamically
-/// assembled descriptor or a component that cannot implement `Descriptor`. The `type` marker is
-/// required because a bare path can be valid in both Rust's type and expression grammars, while
-/// `type T` is unambiguously a typed contribution in this macro.
-///
-/// ```
-/// # use upwell_app::{PluginContributions, contribute};
-/// # use upwell_config::ConfigProperties;
-/// # use upwell_core::Descriptor;
-/// # use upwell_di::{ComponentDescriptor, ProviderDescriptor};
-/// # struct Scheduler;
-/// # #[derive(serde::Deserialize)]
-/// # struct JobsConfig;
-/// # impl ConfigProperties for JobsConfig { const NAME: &'static str = "JobsConfig"; }
-/// # impl Descriptor<ComponentDescriptor> for Scheduler {
-/// #     const DESCRIPTOR: ComponentDescriptor = panic!("documentation-only descriptor");
-/// # }
-/// # fn provider_descriptor() -> ProviderDescriptor { unimplemented!() }
-/// # fn add(contributions: &mut PluginContributions) {
-/// contribute! {
-///     to contributions,
-///     components: [
-///         "jobs/scheduler-component" => type Scheduler,
-///     ],
-///     providers: [
-///         "jobs/scheduler-provider" => provider_descriptor(),
-///     ],
-///     configs: [
-///         "jobs/config" => JobsConfig => "jobs",
-///     ],
-/// }
-/// # }
-/// ```
-///
-/// Contribution IDs remain explicit because they identify plugin emissions and their provenance.
-/// They are intentionally not inferred from descriptor IDs: separate plugins may emit the same
-/// descriptor, and one plugin may emit multiple independently identified contributions.
-#[macro_export]
-macro_rules! contribute {
-    (
-        to $contributions:expr
-        $(, components: [$($components:tt)*])?
-        $(, providers: [
-            $(
-                $provider_id:literal => $provider:expr
-            ),* $(,)?
-        ])?
-        $(, configs: [
-            $(
-                $config_id:literal => $config:ty => $path:expr
-            ),* $(,)?
-        ])?
-        $(,)?
-    ) => {{
-        let __contributions: &mut $crate::PluginContributions = $contributions;
-
-        $(
-            $crate::contribute!(@components __contributions; $($components)*);
-        )?
-
-        $(
-            $(
-                __contributions.provider(
-                    $crate::namespaced_id!($crate::ContributionId, $provider_id),
-                    $provider,
-                );
-            )*
-        )?
-
-        $(
-            $(
-                __contributions.config::<$config>(
-                    $crate::namespaced_id!($crate::ContributionId, $config_id),
-                    $path,
-                );
-            )*
-        )?
-    }};
-
-    (@components $contributions:ident;) => {};
-
-    (@components
-        $contributions:ident;
-        $id:literal => type $component:ty,
-        $($remaining:tt)*
-    ) => {
-        $contributions.component::<$component>(
-            $crate::namespaced_id!($crate::ContributionId, $id),
-        );
-        $crate::contribute!(@components $contributions; $($remaining)*);
-    };
-
-    (@components
-        $contributions:ident;
-        $id:literal => type $component:ty
-    ) => {
-        $contributions.component::<$component>(
-            $crate::namespaced_id!($crate::ContributionId, $id),
-        );
-    };
-
-    (@components
-        $contributions:ident;
-        $id:literal => $descriptor:expr,
-        $($remaining:tt)*
-    ) => {
-        $contributions.component_descriptor(
-            $crate::namespaced_id!($crate::ContributionId, $id),
-            $descriptor,
-        );
-        $crate::contribute!(@components $contributions; $($remaining)*);
-    };
-
-    (@components
-        $contributions:ident;
-        $id:literal => $descriptor:expr
-    ) => {
-        $contributions.component_descriptor(
-            $crate::namespaced_id!($crate::ContributionId, $id),
-            $descriptor,
-        );
-    };
 }
 
 pub(super) struct CollectedContribution {
@@ -522,6 +393,7 @@ enum ContributionPayload {
     Component(ComponentDescriptor),
     Provider(ProviderDescriptor),
     ConfigBinding(ConfigBinding),
+    Entry(EntryDescriptor),
 }
 
 impl ContributionPayload {
@@ -530,223 +402,7 @@ impl ContributionPayload {
             Self::Component(_) => PluginContributionKind::Component,
             Self::Provider(_) => PluginContributionKind::Provider,
             Self::ConfigBinding(_) => PluginContributionKind::ConfigBinding,
+            Self::Entry(_) => PluginContributionKind::Entry,
         }
     }
-
-    #[cfg(feature = "tooling")]
-    fn target(&self) -> ContributionTarget {
-        match self {
-            Self::Component(descriptor) => ContributionTarget::new(
-                format!("component:{}", descriptor.id),
-                ContributionTargetKey::Component(descriptor.ty.type_id),
-            ),
-            Self::Provider(descriptor) => ContributionTarget::new(
-                provider_target(descriptor),
-                ContributionTargetKey::Provider {
-                    trait_ty: descriptor.trait_ty.type_id,
-                    concrete_ty: descriptor.concrete_ty.type_id,
-                    qualifier: descriptor.qualifier.to_string(),
-                },
-            ),
-            Self::ConfigBinding(binding) => ContributionTarget::new(
-                format!(
-                    "config-binding:{}:{}",
-                    (binding.ty.type_name)(),
-                    binding.path
-                ),
-                ContributionTargetKey::ConfigBinding {
-                    ty: binding.ty.type_id,
-                    path: binding.path.clone(),
-                },
-            ),
-        }
-    }
-
-    #[cfg(feature = "tooling")]
-    fn exists_in(&self, registry: &AppRegistry) -> bool {
-        match self {
-            Self::Component(descriptor) => registry.components.iter().any(|existing| {
-                existing.ty.type_id == descriptor.ty.type_id && existing.id == descriptor.id
-            }),
-            Self::Provider(descriptor) => registry.providers.iter().any(|existing| {
-                existing.trait_ty.type_id == descriptor.trait_ty.type_id
-                    && existing.concrete_ty.type_id == descriptor.concrete_ty.type_id
-                    && existing.qualifier == descriptor.qualifier
-            }),
-            Self::ConfigBinding(binding) => registry.config_bindings.iter().any(|existing| {
-                existing.ty.type_id == binding.ty.type_id && existing.path == binding.path
-            }),
-        }
-    }
-}
-
-#[cfg(feature = "tooling")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// Pre-lowering target observation retained only to interpret the final registry.
-struct PluginContributionObservation {
-    requested: String,
-    key: ContributionTargetKey,
-    preceded: bool,
-}
-
-#[cfg(feature = "tooling")]
-impl PluginContributionObservation {
-    fn capture(payload: &ContributionPayload, registry: &AppRegistry) -> Self {
-        let target = payload.target();
-
-        Self {
-            requested: target.requested,
-            key: target.key,
-            preceded: payload.exists_in(registry),
-        }
-    }
-}
-
-#[cfg(feature = "tooling")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// Final-registry reconciliation for one provenance-and-index keyed plugin emission.
-pub(crate) struct PluginContributionReconciliation {
-    pub(crate) requested: String,
-    pub(crate) applied: Option<String>,
-    pub(crate) decision: PluginContributionDecision,
-}
-
-#[cfg(feature = "tooling")]
-impl PluginContributionObservation {
-    fn final_target(&self, registry: &AppRegistry) -> Option<String> {
-        match &self.key {
-            ContributionTargetKey::Component(ty) => registry
-                .components
-                .iter()
-                .find(|component| component.ty.type_id == *ty)
-                .map(|component| format!("component:{}", component.id)),
-            ContributionTargetKey::Provider {
-                trait_ty,
-                concrete_ty,
-                qualifier,
-            } => registry
-                .providers
-                .iter()
-                .find(|provider| {
-                    provider.trait_ty.type_id == *trait_ty
-                        && provider.concrete_ty.type_id == *concrete_ty
-                        && provider.qualifier == qualifier
-                })
-                .map(provider_target),
-            ContributionTargetKey::ConfigBinding { ty, path } => registry
-                .config_bindings
-                .iter()
-                .find(|binding| binding.ty.type_id == *ty && binding.path == *path)
-                .map(config_binding_target),
-        }
-    }
-}
-
-#[cfg(feature = "tooling")]
-fn reconcile_contributions(
-    contributions: &[PluginContribution],
-    observations: &[PluginContributionObservation],
-    registry: &AppRegistry,
-) -> BTreeMap<PluginContributionKey, PluginContributionReconciliation> {
-    let mut selected = BTreeSet::new();
-    let mut reconciliations = BTreeMap::new();
-
-    for (index, (contribution, observation)) in
-        contributions.iter().copied().zip(observations).enumerate()
-    {
-        let key = PluginContributionKey::new(contribution.provenance(), index);
-        let final_target = observation.final_target(registry);
-        let selected_key = final_target
-            .as_ref()
-            .map(|applied| (observation.key.clone(), applied.clone()));
-
-        let decision = match (&final_target, selected_key) {
-            (None, _) => PluginContributionDecision::NotApplied,
-            (Some(applied), _) if observation.preceded && applied == &observation.requested => {
-                PluginContributionDecision::Duplicate
-            }
-            (Some(_), Some(key)) if !selected.insert(key.clone()) => {
-                PluginContributionDecision::Duplicate
-            }
-            (Some(applied), _) if applied == &observation.requested => {
-                PluginContributionDecision::Applied
-            }
-            (Some(_), _) => PluginContributionDecision::Displaced,
-        };
-
-        reconciliations.insert(
-            key,
-            PluginContributionReconciliation {
-                requested: observation.requested.clone(),
-                applied: final_target,
-                decision,
-            },
-        );
-    }
-
-    reconciliations
-}
-
-#[cfg(feature = "tooling")]
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-/// Stable private key for one contributor-local emission occurrence.
-struct PluginContributionKey {
-    provenance: ContributionProvenance,
-    index: usize,
-}
-
-#[cfg(feature = "tooling")]
-impl PluginContributionKey {
-    const fn new(provenance: ContributionProvenance, index: usize) -> Self {
-        Self { provenance, index }
-    }
-}
-
-#[cfg(feature = "tooling")]
-/// Tooling-only requested resource identity and lookup key.
-struct ContributionTarget {
-    requested: String,
-    key: ContributionTargetKey,
-}
-
-#[cfg(feature = "tooling")]
-impl ContributionTarget {
-    fn new(requested: String, key: ContributionTargetKey) -> Self {
-        Self { requested, key }
-    }
-}
-
-#[cfg(feature = "tooling")]
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-/// Stable registry lookup key for an emitted resource category.
-enum ContributionTargetKey {
-    Component(TypeId),
-    Provider {
-        trait_ty: TypeId,
-        concrete_ty: TypeId,
-        qualifier: String,
-    },
-    ConfigBinding {
-        ty: TypeId,
-        path: String,
-    },
-}
-
-#[cfg(feature = "tooling")]
-fn provider_target(descriptor: &ProviderDescriptor) -> String {
-    format!(
-        "provider:{}:{}:{}",
-        (descriptor.trait_ty.type_name)(),
-        (descriptor.concrete_ty.type_name)(),
-        descriptor.qualifier
-    )
-}
-
-#[cfg(feature = "tooling")]
-fn config_binding_target(binding: &ConfigBinding) -> String {
-    format!(
-        "config-binding:{}:{}",
-        (binding.ty.type_name)(),
-        binding.path
-    )
 }
