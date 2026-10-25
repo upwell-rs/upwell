@@ -18,14 +18,15 @@ mod config;
 pub use condition::AppConditionEvaluation;
 pub(crate) use config::{BoundConfigs, ConfigFault};
 
-/// Holds the *agnostic* component, provider, and config-binding descriptors of an app —
-/// declarations only. Runtime instances live in the
+/// Holds the *agnostic* component, provider, config-binding and entry descriptors of an
+/// app — declarations only. Runtime instances live in the
 /// [`ScopeContainer`](upwell_di::ScopeContainer).
 ///
 /// Wraps the DI engine's [`ComponentRegistry`] (component/provider graph) with the config
-/// bindings, and runs the cross-cutting validation the component graph alone cannot
-/// (config edges). Protocol-specific declarations (services/routes) live in the protocol
-/// plugin, not here, so this stays usable by any protocol.
+/// bindings and entries, and runs the cross-cutting validation the component graph alone
+/// cannot (config edges, entry targets). Protocols keep their own declarations (services,
+/// routes) and register only protocol-neutral [`EntryDescriptor`]s here, so this stays
+/// usable by any protocol.
 #[derive(Clone, Default, Debug)]
 pub struct AppRegistry {
     pub components: Vec<ComponentDescriptor>,
