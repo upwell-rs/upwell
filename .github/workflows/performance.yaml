@@ -3,10 +3,23 @@ name: Performance
 # Statistical timing is intentionally isolated from pull-request CI: Criterion's optimized
 # build is comparatively heavy and shared runners are noisy. PRs instead run deterministic
 # allocation and liveness contracts through the normal workspace test job.
+#
+# Release branches are benchmarked on every push so regressions on integration work are
+# measured before it reaches the default branch. A pull request is benchmarked only while it
+# carries the `performance` label; any other branch can be benchmarked on demand.
 on:
   workflow_dispatch:
   schedule:
     - cron: "23 3 * * 1"
+  push:
+    branches:
+      - "release/**"
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -17,6 +30,7 @@ env:
 jobs:
   criterion:
     name: ${{ matrix.bench }}
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'performance') }}
     runs-on: ubuntu-latest
     # One job per bench: they run in parallel, a slow or failing bench is isolated, and each
     # uploads its own report artifact. Add a new bench to this list when you add one.
@@ -26,10 +40,13 @@ jobs:
         bench:
           - di_hot_paths
           - di_graph_memory
+          - di_graph_preparation
           - config_resolution
           - serde_abstraction
           - rpc_dispatch
           - ws_pubsub_fanout
+          - reload_transition
+          - reload_allocations
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -40,7 +57,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run ${{ matrix.bench }} benchmark
-        run: cargo bench --manifest-path benchmarks/Cargo.toml --bench ${{ matrix.bench }}
+        run: cargo bench --manifest-path benchmarks/Cargo.toml --locked --bench ${{ matrix.bench }}
       - name: Store Criterion reports
         uses: actions/upload-artifact@v4
         with:
