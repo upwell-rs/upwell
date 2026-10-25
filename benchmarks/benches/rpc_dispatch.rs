@@ -18,7 +18,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
-use upwell_core::{ResolverSet, TypeDescriptor};
+use upwell_core::{EntryKey, ResolverSet, TypeDescriptor};
 use upwell_di::{ScopeContainer, ScopeRegistry};
 use upwell_rpc::descriptors::{RpcCallContext, RpcOutcome, RpcResponse};
 use upwell_rpc::{
@@ -106,6 +106,7 @@ fn build_router(routes: usize) -> RpcRouter {
     let descriptors: Vec<&'static RpcDescriptor> = (0..routes)
         .map(|i| {
             let name: &'static str = Box::leak(format!("rpc{i}").into_boxed_str());
+            let key: &'static str = Box::leak(format!("rpc/bench.{name}").into_boxed_str());
 
             &*Box::leak(Box::new(RpcDescriptor {
                 name,
@@ -114,6 +115,8 @@ fn build_router(routes: usize) -> RpcRouter {
                 output: TypeDescriptor::of::<()>("()"),
                 handler: bench_handler,
                 source: None,
+                key: EntryKey::new(key).expect("bench RPC entry keys are valid"),
+                targets: Vec::new,
             }))
         })
         .collect();
