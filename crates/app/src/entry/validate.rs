@@ -92,6 +92,33 @@ pub enum EntryError {
         dependency: &'static str,
     },
 
+    /// A forced-fresh target, or one of its eager dependencies, lives in a scope the entry
+    /// cannot reach.
+    #[error(
+        "entry '{key}' rebuilds '{dependency}' fresh, but it needs scope '{scope}', which the entry cannot reach"
+    )]
+    FreshUnreachable {
+        /// The entry's stable identity.
+        key: EntryKey,
+        /// The target's Rust type name.
+        dependency: &'static str,
+        /// The unreachable scope.
+        scope: ScopeId,
+    },
+
+    /// A forced-fresh target has no factory to rebuild it with.
+    #[error(
+        "entry '{key}' rebuilds '{dependency}' fresh, but component '{component}' has no factory"
+    )]
+    FreshWithoutFactory {
+        /// The entry's stable identity.
+        key: EntryKey,
+        /// The target's Rust type name.
+        dependency: &'static str,
+        /// The target's stable component ID.
+        component: String,
+    },
+
     /// A config target has no binding of its type at the requested path.
     #[error(
         "entry '{key}' injects config '{type_name}', which has no binding{}",
@@ -134,6 +161,8 @@ impl EntryError {
             | Self::UnreachableDependency { key, .. }
             | Self::AmbiguousDependency { key, .. }
             | Self::DeferredTransientDependency { key, .. }
+            | Self::FreshUnreachable { key, .. }
+            | Self::FreshWithoutFactory { key, .. }
             | Self::MissingConfig { key, .. }
             | Self::AmbiguousConfig { key, .. } => Some(*key),
         }
@@ -182,25 +211,25 @@ pub(crate) fn validate_targets(
     registry: &AppRegistry,
     selection: &ProviderSelectionModel,
     topology: &PreparedScopeTopology,
-) -> Result<(), EntryError> {
+) -> crate::Result<()> {
     let configs = BoundConfigs::new(&registry.config_bindings);
+    let can_reach =
+        |consumer: ScopeId, dependency: ScopeId| topology.is_reachable(&consumer, &dependency);
 
     for entry in &registry.entries {
         for target in (entry.targets)() {
-            let fault = if target.config {
+            let error = if target.config {
                 configs
                     .fault(&target)
                     .map(|fault| config_error(entry, &target, fault))
             } else {
                 selection
-                    .dependency_fault(&target, entry.scope, |consumer, dependency| {
-                        topology.is_reachable(&consumer, &dependency)
-                    })
+                    .dependency_fault(&target, entry.scope, can_reach)?
                     .map(|fault| dependency_error(entry, &target, fault))
             };
 
-            if let Some(error) = fault {
-                return Err(error);
+            if let Some(error) = error {
+                return Err(error.into());
             }
         }
     }
@@ -231,6 +260,16 @@ fn dependency_error(
         DependencyFault::DeferredTransient => {
             EntryError::DeferredTransientDependency { key, dependency }
         }
+        DependencyFault::FreshUnreachable { scope } => EntryError::FreshUnreachable {
+            key,
+            dependency,
+            scope,
+        },
+        DependencyFault::FreshWithoutFactory { component } => EntryError::FreshWithoutFactory {
+            key,
+            dependency,
+            component,
+        },
         _ => EntryError::MissingDependency { key, dependency },
     }
 }
