@@ -115,6 +115,9 @@ impl ProtocolDefinition for Axum {
             .config_bindings
             .push(ConfigBinding::of::<AxumConfig>(AXUM_CONFIG_PATH));
         registry.components.push(REQUEST_META_DESCRIPTOR);
+        registry
+            .entries
+            .extend(entries::route_entries(&self.controllers));
         #[cfg(feature = "ws")]
         registry.components.extend([
             crate::ws::WEBSOCKET_UPGRADE_META_DESCRIPTOR,
@@ -401,9 +404,9 @@ fn normalize_base_path(base_path: &str) -> String {
     }
 }
 
+mod entries;
 #[cfg(test)]
 mod tests;
-
 #[cfg(feature = "tooling")]
 pub(crate) mod tooling;
 

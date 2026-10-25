@@ -421,8 +421,16 @@ fn expand_method(
     let response_stream = paths.plugin("ResponseStream");
     let rpc_call_context = paths.plugin("RpcCallContext");
     let rpc_descriptor = paths.plugin("RpcDescriptor");
+    let service_descriptor = paths.plugin("ServiceDescriptor");
     let type_descriptor = paths.core("TypeDescriptor");
+    let descriptor_trait = paths.core("Descriptor");
+    let from_container = paths.core("FromContainer");
+    let entry_key = paths.core("entry_key");
     let ret = handler_return_type(paths);
+    let targets = param_types
+        .iter()
+        .filter_map(|ty| attr::first_type_arg(ty, "Inject"))
+        .map(|ty| quote!(<#ty as #from_container>::dependency()));
 
     let wrap = |inner: TokenStream| match output_wrap {
         OutputWrap::None => inner,
@@ -482,6 +490,13 @@ fn expand_method(
             output: #type_descriptor::of::<#output_ty>(#output_name),
             handler: #wrapper_ident,
             source: ::core::option::Option::Some(#source),
+            key: #entry_key!(
+                "rpc/",
+                <#self_ty as #descriptor_trait<#service_descriptor>>::DESCRIPTOR.id,
+                ".",
+                #method_name,
+            ),
+            targets: || ::std::vec![#(#targets),*],
         }
     };
 

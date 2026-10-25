@@ -4,7 +4,7 @@ use std::{fmt, future::Future, pin::Pin, sync::Mutex};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use upwell_core::{ItemSource, ResolverCtx, TypeDescriptor};
+use upwell_core::{DependencyDescriptor, EntryKey, ItemSource, ResolverCtx, TypeDescriptor};
 use upwell_di::{Component, ScopeContainer};
 
 use crate::extract::ErrorResponse;
@@ -155,6 +155,10 @@ pub struct RpcDescriptor {
     pub handler: RpcHandler,
     /// The handler method's declaration, when the registering macro recorded it.
     pub source: Option<ItemSource>,
+    /// The method's stable entry identity: `rpc/<service ID>.<method>`.
+    pub key: EntryKey,
+    /// The dependency edges of the method's injected parameters, in parameter order.
+    pub targets: fn() -> Vec<DependencyDescriptor>,
 }
 
 impl fmt::Debug for RpcDescriptor {
@@ -164,6 +168,7 @@ impl fmt::Debug for RpcDescriptor {
             .field("operation", &self.operation)
             .field("parameters", &self.parameters)
             .field("output", &self.output)
+            .field("key", &self.key)
             .finish_non_exhaustive()
     }
 }
