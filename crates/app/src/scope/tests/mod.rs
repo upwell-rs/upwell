@@ -46,6 +46,12 @@ static AXUM_BOUNDARIES: [ScopeBoundary; 3] = [
     ScopeBoundary::new::<Connection>(&[ScopeParent::Root]),
 ];
 
+fn sorted<const N: usize>(mut ids: [ScopeId; N]) -> [ScopeId; N] {
+    ids.sort();
+
+    ids
+}
+
 fn prepare(boundaries: &'static [ScopeBoundary]) -> PreparedScopeTopology {
     ScopeTopology::new(boundaries)
         .prepare()
@@ -120,11 +126,11 @@ fn boundary_lookup_and_chain_queries_include_implicit_root() {
     );
     assert_eq!(topology.parents_of(&MISSING_ID), None);
     assert_eq!(
-        topology.chains(&MESSAGE_ID),
-        [Box::from([CONNECTION_ID, root])]
+        topology.common_ancestors(&MESSAGE_ID),
+        sorted([CONNECTION_ID, root])
     );
-    assert!(topology.chains(&MISSING_ID).is_empty());
-    assert!(topology.chains(&root).is_empty());
+    assert!(topology.common_ancestors(&MISSING_ID).is_empty());
+    assert!(topology.common_ancestors(&root).is_empty());
 }
 
 #[test]
@@ -151,7 +157,7 @@ fn reachability_follows_ancestry_instead_of_rank() {
 }
 
 #[test]
-fn every_declared_parent_contributes_an_opening_chain() {
+fn common_ancestors_intersect_every_declared_parent() {
     static BOUNDARIES: [ScopeBoundary; 3] = [
         ScopeBoundary::new::<Connection>(&[ScopeParent::Root]),
         ScopeBoundary::new::<Message>(&[ScopeParent::of::<Connection>(), ScopeParent::Root]),
@@ -165,24 +171,11 @@ fn every_declared_parent_contributes_an_opening_chain() {
     assert!(message.opens_under(ScopeParent::Root));
     assert!(message.opens_under(ScopeParent::of::<Connection>()));
     assert!(!message.opens_under(ScopeParent::of::<Leaf>()));
+    assert_eq!(topology.common_ancestors(&MESSAGE_ID), [root]);
     assert_eq!(
-        topology.chains(&MESSAGE_ID),
-        [Box::from([CONNECTION_ID, root]), Box::from([root])]
+        topology.common_ancestors(&LEAF_ID),
+        sorted([MESSAGE_ID, root])
     );
-    assert_eq!(
-        topology.chains(&LEAF_ID),
-        [
-            Box::from([MESSAGE_ID, CONNECTION_ID, root]),
-            Box::from([MESSAGE_ID, root])
-        ]
-    );
-    assert_eq!(topology.common_ancestors(&LEAF_ID), {
-        let mut common = vec![MESSAGE_ID, root];
-
-        common.sort();
-
-        common
-    });
 }
 
 #[test]
@@ -367,3 +360,5 @@ fn parent_must_have_strictly_greater_lifetime_rank() {
         }
     );
 }
+
+mod dense;

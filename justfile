@@ -190,4 +190,4 @@ bench-lock:
     cargo metadata --manifest-path benchmarks/Cargo.toml --format-version 1 > /dev/null
 
 test-templates:
-    cargo nextest run -p cargo-upwell --test init --run-ignored only --no-tests=fail
+    cargo nextest run -p cargo-upwell --test init --run-ignored only --no-tests=fail --locked

@@ -57,8 +57,9 @@ Implemented in #404 (owner, 2026-10-25):
 - Descriptors, containers and topologies carry a `Copy` `ScopeKey` (`S::KEY`, or
   `ScopeKey::of::<S>()`), compared and hashed by ID.
 - `ScopeBoundary::new::<S>(&[ScopeParent::Root, ScopeParent::of::<Connection>()])` declares every
-  opening parent. `PreparedScopeTopology` precomputes each boundary's chains; a dependency is
-  reachable only when its scope is on every chain of the consumer (`common_ancestors`).
+  opening parent. `PreparedScopeTopology` precomputes each boundary's common ancestors (the
+  intersection over its parents, never an enumeration of chains, which can grow exponentially);
+  a dependency is reachable only when its scope is on every chain of the consumer.
 - Scope plans still order one component list per scope, over the common ancestors. Per-chain
   placements come with #345.
 
