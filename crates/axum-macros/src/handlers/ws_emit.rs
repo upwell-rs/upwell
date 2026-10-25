@@ -17,6 +17,10 @@ pub(super) fn emit(handlers: &AxumHandlers, cx: &HandlerContext, out: &mut Token
     let ws_message_descriptor = paths.plugin("WsMessageDescriptor");
     let ws_message_mode = paths.plugin("WsMessageMode");
     let type_descriptor = paths.core("TypeDescriptor");
+    let descriptor_trait = paths.core("Descriptor");
+    let from_container = paths.core("FromContainer");
+    let entry_key = paths.core("entry_key");
+    let ws_registration = paths.plugin("WsControllerRegistration");
     let ws_routes_slice = handlers
         .routes_slice
         .clone()
@@ -58,6 +62,10 @@ pub(super) fn emit(handlers: &AxumHandlers, cx: &HandlerContext, out: &mut Token
             .unwrap_or_else(|| quote!(::core::option::Option::None));
         let codec = &spec.codec;
         let codec_name = codec.to_string();
+        let targets = spec
+            .targets
+            .iter()
+            .map(|ty| quote!(<#ty as #from_container>::dependency()));
         quote! {
             #ws_route_descriptor::new_described::<#protocol>(
                 #ws_message_descriptor {
@@ -68,6 +76,13 @@ pub(super) fn emit(handlers: &AxumHandlers, cx: &HandlerContext, out: &mut Token
                     reply: #reply,
                     codec: #type_descriptor::of::<#codec>(#codec_name),
                     source: ::core::option::Option::Some(#source),
+                    key: #entry_key!(
+                        "ws/",
+                        <#self_ty as #descriptor_trait<#ws_registration>>::DESCRIPTOR.id,
+                        ".",
+                        #handler,
+                    ),
+                    targets: || ::std::vec![#(#targets),*],
                 },
                 |runtime| {
                     let svc = runtime

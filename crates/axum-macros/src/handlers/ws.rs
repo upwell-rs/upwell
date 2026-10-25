@@ -18,6 +18,8 @@ pub(super) struct WsRouteSpec {
     pub(super) is_request: bool,
     pub(super) reply: Option<Type>,
     pub(super) codec: TokenStream,
+    /// The `T` of every `Inject<T>` parameter, in parameter order.
+    pub(super) targets: Vec<Type>,
 }
 
 /// Builds the message-route builder fragment for one `#[message("dest")]` method.
@@ -55,6 +57,7 @@ pub(super) fn build_ws_route(
     let mut bindings: Vec<TokenStream> = Vec::new();
     let mut call_args: Vec<Ident> = Vec::new();
     let mut payload_seen = false;
+    let mut targets: Vec<Type> = Vec::new();
 
     for (i, arg) in method.sig.inputs.iter().enumerate() {
         let FnArg::Typed(typed) = arg else {
@@ -64,13 +67,16 @@ pub(super) fn build_ws_route(
         let ty = typed.ty.as_ref();
 
         match inject_inner(ty) {
-            Some(handle) => bindings.push(quote! {
-                let #ident = #inject(
-                    __scope.extract::<#handle>().await.map_err(|__e| {
-                        #dispatch_error::Inject(::std::string::ToString::to_string(&__e))
-                    })?,
-                );
-            }),
+            Some(handle) => {
+                targets.push(handle.clone());
+                bindings.push(quote! {
+                    let #ident = #inject(
+                        __scope.extract::<#handle>().await.map_err(|__e| {
+                            #dispatch_error::Inject(::std::string::ToString::to_string(&__e))
+                        })?,
+                    );
+                });
+            }
             None => {
                 if payload_seen {
                     return Err(syn::Error::new_spanned(
@@ -151,6 +157,7 @@ pub(super) fn build_ws_route(
         is_request,
         reply: is_request.then(|| client::response_type(&method.sig.output)),
         codec: codec.clone(),
+        targets,
     })
 }
 

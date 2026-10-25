@@ -140,6 +140,10 @@ impl ProtocolDefinition for Axum {
                     (registration.register)(registry);
                 }
             }
+
+            registry
+                .entries
+                .extend(entries::message_entries(&self.ws_controllers, &registered));
         }
     }
 
