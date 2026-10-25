@@ -52,6 +52,43 @@ and the topology types, and lands first because placements, layouts and seeds (#
 designed against it.
 
 
+### Scope values: zero-sized or parameterised
+
+A scope type is either zero-sized (no params, like `Request`) or a struct whose fields are its
+params. Both use the same mechanism, and the zero-sized case costs nothing.
+
+```rust
+#[scope(parents = [Connection])]
+pub struct Request;
+
+#[scope(parents = [Root])]
+pub struct CustomerSync {
+    customer: CustomerId,
+    credentials: Credentials,
+}
+```
+
+The active scope's value is reachable two ways, both public:
+
+- **Through DI:** components in the scope inject `Arc<CustomerSync>`.
+- **Through the task-local context:** `#[scope]` generates `S::current() -> Result<Arc<S>, NoActiveScope>`.
+  For a zero-sized scope it answers "am I inside one?", also offered as `S::is_active()`.
+
+This refines the access rule. Reading the active scope's own value is allowed publicly, because it
+builds nothing, is typed and closed, and each instance carries its own value. Resolving components
+from the active container without a declared dependency stays non-public.
+
+- Params are stored once per instance and shared by `current()` and injection, matching #344's
+  single allocation per instance.
+- Params are immutable, because one instance may run work in several tasks at once. Mutable
+  per-instance state belongs in a scoped component.
+- A `current()` read is not a dependency edge. It cannot build anything, so planning loses
+  nothing, and tooling shows each scope's parameter fields from `#[scope]`.
+- `CustomerSync { .. }.enter(future)` runs a future inside just the params context, without an
+  app, so code that calls `current()` can be unit-tested.
+- The name "scope handle" is avoided while axum's `ScopeHandle` (an `Arc<ScopeContainer>` in
+  request extensions) exists; the value is plain `Arc<S>`.
+
 ### Scope parameters, seeds and options
 
 Opening a scope takes three kinds of input, kept distinct:
