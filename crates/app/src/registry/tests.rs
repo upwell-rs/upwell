@@ -4,7 +4,7 @@ use std::sync::Arc;
 use upwell_config::{ConditionFactSource, ConditionFacts, ConfigBinding, ConfigProperties};
 use upwell_core::{
     Cardinality, ConditionScalar, ConditionScalarKind, ConfigFactDescriptor, ConfigFactId,
-    DependencyDescriptor, TypeDescriptor,
+    DependencyDescriptor, Scope, TypeDescriptor,
 };
 use upwell_di::{Component, ComponentDescriptor, Singleton};
 
@@ -42,7 +42,7 @@ fn component() -> ComponentDescriptor {
         "needs_config",
         "NeedsConfig",
         TypeDescriptor::of::<()>("NeedsConfig"),
-        &Singleton,
+        Singleton::KEY,
     )
     .with_factories(unbuilt_factories!("static", config_deps))
 }

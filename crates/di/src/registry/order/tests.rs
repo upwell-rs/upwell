@@ -1,7 +1,7 @@
 use super::*;
 use crate::descriptors::ProviderOrder;
 use crate::test_support::planned_provider;
-use upwell_core::{Singleton, TypeDescriptor};
+use upwell_core::{Scope, Singleton, TypeDescriptor};
 
 trait Trait: Send + Sync {}
 trait OtherTrait: Send + Sync {}
@@ -10,7 +10,7 @@ struct Beta;
 struct Gamma;
 
 fn component<T: 'static>(name: &'static str) -> ComponentDescriptor {
-    ComponentDescriptor::manual(name, name, TypeDescriptor::of::<T>(name), &Singleton)
+    ComponentDescriptor::manual(name, name, TypeDescriptor::of::<T>(name), Singleton::KEY)
 }
 
 fn provider<T: 'static>(

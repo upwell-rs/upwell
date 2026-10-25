@@ -3,7 +3,7 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 
-use upwell_core::{Cardinality, ResolutionMode, Scope, ScopeId, Singleton};
+use upwell_core::{Cardinality, ResolutionMode, Scope, ScopeId, ScopeKey, Singleton};
 
 use super::ComponentRegistry;
 use super::selection;
@@ -24,9 +24,9 @@ impl ComponentRegistry {
         &self,
         components: &[ComponentDescriptor],
         selection: &selection::ProviderSelectionModel,
-        can_access: &impl Fn(&dyn Scope, &dyn Scope) -> bool,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<()> {
-        let scope_of: HashMap<TypeId, &'static dyn Scope> =
+        let scope_of: HashMap<TypeId, ScopeKey> =
             components.iter().map(|c| (c.ty.type_id, c.scope)).collect();
 
         for c in components {
@@ -108,8 +108,8 @@ impl ComponentRegistry {
         model: &selection::ProviderSelectionModel,
         consumer: &ComponentDescriptor,
         dependency: &upwell_core::DependencyDescriptor,
-        can_access: &impl Fn(&dyn Scope, &dyn Scope) -> bool,
-    ) -> crate::Result<Vec<(&'static dyn Scope, &'static str)>> {
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
+    ) -> crate::Result<Vec<(ScopeKey, &'static str)>> {
         let selected = match dependency.cardinality {
             Cardinality::One => model
                 .select_runtime_one(
@@ -151,21 +151,21 @@ impl ComponentRegistry {
 
 /// Whether a `consumer`-scoped component may hold a `dependency`-scoped one under
 /// the topology-neutral legacy rank model.
-pub(super) fn scope_allows_by_rank(consumer: &dyn Scope, dependency: &dyn Scope) -> bool {
+pub(super) fn scope_allows_by_rank(consumer: ScopeKey, dependency: ScopeKey) -> bool {
     if dependency.is_transient() {
         return true;
     }
 
     if consumer.is_transient() {
-        return dependency.id() == Singleton.id();
+        return dependency.id() == Singleton::ID;
     }
 
     dependency.rank() >= consumer.rank()
 }
 
 pub(super) fn scope_allows_with(
-    consumer: &dyn Scope,
-    dependency: &dyn Scope,
+    consumer: ScopeKey,
+    dependency: ScopeKey,
     can_reach: &impl Fn(ScopeId, ScopeId) -> bool,
 ) -> bool {
     if dependency.is_transient() {
@@ -173,7 +173,7 @@ pub(super) fn scope_allows_with(
     }
 
     if consumer.is_transient() {
-        return dependency.id() == Singleton.id();
+        return dependency.id() == Singleton::ID;
     }
 
     can_reach(consumer.id(), dependency.id())

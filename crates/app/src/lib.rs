@@ -88,7 +88,7 @@ pub use tooling::{
     ToolingProjectionError, ToolingRelationshipKind,
 };
 pub use transition::{CandidateGraph, RestartReason, RestartRequired};
-pub use upwell_core::{Scope, ScopeId, StaticScope, namespaced_id};
+pub use upwell_core::{Scope, ScopeId, namespaced_id};
 
 #[cfg(feature = "tooling")]
 pub use upwell_tooling_schema as tooling_schema;

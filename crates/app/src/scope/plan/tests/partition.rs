@@ -8,7 +8,7 @@ fn factoryless_descriptor_in_undeclared_scope_is_rejected() {
     let descriptors = [descriptor::<MissingSeed>(
         "missing_seed",
         "MissingSeed",
-        &MISSING,
+        Missing::KEY,
         no_factory,
     )];
 
@@ -27,8 +27,8 @@ fn factoryless_descriptor_in_undeclared_scope_is_rejected() {
 #[test]
 fn partition_preserves_independent_singleton_declaration_order() {
     let descriptors = [
-        descriptor::<SecondSingleton>("z-second", "Second", &Singleton, empty_factory),
-        descriptor::<FirstSingleton>("a-first", "First", &Singleton, empty_factory),
+        descriptor::<SecondSingleton>("z-second", "Second", Singleton::KEY, empty_factory),
+        descriptor::<FirstSingleton>("a-first", "First", Singleton::KEY, empty_factory),
     ];
     let plan = ScopePlan::partition(&descriptors, &selection(&descriptors), &topology())
         .expect("plan succeeds");
@@ -40,8 +40,8 @@ fn partition_preserves_independent_singleton_declaration_order() {
 #[test]
 fn partition_preserves_independent_scoped_declaration_order() {
     let descriptors = [
-        descriptor::<SecondScoped>("z-second", "Second", &CHILD, empty_factory),
-        descriptor::<FirstScoped>("a-first", "First", &CHILD, empty_factory),
+        descriptor::<SecondScoped>("z-second", "Second", Child::KEY, empty_factory),
+        descriptor::<FirstScoped>("a-first", "First", Child::KEY, empty_factory),
     ];
     let plan = ScopePlan::partition(&descriptors, &selection(&descriptors), &topology())
         .expect("plan succeeds");
@@ -53,9 +53,9 @@ fn partition_preserves_independent_scoped_declaration_order() {
 #[test]
 fn child_order_accepts_root_ancestor_and_local_factoryless_descriptors() {
     let descriptors = [
-        descriptor::<Root>("root", "Root", &Singleton, empty_factory),
-        descriptor::<ParentSeed>("parent_seed", "ParentSeed", &PARENT, no_factory),
-        descriptor::<ChildFactory>("child", "ChildFactory", &CHILD, parent_factory),
+        descriptor::<Root>("root", "Root", Singleton::KEY, empty_factory),
+        descriptor::<ParentSeed>("parent_seed", "ParentSeed", Parent::KEY, no_factory),
+        descriptor::<ChildFactory>("child", "ChildFactory", Child::KEY, parent_factory),
     ];
 
     let plan = ScopePlan::partition(&descriptors, &selection(&descriptors), &topology())
@@ -75,8 +75,8 @@ fn child_order_accepts_root_ancestor_and_local_factoryless_descriptors() {
 #[test]
 fn child_order_does_not_treat_sibling_factoryless_descriptors_as_prebuilt() {
     let descriptors = [
-        descriptor::<SiblingSeed>("sibling_seed", "SiblingSeed", &SIBLING, no_factory),
-        descriptor::<ChildFactory>("child", "ChildFactory", &CHILD, sibling_factory),
+        descriptor::<SiblingSeed>("sibling_seed", "SiblingSeed", Sibling::KEY, no_factory),
+        descriptor::<ChildFactory>("child", "ChildFactory", Child::KEY, sibling_factory),
     ];
 
     let error = ScopePlan::partition(&descriptors, &selection(&descriptors), &topology())
@@ -92,8 +92,8 @@ fn child_order_does_not_treat_sibling_factoryless_descriptors_as_prebuilt() {
 fn topology_aware_registry_validation_rejects_sibling_dependencies() {
     let registry = crate::AppRegistry {
         components: vec![
-            descriptor::<SiblingSeed>("sibling_seed", "SiblingSeed", &SIBLING, no_factory),
-            descriptor::<ChildFactory>("child", "ChildFactory", &CHILD, sibling_factory),
+            descriptor::<SiblingSeed>("sibling_seed", "SiblingSeed", Sibling::KEY, no_factory),
+            descriptor::<ChildFactory>("child", "ChildFactory", Child::KEY, sibling_factory),
         ],
         providers: Vec::new(),
         config_bindings: Vec::new(),

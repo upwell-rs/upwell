@@ -6,7 +6,7 @@
 //! application message opens a [`WebsocketMessage`] child below that connection.
 
 use upwell_app::{ScopeBoundary, ScopeParent, ScopeTopology};
-use upwell_core::{ScopeId, StaticScope};
+use upwell_core::{Scope, ScopeId};
 
 /// One inbound HTTP request.
 pub struct HttpRequest;
@@ -19,21 +19,21 @@ pub struct WebsocketConnection;
 #[cfg(feature = "ws")]
 pub struct WebsocketMessage;
 
-impl StaticScope for HttpRequest {
+impl Scope for HttpRequest {
     const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "upwell/axum-http-request");
     const RANK: u8 = 100;
     const NAME: &'static str = "HttpRequest";
 }
 
 #[cfg(feature = "ws")]
-impl StaticScope for WebsocketConnection {
+impl Scope for WebsocketConnection {
     const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "upwell/axum-websocket-connection");
     const RANK: u8 = 200;
     const NAME: &'static str = "WebsocketConnection";
 }
 
 #[cfg(feature = "ws")]
-impl StaticScope for WebsocketMessage {
+impl Scope for WebsocketMessage {
     const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "upwell/axum-websocket-message");
     const RANK: u8 = 100;
     const NAME: &'static str = "WebsocketMessage";
@@ -41,13 +41,13 @@ impl StaticScope for WebsocketMessage {
 
 #[cfg(not(feature = "ws"))]
 static AXUM_SCOPE_BOUNDARIES: [ScopeBoundary; 1] =
-    [ScopeBoundary::new(&HttpRequest, ScopeParent::Root)];
+    [ScopeBoundary::new::<HttpRequest>(&[ScopeParent::Root])];
 
 #[cfg(feature = "ws")]
 static AXUM_SCOPE_BOUNDARIES: [ScopeBoundary; 3] = [
-    ScopeBoundary::new(&HttpRequest, ScopeParent::Root),
-    ScopeBoundary::new(&WebsocketConnection, ScopeParent::Root),
-    ScopeBoundary::new(&WebsocketMessage, ScopeParent::of::<WebsocketConnection>()),
+    ScopeBoundary::new::<HttpRequest>(&[ScopeParent::Root]),
+    ScopeBoundary::new::<WebsocketConnection>(&[ScopeParent::Root]),
+    ScopeBoundary::new::<WebsocketMessage>(&[ScopeParent::of::<WebsocketConnection>()]),
 ];
 
 /// Axum-owned scope topology for HTTP and optional WebSocket traffic.

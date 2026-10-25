@@ -6,7 +6,7 @@ use tower::{Layer, Service};
 use upwell_app::{
     AppBuilder, AppRegistry, AppRuntime, PreparedProtocol, ProtocolDefinition, ValidationContext,
 };
-use upwell_core::{Descriptor, TypeDescriptor};
+use upwell_core::{Descriptor, Scope, TypeDescriptor};
 use upwell_di::{ComponentDescriptor, ServiceComponent};
 use upwell_transport::PeerInfo;
 
@@ -31,7 +31,7 @@ static PEER_INFO_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
     "__upwell_peer_info",
     "PeerInfo",
     TypeDescriptor::of::<PeerInfo>("PeerInfo"),
-    &ConnectionScope,
+    ConnectionScope::KEY,
 );
 
 /// The native RPC protocol definition.

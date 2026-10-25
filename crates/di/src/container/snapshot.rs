@@ -9,7 +9,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use upwell_core::{Singleton, StaticScope};
+use upwell_core::{Scope, Singleton};
 
 use super::ScopeContainer;
 use crate::descriptors::component::GenerationSnapshot;

@@ -4,9 +4,9 @@ use super::*;
 
 #[test]
 fn eager_single_matches_global_transient_then_built_then_transient_fallback() {
-    let consumer = component::<Consumer>("consumer", factory).with_scope(&NearScope);
-    let near = component::<Near>("near", factory).with_scope(&NearScope);
-    let transient = component::<TransientProvider>("transient", factory).with_scope(&Transient);
+    let consumer = component::<Consumer>("consumer", factory).with_scope(NearScope::KEY);
+    let near = component::<Near>("near", factory).with_scope(NearScope::KEY);
+    let transient = component::<TransientProvider>("transient", factory).with_scope(Transient::KEY);
     let components = vec![consumer, near, transient];
     let registry = ComponentRegistry {
         components: components.clone(),
@@ -59,7 +59,7 @@ fn eager_single_matches_global_transient_then_built_then_transient_fallback() {
         selected[0].reason,
         DependencySelectionReason::PrimaryProviderInWinningSet
     );
-    assert_eq!(selected[0].scope, Some(Transient.id()));
+    assert_eq!(selected[0].scope, Some(Transient::ID));
     assert_eq!(
         selected[0].stage,
         Some(DependencySelectionStage::TransientPrecedence)
@@ -68,9 +68,9 @@ fn eager_single_matches_global_transient_then_built_then_transient_fallback() {
 
 #[test]
 fn qualified_and_deferred_selection_preserve_runtime_transient_semantics() {
-    let consumer = component::<Consumer>("consumer", factory).with_scope(&NearScope);
-    let near = component::<Near>("near", factory).with_scope(&NearScope);
-    let transient = component::<TransientProvider>("transient", factory).with_scope(&Transient);
+    let consumer = component::<Consumer>("consumer", factory).with_scope(NearScope::KEY);
+    let near = component::<Near>("near", factory).with_scope(NearScope::KEY);
+    let transient = component::<TransientProvider>("transient", factory).with_scope(Transient::KEY);
     let components = vec![consumer, near, transient];
     let registry = ComponentRegistry {
         components: components.clone(),
@@ -109,9 +109,9 @@ fn qualified_and_deferred_selection_preserve_runtime_transient_semantics() {
 
 #[test]
 fn transient_fallback_uses_the_same_ordered_qualified_sets_as_runtime() {
-    let consumer = component::<Consumer>("consumer", factory).with_scope(&Transient);
-    let inaccessible = component::<Near>("inaccessible", factory).with_scope(&NearScope);
-    let transient = component::<TransientProvider>("transient", factory).with_scope(&Transient);
+    let consumer = component::<Consumer>("consumer", factory).with_scope(Transient::KEY);
+    let inaccessible = component::<Near>("inaccessible", factory).with_scope(NearScope::KEY);
+    let transient = component::<TransientProvider>("transient", factory).with_scope(Transient::KEY);
     let components = vec![consumer, inaccessible, transient];
     let registry = ComponentRegistry {
         components: components.clone(),
@@ -133,7 +133,7 @@ fn transient_fallback_uses_the_same_ordered_qualified_sets_as_runtime() {
         selected_types(&selected),
         [TypeId::of::<TransientProvider>()]
     );
-    assert_eq!(selected[0].scope, Some(Transient.id()));
+    assert_eq!(selected[0].scope, Some(Transient::ID));
     assert_eq!(
         selected[0].stage,
         Some(DependencySelectionStage::TransientFallback)
@@ -142,10 +142,10 @@ fn transient_fallback_uses_the_same_ordered_qualified_sets_as_runtime() {
 
 #[test]
 fn collections_use_final_provider_order_and_keyed_collisions_use_runtime_precedence() {
-    let consumer = component::<Consumer>("consumer", factory).with_scope(&NearScope);
-    let near = component::<Near>("near", factory).with_scope(&NearScope);
-    let far = component::<Far>("far", factory).with_scope(&FarScope);
-    let transient = component::<TransientProvider>("transient", factory).with_scope(&Transient);
+    let consumer = component::<Consumer>("consumer", factory).with_scope(NearScope::KEY);
+    let near = component::<Near>("near", factory).with_scope(NearScope::KEY);
+    let far = component::<Far>("far", factory).with_scope(FarScope::KEY);
+    let transient = component::<TransientProvider>("transient", factory).with_scope(Transient::KEY);
     let components = vec![consumer, near, far, transient];
     let registry = ComponentRegistry {
         components: components.clone(),

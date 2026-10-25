@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use upwell_config::ConfigReloader;
-use upwell_core::{RuntimeGenerationId, Scope, ScopeId};
+use upwell_core::{RuntimeGenerationId, ScopeId, ScopeKey};
 use upwell_di::{BoxedComponent, ComponentDescriptor, ScopeContainer};
 use upwell_hooks::HookManager;
 
@@ -214,14 +214,14 @@ impl AppRuntime {
         self.transitions.begin().await
     }
 
-    /// Opens a declared child boundary over its only valid parent.
+    /// Opens a declared child boundary over one of its declared parents.
     ///
     /// The boundary's prepared scope metadata is used for construction. The caller's
     /// `scope` contributes only its stable identity. Every dynamic seed must have a
     /// factory-less descriptor registered at this exact destination and may appear once.
     pub async fn open_scope(
         &self,
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
         parent: Arc<ScopeContainer>,
         seeds: Vec<BoxedComponent>,
     ) -> crate::Result<Arc<ScopeContainer>> {
@@ -260,7 +260,7 @@ impl AppRuntime {
     /// pinned generation.
     pub async fn open_scope_from_root(
         &self,
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
         seeds: Vec<BoxedComponent>,
     ) -> crate::Result<Arc<ScopeContainer>> {
         let view = self.view();
@@ -272,7 +272,7 @@ impl AppRuntime {
     async fn open_scope_with_view(
         &self,
         view: RuntimeView,
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
         parent: Arc<ScopeContainer>,
         seeds: Vec<BoxedComponent>,
     ) -> crate::Result<Arc<ScopeContainer>> {
@@ -283,7 +283,7 @@ impl AppRuntime {
             .boundary(&child)
             .ok_or(crate::Error::UndeclaredScopeOpen { scope: child })?;
 
-        self.validate_parent(&view, child, boundary.parent(), &parent)?;
+        self.validate_parent(&view, child, boundary.parents(), &parent)?;
         self.validate_seeds(&view, child, &seeds)?;
 
         let order = view
@@ -308,7 +308,7 @@ impl AppRuntime {
         &self,
         view: &RuntimeView,
         child: ScopeId,
-        expected: ScopeParent,
+        parents: &'static [ScopeParent],
         parent: &Arc<ScopeContainer>,
     ) -> crate::Result<()> {
         let actual = parent.scope().id();
@@ -320,15 +320,15 @@ impl AppRuntime {
             });
         }
 
-        let valid = match expected {
+        let valid = parents.iter().any(|expected| match expected {
             ScopeParent::Root => Arc::ptr_eq(parent, view.root()),
-            ScopeParent::Boundary(expected) => actual == expected,
-        };
+            ScopeParent::Boundary(expected) => actual == *expected,
+        });
 
         if !valid {
             return Err(crate::Error::InvalidScopeParent {
                 child,
-                expected: expected.id(),
+                expected: parents.iter().map(ScopeParent::id).collect(),
                 actual,
             });
         }

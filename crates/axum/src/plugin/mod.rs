@@ -13,7 +13,7 @@ use upwell_app::{
     AppBuilder, AppRegistry, AppRuntime, PreparedProtocol, ProtocolDefinition, ValidationContext,
 };
 use upwell_config::{ConfigBinding, ContainerConfigExt};
-use upwell_core::{Descriptor, TypeDescriptor};
+use upwell_core::{Descriptor, Scope, TypeDescriptor};
 use upwell_di::{BoxedComponent, Component, ComponentDescriptor};
 
 use crate::config::{AXUM_CONFIG_PATH, AxumConfig};
@@ -317,7 +317,7 @@ impl PreparedProtocol for PreparedAxum {
                     };
 
                     match scope_runtime
-                        .open_scope_from_root(&HttpRequestScope, vec![seed])
+                        .open_scope_from_root(HttpRequestScope::KEY, vec![seed])
                         .await
                     {
                         Ok(scope) => {

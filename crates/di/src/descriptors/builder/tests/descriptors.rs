@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::sync::Arc;
 
-use upwell_core::Transient;
+use upwell_core::{Scope, Transient};
 
 use super::*;
 use crate::{Cardinality, ComponentFactoryRole, from_boxed};
@@ -50,11 +50,11 @@ fn the_explicit_recipe_wins_over_the_declared_default() {
 #[test]
 fn setters_override_one_field_each() {
     let descriptor = ComponentDescriptor::of::<Swedish>()
-        .with_scope(&Transient)
+        .with_scope(Transient::KEY)
         .with_hooks(upwell_hooks::no_hooks)
         .without_retention();
 
-    assert_eq!(descriptor.scope.id(), Transient.id());
+    assert_eq!(descriptor.scope.id(), Transient::ID);
     assert!(
         !descriptor.is_retainable() && descriptor.exposes_live_cell(),
         "opting out of retention keeps typed live-cell access"

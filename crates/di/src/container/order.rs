@@ -4,7 +4,7 @@ use std::{
 };
 
 use tracing::{error, trace};
-use upwell_core::{ResolutionMode, Scope, ScopeId};
+use upwell_core::{ResolutionMode, ScopeId, ScopeKey};
 
 use crate::descriptors::ComponentDescriptor;
 use crate::error::Error;
@@ -32,7 +32,7 @@ pub fn topological_sort<'a>(
         .iter()
         .map(|component| (component.ty.type_id, component))
         .collect();
-    let can_access = |consumer: &dyn Scope, dependency: &'static dyn Scope| {
+    let can_access = |consumer: ScopeKey, dependency: ScopeKey| {
         if dependency.is_transient() {
             return true;
         }
@@ -119,7 +119,7 @@ fn dependency_cycle(
 struct WaitExpansion<'a> {
     selection: &'a ProviderSelectionModel,
     index: &'a ComponentIndex<'a>,
-    can_access: &'a dyn Fn(&dyn Scope, &'static dyn Scope) -> bool,
+    can_access: &'a dyn Fn(ScopeKey, ScopeKey) -> bool,
     provider_memo: HashMap<TypeId, HashSet<TypeId>>,
     visiting: HashSet<TypeId>,
 }
@@ -192,7 +192,7 @@ impl WaitExpansion<'_> {
 
     fn expand_dependency(
         &mut self,
-        consumer: &'static dyn Scope,
+        consumer: ScopeKey,
         dependency: &upwell_core::DependencyDescriptor,
         waits: &mut HashSet<TypeId>,
     ) {

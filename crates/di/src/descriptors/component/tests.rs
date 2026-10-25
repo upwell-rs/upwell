@@ -48,7 +48,7 @@ fn raw_manual_descriptors_carry_no_snapshot_adapter() {
         "raw:manual",
         "RawManual",
         TypeDescriptor::of::<MetadataProbe>("RawManual"),
-        &Singleton,
+        Singleton::KEY,
     );
 
     assert!(

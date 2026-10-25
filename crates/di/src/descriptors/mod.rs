@@ -15,8 +15,8 @@ pub use component::{
 
 pub use upwell_core::{
     Cardinality, ConditionDescriptor, DependencyDescriptor, DependencyObservation, DescriptorFor,
-    ProviderMappingId, RegistryFor, ResolutionMode, Scope, ScopeId, Singleton, StaticScope,
-    Transient, TypeDescriptor, UpwellDescriptor,
+    ProviderMappingId, RegistryFor, ResolutionMode, Scope, ScopeId, ScopeKey, Singleton, Transient,
+    TypeDescriptor, UpwellDescriptor,
 };
 
 /// Link-time registry of every discovered [`ComponentDescriptor`].

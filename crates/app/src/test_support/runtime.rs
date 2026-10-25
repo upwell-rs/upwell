@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use upwell_core::{Singleton, TypeDescriptor};
+use upwell_core::{Scope, Singleton, TypeDescriptor};
 use upwell_di::{BoxedComponent, ComponentDescriptor, ConditionFactSnapshot, Injectable};
 use upwell_hooks::{HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookManager};
 
@@ -13,7 +13,7 @@ pub(crate) fn hook_manager_descriptor() -> ComponentDescriptor {
         HOOK_MANAGER_ID,
         HOOK_MANAGER_NAME,
         TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-        &Singleton,
+        Singleton::KEY,
     )
 }
 

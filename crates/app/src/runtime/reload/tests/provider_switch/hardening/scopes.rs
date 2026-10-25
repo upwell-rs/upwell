@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use upwell_core::{ScopeId, StaticScope};
+use upwell_core::{Scope, ScopeId};
 use upwell_di::{Component as _, ComponentDescriptor, EffectiveNodeRole, factories};
 
 use super::super::fixture::{Authenticator, lock_test_guard};
@@ -22,23 +22,21 @@ struct Call;
 /// A nested step scope opened under a call.
 struct Step;
 
-impl StaticScope for Call {
+impl Scope for Call {
     const ID: ScopeId = CALL_ID;
     const RANK: u8 = 50;
     const NAME: &'static str = "Call";
 }
 
-impl StaticScope for Step {
+impl Scope for Step {
     const ID: ScopeId = STEP_ID;
     const RANK: u8 = 25;
     const NAME: &'static str = "Step";
 }
 
-static CALL: Call = Call;
-static STEP: Step = Step;
 static BOUNDARIES: [ScopeBoundary; 2] = [
-    ScopeBoundary::new(&CALL, ScopeParent::Root),
-    ScopeBoundary::new(&STEP, ScopeParent::Boundary(CALL_ID)),
+    ScopeBoundary::new::<Call>(&[ScopeParent::Root]),
+    ScopeBoundary::new::<Step>(&[ScopeParent::Boundary(CALL_ID)]),
 ];
 
 /// A protocol declaring the call and step scopes.
@@ -73,7 +71,7 @@ async fn construct_call_gate(authenticator: Arc<dyn Authenticator>) -> CallGate 
 }
 
 static CALL_GATE_COMPONENT: ComponentDescriptor = ComponentDescriptor::of::<CallGate>()
-    .with_scope(&CALL)
+    .with_scope(Call::KEY)
     .with_factories(factories!["static" => construct_call_gate]);
 
 fn call_scheme(scope: &Arc<upwell_di::ScopeContainer>) -> &'static str {
@@ -101,7 +99,7 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
     .expect("the scoped app builds");
     let runtime = app.runtime();
     let open_call = runtime
-        .open_scope_from_root(&CALL, Vec::new())
+        .open_scope_from_root(Call::KEY, Vec::new())
         .await
         .expect("a call opens before the switch");
 
@@ -112,11 +110,11 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
         .await
         .expect("a switch with an open call commits");
     let nested = runtime
-        .open_scope(&STEP, Arc::clone(&open_call), Vec::new())
+        .open_scope(Step::KEY, Arc::clone(&open_call), Vec::new())
         .await
         .expect("a step opens under the call opened before the switch");
     let new_call = runtime
-        .open_scope_from_root(&CALL, Vec::new())
+        .open_scope_from_root(Call::KEY, Vec::new())
         .await
         .expect("a call opens after the switch");
     let planned = report

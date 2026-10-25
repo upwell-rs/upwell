@@ -1,6 +1,7 @@
 //! Retained candidate preparation from the pinned active root.
 
 use super::*;
+use upwell_core::Scope;
 
 #[tokio::test]
 async fn mixed_retain_and_reconstruct_builds_a_complete_candidate_root() {
@@ -139,7 +140,7 @@ async fn raw_manual_singleton_requires_restart() {
             "user-provided",
             "UserProvided",
             TypeDescriptor::of::<u8>("UserProvided"),
-            &Singleton,
+            Singleton::KEY,
         )
     };
     let active_hooks = HookManager::new(Vec::new());

@@ -2,7 +2,7 @@
 //! singleton dependency target, so a runtime transition can republish the cells its
 //! retained consumers hold.
 
-use upwell_core::{ProviderMappingId, Singleton, StaticScope};
+use upwell_core::{ProviderMappingId, Scope, Singleton};
 
 use super::ScopeContainer;
 use crate::{EffectiveTarget, Error, LiveCell};

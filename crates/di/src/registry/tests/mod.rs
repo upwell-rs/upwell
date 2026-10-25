@@ -6,8 +6,7 @@ use crate::test_support::{
     dependency, no_dependencies, planned, planned_provider, unbuilt_factories,
 };
 use upwell_core::{
-    Cardinality, DependencyDescriptor, ResolutionMode, Singleton, StaticScope, Transient,
-    TypeDescriptor,
+    Cardinality, DependencyDescriptor, ResolutionMode, Scope, Singleton, Transient, TypeDescriptor,
 };
 
 /// Local stand-in intermediate scopes (the captive rule only cares about rank
@@ -18,31 +17,15 @@ struct Connection;
 struct Request;
 
 impl Scope for Connection {
-    fn id(&self) -> ScopeId {
-        ScopeId::new("test/connection").expect("valid test scope ID")
-    }
-
-    fn rank(&self) -> u8 {
-        2
-    }
-
-    fn name(&self) -> &'static str {
-        "Connection"
-    }
+    const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/connection");
+    const RANK: u8 = 2;
+    const NAME: &'static str = "Connection";
 }
 
 impl Scope for Request {
-    fn id(&self) -> ScopeId {
-        ScopeId::new("test/request").expect("valid test scope ID")
-    }
-
-    fn rank(&self) -> u8 {
-        1
-    }
-
-    fn name(&self) -> &'static str {
-        "Request"
-    }
+    const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/request");
+    const RANK: u8 = 1;
+    const NAME: &'static str = "Request";
 }
 
 /// Two distinct scopes that deliberately share a rank: `rank` is a lifetime
@@ -52,13 +35,13 @@ impl Scope for Request {
 struct SiblingA;
 struct SiblingB;
 
-impl StaticScope for SiblingA {
+impl Scope for SiblingA {
     const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/sibling-a");
     const RANK: u8 = 3;
     const NAME: &'static str = "SiblingA";
 }
 
-impl StaticScope for SiblingB {
+impl Scope for SiblingB {
     const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/sibling-b");
     const RANK: u8 = 3;
     const NAME: &'static str = "SiblingB";

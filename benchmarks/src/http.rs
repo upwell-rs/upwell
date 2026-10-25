@@ -21,7 +21,7 @@ use upwell_app::{App, AppRuntime};
 use upwell_axum::scope::HttpRequest;
 use upwell_axum::{Axum, AxumAppBuilder, ControllerDescriptor, Inject};
 use upwell_config::{ConfigManager, Dynamic};
-use upwell_core::TypeDescriptor;
+use upwell_core::{Scope, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentFactoryRole, Injectable,
@@ -78,7 +78,7 @@ fn factories<const N: usize>() -> &'static [ComponentFactoryDescriptor] {
 fn request_scoped<const N: usize>() -> ComponentDescriptor {
     ComponentDescriptor {
         id: Box::leak(format!("request-scoped-component-{N}").into_boxed_str()),
-        scope: &HttpRequest,
+        scope: HttpRequest::KEY,
         factories: factories::<N>,
         ..ComponentDescriptor::of::<RequestScoped<N>>()
     }

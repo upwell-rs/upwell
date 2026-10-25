@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use tracing::{debug, info, instrument, trace};
-use upwell_core::{ResolverSet, Singleton};
+use upwell_core::{ResolverSet, Scope, Singleton};
 
 use super::{ComponentSource, ScopeContainer, ScopeRegistry, ScopeResolverSlot};
 use crate::construct::{ErasedOneShot, take_selection};
@@ -64,7 +64,7 @@ impl ScopeContainer {
 
         let slot = ScopeResolverSlot::default();
         let mut context = ComponentConstructionContext::new_with_slot(
-            &Singleton,
+            Singleton::KEY,
             None,
             Arc::clone(&registry),
             externals,

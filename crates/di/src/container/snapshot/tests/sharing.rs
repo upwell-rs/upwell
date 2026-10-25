@@ -89,7 +89,7 @@ async fn plain_manual_descriptor_cannot_snapshot() {
         "snapshot-manual",
         "SharedService",
         TypeDescriptor::of::<SharedService>("SharedService"),
-        &Singleton,
+        Singleton::KEY,
     );
     let root = root_with(
         &[manual],

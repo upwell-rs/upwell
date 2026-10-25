@@ -10,7 +10,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use upwell_core::{Singleton, TypeDescriptor};
+use upwell_core::{Scope, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentFactoryRole, DependencyDescriptor, GenerationSnapshot,
@@ -181,7 +181,7 @@ pub fn topic_bus_descriptor<P: PubSubProtocol>() -> ComponentDescriptor {
         id,
         name,
         ty: TypeDescriptor::of::<TopicBus<P>>(name),
-        scope: &Singleton,
+        scope: Singleton::KEY,
         condition: None,
         factories: topic_bus_factories::<P>,
         hooks: no_hooks,

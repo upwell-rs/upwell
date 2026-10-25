@@ -1,6 +1,6 @@
 use std::{any::TypeId, collections::HashMap, sync::Arc};
 
-use upwell_core::{ResolverSet, ScopeId, StaticScope, Transient, TypeDescriptor};
+use upwell_core::{ResolverSet, Scope, ScopeId, Transient, TypeDescriptor};
 
 use super::fresh::{fresh_arc, fresh_construct_all};
 use super::*;
@@ -18,7 +18,7 @@ const SIBLING_SCOPE_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/fre
 /// The branch from which fresh providers are resolved.
 struct VisibleScope;
 
-impl StaticScope for VisibleScope {
+impl Scope for VisibleScope {
     const ID: ScopeId = VISIBLE_SCOPE_ID;
     const RANK: u8 = 1;
     const NAME: &'static str = "Visible";
@@ -27,7 +27,7 @@ impl StaticScope for VisibleScope {
 /// An inaccessible sibling of [`VisibleScope`].
 struct SiblingScope;
 
-impl StaticScope for SiblingScope {
+impl Scope for SiblingScope {
     const ID: ScopeId = SIBLING_SCOPE_ID;
     const RANK: u8 = 1;
     const NAME: &'static str = "Sibling";
@@ -93,19 +93,19 @@ async fn transient() -> TransientProvider {
 
 fn visible_descriptor() -> ComponentDescriptor {
     ComponentDescriptor::of::<VisibleProvider>()
-        .with_scope(&VisibleScope)
+        .with_scope(VisibleScope::KEY)
         .with_factories(factories!["static" => visible])
 }
 
 fn sibling_descriptor() -> ComponentDescriptor {
     ComponentDescriptor::of::<SiblingPrimaryProvider>()
-        .with_scope(&SiblingScope)
+        .with_scope(SiblingScope::KEY)
         .with_factories(factories!["static" => sibling])
 }
 
 fn transient_descriptor() -> ComponentDescriptor {
     ComponentDescriptor::of::<TransientProvider>()
-        .with_scope(&Transient)
+        .with_scope(Transient::KEY)
         .with_factories(factories!["static" => transient])
 }
 
@@ -126,7 +126,7 @@ async fn sibling_branches() -> (Arc<ScopeContainer>, Arc<ScopeContainer>) {
         "sibling-seed-provider",
         "SiblingSeedProvider",
         TypeDescriptor::of::<SiblingSeedProvider>("SiblingSeedProvider"),
-        &SiblingScope,
+        SiblingScope::KEY,
     );
     let components = [visible, sibling, sibling_seed]
         .into_iter()
@@ -146,7 +146,7 @@ async fn sibling_branches() -> (Arc<ScopeContainer>, Arc<ScopeContainer>) {
             .await
             .expect("root builds");
     let visible_branch = ScopeContainer::open_child(
-        &VisibleScope,
+        VisibleScope::KEY,
         Arc::clone(&root),
         Arc::clone(&registry),
         &[],
@@ -154,9 +154,10 @@ async fn sibling_branches() -> (Arc<ScopeContainer>, Arc<ScopeContainer>) {
     )
     .await
     .expect("visible branch opens");
-    let sibling_branch = ScopeContainer::open_child(&SiblingScope, root, registry, &[], Vec::new())
-        .await
-        .expect("sibling branch opens");
+    let sibling_branch =
+        ScopeContainer::open_child(SiblingScope::KEY, root, registry, &[], Vec::new())
+            .await
+            .expect("sibling branch opens");
 
     (visible_branch, sibling_branch)
 }
@@ -187,7 +188,7 @@ async fn transient_and_inaccessible_provider() -> Arc<ScopeContainer> {
             .await
             .expect("root builds");
 
-    ScopeContainer::open_child(&VisibleScope, root, registry, &[], Vec::new())
+    ScopeContainer::open_child(VisibleScope::KEY, root, registry, &[], Vec::new())
         .await
         .expect("visible branch opens")
 }
@@ -197,7 +198,7 @@ async fn accessible_factoryless_provider() -> Arc<ScopeContainer> {
         "visible-seed-provider",
         "VisibleSeedProvider",
         TypeDescriptor::of::<SiblingSeedProvider>("VisibleSeedProvider"),
-        &VisibleScope,
+        VisibleScope::KEY,
     );
     let components = [(manual.ty.type_id, manual)].into_iter().collect();
     let providers = vec![branch_provider::<SiblingSeedProvider>()];
@@ -211,7 +212,7 @@ async fn accessible_factoryless_provider() -> Arc<ScopeContainer> {
             .expect("root builds");
     let seed = BoxedComponent::new(SiblingSeedProvider);
 
-    ScopeContainer::open_child(&VisibleScope, root, registry, &[], vec![seed])
+    ScopeContainer::open_child(VisibleScope::KEY, root, registry, &[], vec![seed])
         .await
         .expect("visible branch opens")
 }

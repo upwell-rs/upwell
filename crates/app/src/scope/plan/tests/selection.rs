@@ -7,19 +7,19 @@ fn duplicate_qualifiers_across_scopes_plan_the_runtime_visible_provider() {
     let parent = descriptor::<ParentSharedProvider>(
         "parent-shared",
         "ParentSharedProvider",
-        &PARENT,
+        Parent::KEY,
         empty_factory,
     );
     let child = descriptor::<ChildSharedProvider>(
         "child-shared",
         "ChildSharedProvider",
-        &CHILD,
+        Child::KEY,
         empty_factory,
     );
     let consumer = descriptor::<ChildSharedConsumer>(
         "child-consumer",
         "ChildSharedConsumer",
-        &CHILD,
+        Child::KEY,
         shared_provider_factory,
     );
     let descriptors = [parent, consumer, child];
@@ -64,25 +64,25 @@ fn reordered_transient_selection_plans_its_eager_dependencies() {
     let consumer = descriptor::<SelectedTransientConsumer>(
         "consumer",
         "SelectedTransientConsumer",
-        &Singleton,
+        Singleton::KEY,
         reordered_provider_factory,
     );
     let dependency = descriptor::<SelectedTransientDependency>(
         "transient-dependency",
         "SelectedTransientDependency",
-        &Singleton,
+        Singleton::KEY,
         empty_factory,
     );
     let scoped = descriptor::<ScopedAlternativeProvider>(
         "scoped-alternative",
         "ScopedAlternativeProvider",
-        &Singleton,
+        Singleton::KEY,
         empty_factory,
     );
     let transient = descriptor::<SelectedTransientProvider>(
         "selected-transient",
         "SelectedTransientProvider",
-        &upwell_core::Transient,
+        upwell_core::Transient::KEY,
         transient_dependency_factory,
     );
     let descriptors = [consumer, scoped, dependency, transient];

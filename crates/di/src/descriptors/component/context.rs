@@ -2,7 +2,7 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use upwell_core::{ResolutionMode, ResolverCtx, ResolverSet, Scope};
+use upwell_core::{ResolutionMode, ResolverCtx, ResolverSet, ScopeKey};
 
 use super::{BoxedComponent, Component, Injectable, ProviderDescriptor, ScopeStore};
 
@@ -19,7 +19,7 @@ use super::{BoxedComponent, Component, Injectable, ProviderDescriptor, ScopeStor
 /// and keeping the interface async is what lets connection/request scopes move to
 /// lazy construction later without changing generated factory code.
 pub struct ComponentConstructionContext {
-    scope: &'static dyn Scope,
+    scope: ScopeKey,
     /// Shared because transients constructed mid-build resolve their own
     /// dependencies from this same in-progress store. Reads/writes are brief and
     /// sequential; no guard is held across an await. `None` until the first write,
@@ -46,7 +46,7 @@ const STORE_POISON: &str = "scope store lock poisoned";
 pub(crate) type SharedStore = Arc<std::sync::RwLock<ScopeStore>>;
 
 pub(crate) struct ComponentConstructionParts {
-    pub(crate) scope: &'static dyn Scope,
+    pub(crate) scope: ScopeKey,
     pub(crate) store: ScopeStore,
     pub(crate) parent: Option<Arc<crate::container::ScopeContainer>>,
     pub(crate) registry: Arc<crate::container::ScopeRegistry>,
@@ -62,7 +62,7 @@ impl ResolverCtx for ComponentConstructionContext {
 
 impl ComponentConstructionContext {
     pub(crate) fn new_with_slot(
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
         parent: Option<Arc<crate::container::ScopeContainer>>,
         registry: Arc<crate::container::ScopeRegistry>,
         resolvers: ResolverSet,
@@ -85,7 +85,7 @@ impl ComponentConstructionContext {
     /// resolve from the components already built in that scope, not just the
     /// frozen parent chain.
     pub(crate) fn with_store(
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
         parent: Option<Arc<crate::container::ScopeContainer>>,
         registry: Arc<crate::container::ScopeRegistry>,
         resolvers: ResolverSet,
@@ -285,7 +285,7 @@ impl ComponentConstructionContext {
     }
 
     /// Whether a component in `scope` is visible from this construction scope.
-    fn can_access(&self, scope: &'static dyn Scope) -> bool {
+    fn can_access(&self, scope: ScopeKey) -> bool {
         scope.is_transient()
             || scope.id() == self.scope.id()
             || self

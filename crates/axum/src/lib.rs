@@ -191,7 +191,7 @@ pub use upwell_di::{
 };
 
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
-pub use upwell_core::{StaticScope, TypeDescriptor};
+pub use upwell_core::{Scope, TypeDescriptor};
 
 /// The DI error returned while resolving protocol-owned connection dependencies.
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]

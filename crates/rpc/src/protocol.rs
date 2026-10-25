@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use tower::{Service, ServiceExt};
 use tracing::{debug, error, info, instrument, warn};
 use upwell_app::{AppRuntime, ProtocolRuntime, Serve, ShutdownSignal};
-use upwell_core::TypeDescriptor;
+use upwell_core::{Scope, TypeDescriptor};
 use upwell_di::{BoxedComponent, ScopeContainer};
 use upwell_transport::{
     CallResult, Connection, Error as TransportError, PeerInfo, PredefinedCode, Respond,
@@ -350,7 +350,10 @@ async fn serve_connection<C: Connection>(
         Vec::new()
     };
 
-    let connection_scope = match runtime.open_scope_from_root(&ConnectionScope, seeds).await {
+    let connection_scope = match runtime
+        .open_scope_from_root(ConnectionScope::KEY, seeds)
+        .await
+    {
         Ok(scope) => scope,
 
         Err(e) => {
@@ -460,7 +463,7 @@ async fn drive_call<R>(
     R: Respond + RespondStream + Send + 'static,
 {
     let request_scope =
-        match AssertUnwindSafe(runtime.open_scope(&RequestScope, connection_scope, Vec::new()))
+        match AssertUnwindSafe(runtime.open_scope(RequestScope::KEY, connection_scope, Vec::new()))
             .catch_unwind()
             .await
         {

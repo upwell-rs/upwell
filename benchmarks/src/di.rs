@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use upwell_core::{ResolverSet, Scope, Singleton, TypeDescriptor};
+use upwell_core::{ResolverSet, Scope, ScopeKey, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentDescriptor, ComponentRegistry, Injectable, Live,
     ProviderDescriptor, ScopeContainer, ScopeRegistry,
@@ -104,7 +104,12 @@ where
 
 /// A manual (factory-less) descriptor for `T`; the instance is seeded directly.
 fn desc<T: Component>() -> ComponentDescriptor {
-    ComponentDescriptor::manual(T::ID, T::NAME, TypeDescriptor::of::<T>(T::NAME), &Singleton)
+    ComponentDescriptor::manual(
+        T::ID,
+        T::NAME,
+        TypeDescriptor::of::<T>(T::NAME),
+        Singleton::KEY,
+    )
 }
 
 /// Re-erases an already-built `Arc<T>` as `Arc<dyn Svc>` for storage under the trait's key — the
@@ -175,42 +180,40 @@ pub fn empty_roster() -> Vec<Entry> {
 }
 
 macro_rules! layer_scopes {
-    ($($name:ident : $rank:literal),* $(,)?) => {
+    ($($name:ident = $id:literal : $rank:literal),* $(,)?) => {
         $(
             struct $name;
 
             impl Scope for $name {
-                fn id(&self) -> upwell_core::ScopeId {
-                    upwell_core::ScopeId::new(concat!("benchmark/", stringify!($name)))
-                        .expect("valid benchmark scope ID")
-                }
-
-                fn rank(&self) -> u8 {
-                    $rank
-                }
-
-                fn name(&self) -> &'static str {
-                    stringify!($name)
-                }
+                const ID: upwell_core::ScopeId = upwell_core::namespaced_id!(upwell_core::ScopeId, $id);
+                const RANK: u8 = $rank;
+                const NAME: &'static str = stringify!($name);
             }
         )*
     };
 }
 
 layer_scopes!(
-    Layer1: 1,
-    Layer2: 2,
-    Layer3: 3,
-    Layer4: 4,
-    Layer5: 5,
-    Layer6: 6,
-    Layer7: 7,
+    Layer1 = "benchmark/layer-1": 1,
+    Layer2 = "benchmark/layer-2": 2,
+    Layer3 = "benchmark/layer-3": 3,
+    Layer4 = "benchmark/layer-4": 4,
+    Layer5 = "benchmark/layer-5": 5,
+    Layer6 = "benchmark/layer-6": 6,
+    Layer7 = "benchmark/layer-7": 7,
 );
 
 /// Scopes for child layers, indexed by layer number. Index `0` is the root (built as `Singleton`),
 /// so it is a placeholder never opened as a child.
-static LAYER_SCOPES: [&'static dyn Scope; 8] = [
-    &Singleton, &Layer1, &Layer2, &Layer3, &Layer4, &Layer5, &Layer6, &Layer7,
+static LAYER_SCOPES: [ScopeKey; 8] = [
+    Singleton::KEY,
+    Layer1::KEY,
+    Layer2::KEY,
+    Layer3::KEY,
+    Layer4::KEY,
+    Layer5::KEY,
+    Layer6::KEY,
+    Layer7::KEY,
 ];
 
 /// The number of components a graph of `width * layers` holds.

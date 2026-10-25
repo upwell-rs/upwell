@@ -4,10 +4,10 @@ use super::*;
 
 #[test]
 fn fresh_selection_reports_accessible_factoryless_providers() {
-    let consumer = component::<Consumer>("consumer", factory).with_scope(&NearScope);
-    let near = component::<Near>("near", factory).with_scope(&NearScope);
-    let far = component::<Far>("far", factory).with_scope(&FarScope);
-    let manual = component::<Manual>("manual", manual).with_scope(&NearScope);
+    let consumer = component::<Consumer>("consumer", factory).with_scope(NearScope::KEY);
+    let near = component::<Near>("near", factory).with_scope(NearScope::KEY);
+    let far = component::<Far>("far", factory).with_scope(FarScope::KEY);
+    let manual = component::<Manual>("manual", manual).with_scope(NearScope::KEY);
     let components = vec![consumer, near, far, manual];
     let registry = ComponentRegistry {
         components: components.clone(),
@@ -38,9 +38,9 @@ fn fresh_selection_reports_accessible_factoryless_providers() {
 
 #[test]
 fn fresh_keyed_selection_reports_accessible_factoryless_providers() {
-    let consumer = component::<Consumer>("consumer", factory).with_scope(&NearScope);
-    let near = component::<Near>("near", factory).with_scope(&NearScope);
-    let manual = component::<Manual>("manual", manual).with_scope(&NearScope);
+    let consumer = component::<Consumer>("consumer", factory).with_scope(NearScope::KEY);
+    let near = component::<Near>("near", factory).with_scope(NearScope::KEY);
+    let manual = component::<Manual>("manual", manual).with_scope(NearScope::KEY);
     let components = vec![consumer, near, manual];
     let registry = ComponentRegistry {
         components: components.clone(),
@@ -66,9 +66,9 @@ fn fresh_keyed_selection_reports_accessible_factoryless_providers() {
 
 #[test]
 fn fresh_qualified_and_keyed_selection_match_ordered_runtime_precedence() {
-    let consumer = component::<Consumer>("consumer", factory).with_scope(&NearScope);
-    let near = component::<Near>("near", factory).with_scope(&NearScope);
-    let far = component::<Far>("far", factory).with_scope(&FarScope);
+    let consumer = component::<Consumer>("consumer", factory).with_scope(NearScope::KEY);
+    let near = component::<Near>("near", factory).with_scope(NearScope::KEY);
+    let far = component::<Far>("far", factory).with_scope(FarScope::KEY);
     let components = vec![consumer, near, far];
     let registry = ComponentRegistry {
         components: components.clone(),
@@ -110,9 +110,9 @@ fn fresh_qualified_and_keyed_selection_match_ordered_runtime_precedence() {
 
 #[test]
 fn fresh_keyed_collisions_prefer_nearer_scope_over_later_global_order() {
-    let consumer = component::<Consumer>("consumer", factory).with_scope(&NearScope);
-    let near = component::<Near>("near", factory).with_scope(&NearScope);
-    let far = component::<Far>("far", factory).with_scope(&FarScope);
+    let consumer = component::<Consumer>("consumer", factory).with_scope(NearScope::KEY);
+    let near = component::<Near>("near", factory).with_scope(NearScope::KEY);
+    let far = component::<Far>("far", factory).with_scope(FarScope::KEY);
     let components = vec![consumer, near, far];
     let registry = ComponentRegistry {
         components: components.clone(),

@@ -47,7 +47,7 @@ pub use descriptors::{
     DependencyObservation, DescriptorFor, Dynamic, GenerationSnapshot, Injectable, Live, LiveCell,
     LiveRebind, LiveRef, PROVIDERS, Provided, ProviderDescriptor, ProviderMappingId, ProviderOf,
     ProviderOrder, ProviderOrderDirection, Registration, RegistryFor, ResolutionMode, Scope,
-    ScopeId, ServiceComponent, Singleton, StaticScope, Transient, TypeDescriptor, UpwellDescriptor,
+    ScopeId, ScopeKey, ServiceComponent, Singleton, Transient, TypeDescriptor, UpwellDescriptor,
     Wired, Wiring, erase_provider, provider_live_cell,
 };
 pub use error::{

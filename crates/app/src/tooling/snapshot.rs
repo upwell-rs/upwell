@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use upwell_core::{DependencyDescriptor, ScopeId, Singleton, StaticScope};
+use upwell_core::{DependencyDescriptor, Scope, ScopeId, Singleton};
 use upwell_di::{
     BoxedComponent, ComponentDescriptor, ComponentFactoryRole, ProviderSelectionModel,
     SelectedDependency,
