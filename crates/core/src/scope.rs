@@ -113,6 +113,7 @@ impl std::fmt::Debug for ScopeKey {
             .field("id", &self.id)
             .field("name", &self.name)
             .field("rank", &self.rank)
+            .field("transient", &self.transient)
             .finish()
     }
 }

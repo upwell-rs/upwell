@@ -5,18 +5,15 @@ use super::validate::{
 };
 use super::{ScopeBoundary, ScopeParent, ScopeTopologyError};
 
-/// Every opening chain of one boundary, each from its immediate parent through the root.
-type Chains = Box<[Box<[ScopeId]>]>;
-
 /// A validated, immutable scope topology ready for planning and runtime lookup.
 ///
 /// Boundaries are stored in stable identity order. The implicit root is available
-/// to chain and reachability queries but is never returned by [`boundary`](Self::boundary).
-/// Every opening chain is computed once here, so queries never walk the parent graph.
+/// to ancestry and reachability queries but is never returned by [`boundary`](Self::boundary).
+/// Each boundary's common ancestors are computed once here, so queries never walk the parent
+/// graph.
 #[derive(Clone, Debug)]
 pub struct PreparedScopeTopology {
     boundaries: Box<[ScopeBoundary]>,
-    chains: Box<[Chains]>,
     common_ancestors: Box<[Box<[ScopeId]>]>,
 }
 
@@ -30,12 +27,10 @@ impl PreparedScopeTopology {
         validate_cycles(&boundaries)?;
         validate_parent_ranks(&boundaries)?;
 
-        let chains = opening_chains(&boundaries);
-        let common_ancestors = chains.iter().map(|chains| common_ids(chains)).collect();
+        let common_ancestors = common_ancestors(&boundaries);
 
         Ok(Self {
             boundaries: boundaries.into_boxed_slice(),
-            chains,
             common_ancestors,
         })
     }
@@ -58,14 +53,6 @@ impl PreparedScopeTopology {
     /// Returns the declared opening parents of `id`, if `id` is a boundary.
     pub fn parents_of(&self, id: &ScopeId) -> Option<&'static [ScopeParent]> {
         self.boundary(id).map(ScopeBoundary::parents)
-    }
-
-    /// Returns every chain `id` may be opened in.
-    ///
-    /// Each chain lists the boundary's ancestors from its immediate parent through the
-    /// implicit root. An undeclared ID and the root itself have no chains.
-    pub fn chains(&self, id: &ScopeId) -> &[Box<[ScopeId]>] {
-        find_index(&self.boundaries, id).map_or(&[], |index| &self.chains[index])
     }
 
     /// Returns the ancestors present on every chain of `id`, the implicit root included,
@@ -98,56 +85,49 @@ impl PreparedScopeTopology {
     }
 }
 
-/// Every opening chain of each boundary, indexed like `boundaries`.
+/// The ancestors on every opening chain of each boundary, sorted, indexed like `boundaries`.
 ///
-/// Requires validated parents and parent ranks: every parent strictly outranks its child,
-/// so visiting boundaries from the highest rank down finds each parent's chains complete.
-fn opening_chains(boundaries: &[ScopeBoundary]) -> Box<[Chains]> {
+/// A boundary's common ancestors are the intersection, over its parents, of the parent itself
+/// plus the parent's own common ancestors. Requires validated parents and parent ranks: every
+/// parent strictly outranks its child, so visiting boundaries from the highest rank down finds
+/// each parent complete. The work is bounded by boundaries × parents × depth, never by the
+/// number of distinct chains.
+fn common_ancestors(boundaries: &[ScopeBoundary]) -> Box<[Box<[ScopeId]>]> {
     let mut order: Vec<usize> = (0..boundaries.len()).collect();
-    let mut chains: Vec<Chains> = vec![Box::new([]); boundaries.len()];
+    let mut common: Vec<Box<[ScopeId]>> = vec![Box::new([]); boundaries.len()];
 
     order.sort_by_key(|index| std::cmp::Reverse(boundaries[*index].rank()));
 
     for index in order {
-        chains[index] = boundaries[index]
+        common[index] = boundaries[index]
             .parents()
             .iter()
-            .flat_map(|parent| parent_chains(boundaries, &chains, *parent))
-            .collect();
+            .map(|parent| through_parent(boundaries, &common, *parent))
+            .reduce(|left, right| {
+                left.into_iter()
+                    .filter(|id| right.binary_search(id).is_ok())
+                    .collect()
+            })
+            .unwrap_or_default()
+            .into_boxed_slice();
     }
 
-    chains.into_boxed_slice()
-}
-
-/// The chains of a boundary opened directly under `parent`.
-fn parent_chains(
-    boundaries: &[ScopeBoundary],
-    chains: &[Chains],
-    parent: ScopeParent,
-) -> Vec<Box<[ScopeId]>> {
-    let ScopeParent::Boundary(id) = parent else {
-        return vec![Box::from([Singleton::ID])];
-    };
-    let index = find_index(boundaries, &id).expect("parent existence is validated before chains");
-
-    chains[index]
-        .iter()
-        .map(|chain| std::iter::once(id).chain(chain.iter().copied()).collect())
-        .collect()
-}
-
-/// The IDs present in every chain, sorted for binary search.
-fn common_ids(chains: &[Box<[ScopeId]>]) -> Box<[ScopeId]> {
-    let Some((first, rest)) = chains.split_first() else {
-        return Box::new([]);
-    };
-    let mut common: Vec<ScopeId> = first
-        .iter()
-        .copied()
-        .filter(|id| rest.iter().all(|chain| chain.contains(id)))
-        .collect();
-
-    common.sort();
-
     common.into_boxed_slice()
+}
+
+/// The sorted ancestors of a boundary opened directly under `parent`.
+fn through_parent(
+    boundaries: &[ScopeBoundary],
+    common: &[Box<[ScopeId]>],
+    parent: ScopeParent,
+) -> Vec<ScopeId> {
+    let ScopeParent::Boundary(id) = parent else {
+        return vec![Singleton::ID];
+    };
+    let index = find_index(boundaries, &id).expect("parent existence is validated before ancestry");
+    let mut ancestors: Vec<ScopeId> = common[index].iter().copied().chain([id]).collect();
+
+    ancestors.sort();
+
+    ancestors
 }
