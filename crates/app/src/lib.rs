@@ -12,6 +12,7 @@
 pub mod app;
 pub mod builtins;
 pub mod composition;
+pub mod entry;
 pub mod error;
 pub mod host;
 pub mod lifecycle;
@@ -40,6 +41,7 @@ pub use composition::{
     RelationKind, RelationTarget, ReplacementDecision, ResolvedPlugin, SlotPolicy,
     SuppressionDecision, extend_late_plugins, resolve_early_plugins,
 };
+pub use entry::{EntryDescriptor, EntryError, EntryId, EntryOwner, EntryTable, EntryTargets};
 pub use error::{Error, Result};
 pub use host::{
     AppHost, AppStage, BootstrapContext, Built, ExecutionMode, HostError, Initial, LifecyclePhase,
@@ -88,7 +90,7 @@ pub use tooling::{
     ToolingProjectionError, ToolingRelationshipKind,
 };
 pub use transition::{CandidateGraph, RestartReason, RestartRequired};
-pub use upwell_core::{Scope, ScopeId, ScopeKey, namespaced_id};
+pub use upwell_core::{EntryKey, Scope, ScopeId, ScopeKey, namespaced_id};
 
 #[cfg(feature = "tooling")]
 pub use upwell_tooling_schema as tooling_schema;

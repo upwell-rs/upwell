@@ -1,18 +1,20 @@
 use std::any::TypeId;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use upwell_core::{DependencyDescriptor, Scope, ScopeId, Singleton};
+use upwell_core::{DependencyDescriptor, Scope, ScopeId, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, ComponentDescriptor, ComponentFactoryRole, ProviderSelectionModel,
     SelectedDependency,
 };
 
+use crate::entry::{EntryDescriptor, EntryTable};
 use crate::scope::{PreparedScopeTopology, SeedDestination};
 
 /// Immutable callback-free input for prepared-state tooling projection.
 pub(crate) struct ProjectionSnapshot {
     components: Vec<ComponentSnapshot>,
     candidates: Vec<CandidateSnapshot>,
+    entries: Vec<EntrySnapshot>,
     root_plan: Vec<ConstructionPlanEntry>,
     scope_plans: HashMap<ScopeId, Vec<ConstructionPlanEntry>>,
 }
@@ -79,6 +81,7 @@ impl ProjectionSnapshot {
         Ok(Self {
             components,
             candidates: Vec::new(),
+            entries: Vec::new(),
             root_plan,
             scope_plans,
         })
@@ -94,12 +97,32 @@ impl ProjectionSnapshot {
         self
     }
 
+    /// Captures every prepared entry with the selected target of each injected dependency.
+    pub(crate) fn with_entries(
+        mut self,
+        selection: &ProviderSelectionModel,
+        topology: &PreparedScopeTopology,
+        entries: &EntryTable,
+    ) -> upwell_di::Result<Self> {
+        self.entries = entries
+            .entries()
+            .iter()
+            .map(|entry| EntrySnapshot::capture(selection, topology, *entry))
+            .collect::<upwell_di::Result<_>>()?;
+
+        Ok(self)
+    }
+
     pub(crate) fn components(&self) -> &[ComponentSnapshot] {
         &self.components
     }
 
     pub(crate) fn candidates(&self) -> &[CandidateSnapshot] {
         &self.candidates
+    }
+
+    pub(crate) fn entries(&self) -> &[EntrySnapshot] {
+        &self.entries
     }
 
     pub(crate) fn root_plan(&self) -> &[ConstructionPlanEntry] {
@@ -264,6 +287,40 @@ impl DependencySnapshot {
         Ok(Self {
             descriptor,
             selected,
+        })
+    }
+}
+
+/// Callback-derived facts for one prepared entry.
+#[derive(Clone)]
+pub(crate) struct EntrySnapshot {
+    pub(crate) descriptor: EntryDescriptor,
+    pub(crate) targets: Vec<DependencySnapshot>,
+}
+
+impl EntrySnapshot {
+    /// Selects each target the way a component living in the entry's scope would: provider
+    /// selection only reads the consumer's scope, so a factoryless stand-in named by the
+    /// entry key carries it.
+    fn capture(
+        selection: &ProviderSelectionModel,
+        topology: &PreparedScopeTopology,
+        descriptor: EntryDescriptor,
+    ) -> upwell_di::Result<Self> {
+        let key = descriptor.key.as_str();
+        let consumer = ComponentDescriptor::manual(
+            key,
+            key,
+            TypeDescriptor::of::<EntryDescriptor>("EntryDescriptor"),
+            descriptor.scope,
+        );
+
+        Ok(Self {
+            descriptor,
+            targets: (descriptor.targets)()
+                .into_iter()
+                .map(|target| DependencySnapshot::capture(selection, topology, consumer, target))
+                .collect::<upwell_di::Result<_>>()?,
         })
     }
 }

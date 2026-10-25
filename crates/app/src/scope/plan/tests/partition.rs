@@ -95,9 +95,7 @@ fn topology_aware_registry_validation_rejects_sibling_dependencies() {
             descriptor::<SiblingSeed>("sibling_seed", "SiblingSeed", Sibling::KEY, no_factory),
             descriptor::<ChildFactory>("child", "ChildFactory", Child::KEY, sibling_factory),
         ],
-        providers: Vec::new(),
-        config_bindings: Vec::new(),
-        condition_facts: Vec::new(),
+        ..Default::default()
     };
 
     let error = registry

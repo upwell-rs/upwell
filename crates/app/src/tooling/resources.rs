@@ -11,6 +11,7 @@ use crate::ProtocolDefinition;
 
 mod condition;
 mod dependency;
+mod entry;
 
 impl<D: ProtocolDefinition> Projection<'_, D> {
     pub(super) fn project_application(&mut self) {

@@ -10,8 +10,8 @@ pub(crate) mod selection;
 use scopes::{scope_allows_by_rank, scope_allows_with};
 
 pub use selection::{
-    DependencySelectionReason, DependencySelectionStage, DependencyTarget, ProviderSelectionModel,
-    SelectedDependency,
+    DependencyFault, DependencySelectionReason, DependencySelectionStage, DependencyTarget,
+    ProviderSelectionModel, SelectedDependency,
 };
 
 use upwell_core::{ScopeId, ScopeKey};

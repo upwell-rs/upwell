@@ -13,6 +13,7 @@ use super::App;
 #[cfg(feature = "tooling")]
 use super::prepare::PreparedTooling;
 use crate::builtins::RuntimeReloader;
+use crate::entry::EntryTable;
 use crate::error::Error;
 use crate::lifecycle::ShutdownSignal;
 use crate::plugin::EffectivePluginPlan;
@@ -46,6 +47,7 @@ pub struct PreparedApp<D: ProtocolDefinition> {
     pub(super) scope_topology: Arc<PreparedScopeTopology>,
     pub(super) scope_orders: Arc<HashMap<upwell_core::ScopeId, Vec<ComponentDescriptor>>>,
     pub(super) seed_destinations: Arc<HashMap<std::any::TypeId, SeedDestination>>,
+    pub(super) entries: Arc<EntryTable>,
     pub(super) resolvers: ResolverSet,
 }
 
@@ -129,6 +131,11 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
         &self.scope_topology
     }
 
+    /// The validated entry points, indexed by dense entry identity.
+    pub fn entries(&self) -> &EntryTable {
+        &self.entries
+    }
+
     /// Constructs ordinary components and finalizes the application protocol.
     pub async fn build(self) -> Result<App<D>, D::Error> {
         let PreparedApp {
@@ -152,6 +159,7 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             scope_topology,
             scope_orders,
             seed_destinations,
+            entries: _,
             resolvers,
         } = self;
 

@@ -357,6 +357,7 @@ fn contribution_kind_name(kind: PluginContributionKind) -> &'static str {
         PluginContributionKind::Component => "component",
         PluginContributionKind::Provider => "provider",
         PluginContributionKind::ConfigBinding => "config-binding",
+        PluginContributionKind::Entry => "entry",
     }
 }
 

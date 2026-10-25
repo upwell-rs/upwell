@@ -64,6 +64,8 @@ pub enum ResourceKind {
     PluginSlot,
     /// One node of a component's condition expression.
     Condition,
+    /// An entry point: a unit of work that runs inside a scope.
+    Entry,
 }
 
 /// Classifies a diagnostic resource identity by its canonical generic prefix.
@@ -87,6 +89,7 @@ pub fn diagnostic_resource_kind(id: &str) -> ResourceKind {
         "contribution" => ResourceKind::Contribution,
         "plugin-slot" => ResourceKind::PluginSlot,
         "condition" => ResourceKind::Condition,
+        "entry" => ResourceKind::Entry,
         "framework" => ResourceKind::Contributor,
         _ => ResourceKind::Unknown,
     }
@@ -189,6 +192,8 @@ pub enum RelationshipKind {
     Conflicts,
     /// A condition decides whether its target component, or parent condition, is eligible.
     Gates,
+    /// An entry runs inside a scope.
+    Enters,
 }
 
 /// One directed relationship between resources.

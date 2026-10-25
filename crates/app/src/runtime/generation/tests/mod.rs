@@ -54,9 +54,7 @@ fn condition_snapshot(enabled: bool) -> ConditionFactSnapshot {
 fn condition_registry() -> AppRegistry {
     AppRegistry {
         components: vec![GENERATION_COMPONENT],
-        providers: Vec::new(),
-        config_bindings: Vec::new(),
-        condition_facts: Vec::new(),
+        ..Default::default()
     }
 }
 

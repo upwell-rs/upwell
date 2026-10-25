@@ -48,7 +48,7 @@ pub enum Error {
     /// A child was opened over a parent it does not declare.
     #[error(
         "scope '{child}' opens only under {}, but parent '{actual}' was supplied",
-        quoted_ids(.expected)
+        quoted(.expected)
     )]
     InvalidScopeParent {
         /// The requested child boundary.
@@ -240,6 +240,10 @@ pub enum Error {
     #[error(transparent)]
     ScopeTopology(#[from] crate::scope::ScopeTopologyError),
 
+    /// An entry point failed preparation.
+    #[error(transparent)]
+    Entry(#[from] crate::entry::EntryError),
+
     /// Plugin declarations could not be resolved into one deterministic effective plan.
     #[error(transparent)]
     Composition(#[from] crate::CompositionDiagnostics),
@@ -267,10 +271,11 @@ impl From<upwell_config::ConfigReloadError> for Error {
 /// The app-layer result type.
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 
-/// Renders `ids` as a comma-separated list of quoted IDs for error messages.
-fn quoted_ids(ids: &[ScopeId]) -> String {
-    ids.iter()
-        .map(|id| format!("'{id}'"))
+/// Renders `items` as a comma-separated list of quoted values for error messages.
+pub(crate) fn quoted(items: &[impl std::fmt::Display]) -> String {
+    items
+        .iter()
+        .map(|item| format!("'{item}'"))
         .collect::<Vec<_>>()
         .join(", ")
 }
