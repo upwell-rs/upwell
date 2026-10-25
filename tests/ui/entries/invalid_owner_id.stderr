@@ -1,28 +1,5 @@
-error[E0080]: evaluation panicked: an entry key derived from an owner's stable ID is not a valid namespaced identifier; owner IDs must use lowercase ASCII letters, digits, '.', '_' or '-'
- --> tests/ui/entries/invalid_owner_id.rs:7:1
+error: `Calc Service` cannot identify an entry owner: entry keys embed this ID, whose `/`-separated parts must start with a lowercase ASCII letter or digit and contain only lowercase ASCII letters, digits, `.`, `_` or `-`; set a valid `id = ".."`
+ --> tests/ui/entries/invalid_owner_id.rs:4:16
   |
-7 | #[handlers]
-  | ^^^^^^^^^^^ evaluation of `_::__UPWELL_RPCS::KEY` failed inside this call
-  |
-note: inside `upwell::entry::key_from_bytes`
- --> $RUST/core/src/panic.rs
-  |
-  |           $crate::panicking::panic_fmt($crate::const_format_args!($($t)+));
-  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the failure occurred here
-  |
- ::: crates/core/src/entry.rs
-  |
-  |           Err(_) => panic!(
-  |  ___________________-
-  | |             "an entry key derived from an owner's stable ID is not a valid namespaced \
-  | |              identifier; owner IDs must use lowercase ASCII letters, digits, '.', '_' or '-'"
-  | |         ),
-  | |_________- in this macro invocation
-
-note: erroneous constant encountered
- --> tests/ui/entries/invalid_owner_id.rs:7:1
-  |
-7 | #[handlers]
-  | ^^^^^^^^^^^
-  |
-  = note: this note originates in the macro `::upwell::entry_key` which comes from the expansion of the attribute macro `handlers` (in Nightly builds, run with -Z macro-backtrace for more info)
+4 | #[service(id = "Calc Service")]
+  |                ^^^^^^^^^^^^^^

@@ -1,5 +1,5 @@
 use quote::format_ident;
-use syn::Ident;
+use syn::{Ident, LitStr};
 
 use super::*;
 
@@ -12,6 +12,19 @@ fn snake_case_and_raw_handler_names_form_segments() {
 
     assert_eq!(plain.value(), "list_users");
     assert_eq!(unraw.value(), "type");
+}
+
+#[test]
+fn owner_ids_must_be_key_segments_between_slashes() {
+    let valid = LitStr::new("billing/users", proc_macro2::Span::call_site());
+    let spaced = LitStr::new("Calc Service", proc_macro2::Span::call_site());
+
+    assert!(owner_id(&valid).is_ok());
+    assert!(owner_id(&spaced).is_err_and(|error| {
+        error
+            .to_string()
+            .contains("`Calc Service` cannot identify an entry owner")
+    }));
 }
 
 #[test]

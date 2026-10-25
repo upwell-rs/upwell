@@ -121,6 +121,8 @@ impl<T: ComponentExt> ParseItem<ComponentContext> for AxumRouter<T> {
             ));
         }
 
+        upwell_macros_core::entry::owner_id(&cx.id)?;
+
         self.context = Some(ControllerContext {
             ident: cx.ident.clone(),
             type_name: cx.type_name.clone(),
