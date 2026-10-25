@@ -10,7 +10,7 @@ mod fault;
 pub(crate) mod rules;
 mod runtime;
 
-pub use fault::DependencyFault;
+pub use fault::{DependencyConsumer, DependencyFault};
 pub(crate) use rules::{provider_matches, select, select_single_by, validate_provider_components};
 
 /// Producer-authoritative target selected for one validated dependency edge.
