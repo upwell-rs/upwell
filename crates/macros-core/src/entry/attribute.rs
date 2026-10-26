@@ -2,7 +2,8 @@
 //!
 //! The function is kept unchanged. Beside it the macro emits a unit marker type named after the
 //! function in `UpperCamelCase`, which carries the entry's `EntryDescriptor` (so the builder can
-//! register it explicitly) and appends that descriptor to the `ENTRIES` discovery slice. Every
+//! register it explicitly) and appends that descriptor to the `ENTRIES` discovery slice. That
+//! generated surface is server-only and gated out on wasm, while the function itself is kept. Every
 //! parameter is an injected target and must be a `FromContainer` type, the same parameters an
 //! `#[init]` constructor takes.
 
@@ -110,9 +111,7 @@ pub fn expand(args: EntryArgs, item: ItemFn, paths: &Paths) -> syn::Result<Token
     let di_assert = di_assertion(&targets, paths);
     let doc = format!("The entry point declared by [`{}`].", ident.unraw());
 
-    Ok(quote! {
-        #item
-
+    let server = crate::gate::native_only(quote! {
         #[doc = #doc]
         #vis struct #marker;
 
@@ -137,6 +136,13 @@ pub fn expand(args: EntryArgs, item: ItemFn, paths: &Paths) -> syn::Result<Token
         };
 
         #di_assert
+    });
+
+    Ok(quote! {
+        #[cfg_attr(target_family = "wasm", allow(dead_code))]
+        #item
+
+        #server
     })
 }
 
