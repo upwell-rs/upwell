@@ -38,6 +38,24 @@ fn the_key_defaults_to_the_function_name_under_the_app_namespace() {
 }
 
 #[test]
+fn the_generated_surface_is_gated_out_on_wasm_while_the_function_is_kept() {
+    let expanded = expansion(
+        scoped(),
+        syn::parse_quote!(
+            fn sync() {}
+        ),
+    )
+    .expect("the entry expands");
+    let function = expanded.find("fn sync").expect("the function is kept");
+    let gate = "# [cfg (not (target_family = \"wasm\"))]";
+
+    assert!(!expanded[..function].contains(gate));
+    assert!(expanded.contains(&format!("{gate} # [doc")));
+    assert!(expanded.contains(&format!("{gate} impl")));
+    assert!(expanded.contains(&format!("{gate} const _")));
+}
+
+#[test]
 fn an_explicit_key_replaces_the_default() {
     let expanded = expansion(
         args(quote!(scope = Request, key = "app/tenant.sync")).expect("arguments parse"),

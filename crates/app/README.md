@@ -52,7 +52,7 @@ builder.scope_entry::<TenantJob, (Arc<TenantDb>, Cfg<Limits>)>(
 
 A free function declares an entry with `#[entry]`. Its parameters are the targets, and the macro
 generates a marker type named after it that discovery collects and the builder can register
-explicitly. The key defaults to `app/<function name>`:
+explicitly. The key defaults to `app/<function name in snake_case>`:
 
 ```rust
 #[entry(scope = TenantJob)]
