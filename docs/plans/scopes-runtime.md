@@ -82,6 +82,19 @@ Entry table, first slice of #358:
   checks this again, so a reload that removes a target's provider is rejected.
 - An entry references its scope's seeds rather than listing seed types; typed seeds are #347.
 
+`#[entry]`, last slice of #358:
+
+- `#[entry(scope = S)]` on a free function keeps the function and emits a unit marker type named
+  after it in `UpperCamelCase`, carrying its `EntryDescriptor`. The parameters are the targets,
+  plain `FromContainer` types as `#[init]` takes them, so entries stay protocol-neutral.
+- The key defaults to `app/<function name in snake_case>`; `key = ".."` overrides it.
+- Discovery collects every marker's descriptor from the `ENTRIES` slice, and
+  `AppBuilder::entry::<Marker>()` registers one explicitly. A declaration registered both ways is
+  kept once (same key and same recorded declaration).
+- Under `di-check`, a required concrete `Arc<T>` target without a provider fails to compile at
+  the parameter. Other targets are validated at preparation, as component fields are.
+- Running an entry is the opener's job (#346, #405); the marker is what `.run(..)` will key on.
+
 
 ### Scope values: zero-sized or parameterised
 

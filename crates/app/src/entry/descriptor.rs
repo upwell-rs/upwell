@@ -56,6 +56,11 @@ impl EntryDescriptor {
     }
 }
 
+/// Link-time registry of every `#[entry]` function's [`EntryDescriptor`], folded into an app by
+/// [`AppBuilder::auto_discover`](crate::AppBuilder::auto_discover).
+#[linkme::distributed_slice]
+pub static ENTRIES: [EntryDescriptor];
+
 /// The injected targets of an entry, written as a tuple of injectable parameter types.
 ///
 /// Implemented for `()` and for tuples of up to twelve [`FromContainer`] types, so a tuple

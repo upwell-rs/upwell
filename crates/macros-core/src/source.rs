@@ -3,7 +3,7 @@
 //! The emitted `file!()`/`line!()`/`column!()` carry the user token's span, so the compiler
 //! resolves them at that token rather than at the macro invocation.
 
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::{Span, TokenStream, TokenTree};
 use quote::quote_spanned;
 
 use crate::paths::Paths;
@@ -43,4 +43,25 @@ pub fn associated_item(self_ty: &syn::Type, item: &syn::Ident) -> String {
     let ty = quote::quote!(#self_ty).to_string().replace(' ', "");
 
     format!("{ty}::{item}")
+}
+
+/// Locates every token of `tokens` at `span`, keeping each token's own name resolution, so
+/// diagnostics about generated code point at the user's token rather than at the macro.
+pub fn respan(tokens: TokenStream, span: Span) -> TokenStream {
+    tokens
+        .into_iter()
+        .map(|mut token| {
+            if let TokenTree::Group(group) = &token {
+                let mut respanned =
+                    proc_macro2::Group::new(group.delimiter(), respan(group.stream(), span));
+
+                respanned.set_span(group.span().located_at(span));
+                token = TokenTree::Group(respanned);
+            } else {
+                token.set_span(token.span().located_at(span));
+            }
+
+            token
+        })
+        .collect()
 }

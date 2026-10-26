@@ -1562,6 +1562,7 @@ version = "0.20.0"
 dependencies = [
  "arc-swap",
  "futures",
+ "linkme",
  "serde",
  "thiserror",
  "tokio",
