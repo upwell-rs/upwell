@@ -50,6 +50,17 @@ builder.scope_entry::<TenantJob, (Arc<TenantDb>, Cfg<Limits>)>(
 )
 ```
 
+A free function declares an entry with `#[entry]`. Its parameters are the targets, and the macro
+generates a marker type named after it that discovery collects and the builder can register
+explicitly. The key defaults to `app/<function name>`:
+
+```rust
+#[entry(scope = TenantJob)]
+async fn reconcile(db: Arc<TenantDb>, limits: Cfg<Limits>) -> Result<()> { /* .. */ }
+
+builder.entry::<Reconcile>()
+```
+
 Preparation rejects duplicate keys, scopes the protocol does not open, and targets that the
 entry's scope cannot resolve. Reload candidates are checked the same way. The prepared app indexes
 entries by dense `EntryId` in `PreparedApp::entries`, and `cargo upwell inspect` lists them as

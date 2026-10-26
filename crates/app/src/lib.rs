@@ -41,7 +41,9 @@ pub use composition::{
     RelationKind, RelationTarget, ReplacementDecision, ResolvedPlugin, SlotPolicy,
     SuppressionDecision, extend_late_plugins, resolve_early_plugins,
 };
-pub use entry::{EntryDescriptor, EntryError, EntryId, EntryOwner, EntryTable, EntryTargets};
+pub use entry::{
+    ENTRIES, EntryDescriptor, EntryError, EntryId, EntryOwner, EntryTable, EntryTargets,
+};
 pub use error::{Error, Result};
 pub use host::{
     AppHost, AppStage, BootstrapContext, Built, ExecutionMode, HostError, Initial, LifecyclePhase,

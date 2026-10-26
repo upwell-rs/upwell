@@ -10,7 +10,7 @@ mod descriptor;
 mod table;
 mod validate;
 
-pub use descriptor::{EntryDescriptor, EntryOwner, EntryTargets};
+pub use descriptor::{ENTRIES, EntryDescriptor, EntryOwner, EntryTargets};
 pub use table::{EntryId, EntryTable};
 pub use validate::EntryError;
 pub(crate) use validate::validate_targets;

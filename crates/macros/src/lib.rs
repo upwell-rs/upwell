@@ -168,6 +168,42 @@ pub fn config(attr: TokenStream, item: TokenStream) -> TokenStream {
     upwell_macros_core::config(attr.into(), item.into()).into()
 }
 
+/// Registers a free function as an entry point: a unit of work that runs inside a scope.
+///
+/// The function stays as written. Its parameters are the targets the entry injects, each a
+/// `FromContainer` type as an `#[init]` constructor takes (`Arc<T>`, `Cfg<T>`,
+/// `Vec<Arc<dyn Tr>>`, ..). Beside it the macro emits a unit marker type named after the
+/// function in `UpperCamelCase` that carries the entry's `EntryDescriptor`, and adds the
+/// descriptor to the discovery slice `AppBuilder::auto_discover` reads. Register the entry
+/// explicitly with `AppBuilder::entry::<Marker>()`; an entry registered both ways is kept
+/// once.
+///
+/// Preparation validates the entry like every other one: its scope must be opened by the
+/// active protocol, and each target must resolve from that scope. Under `di-check`, a missing
+/// provider of a concrete `Arc<T>` target is also a compile error.
+///
+/// ```ignore
+/// #[entry(scope = Singleton)]
+/// async fn reconcile(db: Arc<TenantDb>, audit: Arc<Audit>) -> Result<()> { .. }
+///
+/// // Generated: `struct Reconcile;`, keyed `app/reconcile`.
+/// let app = App::<Protocol>::builder("tenants").entry::<Reconcile>();
+/// ```
+///
+/// # Arguments
+///
+/// - `scope = Path` (required): the scope the entry runs in.
+/// - `key = ".."`: the stable entry key, by default `app/<function name in snake_case>`.
+///
+/// # Errors
+///
+/// A missing `scope`, a malformed `key`, a generic function, a `self` parameter or a function
+/// already named in `UpperCamelCase` is a compile error.
+#[proc_macro_attribute]
+pub fn entry(attr: TokenStream, item: TokenStream) -> TokenStream {
+    upwell_macros_core::entry(attr.into(), item.into()).into()
+}
+
 /// Registers a component's lifecycle methods from an inherent `impl` block.
 ///
 /// That is the `#[init]` constructor, the transition recipes and `#[hook]` methods. The

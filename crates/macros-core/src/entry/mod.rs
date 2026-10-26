@@ -1,9 +1,12 @@
-//! Entry-key segments for macro-registered entry points.
+//! Entry-key segments for macro-registered entry points, and the `#[entry]` attribute.
 //!
-//! Entry keys are `<protocol>/<owner segment>.<handler segment>`. Both segments are derived
-//! from Rust names or owner IDs by converting them to `snake_case`, so `listUsers`, `r#type`
-//! and `"Calc Service"` all form key segments (`list_users`, `type`, `calc_service`). Only a
+//! Protocol entry keys are `<protocol>/<owner segment>.<handler segment>`, and an `#[entry]`
+//! function's key defaults to `app/<function segment>`. Every segment is derived from a Rust
+//! name or owner ID by converting it to `snake_case`, so `listUsers`, `r#type` and
+//! `"Calc Service"` all form key segments (`list_users`, `type`, `calc_service`). Only a
 //! name that has no such form, such as one with non-ASCII letters, is rejected.
+
+pub(crate) mod attribute;
 
 use heck::ToSnakeCase;
 use proc_macro2::Span;

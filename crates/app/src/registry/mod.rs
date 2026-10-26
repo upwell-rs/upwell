@@ -9,7 +9,7 @@ use upwell_di::{
     ProviderSelectionModel,
 };
 
-use crate::entry::EntryDescriptor;
+use crate::entry::{ENTRIES, EntryDescriptor};
 use crate::scope::PreparedScopeTopology;
 
 mod condition;
@@ -43,12 +43,13 @@ pub struct AppRegistry {
 
 impl AppRegistry {
     /// Collects every link-time-registered agnostic descriptor (components, providers,
-    /// config bindings) into an `AppRegistry`. Protocol variant slices (e.g. RPC services)
-    /// are folded in by the protocol definition, not here.
+    /// config bindings, `#[entry]` functions) into an `AppRegistry`. Protocol variant slices
+    /// (e.g. RPC services) are folded in by the protocol definition, not here.
     pub fn collect() -> Self {
         let mut components: Vec<_> = COMPONENTS.iter().copied().collect();
         let mut providers: Vec<_> = PROVIDERS.iter().copied().collect();
         let mut config_bindings: Vec<_> = CONFIG_BINDINGS.iter().map(|d| d.to_binding()).collect();
+        let mut entries: Vec<_> = ENTRIES.iter().copied().collect();
 
         // Distributed-slice order differs between linkers. Sort auto-discovered
         // descriptors only; explicit builder registrations retain caller order.
@@ -64,13 +65,29 @@ impl AppRegistry {
                 .cmp((right.ty.type_name)())
                 .then_with(|| left.path.cmp(&right.path))
         });
+        entries.sort_by_key(|entry| entry.key);
 
         Self {
             components,
             providers,
             config_bindings,
             condition_facts: Vec::new(),
-            entries: Vec::new(),
+            entries,
+        }
+    }
+
+    /// Registers an entry unless the same declaration is already registered under the same
+    /// key, so an explicit registration and discovery of one `#[entry]` keep it once. Two
+    /// different entries sharing a key are both kept and rejected by preparation.
+    pub fn add_entry(&mut self, entry: EntryDescriptor) {
+        let registered = entry.source.is_some()
+            && self
+                .entries
+                .iter()
+                .any(|existing| existing.key == entry.key && existing.source == entry.source);
+
+        if !registered {
+            self.entries.push(entry);
         }
     }
 

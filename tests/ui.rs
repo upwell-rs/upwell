@@ -16,7 +16,7 @@ fn invalid_transition_recipes_fail_to_compile() {
 }
 
 #[test]
-fn names_that_cannot_form_entry_keys_fail_to_compile() {
+fn invalid_entries_fail_to_compile() {
     let cases = trybuild::TestCases::new();
 
     cases.compile_fail("tests/ui/entries/*.rs");

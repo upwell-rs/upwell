@@ -125,9 +125,8 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         self
     }
 
-    /// Merges every link-time-registered component and provider descriptor (and the
-    /// protocol's own variants) into the app, and enables
-    /// config auto-discovery.
+    /// Merges every link-time-registered component, provider and `#[entry]` descriptor (and
+    /// the protocol's own variants) into the app, and enables config auto-discovery.
     pub fn auto_discover(mut self) -> Self {
         let discovered = AppRegistry::collect();
 
@@ -135,6 +134,10 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
 
         for provider in discovered.providers {
             self.registry.add_provider(provider);
+        }
+
+        for entry in discovered.entries {
+            self.registry.add_entry(entry);
         }
 
         self.auto_discovery_enabled = true;
@@ -194,9 +197,18 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         self.entry_descriptor(EntryDescriptor::new::<S, T>(key))
     }
 
+    /// Registers the entry `E` declares, such as the marker type an `#[entry]` function
+    /// generates. An entry that discovery also registers is kept once.
+    pub fn entry<E>(self) -> Self
+    where
+        E: Descriptor<EntryDescriptor>,
+    {
+        self.entry_descriptor(<E as Descriptor<EntryDescriptor>>::DESCRIPTOR)
+    }
+
     /// Registers an entry descriptor, for entries assembled without a typed target tuple.
     pub fn entry_descriptor(mut self, descriptor: EntryDescriptor) -> Self {
-        self.registry.entries.push(descriptor);
+        self.registry.add_entry(descriptor);
 
         self
     }

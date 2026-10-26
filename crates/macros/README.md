@@ -11,8 +11,8 @@ This is a `proc-macro = true` crate whose entry points are thin shims: each forw
 streams to the matching `expand` function in [`upwell-macros-core`](../macros-core), the ordinary
 library that holds all the parsing and codegen (a proc-macro crate can only export proc-macros).
 It exposes the framework's core, protocol-agnostic macros — `#[component]`, `#[config]`,
-`#[methods]`, `#[injectable]`, `#[when]`, and `app!` — which span
-components/DI, conditional availability, configuration, and lifecycle. Protocol-specific macros (`#[service]`, `#[handlers]`,
+`#[methods]`, `#[injectable]`, `#[when]`, `#[entry]`, and `app!` — which span
+components/DI, conditional availability, configuration, scope entries, and lifecycle. Protocol-specific macros (`#[service]`, `#[handlers]`,
 `#[rpc]`) live in their own crates; only the core stays here. Errors surface as `compile_error!` via
 the core, never a panic.
 

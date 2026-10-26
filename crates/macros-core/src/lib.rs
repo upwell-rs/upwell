@@ -49,7 +49,7 @@ pub use paths::Paths;
 pub use component::expand as expand_component;
 
 use proc_macro2::TokenStream;
-use syn::{DeriveInput, ItemImpl, ItemStruct, ItemTrait};
+use syn::{DeriveInput, ItemFn, ItemImpl, ItemStruct, ItemTrait};
 
 /// `app!` expansion entry point for a named protocol-agnostic application definition.
 pub fn app(input: TokenStream) -> TokenStream {
@@ -95,6 +95,19 @@ pub fn config(attr: TokenStream, item: TokenStream) -> TokenStream {
     let paths = args.paths(Paths::upwell());
 
     run::<DeriveInput, _>(item, |item| config::expand(args, item, &paths))
+}
+
+/// `#[entry]` expansion entry point.
+pub fn entry(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = match syn::parse2::<entry::attribute::EntryArgs>(attr) {
+        Ok(args) => args,
+
+        Err(e) => return e.into_compile_error(),
+    };
+
+    let paths = args.paths(Paths::upwell());
+
+    run::<ItemFn, _>(item, |item| entry::attribute::expand(args, item, &paths))
 }
 
 /// `#[methods]` expansion entry point — the base impl macro with no extension.
