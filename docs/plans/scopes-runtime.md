@@ -1,6 +1,7 @@
 # Scopes Runtime
 
-Status: decided (2026-10-24). Open questions are settled when their tasks are implemented.
+Status: decided (2026-10-24, generation policy and the single opening API added 2026-10-28). Open
+questions are settled when their tasks are implemented.
 Umbrella for: #343 (per-call scope cost), #118 (invocation scope propagation), #117
 (protocol-controlled scope lifecycle and seeds), #119 (factory-level and custom scopes)
 
@@ -93,7 +94,8 @@ Entry table, first slice of #358:
   kept once (same key and same recorded declaration).
 - Under `di-check`, a required concrete `Arc<T>` target without a provider fails to compile at
   the parameter. Other targets are validated at preparation, as component fields are.
-- Running an entry is the opener's job (#346, #405); the marker is what `.run(..)` will key on.
+- Running an entry is the opener's job (#346, #405); the marker is what `.open(..)` and `.run(..)`
+  will key on.
 
 
 ### Scope values: zero-sized or parameterised
@@ -132,6 +134,46 @@ from the active container without a declared dependency stays non-public.
   app, so code that calls `current()` can be unit-tested.
 - The name "scope handle" is avoided while axum's `ScopeHandle` (an `Arc<ScopeContainer>` in
   request extensions) exists; the value is plain `Arc<S>`.
+
+### Generation policy is part of the scope type
+
+What happens to an open instance when a new runtime generation commits is declared by the scope
+type, not by its boundary and not per opening (owner, 2026-10-28; #344):
+
+```rust
+#[non_exhaustive]
+pub enum ScopeGenerations {
+    Pinned,
+    Durable,
+}
+
+pub trait Scope: Send + Sync + 'static {
+    // ID, RANK, NAME, IS_TRANSIENT as today
+    const GENERATIONS: ScopeGenerations = ScopeGenerations::Pinned;
+}
+```
+
+| Policy | When a generation commits | Container | Typical scopes |
+|---|---|---|---|
+| `Pinned` (default) | Keeps the generation it opened under | One allocation, plain values, no `Live` | HTTP request, RPC call, WebSocket message, user units of work |
+| `Durable` | Stays on its opening generation and reports how far behind it is | Slots ensured on first use | RPC and WebSocket connections |
+
+- `ScopeKey` carries the policy, like `IS_TRANSIENT`. The topology, planner, containers, tooling and
+  `#[scope(generations = durable)]` all read it from there. It replaces a boundary-level
+  `ScopeLifetime`, and no scope ID is special-cased: a user scope gets the request treatment by
+  declaring the same policy.
+- It is fixed per type. Plans, slot layouts and the container kind are chosen when a generation is
+  prepared, so a per-opening override would make every entry carry both container kinds.
+- `Live` is a consequence of the policy, not a separate switch. A pinned instance is never rebound,
+  so `Live` there would only cost an `ArcSwap` and a debt traversal on drop.
+- `Dep<T>` and `Cfg<T>` keep the same types under every policy, so component code never sees which
+  container it lives in. Pinned storage therefore needs a handle of the same type that is not backed
+  by `ArcSwap`; this is settled before #345 fixes the slot layout.
+- A pinned child of a durable parent uses the parent's generation.
+- The enum is `#[non_exhaustive]` so a `Rebind` policy can follow once rebinding exists: rebuilt
+  onto each new generation in place, with `Live` storage. A `Rebind` scope may only open under the
+  root or other `Rebind` scopes, since a rebound child under a pinned parent would mix generations.
+  Container internals leave room for it; the variant is not exposed until it works.
 
 ### Scope parameters, seeds and options
 
@@ -173,14 +215,45 @@ async fn sync_all(customers: Arc<CustomerRepo>, sync: ScopeOpener<CustomerSync>)
 
 - The scope type is its own parameter set. Opening a scope takes a value of that type, and
   components in the scope inject it like any other dependency, so params need no separate seed.
-- `ScopeOpener<S>` is the injectable form of the prepared opener (#346). It grants permission to
-  open `S`, not to look anything up in it.
-- `builder(params)` returns a scope builder: `.seed(value)` for declared seed slots, options such as
-  `.capture_logs()`, then one of:
+- `ScopeOpener<S>` is the prepared opener (#346). Injected, it grants permission to open `S`, not
+  to look anything up in it.
+- `builder(params)` returns a scope builder: `.under(&parent)` for a typed parent
+  (`S: OpensUnder<P>`), `.seed(value)` for declared seed slots, options such as `.capture_logs()`,
+  then one of:
+  - `.open(&entry)`: opens the instance with a registered entry's plan and returns it; protocols
+    run their handler in it.
   - `.run(closure)`: a planned entry whose closure parameters declare its dependencies. The plan
     is cached per closure type.
   - `.enter(future)`: propagation only. The future runs inside the scope and reaches its values
     through declared `Current<T>` dependencies.
+
+### One opening API for protocols and users
+
+Protocols open their scopes through the same `ScopeOpener<S>` users inject (owner, 2026-10-28;
+#346, #353). There is no second, protocol-only flow to keep in sync.
+
+```rust
+let opener: ScopeOpener<Request> = app.opener::<Request>()?;
+let get_user = opener.entry::<GetUser>();
+
+let scope = opener
+    .builder(Request { id, method, route })
+    .under(&connection)
+    .seed(meta)
+    .open(&get_user)
+    .await?;
+```
+
+- A serve loop prepares one opener per scope it opens and resolves each entry's `EntryId` once.
+  Validation (declared scope, parents, seed types) happens at that point, so the per-call path does
+  no topology lookup or seed check; it loads the entry's plan from the current generation and
+  builds the container.
+- The builder is a stack value with no allocation of its own.
+- `OpensUnder<P>` is defined with the opener, because protocols need typed parents. Protocol scope
+  types implement it by hand for the parents their topology lists; `#[scope(parents = [..])]`
+  generates it (#405).
+- The ad hoc `open_scope_*` API, with its per-call validation, becomes framework-internal once the
+  protocols move over, in line with the access rule above.
 
 ### Request data in protocol scopes
 
