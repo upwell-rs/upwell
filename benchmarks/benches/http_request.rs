@@ -15,30 +15,17 @@
 //! Per-request cost should track what a route uses, so a widening gap between `upwell_hello`
 //! and `upwell_unused/N` is a regression.
 
-use std::hint::black_box;
-use std::time::Duration;
-
 use axum::Router;
-use axum::http::StatusCode;
-use criterion::measurement::Measurement;
-use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
-use tokio::runtime::{Builder, Runtime};
+use criterion::{Criterion, criterion_group, criterion_main};
+use tokio::runtime::Runtime;
 use upwell_benchmarks::alloc::TrackingAllocator;
-use upwell_benchmarks::http::{self, HELLO, SCOPED};
+use upwell_benchmarks::cases::{self, Case};
+use upwell_benchmarks::http::{self, HELLO, HttpCall, SCOPED};
 use upwell_benchmarks::measure::AllocBytes;
+use upwell_benchmarks::scoped::UNUSED;
 
 #[global_allocator]
 static GLOBAL: TrackingAllocator = TrackingAllocator;
-
-/// Unused request-scoped component counts; 10 matches the regression report in #343.
-const UNUSED: [usize; 3] = [1, 10, 64];
-
-/// One benchmark case: a router and the path it is called on.
-struct Case {
-    name: String,
-    router: Router,
-    path: &'static str,
-}
 
 /// Builds `count` request-scoped components into an app and takes its assembled router.
 async fn upwell_router(count: usize) -> Router {
@@ -47,98 +34,41 @@ async fn upwell_router(count: usize) -> Router {
     app.protocol().router().clone()
 }
 
-/// Builds every case, checking each answers `200 OK` so no case measures an error path.
-fn cases(runtime: &Runtime) -> Vec<Case> {
+fn http_cases(runtime: &Runtime) -> Vec<Case<HttpCall>> {
+    let upwell = |count, path| HttpCall::new(runtime.block_on(upwell_router(count)), path);
     let mut cases = vec![
-        Case {
-            name: "raw_axum".to_string(),
-            router: http::raw_router(),
-            path: HELLO,
-        },
-        Case {
-            name: "upwell_hello".to_string(),
-            router: runtime.block_on(upwell_router(0)),
-            path: HELLO,
-        },
-        Case {
-            name: "upwell_scoped".to_string(),
-            router: runtime.block_on(upwell_router(1)),
-            path: SCOPED,
-        },
+        Case::new("raw_axum", HttpCall::new(http::raw_router(), HELLO)),
+        Case::new("upwell_hello", upwell(0, HELLO)),
+        Case::new("upwell_scoped", upwell(1, SCOPED)),
     ];
 
     for count in UNUSED {
-        cases.push(Case {
-            name: format!("upwell_unused/{count}"),
-            router: runtime.block_on(upwell_router(count)),
-            path: HELLO,
-        });
-    }
-
-    for case in &cases {
-        let status = runtime.block_on(http::get_status(&case.router, case.path));
-
-        assert_eq!(
-            status,
-            StatusCode::OK,
-            "{} answers {}",
-            case.name,
-            case.path
-        );
+        cases.push(Case::new(
+            format!("upwell_unused/{count}"),
+            upwell(count, HELLO),
+        ));
     }
 
     cases
 }
 
-fn run_cases<M: Measurement>(group: &mut BenchmarkGroup<'_, M>, runtime: &Runtime, cases: &[Case]) {
-    for case in cases {
-        group.bench_function(case.name.as_str(), |bencher| {
-            bencher
-                .to_async(runtime)
-                .iter(|| async { black_box(http::get_status(&case.router, case.path).await) });
-        });
-    }
-}
-
 fn request_time(c: &mut Criterion) {
-    let runtime = Runtime::new().expect("tokio runtime");
-    let cases = cases(&runtime);
-    let mut group = c.benchmark_group("http_request");
-
-    run_cases(&mut group, &runtime, &cases);
-
-    group.finish();
+    cases::time(c, "http_request", http_cases);
 }
 
-/// A single-threaded runtime keeps other threads' allocations out of the per-request figure.
 fn request_bytes(c: &mut Criterion<AllocBytes>) {
-    let runtime = Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    let cases = cases(&runtime);
-    let mut group = c.benchmark_group("http_request_bytes");
-
-    run_cases(&mut group, &runtime, &cases);
-
-    group.finish();
+    cases::bytes(c, "http_request_bytes", http_cases);
 }
 
 criterion_group! {
     name = time;
-    config = Criterion::default()
-        .warm_up_time(Duration::from_secs(1))
-        .measurement_time(Duration::from_secs(4))
-        .sample_size(100);
+    config = cases::time_config();
     targets = request_time
 }
 
 criterion_group! {
     name = bytes;
-    config = Criterion::default()
-        .with_measurement(AllocBytes)
-        .without_plots()
-        .sample_size(10);
+    config = cases::bytes_config();
     targets = request_bytes
 }
 
