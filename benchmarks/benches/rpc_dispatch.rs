@@ -8,9 +8,7 @@
 //!   The handler is trivial, so the figure is routing overhead, not handler work.
 
 use std::collections::HashMap;
-use std::future::Future;
 use std::hint::black_box;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,13 +16,11 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
-use upwell_core::{EntryKey, ResolverSet, TypeDescriptor};
+use upwell_benchmarks::rpc;
+use upwell_core::ResolverSet;
 use upwell_di::{ScopeContainer, ScopeRegistry};
-use upwell_rpc::descriptors::{RpcCallContext, RpcOutcome, RpcResponse};
-use upwell_rpc::{
-    ErrorResponse, OperationKind, ResolvedService, RpcDescriptor, RpcGroup, RpcRouter,
-    ServiceDescriptor,
-};
+use upwell_rpc::RpcRouter;
+use upwell_rpc::descriptors::RpcCallContext;
 use upwell_transport::{PeerInfo, WireMessage, WireOutcome, WireRequest, WireResponse};
 
 #[derive(Serialize, Deserialize)]
@@ -84,55 +80,13 @@ fn wire_envelope(c: &mut Criterion) {
     group.finish();
 }
 
-/// A type token for the bench service's `TypeDescriptor`.
-struct BenchService;
-
-/// A trivial handler: the dispatch bench measures routing, not handler work.
-fn bench_handler(
-    _ctx: RpcCallContext,
-) -> Pin<Box<dyn Future<Output = Result<RpcOutcome, ErrorResponse>> + Send>> {
-    Box::pin(async { Ok(RpcOutcome::Unary(RpcResponse::default())) })
-}
-
-/// The service's group accessor — never invoked by `from_services` (which reads the flattened
-/// `rpcs` vec), so an empty slice suffices.
-fn empty_groups() -> &'static [RpcGroup] {
-    &[]
-}
-
-/// Builds a router with `routes` distinct paths, all mapped to the trivial handler. Descriptors are
-/// leaked to `'static`, which a benchmark can afford.
+/// Builds a router with `routes` distinct paths, all mapped to the trivial handler.
 fn build_router(routes: usize) -> RpcRouter {
-    let descriptors: Vec<&'static RpcDescriptor> = (0..routes)
-        .map(|i| {
-            let name: &'static str = Box::leak(format!("rpc{i}").into_boxed_str());
-            let key: &'static str = Box::leak(format!("rpc/bench.{name}").into_boxed_str());
-
-            &*Box::leak(Box::new(RpcDescriptor {
-                name,
-                operation: OperationKind::Unary,
-                parameters: &[],
-                output: TypeDescriptor::of::<()>("()"),
-                handler: bench_handler,
-                source: None,
-                key: EntryKey::new(key).expect("bench RPC entry keys are valid"),
-                targets: Vec::new,
-            }))
-        })
+    let descriptors = (0..routes)
+        .map(|i| rpc::descriptor(Box::leak(format!("rpc{i}").into_boxed_str()), rpc::hello))
         .collect();
 
-    let service = ResolvedService {
-        descriptor: ServiceDescriptor {
-            id: "bench",
-            name: "BenchService",
-            ty: TypeDescriptor::of::<BenchService>("BenchService"),
-            version: None,
-            rpcs: empty_groups,
-        },
-        rpcs: descriptors,
-    };
-
-    RpcRouter::from_services(std::slice::from_ref(&service))
+    rpc::router(descriptors)
 }
 
 async fn empty_scope() -> Arc<ScopeContainer> {

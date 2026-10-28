@@ -48,6 +48,7 @@ jobs:
           - reload_transition
           - reload_allocations
           - http_request
+          - scoped_call
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6

@@ -71,3 +71,7 @@ harness = false
 [[bench]]
 name = "http_request"
 harness = false
+
+[[bench]]
+name = "scoped_call"
+harness = false
