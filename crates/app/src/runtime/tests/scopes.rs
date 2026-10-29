@@ -124,6 +124,33 @@ async fn open_uses_declared_scope_metadata_and_retains_empty_boundaries() {
 }
 
 #[tokio::test]
+async fn open_leaves_an_unprovided_seed_slot_empty() {
+    /// A seed declared for the session boundary that a protocol may leave out.
+    struct OptionalSeed;
+
+    let destinations = HashMap::from([(
+        TypeId::of::<OptionalSeed>(),
+        SeedDestination {
+            scope: SESSION_ID,
+            type_name: std::any::type_name::<OptionalSeed>(),
+        },
+    )]);
+    let (runtime, _) = build_runtime(destinations).await;
+
+    let unseeded = runtime
+        .open_scope_from_root(Session::KEY, Vec::new())
+        .await
+        .expect("a seed slot no dependency needs may stay empty");
+    let seeded = runtime
+        .open_scope_from_root(Session::KEY, vec![seed::<OptionalSeed>()])
+        .await
+        .expect("a declared seed fills its slot");
+
+    assert_eq!(unseeded.scope().id(), SESSION_ID);
+    assert_eq!(seeded.scope().id(), SESSION_ID);
+}
+
+#[tokio::test]
 async fn open_validates_seed_registration_destination_and_uniqueness() {
     /// A seed declared for the session boundary.
     struct SessionSeed;

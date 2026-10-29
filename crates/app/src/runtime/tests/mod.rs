@@ -8,7 +8,7 @@ use upwell_di::{BoxedComponent, EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
 use super::*;
-use crate::test_support::{empty_condition, seed_hook_manager};
+use crate::test_support::{empty_condition, seed_hook_manager, seed_layouts};
 use crate::{Error, ScopeBoundary, ScopeParent, ScopeTopology};
 
 const SESSION_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/session");
@@ -85,18 +85,21 @@ async fn prepared_generation(
     let topology = ScopeTopology::new(&BOUNDARIES)
         .prepare()
         .expect("test topology prepares");
+    let topology = Arc::new(topology);
     let graph = EffectiveGraph::build(base, &upwell_di::ComponentRegistry::default(), |_, _| true)
         .expect("empty graph validates");
+    let layouts = seed_layouts(&topology, &seed_destinations, graph.provider_selection());
     let generation = PreparedRuntimeGeneration::new(
         root,
         Arc::clone(&registry),
         RuntimeScopePlan::new(
-            Arc::new(topology),
+            Arc::clone(&topology),
             Arc::new(HashMap::from([
                 (SESSION_ID, Vec::new()),
                 (REQUEST_ID, Vec::new()),
                 (SHARED_ID, Vec::new()),
             ])),
+            Arc::new(layouts),
             Arc::new(seed_destinations),
         ),
         Arc::from([]),

@@ -16,7 +16,7 @@ use upwell_core::{RuntimeGenerationId, ScopeId, ScopeKey};
 use upwell_di::{BoxedComponent, ComponentDescriptor, ScopeContainer};
 use upwell_hooks::HookManager;
 
-use crate::scope::{PreparedScopeTopology, ScopeParent, SeedDestination};
+use crate::scope::{PreparedScopeTopology, ScopeLayouts, ScopeParent, SeedDestination};
 
 mod generation;
 mod reentrancy;
@@ -84,6 +84,7 @@ impl WeakAppRuntime {
 pub(crate) struct RuntimeScopePlan {
     topology: Arc<PreparedScopeTopology>,
     orders: Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>>,
+    layouts: Arc<ScopeLayouts>,
     seed_destinations: Arc<HashMap<TypeId, SeedDestination>>,
 }
 
@@ -91,11 +92,13 @@ impl RuntimeScopePlan {
     pub(crate) fn new(
         topology: Arc<PreparedScopeTopology>,
         orders: Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>>,
+        layouts: Arc<ScopeLayouts>,
         seed_destinations: Arc<HashMap<TypeId, SeedDestination>>,
     ) -> Self {
         Self {
             topology,
             orders,
+            layouts,
             seed_destinations,
         }
     }
@@ -104,6 +107,12 @@ impl RuntimeScopePlan {
     /// reuses this plan.
     pub(crate) fn orders(&self) -> &Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>> {
         &self.orders
+    }
+
+    /// The slot layout of each protocol-owned scope, shared with any candidate that reuses
+    /// this plan.
+    pub(crate) fn layouts(&self) -> &Arc<ScopeLayouts> {
+        &self.layouts
     }
 
     /// The declared destination of each factory-less scoped component, shared with any
@@ -286,17 +295,16 @@ impl AppRuntime {
         self.validate_parent(&view, child, boundary.parents(), &parent)?;
         self.validate_seeds(&view, child, &seeds)?;
 
-        let order = view
+        let layout = view
             .scope_plan()
-            .orders
+            .layouts
             .get(&child)
-            .map_or(&[][..], Vec::as_slice);
+            .ok_or(crate::Error::UndeclaredScopeOpen { scope: child })?;
 
-        ScopeContainer::open_child_with_generation_lease(
-            boundary.scope(),
+        ScopeContainer::open_planned(
             parent,
             Arc::clone(view.scopes()),
-            order,
+            layout,
             seeds,
             view.generation_state(),
         )

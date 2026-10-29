@@ -71,6 +71,7 @@ fn runtime_view(
             Arc::new(empty_topology()),
             Arc::new(HashMap::new()),
             Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
         ),
         Arc::from(resolved),
         graph,

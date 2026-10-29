@@ -64,6 +64,35 @@ Implemented in #404 (owner, 2026-10-25):
 - Scope plans still order one component list per scope, over the common ancestors. Per-chain
   placements come with #345.
 
+### Slot layouts and planned dependencies
+
+Implemented in the first slice of #345 (owner, 2026-10-29):
+
+- Each protocol-owned scope gets a `SlotLayout` when a generation is prepared: its components in one
+  topological order, seeds first, plus a type index and a trait index built once. Layouts are
+  planned parents first, so a layout can point into the layouts of the scopes open around it.
+  Transitions plan new layouts with the candidate graph.
+- Every eager edge of every factory is resolved once to a `DepRef`: a root singleton, a slot of an
+  ancestor's layout, a slot of the scope's own layout, a transient with its own planned edges, every
+  provider of a collection or keyed edge, or absent for an unsatisfied optional edge. Selection uses
+  the same rules and the same reachability as validation, so a planned edge resolves to the target
+  validation checked. Config, dynamic, lazy, deferred and fresh edges keep resolving through their
+  own handles.
+- A scope opened by the runtime stores its instances in a dense slot store laid out by its layout,
+  instead of per-instance `HashMap`s. Factories read their planned edges first, so no provider
+  selection runs while a planned scope is built. A planned source that cannot answer, such as an
+  ancestor opened without a layout, falls back to dynamic resolution.
+- Construction fails with attributed errors (`MissingDependency`, `UnplacedDependency`) when an
+  edge has no source on the chain. Captive and ambiguous edges are still rejected by validation
+  first.
+- While #136 and #140 are open, a placement is the component's declared scope.
+- The pinned storage handle is decided: `Live<T>` becomes an enum internally (a fixed `Arc<T>` or the
+  swappable `ArcSwap`), so slots in a pinned scope need no `ArcSwap` and `Dep<T>` keeps its type.
+  It lands with the container kinds (#344). Slots store `Injectable::Stored`, so layouts do not
+  change when it does.
+- Next slice: macro-generated factories take their dependencies by position (`ctx.dep(i)`)
+  instead of matching the running slot's edges by type.
+
 ### Entries
 
 Every unit of work that runs in a scope is an entry (#358). Entries are what entry plans (#348)

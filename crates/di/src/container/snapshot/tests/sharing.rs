@@ -14,8 +14,7 @@ async fn arc_snapshot_shares_the_instance_but_not_the_live_cell() {
 
     let active_cell = root
         .store
-        .components
-        .get(&descriptor.ty.type_id)
+        .component(descriptor.ty.type_id)
         .and_then(|boxed| boxed.downcast_ref::<Live<SharedService>>())
         .expect("active slot holds a Live cell");
     let snapshot_cell = snapshot
@@ -132,34 +131,36 @@ async fn snapshot_copies_no_ownership_or_provider_path() {
     )
     .await;
 
-    let components_before = root.store.components.len();
-    let providers_before = root.store.providers.len();
+    let components_before = root.store.component_count();
+    let providers_before = root.store.provider_count();
 
     let snapshot = root
         .snapshot_singleton(descriptor)
         .expect("typed singleton snapshots");
 
     assert_eq!(
-        root.store.components.len(),
+        root.store.component_count(),
         components_before,
         "the active root's concrete slots are untouched"
     );
     assert_eq!(
-        root.store.providers.len(),
+        root.store.provider_count(),
         providers_before,
         "the active root's provider aliases are untouched"
     );
 
     let mut fresh = ScopeStore::default();
-    fresh.insert(snapshot);
+    fresh
+        .insert(snapshot)
+        .expect("a keyed store accepts any component");
 
     assert_eq!(
-        fresh.components.len(),
+        fresh.component_count(),
         1,
         "the snapshot is exactly one concrete component"
     );
     assert!(
-        fresh.providers.is_empty(),
+        fresh.provider_count() == 0,
         "the snapshot carries no provider aliases"
     );
 }

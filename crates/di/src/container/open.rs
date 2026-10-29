@@ -7,9 +7,15 @@ use tracing::{debug, error, info, instrument, trace};
 use upwell_core::{ResolverSet, Scope, ScopeKey, Singleton};
 
 use super::{ComponentSource, ScopeContainer, ScopeRegistry, ScopeResolverSlot};
-use crate::descriptors::component::{ComponentConstructionContext, ScopeStore};
+use crate::descriptors::component::{
+    ComponentConstructionContext, ComponentConstructionParts, Running, ScopeStore,
+};
 use crate::descriptors::{BoxedComponent, ComponentDescriptor};
 use crate::error::Error;
+use crate::layout::{SlotIdx, SlotLayout};
+
+/// The runtime-generation state object a container retains while it is open.
+type GenerationLease = Option<Arc<dyn Any + Send + Sync>>;
 
 impl ScopeContainer {
     /// Returns the container whose identity matches `scope` from this scope's
@@ -53,16 +59,16 @@ impl ScopeContainer {
         )
         .await?;
 
-        info!(count = root.store.components.len(), "root container built");
+        info!(count = root.store.component_count(), "root container built");
 
         Ok(root)
     }
 
     /// Opens a child scope over `parent`, seeding `seeds` then constructing `order`
-    /// (a dependency order precomputed at application build). Every scope — the four
-    /// built-ins and any future user-defined one — is created through this single
-    /// primitive.
+    /// (a dependency order precomputed at application build).
     ///
+    /// Every dependency is selected while the scope is built. Runtime-managed scopes are
+    /// opened from a prepared layout with [`open_planned`](Self::open_planned) instead.
     /// Empty scopes still receive a container so every declared logical boundary
     /// retains its stable identity in the runtime chain.
     pub async fn open_child(
@@ -74,53 +80,11 @@ impl ScopeContainer {
     ) -> crate::Result<Arc<ScopeContainer>> {
         let generation_lease = parent.generation_lease.clone();
 
-        Self::open_child_inner(scope, parent, registry, order, seeds, generation_lease).await
-    }
-
-    /// Opens a child scope while retaining one opaque runtime-generation state object.
-    #[doc(hidden)]
-    pub async fn open_child_with_generation_lease<T: Any + Send + Sync>(
-        scope: ScopeKey,
-        parent: Arc<ScopeContainer>,
-        registry: Arc<ScopeRegistry>,
-        order: &[ComponentDescriptor],
-        seeds: Vec<BoxedComponent>,
-        generation_lease: Arc<T>,
-    ) -> crate::Result<Arc<ScopeContainer>> {
-        Self::open_child_inner(
-            scope,
-            parent,
-            registry,
-            order,
-            seeds,
-            Some(generation_lease),
-        )
-        .await
-    }
-
-    async fn open_child_inner(
-        scope: ScopeKey,
-        parent: Arc<ScopeContainer>,
-        registry: Arc<ScopeRegistry>,
-        order: &[ComponentDescriptor],
-        seeds: Vec<BoxedComponent>,
-        generation_lease: Option<Arc<dyn Any + Send + Sync>>,
-    ) -> crate::Result<Arc<ScopeContainer>> {
-        let externals = parent.resolvers().clone();
-
         if order.is_empty() && seeds.is_empty() {
-            return Ok(Arc::new_cyclic(|container| ScopeContainer {
-                scope,
-                store: ScopeStore::default(),
-                parent: Some(parent),
-                registry,
-                resolver_base: externals,
-                resolvers: std::sync::OnceLock::new(),
-                slot: ScopeResolverSlot::attached(container.clone()),
-                generation_lease,
-                drop_guard: std::sync::OnceLock::new(),
-            }));
+            return Ok(Self::empty(scope, parent, registry, generation_lease));
         }
+
+        let externals = parent.resolvers().clone();
 
         Self::build(
             scope,
@@ -134,10 +98,89 @@ impl ScopeContainer {
         .await
     }
 
+    /// Opens a child scope from its prepared slot layout, retaining one opaque
+    /// runtime-generation state object.
+    ///
+    /// Seeds fill the layout's factory-less slots, then each factory-backed slot is
+    /// built in layout order, resolving its dependencies through the edges the layout
+    /// planned. The layout must belong to the generation of `registry`. A seed slot left
+    /// empty fails only when a dependency resolves it, as with a scope opened from a plain
+    /// construction order.
+    #[doc(hidden)]
+    pub async fn open_planned<T: Any + Send + Sync>(
+        parent: Arc<ScopeContainer>,
+        registry: Arc<ScopeRegistry>,
+        layout: &Arc<SlotLayout>,
+        seeds: Vec<BoxedComponent>,
+        generation_lease: Arc<T>,
+    ) -> crate::Result<Arc<ScopeContainer>> {
+        let scope = layout.scope();
+        let generation_lease: GenerationLease = Some(generation_lease);
+
+        if !layout.constructs() && seeds.is_empty() {
+            return Ok(Self::empty(scope, parent, registry, generation_lease));
+        }
+
+        let mut cx = ComponentConstructionContext::new_with_slot(
+            scope,
+            Some(Arc::clone(&parent)),
+            Arc::clone(&registry),
+            parent.resolvers().clone(),
+            ScopeResolverSlot::default(),
+        );
+
+        cx.use_layout(Arc::clone(layout));
+
+        for seed in seeds {
+            cx.insert(seed)?;
+        }
+
+        for (index, spec) in layout.slots().iter().enumerate() {
+            let component = &spec.component;
+            let Some(factory) = spec.factory else {
+                continue;
+            };
+
+            debug!(component = %component.name, scope = scope.name(), "constructing component");
+
+            cx.set_running(Running::Slot(SlotIdx::new(index)));
+
+            let built = (factory.construct)(&mut cx).await;
+
+            cx.set_running(Running::Unplanned);
+            cx.insert(built?)?;
+
+            trace!(component = %component.name, "component ready");
+        }
+
+        Self::freeze(cx.into_parts(), generation_lease)
+    }
+
+    /// A container for a scope that holds no components.
+    fn empty(
+        scope: ScopeKey,
+        parent: Arc<ScopeContainer>,
+        registry: Arc<ScopeRegistry>,
+        generation_lease: GenerationLease,
+    ) -> Arc<ScopeContainer> {
+        let externals = parent.resolvers().clone();
+
+        Arc::new_cyclic(|container| ScopeContainer {
+            scope,
+            store: ScopeStore::default(),
+            parent: Some(parent),
+            registry,
+            resolver_base: externals,
+            resolvers: std::sync::OnceLock::new(),
+            slot: ScopeResolverSlot::attached(container.clone()),
+            generation_lease,
+            drop_guard: std::sync::OnceLock::new(),
+        })
+    }
+
     /// Seeds instances, then constructs `order` in sequence, aliasing trait
     /// providers as each instance lands. Resolution during construction reaches the
-    /// parent chain. The frozen container is built with [`Arc::new_cyclic`] so it can
-    /// hold its own [`ComponentSource`] (a `Weak` self-reference) in its resolver set.
+    /// parent chain.
     async fn build(
         scope: ScopeKey,
         parent: Option<Arc<ScopeContainer>>,
@@ -145,20 +188,20 @@ impl ScopeContainer {
         order: &[ComponentDescriptor],
         seeds: Vec<BoxedComponent>,
         externals: ResolverSet,
-        generation_lease: Option<Arc<dyn Any + Send + Sync>>,
+        generation_lease: GenerationLease,
     ) -> crate::Result<Arc<ScopeContainer>> {
-        let slot = ScopeResolverSlot::default();
         let mut cx = ComponentConstructionContext::new_with_slot(
             scope,
             parent,
             Arc::clone(&registry),
             externals,
-            slot.clone(),
+            ScopeResolverSlot::default(),
         );
+
         for seed in seeds {
             let type_id = seed.ty.type_id;
 
-            cx.insert(seed);
+            cx.insert(seed)?;
             register_providers_for(&mut cx, &registry, type_id);
         }
 
@@ -169,29 +212,30 @@ impl ScopeContainer {
 
                     let component = (factory.construct)(&mut cx).await?;
 
-                    cx.insert(component);
+                    cx.insert(component)?;
 
                     trace!(component = %descriptor.name, "component ready");
                 }
 
-                None => {
-                    if !cx.contains(descriptor.ty.type_id) {
-                        error!(component = %descriptor.name, "no instance provided for factory-less component");
-                        return Err(Error::MissingComponent(descriptor.name));
-                    }
-
-                    trace!(component = %descriptor.name, "using provided instance");
-                }
+                None => require_seeded(&cx, descriptor)?,
             }
 
             register_providers_for(&mut cx, &registry, descriptor.ty.type_id);
         }
 
-        let parts = cx.into_parts();
-        let slot = parts.slot.clone();
+        Self::freeze(cx.into_parts(), generation_lease)
+    }
 
+    /// Freezes a built scope. The container is built with [`Arc::new_cyclic`] so it can
+    /// hold its own [`ComponentSource`] (a `Weak` self-reference) in its resolver set.
+    fn freeze(
+        parts: ComponentConstructionParts,
+        generation_lease: GenerationLease,
+    ) -> crate::Result<Arc<ScopeContainer>> {
+        let slot = parts.slot;
         let container = Arc::new_cyclic(|weak| {
             let mut resolvers = parts.resolvers;
+
             resolvers.insert(Arc::new(ComponentSource {
                 container: weak.clone(),
             }));
@@ -208,10 +252,27 @@ impl ScopeContainer {
                 drop_guard: std::sync::OnceLock::new(),
             }
         });
+
         slot.attach(&container)?;
 
         Ok(container)
     }
+}
+
+/// Requires a factory-less component to have been seeded before the scope is built.
+fn require_seeded(
+    cx: &ComponentConstructionContext,
+    descriptor: &ComponentDescriptor,
+) -> crate::Result<()> {
+    if !cx.contains(descriptor.ty.type_id) {
+        error!(component = %descriptor.name, "no instance provided for factory-less component");
+
+        return Err(Error::MissingComponent(descriptor.name));
+    }
+
+    trace!(component = %descriptor.name, "using provided instance");
+
+    Ok(())
 }
 
 /// Registers every provider declared by the just-built concrete `concrete_id`,
@@ -223,6 +284,7 @@ fn register_providers_for(
 ) {
     for provider in registry.providers_for(concrete_id) {
         let ordinal = registry.provider_ordinal(provider);
+
         cx.register_provider(provider, ordinal);
     }
 }

@@ -104,6 +104,26 @@ pub enum Error {
     #[error("dependency cycle: no construction order for components: {0}")]
     DependencyCycle(String),
 
+    #[error(
+        "dependency '{dependency}' of component '{component_id}' resolves to '{target}' in scope '{scope}', which is not open on every chain of the consumer"
+    )]
+    UnplacedDependency {
+        /// Stable consumer component identity.
+        component_id: String,
+        /// Human-readable dependency description.
+        dependency: String,
+        /// Stable identity of the selected component.
+        target: String,
+        /// The selected component's scope.
+        scope: &'static str,
+    },
+
+    #[error("component '{component}' has no slot in the layout of scope '{scope}'")]
+    UnplannedComponent {
+        component: &'static str,
+        scope: &'static str,
+    },
+
     /// A provider descriptor references a concrete type outside the effective component set.
     #[error("{0}")]
     ProviderComponentMissing(Box<ProviderComponentMissing>),

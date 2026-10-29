@@ -9,17 +9,19 @@ use upwell_hooks::{HookDescriptor, no_hooks};
 mod context;
 mod factory;
 mod live;
+mod planned;
 mod provider;
 mod snapshot;
 mod store;
 
 pub use context::ComponentConstructionContext;
-pub(crate) use context::SharedStore;
+pub(crate) use context::{ComponentConstructionParts, SharedStore};
 pub use factory::{
     ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole,
     DeclaredScope, Registration,
 };
 pub use live::{Dep, Live, LiveCell, LiveRebind, LiveRef};
+pub(crate) use planned::Running;
 pub use provider::{ProviderDescriptor, ProviderOrder, ProviderOrderDirection};
 pub use snapshot::GenerationSnapshot;
 pub(crate) use store::ScopeStore;

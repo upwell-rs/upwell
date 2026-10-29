@@ -6,9 +6,10 @@ use std::sync::Arc;
 use upwell_core::{Scope, Transient};
 
 use super::{ScopeContainer, ScopeRegistry, ScopeResolverSlot};
-use crate::descriptors::component::{ComponentConstructionContext, SharedStore};
+use crate::descriptors::component::{ComponentConstructionContext, Running, SharedStore};
 use crate::descriptors::{BoxedComponent, ComponentDescriptor, Injectable, ProviderDescriptor};
 use crate::error::Error;
+use crate::layout::TransientPlan;
 
 /// Constructs a fresh `Transient` instance whose `Injectable::Target` is `H`, if
 /// one is registered. A transient is rebuilt on every resolution and never stored,
@@ -46,6 +47,35 @@ async fn construct_transient_boxed(
     let boxed = (factory.construct)(&mut cx).await?;
 
     Ok(boxed)
+}
+
+/// Constructs a transient from its prepared plan, resolving its dependencies through the
+/// plan's edges. Like on-demand construction, it is built in a throwaway context over the
+/// requesting scope's parent and in-progress store.
+pub(crate) async fn construct_planned_transient(
+    registry: &Arc<ScopeRegistry>,
+    parent: Option<Arc<ScopeContainer>>,
+    slot: ScopeResolverSlot,
+    store: SharedStore,
+    plan: Arc<TransientPlan>,
+) -> crate::Result<BoxedComponent> {
+    let factory = plan.factory;
+    let externals = parent
+        .as_ref()
+        .map(|parent| parent.resolvers().clone())
+        .unwrap_or_default();
+    let mut cx = ComponentConstructionContext::with_store(
+        Transient::KEY,
+        parent,
+        Arc::clone(registry),
+        externals,
+        slot,
+        store,
+    );
+
+    cx.set_running(Running::Transient(plan));
+
+    (factory.construct)(&mut cx).await
 }
 
 pub(crate) async fn construct_fresh_boxed(
