@@ -8,7 +8,7 @@ use upwell_core::{RuntimeGenerationId, ScopeId};
 use upwell_di::{ComponentDescriptor, EffectiveGraph, ProviderSelectionModel};
 
 use crate::runtime::{RuntimeScopePlan, RuntimeView};
-use crate::scope::{PreparedScopeTopology, ScopePlan, SeedDestination};
+use crate::scope::{PreparedScopeTopology, ScopeLayouts, ScopePlan, SeedDestination};
 use crate::{AppConditionEvaluation, AppRegistry};
 
 mod commit;
@@ -34,6 +34,7 @@ pub struct CandidateGraph {
     by_id: HashMap<&'static str, usize>,
     singleton_order: Box<[ComponentDescriptor]>,
     scope_orders: Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>>,
+    scope_layouts: Arc<ScopeLayouts>,
     seed_destinations: Arc<HashMap<std::any::TypeId, SeedDestination>>,
 }
 
@@ -102,6 +103,7 @@ impl CandidateGraph {
             graph,
             Arc::from(components),
             Arc::new(scopes.orders),
+            Arc::new(scopes.layouts),
             Arc::new(scopes.seed_destinations),
         ))
     }
@@ -119,6 +121,7 @@ impl CandidateGraph {
             base.effective_graph().same_graph(),
             Arc::clone(base.resolved_components()),
             Arc::clone(plan.orders()),
+            Arc::clone(plan.layouts()),
             Arc::clone(plan.seed_destinations()),
         )
     }
@@ -127,6 +130,7 @@ impl CandidateGraph {
         graph: EffectiveGraph,
         components: Arc<[ComponentDescriptor]>,
         scope_orders: Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>>,
+        scope_layouts: Arc<ScopeLayouts>,
         seed_destinations: Arc<HashMap<std::any::TypeId, SeedDestination>>,
     ) -> Self {
         let by_id = components
@@ -147,6 +151,7 @@ impl CandidateGraph {
             by_id,
             singleton_order,
             scope_orders,
+            scope_layouts,
             seed_destinations,
         }
     }
@@ -196,6 +201,7 @@ impl CandidateGraph {
         let scope_plan = RuntimeScopePlan::new(
             Arc::clone(topology),
             self.scope_orders,
+            self.scope_layouts,
             self.seed_destinations,
         );
 

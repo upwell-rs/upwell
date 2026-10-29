@@ -75,7 +75,7 @@ impl ScopeContainer {
             context.insert(BoxedComponent {
                 ty: descriptor.ty,
                 value: Box::new(Injectable::into_stored(RootResolver::new())),
-            });
+            })?;
             register_candidate_providers(&mut context, &registry, descriptor)?;
         }
 
@@ -85,7 +85,7 @@ impl ScopeContainer {
                 .component(type_id)
                 .expect("candidate inputs were validated");
 
-            context.insert(component);
+            context.insert(component)?;
             register_candidate_providers(&mut context, &registry, descriptor)?;
         }
 
@@ -108,7 +108,7 @@ impl ScopeContainer {
 
             validate_factory_output(descriptor, &component)?;
 
-            context.insert(component);
+            context.insert(component)?;
             register_candidate_providers(&mut context, &registry, descriptor)?;
 
             trace!(component = %descriptor.name, "candidate component ready");
@@ -121,7 +121,7 @@ impl ScopeContainer {
         }
 
         info!(
-            count = root.store.components.len(),
+            count = root.store.component_count(),
             "candidate root prepared"
         );
 

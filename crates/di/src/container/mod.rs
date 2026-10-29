@@ -22,7 +22,8 @@ pub use order::topological_sort;
 pub(crate) use resolver_slot::ScopeResolverSlot;
 pub use scope_registry::ScopeRegistry;
 pub(crate) use transient::{
-    construct_fresh_boxed, construct_transient, construct_transient_provider,
+    construct_fresh_boxed, construct_planned_transient, construct_transient,
+    construct_transient_provider,
 };
 
 /// One scope's constructed instances, layered over an optional parent scope.

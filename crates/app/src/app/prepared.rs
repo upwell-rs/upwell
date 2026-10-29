@@ -20,7 +20,7 @@ use crate::plugin::EffectivePluginPlan;
 use crate::protocol::{PreparedProtocol, ProtocolDefinition};
 use crate::registry::AppRegistry;
 use crate::runtime::{AppConditionState, AppRuntime, PreparedRuntimeGeneration, RuntimeScopePlan};
-use crate::scope::{PreparedScopeTopology, SeedDestination};
+use crate::scope::{PreparedScopeTopology, ScopeLayouts, SeedDestination};
 
 /// A validated application assembly awaiting runtime component construction.
 ///
@@ -46,6 +46,7 @@ pub struct PreparedApp<D: ProtocolDefinition> {
     pub(super) scope_registry: Arc<ScopeRegistry>,
     pub(super) scope_topology: Arc<PreparedScopeTopology>,
     pub(super) scope_orders: Arc<HashMap<upwell_core::ScopeId, Vec<ComponentDescriptor>>>,
+    pub(super) scope_layouts: Arc<ScopeLayouts>,
     pub(super) seed_destinations: Arc<HashMap<std::any::TypeId, SeedDestination>>,
     pub(super) entries: Arc<EntryTable>,
     pub(super) resolvers: ResolverSet,
@@ -158,6 +159,7 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             scope_registry,
             scope_topology,
             scope_orders,
+            scope_layouts,
             seed_destinations,
             entries: _,
             resolvers,
@@ -189,7 +191,12 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
         let generation = PreparedRuntimeGeneration::new(
             root,
             scope_registry,
-            RuntimeScopePlan::new(scope_topology, scope_orders, seed_destinations),
+            RuntimeScopePlan::new(
+                scope_topology,
+                scope_orders,
+                scope_layouts,
+                seed_destinations,
+            ),
             resolved,
             effective_graph,
             condition,

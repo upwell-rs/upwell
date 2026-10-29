@@ -2,9 +2,11 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use upwell_core::{ResolutionMode, ResolverCtx, ResolverSet, ScopeKey};
+use upwell_core::{Cardinality, ResolutionMode, ResolverCtx, ResolverSet, ScopeKey};
 
+use super::planned::{Planned, Running};
 use super::{BoxedComponent, Component, Injectable, ProviderDescriptor, ScopeStore};
+use crate::layout::SlotLayout;
 
 /// Context passed to a component factory during construction.
 ///
@@ -25,10 +27,14 @@ pub struct ComponentConstructionContext {
     /// sequential; no guard is held across an await. `None` until the first write,
     /// so a request-time extraction context, which never stores anything, does not
     /// allocate one.
-    store: Option<SharedStore>,
-    parent: Option<Arc<crate::container::ScopeContainer>>,
-    registry: Arc<crate::container::ScopeRegistry>,
-    slot: crate::container::ScopeResolverSlot,
+    pub(super) store: Option<SharedStore>,
+    pub(super) parent: Option<Arc<crate::container::ScopeContainer>>,
+    pub(super) registry: Arc<crate::container::ScopeRegistry>,
+    pub(super) slot: crate::container::ScopeResolverSlot,
+    /// The prepared layout this scope is built from, when it is opened from one.
+    pub(super) layout: Option<Arc<SlotLayout>>,
+    /// The factory being run, whose planned edges resolutions read first.
+    pub(super) running: Running,
     /// External resolvers (e.g. the config store) threaded in by the runtime, so a
     /// factory parameter like `Cfg<T>` resolves through `cx.get::<ConfigStore>()`.
     resolvers: ResolverSet,
@@ -75,6 +81,8 @@ impl ComponentConstructionContext {
             registry,
             resolvers,
             slot,
+            layout: None,
+            running: Running::Unplanned,
             previous: None,
             change: None,
         }
@@ -99,6 +107,8 @@ impl ComponentConstructionContext {
             registry,
             resolvers,
             slot,
+            layout: None,
+            running: Running::Unplanned,
             previous: None,
             change: None,
         }
@@ -151,7 +161,7 @@ impl ComponentConstructionContext {
     }
 
     /// Reads this context's store, or `None` when nothing has been stored yet.
-    fn read_store<R>(&self, read: impl FnOnce(&ScopeStore) -> Option<R>) -> Option<R> {
+    pub(super) fn read_store<R>(&self, read: impl FnOnce(&ScopeStore) -> Option<R>) -> Option<R> {
         read(&self.store.as_ref()?.read().expect(STORE_POISON))
     }
 
@@ -195,6 +205,12 @@ impl ComponentConstructionContext {
     pub async fn resolve<H: Injectable>(&self) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
 
+        if let Some(source) = self.planned_source(target, None, Cardinality::One)
+            && let Planned::Resolved(handle) = self.resolve_planned::<H>(source).await?
+        {
+            return Ok(handle);
+        }
+
         if let Some(provider) = self.registry.selected_runtime_provider(
             target,
             None,
@@ -230,6 +246,13 @@ impl ComponentConstructionContext {
         qualifier: &str,
     ) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
+
+        if let Some(source) = self.planned_source(target, Some(qualifier), Cardinality::One)
+            && let Planned::Resolved(handle) = self.resolve_planned::<H>(source).await?
+        {
+            return Ok(handle);
+        }
+
         let Some(provider) = self.registry.selected_runtime_provider(
             target,
             Some(qualifier),
@@ -246,6 +269,14 @@ impl ComponentConstructionContext {
     /// Every provider of the trait `H::Target` across this scope and its parents.
     pub async fn resolve_all<H: Injectable>(&self) -> crate::Result<Vec<H>> {
         let target = TypeId::of::<H::Target>();
+
+        if let Some(provided) = self
+            .planned_many::<H>(target, Cardinality::Collection)
+            .await?
+        {
+            return Ok(provided.into_iter().map(|(_, handle)| handle).collect());
+        }
+
         let providers = self.registry.selected_runtime_collection(
             target,
             ResolutionMode::Eager,
@@ -267,6 +298,14 @@ impl ComponentConstructionContext {
     /// and its parents (a closer scope wins a qualifier collision).
     pub async fn resolve_keyed<H: Injectable>(&self) -> crate::Result<HashMap<String, H>> {
         let target = TypeId::of::<H::Target>();
+
+        if let Some(provided) = self.planned_many::<H>(target, Cardinality::Keyed).await? {
+            return Ok(provided
+                .into_iter()
+                .map(|(qualifier, handle)| (qualifier.to_string(), handle))
+                .collect());
+        }
+
         let providers = self.registry.selected_runtime_keyed(
             target,
             ResolutionMode::Eager,
@@ -327,8 +366,8 @@ impl ComponentConstructionContext {
             .and_then(|parent| parent.resolve_provider_built::<H>(&provider)))
     }
 
-    pub(crate) fn insert(&mut self, component: BoxedComponent) {
-        self.write_store().insert(component);
+    pub(crate) fn insert(&mut self, component: BoxedComponent) -> crate::Result<()> {
+        self.write_store().insert(component)
     }
 
     pub(crate) fn register_provider(&mut self, provider: &ProviderDescriptor, ordinal: usize) {

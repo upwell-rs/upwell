@@ -1,8 +1,12 @@
 use std::any::TypeId;
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use upwell_core::{Scope, ScopeId, Singleton, Transient};
-use upwell_di::{ComponentDescriptor, EffectiveGraph, ProviderSelectionModel, topological_sort};
+use upwell_di::{
+    ComponentDescriptor, EffectiveGraph, ProviderSelectionModel, SlotLayout, topological_sort,
+};
 
 use super::PreparedScopeTopology;
 
@@ -12,8 +16,12 @@ pub(crate) struct ScopePlan {
     pub(crate) singletons: Vec<ComponentDescriptor>,
     pub(crate) transient: HashMap<TypeId, ComponentDescriptor>,
     pub(crate) orders: HashMap<ScopeId, Vec<ComponentDescriptor>>,
+    pub(crate) layouts: ScopeLayouts,
     pub(crate) seed_destinations: HashMap<TypeId, SeedDestination>,
 }
+
+/// The prepared slot layout of every protocol-owned scope, keyed by scope.
+pub(crate) type ScopeLayouts = HashMap<ScopeId, Arc<SlotLayout>>;
 
 /// The declared destination and diagnostic name of a factory-less scoped component.
 #[derive(Clone, Copy, Debug)]
@@ -41,11 +49,13 @@ impl ScopePlan {
     ) -> crate::Result<Self> {
         let partitions = DescriptorPartitions::classify(resolved, topology)?;
         let orders = partitions.orders(topology, selection)?;
+        let layouts = partitions.layouts(&orders, topology, selection)?;
 
         Ok(Self {
             singletons: partitions.singletons,
             transient: partitions.transient,
             orders,
+            layouts,
             seed_destinations: partitions.seed_destinations,
         })
     }
@@ -166,6 +176,51 @@ impl DescriptorPartitions {
         }
 
         Ok(orders)
+    }
+
+    /// Plans each boundary's slot layout from its construction order, parents before
+    /// children, so every layout can point into the layouts of the scopes around it.
+    fn layouts(
+        &self,
+        orders: &HashMap<ScopeId, Vec<ComponentDescriptor>>,
+        topology: &PreparedScopeTopology,
+        selection: &ProviderSelectionModel,
+    ) -> crate::Result<ScopeLayouts> {
+        let mut boundaries: Vec<_> = topology.boundaries().iter().collect();
+        let mut layouts = HashMap::with_capacity(boundaries.len());
+
+        boundaries.sort_by_key(|boundary| Reverse(boundary.rank()));
+
+        for boundary in boundaries {
+            let scope = boundary.id();
+            let seeded: Vec<ComponentDescriptor> = self
+                .descriptors_by_scope
+                .get(&scope)
+                .into_iter()
+                .flatten()
+                .filter(|component| self.is_seeded(&scope, component))
+                .copied()
+                .collect();
+            let order = orders.get(&scope).map_or(&[][..], Vec::as_slice);
+            let layout = SlotLayout::plan(
+                boundary.scope(),
+                &seeded,
+                order,
+                &layouts,
+                selection,
+                |consumer, dependency| topology.is_reachable(&consumer, &dependency),
+            )?;
+
+            layouts.insert(scope, Arc::new(layout));
+        }
+
+        Ok(layouts)
+    }
+
+    fn is_seeded(&self, scope: &ScopeId, component: &ComponentDescriptor) -> bool {
+        self.factoryless_by_scope
+            .get(scope)
+            .is_some_and(|seeded| seeded.contains(&component.ty.type_id))
     }
 
     fn prebuilt(

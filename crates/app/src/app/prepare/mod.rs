@@ -160,6 +160,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             scope_registry,
             scope_topology,
             scope_orders: Arc::new(scopes.orders),
+            scope_layouts: Arc::new(scopes.layouts),
             seed_destinations: Arc::new(scopes.seed_destinations),
             entries,
             resolvers,

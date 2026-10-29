@@ -16,6 +16,7 @@ pub mod construct;
 pub mod container;
 pub mod descriptors;
 pub mod error;
+pub mod layout;
 mod observability;
 mod primitives;
 pub mod registry;
@@ -55,6 +56,7 @@ pub use error::{
     ProviderOrderCycle, ProviderOrderSourceTraitMismatch, ProviderOrderTargetTraitMismatch, Result,
     ScopeUnreachableDependency, ScopeUnreachableProvider, ScopeViolation,
 };
+pub use layout::SlotLayout;
 pub use primitives::{Deferred, Fresh, FreshFromContainer, Lazy};
 pub use registry::{
     ComponentRegistry, DependencyConsumer, DependencyFault, DependencySelectionReason,

@@ -38,7 +38,7 @@ impl ScopeContainer {
 
     fn component_live_cell(&self, component: &str) -> Option<LiveCell> {
         let descriptor = self.registry.component_by_id(component)?;
-        let stored = self.store.components.get(&descriptor.ty.type_id)?;
+        let stored = self.store.component(descriptor.ty.type_id)?;
 
         descriptor.generation_snapshot?.live_cell(stored)
     }
@@ -50,17 +50,9 @@ impl ScopeContainer {
             .providers_for(descriptor.ty.type_id)
             .iter()
             .find(|provider| provider.mapping_id(&descriptor) == mapping)?;
-        let entry = self
-            .store
-            .providers
-            .get(&provider.trait_ty.type_id)?
-            .iter()
-            .find(|entry| {
-                entry.descriptor.concrete_ty.type_id == provider.concrete_ty.type_id
-                    && entry.descriptor.qualifier == provider.qualifier
-            })?;
+        let value = self.store.provider_value(provider)?;
 
-        (provider.live)(&entry.value)
+        (provider.live)(value)
     }
 }
 

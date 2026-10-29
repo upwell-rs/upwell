@@ -6,7 +6,7 @@ mod prepared;
 mod validate;
 
 pub use declaration::{ScopeBoundary, ScopeParent, ScopeTopology};
-pub(crate) use plan::{ScopePlan, SeedDestination};
+pub(crate) use plan::{ScopeLayouts, ScopePlan, SeedDestination};
 pub use prepared::PreparedScopeTopology;
 pub use validate::ScopeTopologyError;
 

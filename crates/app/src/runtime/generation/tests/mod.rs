@@ -107,7 +107,12 @@ async fn prepared_with_hooks(
     PreparedRuntimeGeneration::new(
         root,
         registry,
-        RuntimeScopePlan::new(topology, Arc::new(HashMap::new()), Arc::new(HashMap::new())),
+        RuntimeScopePlan::new(
+            topology,
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+        ),
         Arc::from([]),
         graph,
         condition,

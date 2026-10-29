@@ -56,8 +56,7 @@ impl ScopeContainer {
 
         let active = self
             .store
-            .components
-            .get(&descriptor.ty.type_id)
+            .component(descriptor.ty.type_id)
             .ok_or(Error::MissingComponent(descriptor.name))?;
 
         let boxed =

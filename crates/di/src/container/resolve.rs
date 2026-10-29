@@ -3,11 +3,12 @@
 use std::any::TypeId;
 use std::sync::Arc;
 
-use upwell_core::{ResolutionMode, Scope, Transient};
+use upwell_core::{ResolutionMode, Scope, ScopeKey, Transient};
 
 use super::{ScopeContainer, construct_transient, construct_transient_provider};
 use crate::descriptors::component::{ComponentConstructionContext, SharedStore};
 use crate::descriptors::{Component, Injectable, ProviderDescriptor};
+use crate::layout::{RootTarget, SlotLayout, SlotRef};
 
 impl ScopeContainer {
     /// Returns the registered component of type `T` as its handle (`Arc<T>` by
@@ -135,6 +136,40 @@ impl ScopeContainer {
         self.parent
             .as_ref()?
             .resolve_qualified_built::<H>(qualifier)
+    }
+
+    /// The container of `scope` on this scope's chain, this scope included.
+    pub(crate) fn ancestor(&self, scope: ScopeKey) -> Option<&ScopeContainer> {
+        let mut current = self;
+
+        loop {
+            if current.scope.id() == scope.id() {
+                return Some(current);
+            }
+
+            current = current.parent.as_deref()?;
+        }
+    }
+
+    /// The root container at the top of this scope's chain.
+    pub(crate) fn root_container(&self) -> &ScopeContainer {
+        let mut current = self;
+
+        while let Some(parent) = current.parent.as_deref() {
+            current = parent;
+        }
+
+        current
+    }
+
+    /// The handle at a planned slot of this scope, when it was opened from `layout`.
+    pub(crate) fn planned<H: Injectable>(&self, layout: &SlotLayout, at: SlotRef) -> Option<H> {
+        self.store.planned::<H>(layout, at)
+    }
+
+    /// The handle a planned root dependency resolves to in this container.
+    pub(crate) fn root_target<H: Injectable>(&self, target: &RootTarget) -> Option<H> {
+        self.store.root::<H>(target)
     }
 
     /// Resolves one exact selected provider from its owning visible scope.
