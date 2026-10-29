@@ -125,8 +125,22 @@ async fn open_uses_declared_scope_metadata_and_retains_empty_boundaries() {
 
 #[tokio::test]
 async fn open_leaves_an_unprovided_seed_slot_empty() {
-    /// A seed declared for the session boundary that a protocol may leave out.
-    struct OptionalSeed;
+    /// A by-value seed declared for the session boundary that a protocol may leave out.
+    #[derive(Clone, Debug, PartialEq)]
+    struct OptionalSeed(u8);
+
+    impl upwell_di::Injectable for OptionalSeed {
+        type Target = Self;
+        type Stored = Self;
+
+        fn into_stored(self) -> Self {
+            self
+        }
+
+        fn from_stored(stored: &Self) -> Self {
+            stored.clone()
+        }
+    }
 
     let destinations = HashMap::from([(
         TypeId::of::<OptionalSeed>(),
@@ -135,6 +149,10 @@ async fn open_leaves_an_unprovided_seed_slot_empty() {
             type_name: std::any::type_name::<OptionalSeed>(),
         },
     )]);
+    let supplied = BoxedComponent {
+        ty: TypeDescriptor::of::<OptionalSeed>("OptionalSeed"),
+        value: Box::new(OptionalSeed(7)),
+    };
     let (runtime, _) = build_runtime(destinations).await;
 
     let unseeded = runtime
@@ -142,12 +160,22 @@ async fn open_leaves_an_unprovided_seed_slot_empty() {
         .await
         .expect("a seed slot no dependency needs may stay empty");
     let seeded = runtime
-        .open_scope_from_root(Session::KEY, vec![seed::<OptionalSeed>()])
+        .open_scope_from_root(Session::KEY, vec![supplied])
         .await
         .expect("a declared seed fills its slot");
+    let seeded_value = seeded
+        .resolvers()
+        .get_arc::<upwell_di::ComponentSource>()
+        .expect("an open scope exposes its component source")
+        .resolve::<OptionalSeed>();
 
     assert_eq!(unseeded.scope().id(), SESSION_ID);
     assert_eq!(seeded.scope().id(), SESSION_ID);
+    assert_eq!(
+        seeded_value,
+        Some(OptionalSeed(7)),
+        "the supplied seed is stored in its slot and resolvable from the scope"
+    );
 }
 
 #[tokio::test]
