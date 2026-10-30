@@ -11,9 +11,8 @@ use crate::extract::ErrorResponse;
 
 /// The interaction pattern of an RPC method, following gRPC's four kinds.
 ///
-/// Only `Unary` is served today. The streaming variants are the target of the
-/// streaming plan (`specs/002-streaming-rpcs/plan.md`); they are not yet
-/// produced by the `#[rpc]` macro nor handled by the runtime.
+/// Only `Unary` is served today. The streaming variants are planned; they are
+/// not yet produced by the `#[rpc]` macro nor handled by the runtime.
 #[derive(Clone, Copy, Debug)]
 pub enum OperationKind {
     /// One request, one response.
