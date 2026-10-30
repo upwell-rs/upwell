@@ -96,6 +96,11 @@ fn roster(scope: ScopeKey) -> &'static [ComponentDescriptor] {
 }
 
 /// Registers the first `count` roster components in `scope` with `builder`.
+///
+/// # Panics
+///
+/// Panics when `count` exceeds [`MAX_SCOPED`], the size of the roster.
+#[must_use]
 pub fn register<D: ProtocolDefinition>(
     builder: AppBuilder<D>,
     scope: ScopeKey,
@@ -127,6 +132,11 @@ pub enum Roster {
 
 impl Roster {
     /// Registers this roster in `scope` with `builder`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `self` is [`Roster::Unused`] with a count above [`MAX_SCOPED`].
+    #[must_use]
     pub fn register<D: ProtocolDefinition>(
         self,
         builder: AppBuilder<D>,
@@ -143,6 +153,7 @@ impl Roster {
 }
 
 /// Builds an application named `name` with an empty config source.
+#[must_use]
 pub fn builder<D: ProtocolDefinition>(name: &str) -> AppBuilder<D> {
     App::<D>::builder(name).config_source(ConfigManager::<Dynamic>::empty())
 }
