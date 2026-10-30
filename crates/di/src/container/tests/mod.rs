@@ -145,18 +145,21 @@ fn fresh_target_factory(
 static TARGET_PROVIDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: target_provider_factory,
+    construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
 }];
 static OWNER_PROVIDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: owner_provider_factory,
+    construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
 }];
 static FRESH_TARGET_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: fresh_target_factory,
+    construct_ready: None,
     dependencies: fresh_target_dependencies,
     role: ComponentFactoryRole::Explicit,
 }];
@@ -224,3 +227,4 @@ mod children;
 mod drop_guard;
 mod fresh;
 mod providers;
+mod ready;

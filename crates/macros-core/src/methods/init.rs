@@ -45,6 +45,8 @@ pub(super) fn parse_init(method: &ImplItemFn) -> syn::Result<InitInfo> {
 
 /// Emits the `#[init]` factory: a fixed-name async `init` wrapper (the guard and sync→async
 /// normalizer) plus its `ComponentFactoryDescriptor`, appended to the type's factory slice.
+/// A sync constructor is also the descriptor's ready factory, so it builds without a future
+/// when every parameter is ready.
 ///
 /// The fixed-name `init` associated fn is always `async` and forwards to the marked
 /// constructor, normalizing a sync constructor (factories are async) and serving as the
@@ -83,9 +85,11 @@ pub(super) fn generate_init(
         }
     };
 
+    let ready = (!info.is_async).then(|| quote!(<#self_ty>::#marked));
     let factory = factory_descriptor(
         &quote!(concat!("init:", stringify!(#marked))),
         &quote!(<#self_ty>::init),
+        ready.as_ref(),
         paths,
     );
     let component = register_factory(

@@ -3,7 +3,8 @@
 //! A generated factory reads each edge by the position it declared it at, so a planned slot
 //! answers with one index. A hand-written factory resolves by type, which searches the
 //! running slot's planned edges. Either falls back to dynamic selection when nothing was
-//! planned.
+//! planned. The `*_ready` reads answer a factory's synchronous path from planned edges
+//! alone, and report an edge that needs more so the factory runs its async path.
 
 use std::any::TypeId;
 use std::collections::HashMap;
@@ -68,6 +69,49 @@ impl ComponentConstructionContext {
         index: usize,
     ) -> crate::Result<HashMap<String, H>> {
         self.resolve_keyed_at::<H>(Some(index)).await
+    }
+
+    /// Reads the single edge a generated factory declared at `index` without awaiting.
+    /// `None` when its planned source needs construction or dynamic selection; otherwise
+    /// the handle, or `Some(None)` when the plan found no provider.
+    #[doc(hidden)]
+    pub fn dep_ready<H: Injectable>(
+        &self,
+        index: usize,
+        qualifier: Option<&str>,
+    ) -> Option<Option<H>> {
+        let target = TypeId::of::<H::Target>();
+        let source = self.planned_edge(Some(index), target, qualifier, Cardinality::One)?;
+
+        match self.read_planned::<H>(source) {
+            Planned::Resolved(handle) => Some(handle),
+            Planned::Unavailable => None,
+        }
+    }
+
+    /// Reads the collection edge a generated factory declared at `index` without awaiting.
+    /// `None` when one of its planned providers needs construction or dynamic selection.
+    #[doc(hidden)]
+    pub fn dep_all_ready<H: Injectable>(&self, index: usize) -> Option<Vec<H>> {
+        let target = TypeId::of::<H::Target>();
+        let provided = self.read_many::<H>(index, target, Cardinality::Collection)?;
+
+        Some(provided.into_iter().map(|(_, handle)| handle).collect())
+    }
+
+    /// Reads the keyed edge a generated factory declared at `index` without awaiting.
+    /// `None` when one of its planned providers needs construction or dynamic selection.
+    #[doc(hidden)]
+    pub fn dep_keyed_ready<H: Injectable>(&self, index: usize) -> Option<HashMap<String, H>> {
+        let target = TypeId::of::<H::Target>();
+        let provided = self.read_many::<H>(index, target, Cardinality::Keyed)?;
+
+        Some(
+            provided
+                .into_iter()
+                .map(|(qualifier, handle)| (qualifier.to_string(), handle))
+                .collect(),
+        )
     }
 
     async fn resolve_one<H: Injectable>(

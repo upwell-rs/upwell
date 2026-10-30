@@ -77,12 +77,23 @@ impl ComponentConstructionContext {
             .or_else(|| PlannedDependency::find(planned, target, qualifier, cardinality))
     }
 
-    /// Resolves one planned single-value source.
+    /// Resolves one planned single-value source, building a transient one.
     pub(super) async fn resolve_planned<H: Injectable>(
         &self,
         source: &DepRef,
     ) -> crate::Result<Planned<H>> {
         let planned = match source {
+            DepRef::Transient(plan) => Planned::Resolved(self.build_transient::<H>(plan).await?),
+            _ => self.read_planned::<H>(source),
+        };
+
+        Ok(planned)
+    }
+
+    /// Reads one planned single-value source without awaiting. A transient source needs
+    /// construction, so it is `Unavailable` here.
+    pub(super) fn read_planned<H: Injectable>(&self, source: &DepRef) -> Planned<H> {
+        match source {
             DepRef::Absent => Planned::Resolved(None),
             DepRef::Local(at) => Planned::found(
                 self.layout
@@ -100,11 +111,8 @@ impl ComponentConstructionContext {
                     .as_ref()
                     .and_then(|parent| parent.root_container().root_target::<H>(target)),
             ),
-            DepRef::Transient(plan) => Planned::Resolved(self.build_transient::<H>(plan).await?),
-            DepRef::Many(_) | DepRef::Unplanned => Planned::Unavailable,
-        };
-
-        Ok(planned)
+            DepRef::Transient(_) | DepRef::Many(_) | DepRef::Unplanned => Planned::Unavailable,
+        }
     }
 
     /// The planned providers of the running factory's `cardinality` edge for `target`,
@@ -116,12 +124,45 @@ impl ComponentConstructionContext {
         target: TypeId,
         cardinality: Cardinality,
     ) -> crate::Result<Option<Vec<(&'static str, H)>>> {
-        let Some(DepRef::Many(provided)) = self.planned_edge(index, target, None, cardinality)
-        else {
+        let Some(provided) = self.planned_providers(index, target, cardinality) else {
             return Ok(None);
         };
 
         self.resolve_provided::<H>(provided).await
+    }
+
+    /// The planned providers of the edge declared at `index`, read without awaiting.
+    /// `None` when the edge was not planned or one of its providers needs construction.
+    pub(super) fn read_many<H: Injectable>(
+        &self,
+        index: usize,
+        target: TypeId,
+        cardinality: Cardinality,
+    ) -> Option<Vec<(&'static str, H)>> {
+        let provided = self.planned_providers(Some(index), target, cardinality)?;
+        let mut read = Vec::with_capacity(provided.len());
+
+        for entry in provided {
+            match self.read_planned::<H>(&entry.source) {
+                Planned::Resolved(Some(handle)) => read.push((entry.qualifier, handle)),
+                Planned::Resolved(None) => {}
+                Planned::Unavailable => return None,
+            }
+        }
+
+        Some(read)
+    }
+
+    fn planned_providers(
+        &self,
+        index: Option<usize>,
+        target: TypeId,
+        cardinality: Cardinality,
+    ) -> Option<&[ProvidedRef]> {
+        match self.planned_edge(index, target, None, cardinality)? {
+            DepRef::Many(provided) => Some(provided),
+            _ => None,
+        }
     }
 
     /// Resolves every provider of a planned collection or keyed source, with its

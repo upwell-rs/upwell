@@ -122,4 +122,8 @@ where
     async fn from_container(cx: &ComponentConstructionContext) -> crate::Result<Self> {
         Ok(Self::capture(cx.resolver_slot()))
     }
+
+    fn ready_at(cx: &ComponentConstructionContext, _index: usize) -> Option<crate::Result<Self>> {
+        Some(Ok(Self::capture(cx.resolver_slot())))
+    }
 }

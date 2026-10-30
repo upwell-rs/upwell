@@ -305,6 +305,7 @@ fn descriptor(recipe: &Recipe, factory: &TokenStream, paths: &Paths) -> TokenStr
         #component_factory_descriptor {
             id: #id,
             construct: #construct,
+            construct_ready: ::core::option::Option::None,
             dependencies: #dependencies,
             role: #component_factory_role::#role,
         }

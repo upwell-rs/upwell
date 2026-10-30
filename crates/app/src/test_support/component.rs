@@ -38,6 +38,7 @@ macro_rules! unbuilt_factories {
                 &[::upwell_di::ComponentFactoryDescriptor {
                     id: $id,
                     construct: $crate::test_support::unbuilt,
+                    construct_ready: ::core::option::Option::None,
                     dependencies: $dependencies,
                     role: ::upwell_di::ComponentFactoryRole::$role,
                 }]

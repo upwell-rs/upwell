@@ -436,6 +436,7 @@ fn scheduler_deps() -> Vec<DependencyDescriptor> {
 static SCHEDULER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: scheduler_construct,
+    construct_ready: None,
     dependencies: scheduler_deps,
     role: ComponentFactoryRole::Explicit,
 }];

@@ -44,7 +44,7 @@ async fn construct_transient_boxed(
         store,
     );
 
-    let boxed = (factory.construct)(&mut cx).await?;
+    let boxed = factory.build(&mut cx).await?;
 
     Ok(boxed)
 }
@@ -75,7 +75,7 @@ pub(crate) async fn construct_planned_transient(
 
     cx.set_running(Running::Transient(plan));
 
-    (factory.construct)(&mut cx).await
+    factory.build(&mut cx).await
 }
 
 pub(crate) async fn construct_fresh_boxed(
@@ -111,7 +111,7 @@ pub(crate) async fn construct_fresh_boxed(
         slot,
     );
 
-    (factory.construct)(&mut cx).await
+    factory.build(&mut cx).await
 }
 
 pub(crate) async fn construct_transient<H: Injectable>(

@@ -26,6 +26,7 @@ macro_rules! unbuilt_factories {
                 &[$crate::descriptors::ComponentFactoryDescriptor {
                     id: $id,
                     construct: $crate::test_support::unbuilt,
+                    construct_ready: ::core::option::Option::None,
                     dependencies: $dependencies,
                     role: $crate::descriptors::ComponentFactoryRole::$role,
                 }]
@@ -45,6 +46,7 @@ pub(crate) const fn unbuilt_recipe(
     ComponentFactoryDescriptor {
         id,
         construct: unbuilt,
+        construct_ready: None,
         dependencies,
         role,
     }
