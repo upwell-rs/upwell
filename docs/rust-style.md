@@ -99,8 +99,10 @@ the owner rule applies. Where this file is silent, rustfmt and the Rust API Guid
 - Traits may declare `fn ... -> impl Future<Output = ...> + Send`. Impls use `async fn`.
 - Prefer static generics (`T: Trait`, `impl Trait`) over `Box<dyn Trait>`. Users can box or enum-dispatch
   themselves if they need to.
-- Forward-compatible wire enums use an `http::StatusCode`-style newtype or `#[non_exhaustive]`. Never
-  add an `Unknown(u8)` variant.
+- Wire values an older peer must keep, forward or report without understanding them (status and error
+  codes, user-extensible sets) use an `http::StatusCode`-style newtype. Framework-owned sets, where an
+  unknown value is an error or never crosses a version boundary, use a `#[non_exhaustive]` enum and
+  reject unknown values when decoding. Never add an `Unknown(u8)` variant.
 - Status and error codes are opaque to the framework. Do not add `category()` or `retryable()` methods.
 
 ## Errors and panics
