@@ -131,6 +131,7 @@ pub(super) fn snapshot_dependencies() -> Vec<upwell_core::DependencyDescriptor> 
 pub(super) static FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "projected",
     construct,
+    construct_ready: None,
     dependencies,
     role: ComponentFactoryRole::Default,
 }];
@@ -139,6 +140,7 @@ pub(super) static SNAPSHOT_FACTORIES: [ComponentFactoryDescriptor; 1] =
     [ComponentFactoryDescriptor {
         id: "snapshot",
         construct,
+        construct_ready: None,
         dependencies: snapshot_dependencies,
         role: ComponentFactoryRole::Default,
     }];
@@ -261,6 +263,7 @@ pub(super) static CONFIG_CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] =
     [ComponentFactoryDescriptor {
         id: "static",
         construct: construct_config_consumer,
+        construct_ready: None,
         dependencies: exact_config_dependency,
         role: ComponentFactoryRole::Default,
     }];
@@ -352,6 +355,7 @@ pub(super) static PROVIDER_CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] =
     [ComponentFactoryDescriptor {
         id: "static",
         construct: construct_config_consumer,
+        construct_ready: None,
         dependencies: provider_consumer_dependencies,
         role: ComponentFactoryRole::Default,
     }];

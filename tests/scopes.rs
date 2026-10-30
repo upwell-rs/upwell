@@ -22,6 +22,7 @@ use common::{MemoryServer, deadline};
 static CONNECTION_IDS: AtomicU64 = AtomicU64::new(1);
 static REQUEST_IDS: AtomicU64 = AtomicU64::new(1);
 static TRACE_IDS: AtomicU64 = AtomicU64::new(1);
+static TRACED_IDS: AtomicU64 = AtomicU64::new(1);
 
 /// Connection-scoped: one id per connection.
 struct ConnId(u64);
@@ -47,6 +48,15 @@ struct TraceId(u64);
 impl Default for TraceId {
     fn default() -> Self {
         Self(TRACE_IDS.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+/// Identity of a [`TracedState`]: one id per build, so a build that ran twice shows a gap.
+struct TracedId(u64);
+
+impl Default for TracedId {
+    fn default() -> Self {
+        Self(TRACED_IDS.fetch_add(1, Ordering::Relaxed))
     }
 }
 
@@ -76,6 +86,16 @@ struct MixedState {
     req: Arc<ReqState>,
     markers: Vec<Arc<dyn ScopedMarker>>,
     conn: Arc<ConnState>,
+}
+
+/// Request-scoped component whose transient edge needs construction, so its factory gives up
+/// the synchronous path after its `#[default]` field and builds through the async one.
+#[component(scope = upwell::daemon::Request)]
+struct TracedState {
+    #[default]
+    id: TracedId,
+    req: Arc<ReqState>,
+    trace: Arc<Trace>,
 }
 
 /// Transient component, rebuilt on each resolution.
@@ -141,6 +161,16 @@ impl ScopeSvc {
             .collect();
 
         Ok((mixed.conn.id.0, mixed.req.conn.id.0, markers, trace))
+    }
+
+    /// Returns the traced state's id and whether its edges resolved.
+    #[rpc]
+    async fn traced(
+        Inject(traced): Inject<Arc<TracedState>>,
+    ) -> upwell::daemon::Result<(u64, bool)> {
+        let resolved = traced.req.conn.id.0 > 0 && traced.trace.id.0 > 0;
+
+        Ok((traced.id.0, resolved))
     }
 
     #[rpc]
@@ -279,6 +309,32 @@ async fn generated_factory_reads_each_edge_at_its_declared_position() {
         "the collection edge resolves every provider in order"
     );
     assert!(trace, "the lazy edge still resolves through its own handle");
+
+    server.shutdown([conn]).await;
+}
+
+#[tokio::test]
+async fn a_factory_falling_back_to_its_async_path_builds_its_defaults_once() {
+    let server = start().await;
+    let conn = server.connect().await;
+    let first = TRACED_IDS.load(Ordering::Relaxed);
+    let result = deadline(
+        "ScopeSvc.traced call",
+        conn.call("ScopeSvc.traced", enc(&())),
+    )
+    .await
+    .expect("traced call returns a response");
+    let (id, resolved) = match result {
+        CallResult::Ok(body) => dec::<(u64, bool)>(&body),
+        CallResult::Err { .. } => panic!("traced call errored"),
+    };
+
+    assert!(resolved, "the planned and transient edges both resolve");
+    assert_eq!(
+        (id, TRACED_IDS.load(Ordering::Relaxed)),
+        (first, first + 1),
+        "the call built its traced state's default once, not once per factory path"
+    );
 
     server.shutdown([conn]).await;
 }

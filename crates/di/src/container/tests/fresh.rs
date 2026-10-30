@@ -133,6 +133,7 @@ async fn fresh_reconstructs_a_transient_against_the_requesting_scope() {
     static TRANSIENT_LEAF_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
         id: "static",
         construct: transient_leaf_factory,
+        construct_ready: None,
         dependencies: no_dependencies,
         role: ComponentFactoryRole::Explicit,
     }];

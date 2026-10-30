@@ -45,15 +45,23 @@ impl<const N: usize> Component for CallScoped<N> {
     }
 }
 
+fn boxed<const N: usize>() -> BoxedComponent {
+    BoxedComponent {
+        ty: TypeDescriptor::of::<CallScoped<N>>(CallScoped::<N>::NAME),
+        value: Box::new(Injectable::into_stored(CallScoped::<N>.into_handle())),
+    }
+}
+
 fn construct<const N: usize>(
     _cx: &mut ComponentConstructionContext,
 ) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
-    Box::pin(async {
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<CallScoped<N>>(CallScoped::<N>::NAME),
-            value: Box::new(Injectable::into_stored(CallScoped::<N>.into_handle())),
-        })
-    })
+    Box::pin(async { Ok(boxed::<N>()) })
+}
+
+fn construct_ready<const N: usize>(
+    _cx: &ComponentConstructionContext,
+) -> upwell_di::Result<Option<BoxedComponent>> {
+    Ok(Some(boxed::<N>()))
 }
 
 fn factories<const N: usize>() -> &'static [ComponentFactoryDescriptor] {
@@ -61,6 +69,7 @@ fn factories<const N: usize>() -> &'static [ComponentFactoryDescriptor] {
         &[ComponentFactoryDescriptor {
             id: "explicit",
             construct: construct::<N>,
+            construct_ready: Some(construct_ready::<N>),
             dependencies: Vec::new,
             role: ComponentFactoryRole::Explicit,
         }]

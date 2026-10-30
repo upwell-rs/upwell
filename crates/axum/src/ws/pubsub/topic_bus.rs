@@ -167,6 +167,7 @@ fn topic_bus_factories<P: PubSubProtocol>() -> &'static [ComponentFactoryDescrip
     &[ComponentFactoryDescriptor {
         id: "static",
         construct: construct_topic_bus::<P>,
+        construct_ready: None,
         dependencies: topic_bus_dependencies,
         role: ComponentFactoryRole::Default,
     }]

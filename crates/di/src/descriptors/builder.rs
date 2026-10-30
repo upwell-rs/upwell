@@ -147,6 +147,7 @@ macro_rules! __factory_entry {
         $crate::ComponentFactoryDescriptor {
             id: $id,
             construct: |cx| $crate::dispatch_factory($factory, cx),
+            construct_ready: ::core::option::Option::None,
             dependencies: || $crate::factory_dependencies($factory),
             role: $crate::ComponentFactoryRole::$role,
         }
@@ -160,6 +161,7 @@ macro_rules! __replacement_entry {
         $crate::ComponentFactoryDescriptor {
             id: $id,
             construct: |cx| $crate::dispatch_replacement($factory, cx),
+            construct_ready: ::core::option::Option::None,
             dependencies: || $crate::replacement_dependencies($factory),
             role: $crate::ComponentFactoryRole::Replacement,
         }
@@ -173,6 +175,7 @@ macro_rules! __transition_entry {
         $crate::ComponentFactoryDescriptor {
             id: $id,
             construct: |cx| $crate::dispatch_transition($handler, cx),
+            construct_ready: ::core::option::Option::None,
             dependencies: ::std::vec::Vec::new,
             role: $crate::ComponentFactoryRole::Transition,
         }
@@ -186,6 +189,7 @@ macro_rules! __hot_update_entry {
         $crate::ComponentFactoryDescriptor {
             id: $id,
             construct: |cx| $crate::dispatch_hot_update($factory, cx),
+            construct_ready: ::core::option::Option::None,
             dependencies: || $crate::hot_update_dependencies($factory),
             role: $crate::ComponentFactoryRole::HotUpdate,
         }

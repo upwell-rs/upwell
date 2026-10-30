@@ -11,6 +11,15 @@ pub type ComponentFactory =
         &'a mut ComponentConstructionContext,
     ) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + 'a>>;
 
+/// Synchronous factory function pointer that builds a component without allocating a
+/// future when every dependency is ready to read.
+///
+/// `Ok(None)` means a dependency needs construction or dynamic selection, so the caller
+/// runs the [`ComponentFactory`] instead. A ready factory only reads, so giving up
+/// part-way has no effect the async run could observe.
+pub type ReadyComponentFactory =
+    fn(&ComponentConstructionContext) -> crate::Result<Option<BoxedComponent>>;
+
 /// How the container uses one of a component's construction recipes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ComponentFactoryRole {
@@ -65,9 +74,29 @@ pub struct ComponentFactoryDescriptor {
     /// construction semantics change. IDs must be non-empty and unique within a component.
     pub id: &'static str,
     pub construct: ComponentFactory,
+    /// The synchronous path tried before [`construct`](Self::construct), when the
+    /// factory has one.
+    pub construct_ready: Option<ReadyComponentFactory>,
     /// The factory's dependency edges, reported at runtime. Read only at build.
     pub dependencies: fn() -> Vec<DependencyDescriptor>,
     pub role: ComponentFactoryRole,
+}
+
+impl ComponentFactoryDescriptor {
+    /// Builds the component through [`construct_ready`](Self::construct_ready) when every
+    /// dependency is ready, and through [`construct`](Self::construct) otherwise.
+    pub(crate) async fn build(
+        &self,
+        cx: &mut ComponentConstructionContext,
+    ) -> crate::Result<BoxedComponent> {
+        if let Some(construct_ready) = self.construct_ready
+            && let Some(built) = construct_ready(cx)?
+        {
+            return Ok(built);
+        }
+
+        (self.construct)(cx).await
+    }
 }
 
 impl fmt::Debug for ComponentFactoryDescriptor {

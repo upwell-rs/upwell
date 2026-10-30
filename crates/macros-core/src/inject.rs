@@ -185,19 +185,30 @@ pub fn field_injection_component(
     let descriptor_trait = paths.core("Descriptor");
 
     let mut inits = Vec::new();
+    let mut ready_inits = Vec::new();
+    let mut ready_reads = Vec::new();
     let mut dep_descriptors = Vec::new();
     let mut checks = Vec::new();
     let mut wired_targets = Vec::new();
 
-    let mut plan = |inits: &mut Vec<TokenStream>, prefix: TokenStream, field: &mut Field| {
+    let mut plan = |inits: &mut Vec<TokenStream>,
+                    ready_inits: &mut Vec<TokenStream>,
+                    prefix: TokenStream,
+                    field: &mut Field| {
         let FieldPlan {
             value,
+            ready,
             dependency,
             check,
             wired,
         } = plan_field(field, dep_descriptors.len(), paths);
 
         inits.push(quote!(#prefix #value));
+
+        let ReadyField { read, value } = ready;
+
+        ready_inits.push(quote!(#prefix #value));
+        ready_reads.extend(read);
 
         if let Some(dep) = dependency {
             dep_descriptors.push(dep);
@@ -212,25 +223,31 @@ pub fn field_injection_component(
         }
     };
 
-    let construct = match &mut item.fields {
+    let (construct, construct_ready) = match &mut item.fields {
         Fields::Named(named) => {
             for field in &mut named.named {
                 let field_ident = field.ident.clone().expect("named field");
-                plan(&mut inits, quote!(#field_ident:), field);
+                plan(&mut inits, &mut ready_inits, quote!(#field_ident:), field);
             }
 
-            quote!(#self_ident { #(#inits),* })
+            (
+                quote!(#self_ident { #(#inits),* }),
+                quote!(#self_ident { #(#ready_inits),* }),
+            )
         }
 
         Fields::Unnamed(unnamed) => {
             for field in &mut unnamed.unnamed {
-                plan(&mut inits, quote!(), field);
+                plan(&mut inits, &mut ready_inits, quote!(), field);
             }
 
-            quote!(#self_ident( #(#inits),* ))
+            (
+                quote!(#self_ident( #(#inits),* )),
+                quote!(#self_ident( #(#ready_inits),* )),
+            )
         }
 
-        Fields::Unit => quote!(#self_ident),
+        Fields::Unit => (quote!(#self_ident), quote!(#self_ident)),
     };
 
     // The field-injection default factory — its dep assertions, construction fn,
@@ -255,6 +272,7 @@ pub fn field_injection_component(
             #component_factory_descriptor {
                 id: "default",
                 construct: __upwell_factory,
+                construct_ready: ::core::option::Option::Some(__upwell_ready_factory),
                 dependencies: __upwell_deps,
                 role: #component_factory_role::Default,
             }
@@ -283,17 +301,28 @@ pub fn field_injection_component(
                 >,
             > {
                 ::std::boxed::Box::pin(async move {
-                    let __instance = #construct;
-
-                    ::core::result::Result::Ok(#boxed_component {
-                        ty: #type_descriptor::of::<#self_ident>(#name),
-                        value: ::std::boxed::Box::new(
-                            #injectable::into_stored(
-                                <#self_ident as #component>::into_handle(__instance),
-                            ),
-                        ),
-                    })
+                    ::core::result::Result::Ok(__upwell_boxed(#construct))
                 })
+            }
+
+            #[allow(unused_variables)]
+            fn __upwell_ready_factory(
+                cx: &#component_construction_context,
+            ) -> #result<::core::option::Option<#boxed_component>> {
+                #(#ready_reads)*
+
+                ::core::result::Result::Ok(::core::option::Option::Some(
+                    __upwell_boxed(#construct_ready),
+                ))
+            }
+
+            fn __upwell_boxed(instance: #self_ident) -> #boxed_component {
+                #boxed_component {
+                    ty: #type_descriptor::of::<#self_ident>(#name),
+                    value: ::std::boxed::Box::new(
+                        #injectable::into_stored(<#self_ident as #component>::into_handle(instance)),
+                    ),
+                }
             }
 
             fn __upwell_deps() -> ::std::vec::Vec<#dependency_descriptor> {
@@ -307,7 +336,14 @@ pub fn field_injection_component(
     } else {
         // A manual component still strips field attrs (done above) but builds
         // nothing. It is trivially `Wired` — it has no constructed dependencies.
-        let _ = (&construct, &dep_descriptors, &checks, &wired_targets);
+        let _ = (
+            &construct,
+            &construct_ready,
+            &ready_reads,
+            &dep_descriptors,
+            &checks,
+            &wired_targets,
+        );
 
         crate::di::wired_impl(&self_ident, &[], paths)
     };
@@ -376,16 +412,33 @@ pub fn register_factory(
 /// `factory` through the build-time `Factory` machinery, as `factories!` expands an entry:
 /// the factory's parameters supply both construction and the dependency edges, so its
 /// signature need not be visible to the macro.
-pub fn factory_descriptor(id: &TokenStream, factory: &TokenStream, paths: &Paths) -> TokenStream {
+///
+/// `ready` is a synchronous function taking the same parameters, which builds the component
+/// without a future when every parameter is ready to read.
+pub fn factory_descriptor(
+    id: &TokenStream,
+    factory: &TokenStream,
+    ready: Option<&TokenStream>,
+    paths: &Paths,
+) -> TokenStream {
     let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
     let component_factory_role = paths.core("ComponentFactoryRole");
     let dispatch_factory = paths.core("dispatch_factory");
+    let dispatch_ready_factory = paths.core("dispatch_ready_factory");
     let factory_dependencies = paths.core("factory_dependencies");
+
+    let construct_ready = match ready {
+        Some(ready) => quote! {
+            ::core::option::Option::Some(|cx| #dispatch_ready_factory(#ready, cx))
+        },
+        None => quote!(::core::option::Option::None),
+    };
 
     quote! {
         #component_factory_descriptor {
             id: #id,
             construct: |cx| #dispatch_factory(#factory, cx),
+            construct_ready: #construct_ready,
             dependencies: || #factory_dependencies(#factory),
             role: #component_factory_role::Explicit,
         }
@@ -403,6 +456,7 @@ pub fn explicit_factory(
     let factory = factory_descriptor(
         &quote!(concat!("factory:", stringify!(#factory_path))),
         &quote!(#factory_path),
+        None,
         paths,
     );
 
@@ -420,6 +474,7 @@ pub fn explicit_factory(
 /// local state).
 struct FieldPlan {
     value: TokenStream,
+    ready: ReadyField,
     dependency: Option<TokenStream>,
     /// The `Provided<Target>` type to assert eagerly for this field, when it is a
     /// required *concrete* dependency (trait-object / optional / dynamic / multi
@@ -428,6 +483,38 @@ struct FieldPlan {
     /// The `Provided<Target>` type for the lazy `Wired` bound — every required
     /// single dependency, *including* trait objects (checked only via `app!`).
     wired: Option<TokenStream>,
+}
+
+/// How a field is built on the synchronous factory path: `read` binds a dependency before
+/// the struct literal, returning `Ok(None)` when it is not ready, and `value` builds the
+/// field. Reading every dependency first keeps a `#[default]` field from being built for an
+/// attempt that falls back to the async path.
+struct ReadyField {
+    read: Option<TokenStream>,
+    value: TokenStream,
+}
+
+impl ReadyField {
+    /// A field built the same way on both paths, without awaiting.
+    fn same(value: &TokenStream) -> Self {
+        Self {
+            read: None,
+            value: value.clone(),
+        }
+    }
+
+    /// A field whose dependency `source` yields `Option<T>`, `None` meaning not ready.
+    /// `value` builds the field from the read binding.
+    fn read(binding: &syn::Ident, source: TokenStream, value: TokenStream) -> Self {
+        Self {
+            read: Some(quote! {
+                let ::core::option::Option::Some(#binding) = #source else {
+                    return ::core::result::Result::Ok(::core::option::Option::None);
+                };
+            }),
+            value,
+        }
+    }
 }
 
 /// Classifies a field and, as a side effect, strips the `#[default]` marker so
@@ -440,8 +527,11 @@ fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
     field.attrs.retain(|a| !a.path().is_ident("default"));
 
     if had_default {
+        let value = quote!(::core::default::Default::default());
+
         return FieldPlan {
-            value: quote!(::core::default::Default::default()),
+            ready: ReadyField::same(&value),
+            value,
             dependency: None,
             check: None,
             wired: None,
@@ -520,6 +610,7 @@ fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
     };
 
     let none = quote!(::core::option::Option::None);
+    let binding = format_ident!("__upwell_dep{index}");
     let index = Literal::usize_unsuffixed(index);
 
     let ty = &field.ty;
@@ -535,8 +626,11 @@ fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
             dependency
         });
 
+        let value = quote!(cx.fresh::<#handle>(#qualifier));
+
         return FieldPlan {
-            value: quote!(cx.fresh::<#handle>(#qualifier)),
+            ready: ReadyField::same(&value),
+            value,
             dependency: Some(dependency),
             check: None,
             wired: None,
@@ -554,8 +648,11 @@ fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
             dependency
         });
 
+        let value = quote!(cx.deferred::<#target>(#qualifier)?);
+
         return FieldPlan {
-            value: quote!(cx.deferred::<#target>(#qualifier)?),
+            ready: ReadyField::same(&value),
+            value,
             dependency: Some(dependency),
             check: None,
             wired: None,
@@ -571,15 +668,25 @@ fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
             }),
             None => quote!(<#ty as #from_container>::dependency()),
         };
-        let value = match (&field_qualifier, attr::arc_inner_type(&handle)) {
+        let (value, ready) = match (&field_qualifier, attr::arc_inner_type(&handle)) {
             (Some(qualifier), Ok(target)) => {
-                quote!(cx.lazy_qualified::<#target>(#qualifier))
+                let value = quote!(cx.lazy_qualified::<#target>(#qualifier));
+
+                (value.clone(), ReadyField::same(&value))
             }
-            _ => quote!(<#ty as #from_container>::from_container(cx).await?),
+            _ => (
+                quote!(<#ty as #from_container>::from_container(cx).await?),
+                ReadyField::read(
+                    &binding,
+                    quote!(<#ty as #from_container>::ready_at(cx, #index)),
+                    quote!(#binding?),
+                ),
+            ),
         };
 
         return FieldPlan {
             value,
+            ready,
             dependency: Some(dependency),
             check: None,
             wired: None,
@@ -632,8 +739,11 @@ fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
             }
         };
 
+        let value = quote!(#resolved.ok_or(#error::MissingComponent(#dep_name))?);
+
         return FieldPlan {
-            value: quote!(#resolved.ok_or(#error::MissingComponent(#dep_name))?),
+            ready: ReadyField::same(&value),
+            value,
             dependency: Some(dependency),
             check: None,
             wired: None,
@@ -653,6 +763,11 @@ fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
 
         return FieldPlan {
             value: quote!(cx.dep_all::<#item>(#index).await?),
+            ready: ReadyField::read(
+                &binding,
+                quote!(cx.dep_all_ready::<#item>(#index)),
+                quote!(#binding),
+            ),
             dependency: Some(dependency),
             check: None,
             wired: None,
@@ -670,6 +785,11 @@ fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
 
         return FieldPlan {
             value: quote!(cx.dep_keyed::<#value>(#index).await?),
+            ready: ReadyField::read(
+                &binding,
+                quote!(cx.dep_keyed_ready::<#value>(#index)),
+                quote!(#binding),
+            ),
             dependency: Some(dependency),
             check: None,
             wired: None,
@@ -697,13 +817,18 @@ fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
         Some(q) => quote!(::core::option::Option::Some(#q)),
         None => none,
     };
-    let resolved = quote!(cx.dep::<#handle>(#index, #qualifier).await?);
-    let value = match (optional, dynamic) {
+    let wrap = |resolved: TokenStream| match (optional, dynamic) {
         (false, false) => quote!(#resolved.ok_or(#error::MissingComponent(#dep_name))?),
         (false, true) => quote!(#dynamic_ty(#resolved.ok_or(#error::MissingComponent(#dep_name))?)),
         (true, false) => resolved,
         (true, true) => quote!(#resolved.map(#dynamic_ty)),
     };
+    let value = wrap(quote!(cx.dep::<#handle>(#index, #qualifier).await?));
+    let ready = ReadyField::read(
+        &binding,
+        quote!(cx.dep_ready::<#handle>(#index, #qualifier)),
+        wrap(quote!(#binding)),
+    );
 
     let dependency = dep(
         &handle,
@@ -725,6 +850,7 @@ fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
 
     FieldPlan {
         value,
+        ready,
         dependency: Some(dependency),
         check,
         wired,

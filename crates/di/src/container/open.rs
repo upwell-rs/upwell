@@ -145,7 +145,7 @@ impl ScopeContainer {
 
             cx.set_running(Running::Slot(SlotIdx::new(index)));
 
-            let built = (factory.construct)(&mut cx).await;
+            let built = factory.build(&mut cx).await;
 
             cx.set_running(Running::Unplanned);
             cx.insert(built?)?;
@@ -210,7 +210,7 @@ impl ScopeContainer {
                 Some(factory) => {
                     debug!(component = %descriptor.name, scope = scope.name(), "constructing component");
 
-                    let component = (factory.construct)(&mut cx).await?;
+                    let component = factory.build(&mut cx).await?;
 
                     cx.insert(component)?;
 

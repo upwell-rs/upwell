@@ -69,6 +69,7 @@ pub(super) static DIAGNOSTIC_CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1]
     [ComponentFactoryDescriptor {
         id: "diagnostic-consumer",
         construct,
+        construct_ready: None,
         dependencies: diagnostic_dependency,
         role: ComponentFactoryRole::Explicit,
     }];
@@ -81,6 +82,7 @@ pub(super) static DIAGNOSTIC_PROVIDER_CONSUMER_FACTORIES: [ComponentFactoryDescr
     [ComponentFactoryDescriptor {
         id: "diagnostic-provider-consumer",
         construct,
+        construct_ready: None,
         dependencies: diagnostic_provider_dependency,
         role: ComponentFactoryRole::Explicit,
     }];

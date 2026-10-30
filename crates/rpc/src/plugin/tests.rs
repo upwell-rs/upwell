@@ -53,6 +53,7 @@ fn no_dependencies() -> Vec<upwell_core::DependencyDescriptor> {
 static SENTINEL_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: construct_sentinel,
+    construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Default,
 }];

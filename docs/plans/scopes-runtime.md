@@ -97,6 +97,13 @@ Implemented in the first slice of #345 (owner, 2026-10-29):
   position through `FromContainer::from_container_at`. Hand-written `FromContainer` parameters keep
   the typed lookup by default. Debug builds panic when an edge is read as a different type from the
   one declared at its position; release builds fall back to the typed lookup.
+- A factory may also carry a synchronous `construct_ready` path (#430), tried before the boxed async
+  `construct`. It reads planned edges without awaiting (`cx.dep_ready(i)` and friends,
+  `FromContainer::ready_at`) and returns `Ok(None)` when an edge needs a transient build or dynamic
+  selection, so the async path runs instead. `#[component]` field injection and sync `#[init]`
+  constructors emit one; async and hand-written factories keep only `construct`. The generated code
+  reads every dependency before it builds a `#[default]` field, so a fallback never builds a default
+  twice.
 
 ### Entries
 

@@ -214,7 +214,7 @@ async fn construct_declared(
     };
     let factory = factory.ok_or(Error::MissingComponent(descriptor.name))?;
 
-    (factory.construct)(context).await
+    factory.build(context).await
 }
 
 fn register_candidate_providers(

@@ -19,7 +19,7 @@ pub use context::ComponentConstructionContext;
 pub(crate) use context::{ComponentConstructionParts, SharedStore};
 pub use factory::{
     ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole,
-    DeclaredScope, Registration,
+    DeclaredScope, ReadyComponentFactory, Registration,
 };
 pub use live::{Dep, Live, LiveCell, LiveRebind, LiveRef};
 pub(crate) use planned::Running;
