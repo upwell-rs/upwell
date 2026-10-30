@@ -152,22 +152,24 @@ struct Planner<'a, R> {
 }
 
 impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
-    /// Plans every eager edge of `factory`. `visiting` holds the transients being planned,
-    /// so a transient cycle is reported instead of recursing forever.
+    /// Plans every edge of `factory` at its declared position, so a generated factory reads
+    /// its edges by index. `visiting` holds the transients being planned, so a transient
+    /// cycle is reported instead of recursing forever.
     fn factory_dependencies(
         &self,
         consumer: &ComponentDescriptor,
         factory: &ComponentFactoryDescriptor,
         visiting: &mut Vec<TypeId>,
     ) -> crate::Result<Box<[PlannedDependency]>> {
-        let mut planned = Vec::new();
+        let dependencies = (factory.dependencies)();
+        let mut planned = Vec::with_capacity(dependencies.len());
 
-        for dependency in (factory.dependencies)() {
-            if !is_planned(&dependency) {
-                continue;
-            }
-
-            let source = self.source(consumer, &dependency, visiting)?;
+        for dependency in dependencies {
+            let source = if is_planned(&dependency) {
+                self.source(consumer, &dependency, visiting)?
+            } else {
+                DepRef::Unplanned
+            };
 
             planned.push(PlannedDependency {
                 target: dependency.ty.type_id,

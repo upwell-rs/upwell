@@ -11,6 +11,7 @@ mod factory;
 mod live;
 mod planned;
 mod provider;
+mod resolve;
 mod snapshot;
 mod store;
 

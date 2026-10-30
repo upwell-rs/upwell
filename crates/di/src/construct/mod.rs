@@ -101,6 +101,17 @@ pub trait FromContainer: Sized {
     fn from_container(
         cx: &ComponentConstructionContext,
     ) -> impl Future<Output = crate::Result<Self>> + Send;
+
+    /// Resolves this parameter as the factory's edge declared at `index`, reading the
+    /// running slot's planned edge there directly. Defaults to
+    /// [`from_container`](Self::from_container) for parameters that resolve through their
+    /// own handle.
+    fn from_container_at(
+        cx: &ComponentConstructionContext,
+        _index: usize,
+    ) -> impl Future<Output = crate::Result<Self>> + Send {
+        Self::from_container(cx)
+    }
 }
 
 impl<T> FromContainer for Arc<T>
@@ -113,6 +124,15 @@ where
 
     async fn from_container(cx: &ComponentConstructionContext) -> crate::Result<Self> {
         cx.resolve::<Arc<T>>()
+            .await?
+            .ok_or(Error::MissingComponent(short_name::<T>()))
+    }
+
+    async fn from_container_at(
+        cx: &ComponentConstructionContext,
+        index: usize,
+    ) -> crate::Result<Self> {
+        cx.dep::<Arc<T>>(index, None)
             .await?
             .ok_or(Error::MissingComponent(short_name::<T>()))
     }
@@ -132,6 +152,15 @@ where
 
     async fn from_container(cx: &ComponentConstructionContext) -> crate::Result<Self> {
         cx.resolve::<Dep<T>>()
+            .await?
+            .ok_or(Error::MissingComponent(short_name::<T>()))
+    }
+
+    async fn from_container_at(
+        cx: &ComponentConstructionContext,
+        index: usize,
+    ) -> crate::Result<Self> {
+        cx.dep::<Dep<T>>(index, None)
             .await?
             .ok_or(Error::MissingComponent(short_name::<T>()))
     }
@@ -155,6 +184,15 @@ where
             .await?
             .ok_or(Error::MissingComponent(short_name::<H>()))
     }
+
+    async fn from_container_at(
+        cx: &ComponentConstructionContext,
+        index: usize,
+    ) -> crate::Result<Self> {
+        cx.dep::<H>(index, None)
+            .await?
+            .ok_or(Error::MissingComponent(short_name::<H>()))
+    }
 }
 
 impl<T> FromContainer for Option<Arc<T>>
@@ -167,6 +205,13 @@ where
 
     async fn from_container(cx: &ComponentConstructionContext) -> crate::Result<Self> {
         cx.resolve::<Arc<T>>().await
+    }
+
+    async fn from_container_at(
+        cx: &ComponentConstructionContext,
+        index: usize,
+    ) -> crate::Result<Self> {
+        cx.dep::<Arc<T>>(index, None).await
     }
 }
 
@@ -181,6 +226,13 @@ where
     async fn from_container(cx: &ComponentConstructionContext) -> crate::Result<Self> {
         cx.resolve_all::<Arc<T>>().await
     }
+
+    async fn from_container_at(
+        cx: &ComponentConstructionContext,
+        index: usize,
+    ) -> crate::Result<Self> {
+        cx.dep_all::<Arc<T>>(index).await
+    }
 }
 
 impl<T> FromContainer for HashMap<String, Arc<T>>
@@ -193,6 +245,13 @@ where
 
     async fn from_container(cx: &ComponentConstructionContext) -> crate::Result<Self> {
         cx.resolve_keyed::<Arc<T>>().await
+    }
+
+    async fn from_container_at(
+        cx: &ComponentConstructionContext,
+        index: usize,
+    ) -> crate::Result<Self> {
+        cx.dep_keyed::<Arc<T>>(index).await
     }
 }
 
@@ -256,7 +315,7 @@ pub trait Factory<Args>: Sized {
 }
 
 macro_rules! impl_factory {
-    ( $($ty:ident),* ) => {
+    ( $($ty:ident $index:literal),* ) => {
         impl<F, Fut, Out, $($ty,)*> Factory<($($ty,)*)> for F
         where
             F: FnOnce($($ty,)*) -> Fut + Send,
@@ -273,7 +332,7 @@ macro_rules! impl_factory {
                 self,
                 cx: &mut ComponentConstructionContext,
             ) -> crate::Result<BoxedComponent> {
-                $( let $ty = <$ty as FromContainer>::from_container(cx).await?; )*
+                $( let $ty = <$ty as FromContainer>::from_container_at(cx, $index).await?; )*
 
                 let output = (self)($($ty,)*).await;
                 let component = output.into_component()?;
@@ -292,14 +351,14 @@ macro_rules! impl_factory {
 }
 
 impl_factory!();
-impl_factory!(T1);
-impl_factory!(T1, T2);
-impl_factory!(T1, T2, T3);
-impl_factory!(T1, T2, T3, T4);
-impl_factory!(T1, T2, T3, T4, T5);
-impl_factory!(T1, T2, T3, T4, T5, T6);
-impl_factory!(T1, T2, T3, T4, T5, T6, T7);
-impl_factory!(T1, T2, T3, T4, T5, T6, T7, T8);
+impl_factory!(T1 0);
+impl_factory!(T1 0, T2 1);
+impl_factory!(T1 0, T2 1, T3 2);
+impl_factory!(T1 0, T2 1, T3 2, T4 3);
+impl_factory!(T1 0, T2 1, T3 2, T4 3, T5 4);
+impl_factory!(T1 0, T2 1, T3 2, T4 3, T5 4, T6 5);
+impl_factory!(T1 0, T2 1, T3 2, T4 3, T5 4, T6 5, T7 6);
+impl_factory!(T1 0, T2 1, T3 2, T4 3, T5 4, T6 5, T7 6, T8 7);
 
 /// The dependency edges of `factory`, recovered from its [`Factory`] impl. The
 /// factory value is consumed only to infer `Args`; the macro wraps a non-capturing

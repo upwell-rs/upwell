@@ -16,11 +16,13 @@
 //!
 //! [`Injectable`]: upwell_core::Injectable
 
-use proc_macro2::TokenStream;
+use proc_macro2::{Literal, TokenStream};
 use quote::{ToTokens, format_ident, quote, quote_spanned};
-use syn::{Expr, ExprLit, Field, Fields, ItemStruct, Lit, LitStr, Meta, spanned::Spanned};
+use syn::spanned::Spanned;
+use syn::{Expr, ExprLit, Field, Fields, ItemStruct, Lit, LitStr, Meta};
 
-use crate::{attr, paths::Paths};
+use crate::attr;
+use crate::paths::Paths;
 
 /// The per-type registration slice identifier, `{Type}Registrations` — the merged `linkme` slice
 /// holding both factory and hook entries (as `Registration`). Declared by `#[component]` /
@@ -193,7 +195,7 @@ pub fn field_injection_component(
             dependency,
             check,
             wired,
-        } = plan_field(field, paths);
+        } = plan_field(field, dep_descriptors.len(), paths);
 
         inits.push(quote!(#prefix #value));
 
@@ -430,7 +432,10 @@ struct FieldPlan {
 
 /// Classifies a field and, as a side effect, strips the `#[default]` marker so
 /// the emitted struct stays valid.
-fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
+///
+/// `index` is the position the field's dependency edge takes in the factory's declared
+/// edges, so a planned edge is read by position instead of by type.
+fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
     let had_default = field.attrs.iter().any(|a| a.path().is_ident("default"));
     field.attrs.retain(|a| !a.path().is_ident("default"));
 
@@ -515,6 +520,7 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
     };
 
     let none = quote!(::core::option::Option::None);
+    let index = Literal::usize_unsuffixed(index);
 
     let ty = &field.ty;
 
@@ -646,7 +652,7 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
         );
 
         return FieldPlan {
-            value: quote!(cx.resolve_all::<#item>().await?),
+            value: quote!(cx.dep_all::<#item>(#index).await?),
             dependency: Some(dependency),
             check: None,
             wired: None,
@@ -663,7 +669,7 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
         );
 
         return FieldPlan {
-            value: quote!(cx.resolve_keyed::<#value>().await?),
+            value: quote!(cx.dep_keyed::<#value>(#index).await?),
             dependency: Some(dependency),
             check: None,
             wired: None,
@@ -687,13 +693,11 @@ fn plan_field(field: &mut Field, paths: &Paths) -> FieldPlan {
     };
     let dep_name = LitStr::new(&dep_name_str, handle.span());
 
-    let (resolved, qualifier) = match &field_qualifier {
-        Some(q) => (
-            quote!(cx.resolve_qualified::<#handle>(#q).await?),
-            quote!(::core::option::Option::Some(#q)),
-        ),
-        None => (quote!(cx.resolve::<#handle>().await?), none),
+    let qualifier = match &field_qualifier {
+        Some(q) => quote!(::core::option::Option::Some(#q)),
+        None => none,
     };
+    let resolved = quote!(cx.dep::<#handle>(#index, #qualifier).await?);
     let value = match (optional, dynamic) {
         (false, false) => quote!(#resolved.ok_or(#error::MissingComponent(#dep_name))?),
         (false, true) => quote!(#dynamic_ty(#resolved.ok_or(#error::MissingComponent(#dep_name))?)),
