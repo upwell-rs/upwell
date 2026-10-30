@@ -17,7 +17,7 @@ use upwell_rpc::{
 };
 use upwell_transport::PeerInfo;
 
-use crate::scoped::{self, CallScope, CallScoped, Route, ScopedCalls, ScopedProtocol};
+use crate::scoped::{self, CallScope, CallScoped, Roster, Route, ScopedCalls, ScopedProtocol};
 
 /// The path of the handler that resolves nothing.
 pub const HELLO: &str = "BenchService.hello";
@@ -93,12 +93,12 @@ pub struct RpcCalls {
 }
 
 impl ScopedProtocol for RpcCalls {
-    async fn build(count: usize) -> Self {
+    async fn build(roster: Roster) -> Self {
         let calls = ScopedCalls::build(
             scoped::builder("rpc-call-bench"),
             Connection::KEY,
             Request::KEY,
-            count,
+            roster,
         )
         .await;
         let router = router(vec![
