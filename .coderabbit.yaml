@@ -59,4 +59,5 @@ knowledge_base:
   code_guidelines:
     enabled: true
     filePatterns:
-      - docs/rust-style.md
+      - files: docs/rust-style.md
+        applyTo: "**/*.rs"
