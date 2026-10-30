@@ -9,6 +9,8 @@
 //!   wall-clock time, turning "how much memory does this cost" into a first-class, trended metric.
 //! - [`cases`] — the harness that runs a per-call bench's cases in both time and bytes.
 //! - [`scoped`] — a per-call scope roster and fixture shared by every protocol bench.
+//! - [`fan_in`] — a per-call component with many dependencies, built through the ordinary
+//!   factory path.
 //! - [`di`] — builders that stand up small/moderate/large DI graphs layered across several scopes,
 //!   using only the public `upwell-di` API.
 //! - [`graph`] — large factory-backed singleton graphs for measuring graph preparation.
@@ -21,6 +23,7 @@
 pub mod alloc;
 pub mod cases;
 pub mod di;
+pub mod fan_in;
 pub mod graph;
 pub mod http;
 pub mod measure;

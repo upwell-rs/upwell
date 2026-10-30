@@ -23,6 +23,7 @@ use upwell_di::{
 };
 
 use crate::cases::{Call, Case};
+use crate::fan_in::{self, FAN_IN};
 
 /// The largest number of scoped components a fixture can register.
 pub const MAX_SCOPED: usize = 64;
@@ -112,6 +113,34 @@ pub fn register<D: ProtocolDefinition>(
         })
 }
 
+/// The components a fixture registers in its per-call scope.
+#[derive(Clone, Copy)]
+pub enum Roster {
+    /// The first `N` roster components, none of which has a dependency.
+    Unused(usize),
+
+    /// [`FAN_IN`] roster components plus a [`FanIn`](fan_in::FanIn) consumer depending on all
+    /// of them, so every per-call scope runs a factory reading [`FAN_IN`] edges.
+    FanIn,
+}
+
+impl Roster {
+    /// Registers this roster in `scope` with `builder`.
+    pub fn register<D: ProtocolDefinition>(
+        self,
+        builder: AppBuilder<D>,
+        scope: ScopeKey,
+    ) -> AppBuilder<D> {
+        match self {
+            Self::Unused(count) => register(builder, scope, count),
+
+            Self::FanIn => {
+                register(builder, scope, FAN_IN).component_descriptor(fan_in::descriptor(scope))
+            }
+        }
+    }
+}
+
 /// Builds an application named `name` with an empty config source.
 pub fn builder<D: ProtocolDefinition>(name: &str) -> AppBuilder<D> {
     App::<D>::builder(name).config_source(ConfigManager::<Dynamic>::empty())
@@ -147,18 +176,19 @@ pub struct ScopedCalls<D: ProtocolDefinition> {
 }
 
 impl<D: ProtocolDefinition> ScopedCalls<D> {
-    /// Builds `builder` with `count` roster components in the `per_call` scope, then opens one
-    /// `connection` scope from the root.
+    /// Builds `builder` with `roster` in the `per_call` scope, then opens one `connection` scope
+    /// from the root.
     pub async fn build(
         builder: AppBuilder<D>,
         connection: ScopeKey,
         per_call: ScopeKey,
-        count: usize,
+        roster: Roster,
     ) -> Self
     where
         D::Error: std::fmt::Debug,
     {
-        let app = register(builder, per_call, count)
+        let app = roster
+            .register(builder, per_call)
             .build()
             .await
             .expect("benchmark app builds");
@@ -192,8 +222,8 @@ impl<D: ProtocolDefinition> ScopedCalls<D> {
 
 /// A protocol fixture that serves the [`Route`]s over [`ScopedCalls`].
 pub trait ScopedProtocol: Sized {
-    /// Builds the fixture with `count` roster components in its per-call scope.
-    fn build(count: usize) -> impl Future<Output = Self>;
+    /// Builds the fixture with `roster` in its per-call scope.
+    fn build(roster: Roster) -> impl Future<Output = Self>;
 
     /// Dispatches one call to `route` through `scope` and returns whether it succeeded.
     fn call(&self, scope: CallScope, route: Route) -> impl Future<Output = bool>;
@@ -219,27 +249,40 @@ impl<P: ScopedProtocol> Call for ScopedCall<P> {
 /// - `scoped`: a handler resolving one per-call component, the only one registered.
 /// - `unused/N`: the injection-free handler in a fresh per-call scope with `N` registered
 ///   components it never uses.
+/// - `fan_in/8`: the injection-free handler in a fresh per-call scope whose components include
+///   one factory reading eight dependency edges.
 pub fn cases<P: ScopedProtocol>(runtime: &Runtime) -> Vec<Case<ScopedCall<P>>> {
-    let case = |count, scope, route| ScopedCall {
-        fixture: runtime.block_on(P::build(count)),
+    let case = |roster, scope, route| ScopedCall {
+        fixture: runtime.block_on(P::build(roster)),
         scope,
         route,
     };
     let mut cases = vec![
         Case::new(
             "dispatch_only",
-            case(0, CallScope::Connection, Route::Hello),
+            case(Roster::Unused(0), CallScope::Connection, Route::Hello),
         ),
-        Case::new("empty_scope", case(0, CallScope::PerCall, Route::Hello)),
-        Case::new("scoped", case(1, CallScope::PerCall, Route::Scoped)),
+        Case::new(
+            "empty_scope",
+            case(Roster::Unused(0), CallScope::PerCall, Route::Hello),
+        ),
+        Case::new(
+            "scoped",
+            case(Roster::Unused(1), CallScope::PerCall, Route::Scoped),
+        ),
     ];
 
     for count in UNUSED {
         cases.push(Case::new(
             format!("unused/{count}"),
-            case(count, CallScope::PerCall, Route::Hello),
+            case(Roster::Unused(count), CallScope::PerCall, Route::Hello),
         ));
     }
+
+    cases.push(Case::new(
+        format!("fan_in/{FAN_IN}"),
+        case(Roster::FanIn, CallScope::PerCall, Route::Hello),
+    ));
 
     cases
 }

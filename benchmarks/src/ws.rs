@@ -14,7 +14,7 @@ use upwell_axum::scope::{WebsocketConnection, WebsocketMessage};
 use upwell_core::Scope;
 use upwell_di::ScopeContainer;
 
-use crate::scoped::{self, CallScope, CallScoped, Route, ScopedCalls, ScopedProtocol};
+use crate::scoped::{self, CallScope, CallScoped, Roster, Route, ScopedCalls, ScopedProtocol};
 
 fn handler(route: Route, scope: Arc<ScopeContainer>) -> BoxFuture<'static, bool> {
     Box::pin(async move {
@@ -31,12 +31,12 @@ pub struct WsMessages {
 }
 
 impl ScopedProtocol for WsMessages {
-    async fn build(count: usize) -> Self {
+    async fn build(roster: Roster) -> Self {
         let calls = ScopedCalls::build(
             scoped::builder("ws-message-bench"),
             WebsocketConnection::KEY,
             WebsocketMessage::KEY,
-            count,
+            roster,
         )
         .await;
 

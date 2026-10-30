@@ -9,6 +9,8 @@
 //! - `scoped`: a handler resolving one per-call component, the only one registered.
 //! - `unused/N`: the injection-free handler in a fresh per-call scope with `N` registered
 //!   components it never uses.
+//! - `fan_in/8`: the injection-free handler in a fresh per-call scope whose components include one
+//!   factory reading eight dependency edges, so the cost of reading planned edges is visible.
 //!
 //! Each case runs twice, once for wall-clock time (`rpc_call`, `ws_message`) and once for heap
 //! bytes per call (`rpc_call_bytes`, `ws_message_bytes`). Per-call cost should track what a
