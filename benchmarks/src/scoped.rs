@@ -115,6 +115,7 @@ pub fn register<D: ProtocolDefinition>(
 
 /// The components a fixture registers in its per-call scope.
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub enum Roster {
     /// The first `N` roster components, none of which has a dependency.
     Unused(usize),
