@@ -42,6 +42,9 @@ pub(crate) enum DepRef {
     Many(Box<[ProvidedRef]>),
     /// An optional dependency no visible provider satisfies.
     Absent,
+    /// An edge resolved through its own handle (config, dynamic, lazy, deferred or fresh),
+    /// kept so planned edges stay at their declared positions.
+    Unplanned,
 }
 
 /// One provider of a collection or keyed dependency.
@@ -62,7 +65,8 @@ pub(crate) struct TransientPlan {
     pub(crate) dependencies: Box<[PlannedDependency]>,
 }
 
-/// One eager dependency edge of a factory and the source it resolves to.
+/// One dependency edge of a factory, at its declared position, and the source it resolves
+/// to.
 #[derive(Clone, Debug)]
 pub(crate) struct PlannedDependency {
     pub(crate) target: TypeId,
@@ -72,7 +76,8 @@ pub(crate) struct PlannedDependency {
 }
 
 impl PlannedDependency {
-    /// Returns the source of the edge requesting `target` with `qualifier` and `cardinality`.
+    /// Returns the planned source of the edge requesting `target` with `qualifier` and
+    /// `cardinality`.
     pub(crate) fn find<'plan>(
         planned: &'plan [Self],
         target: TypeId,
@@ -80,9 +85,46 @@ impl PlannedDependency {
         cardinality: Cardinality,
     ) -> Option<&'plan DepRef> {
         let edge = planned.iter().find(|edge| {
-            edge.target == target && edge.qualifier == qualifier && edge.cardinality == cardinality
+            edge.target == target
+                && edge.qualifier == qualifier
+                && edge.cardinality == cardinality
+                && edge.is_planned()
         })?;
 
         Some(&edge.source)
+    }
+
+    /// Returns the planned source of the edge declared at `index`, when it requests
+    /// `target` with `cardinality`.
+    ///
+    /// A planned edge requested as another type means a factory read an edge away from
+    /// its declared position, which is a bug in the factory's generated code. Debug builds
+    /// panic on it; release builds return `None` so the caller falls back to a typed
+    /// lookup instead of reading another edge's slot.
+    pub(crate) fn at(
+        planned: &[Self],
+        index: usize,
+        target: TypeId,
+        cardinality: Cardinality,
+    ) -> Option<&DepRef> {
+        let edge = planned.get(index)?;
+
+        if !edge.is_planned() {
+            return None;
+        }
+
+        let declared = edge.target == target && edge.cardinality == cardinality;
+
+        debug_assert!(
+            declared,
+            "factory edge {index} was requested as another type than it declared; this is a \
+             bug in the factory's generated code"
+        );
+
+        declared.then_some(&edge.source)
+    }
+
+    fn is_planned(&self) -> bool {
+        !matches!(self.source, DepRef::Unplanned)
     }
 }

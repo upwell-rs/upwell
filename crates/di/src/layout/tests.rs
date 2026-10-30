@@ -316,8 +316,58 @@ fn plan_leaves_unplanned_edges_to_the_dynamic_path() {
         .expect("the inner scope plans");
 
     assert!(
-        layout.slots()[2].dependencies.is_empty(),
-        "lazy edges resolve through their own handle"
+        matches!(sources(&layout, 2)[..], [DepRef::Unplanned]),
+        "a lazy edge keeps its position but resolves through its own handle"
+    );
+}
+
+#[test]
+fn planned_edges_are_read_by_declared_position() {
+    let fixture = Fixture::new();
+    let mixed = scoped(
+        component::<Elsewhere>(
+            "mixed-consumer",
+            unbuilt_factories!("mixed-consumer", || vec![
+                dependency(
+                    "Handler",
+                    TypeDescriptor::of::<Handler>("Handler"),
+                    Cardinality::One,
+                    ResolutionMode::Lazy,
+                ),
+                eager::<Handler>("Handler", Cardinality::One),
+            ]),
+        ),
+        Inner::KEY,
+    );
+    let selection = fixture.selection(&[mixed]);
+    let handler = TypeId::of::<Handler>();
+
+    let layout = fixture
+        .inner(&selection, &[fixture.handler, mixed])
+        .expect("the inner scope plans");
+    let planned = &layout.slots()[2].dependencies;
+
+    assert!(
+        matches!(
+            PlannedDependency::at(planned, 1, handler, Cardinality::One),
+            Some(DepRef::Local(at)) if at.slot == SlotIdx::new(1)
+        ),
+        "the eager edge after a lazy one is read at its declared position"
+    );
+    assert!(
+        PlannedDependency::at(planned, 0, handler, Cardinality::One).is_none(),
+        "an unplanned position falls back to the edge's own handle"
+    );
+    assert!(
+        PlannedDependency::at(planned, 2, handler, Cardinality::One).is_none(),
+        "a position past the declared edges has no planned source"
+    );
+    assert!(
+        matches!(
+            PlannedDependency::find(planned, handler, None, Cardinality::One),
+            Some(DepRef::Local(_))
+        ),
+        "a typed lookup skips the unplanned edge of the same type"
     );
 }
 
@@ -375,5 +425,24 @@ fn plan_rejects_a_dependency_held_by_no_scope_on_the_chain() {
     assert!(
         matches!(&error, Error::UnplacedDependency { component_id, target, scope, .. } if component_id == "sibling-consumer" && target == "elsewhere" && *scope == "Sibling"),
         "the error names the consumer, target and scope, got {error:?}"
+    );
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "requested as another type than it declared")]
+fn a_planned_edge_read_as_another_type_is_a_bug() {
+    let fixture = Fixture::new();
+    let selection = fixture.selection(&[]);
+
+    let layout = fixture
+        .inner(&selection, &[fixture.handler, fixture.consumer])
+        .expect("the inner scope plans");
+
+    PlannedDependency::at(
+        &layout.slots()[2].dependencies,
+        0,
+        TypeId::of::<Seed>(),
+        Cardinality::One,
     );
 }

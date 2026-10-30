@@ -15,7 +15,7 @@ use std::sync::{
 };
 
 use upwell::daemon::{App, Inject, handlers, service};
-use upwell::{CallResult, MemoryConnectionHandle, PeerInfo, component, injectable};
+use upwell::{CallResult, Lazy, MemoryConnectionHandle, PeerInfo, component, injectable};
 
 use common::{MemoryServer, deadline};
 
@@ -66,6 +66,18 @@ struct ReqState {
     id: ReqId,
 }
 
+/// Request-scoped component whose eager edges follow `#[default]` and lazy fields, so a
+/// planned edge read by the wrong position would resolve the wrong dependency.
+#[component(scope = upwell::daemon::Request)]
+struct MixedState {
+    #[default]
+    _id: ReqId,
+    trace: Lazy<Arc<Trace>>,
+    req: Arc<ReqState>,
+    markers: Vec<Arc<dyn ScopedMarker>>,
+    conn: Arc<ConnState>,
+}
+
 /// Transient component, rebuilt on each resolution.
 #[component(scope = upwell::scope::Transient)]
 struct Trace {
@@ -114,6 +126,21 @@ impl ScopeSvc {
         Inject(b): Inject<Arc<Trace>>,
     ) -> upwell::daemon::Result<(u64, u64)> {
         Ok((a.id.0, b.id.0))
+    }
+
+    /// Returns what a component with mixed field kinds resolved, positionally.
+    #[rpc]
+    async fn mixed(
+        Inject(mixed): Inject<Arc<MixedState>>,
+    ) -> upwell::daemon::Result<(u64, u64, Vec<String>, bool)> {
+        let trace = mixed.trace.get_or_create().await.is_ok();
+        let markers = mixed
+            .markers
+            .iter()
+            .map(|marker| marker.name().to_string())
+            .collect();
+
+        Ok((mixed.conn.id.0, mixed.req.conn.id.0, markers, trace))
     }
 
     #[rpc]
@@ -226,6 +253,32 @@ async fn provider_order_is_global_across_visible_scopes() {
     };
 
     assert_eq!(names, ["request", "root"]);
+
+    server.shutdown([conn]).await;
+}
+
+#[tokio::test]
+async fn generated_factory_reads_each_edge_at_its_declared_position() {
+    let server = start().await;
+    let conn = server.connect().await;
+    let result = deadline("ScopeSvc.mixed call", conn.call("ScopeSvc.mixed", enc(&())))
+        .await
+        .expect("mixed call returns a response");
+    let (conn_id, req_conn_id, markers, trace) = match result {
+        CallResult::Ok(body) => dec::<(u64, u64, Vec<String>, bool)>(&body),
+        CallResult::Err { .. } => panic!("mixed call errored"),
+    };
+
+    assert_eq!(
+        conn_id, req_conn_id,
+        "the connection edge and the request state's connection are the same instance"
+    );
+    assert_eq!(
+        markers,
+        ["request", "root"],
+        "the collection edge resolves every provider in order"
+    );
+    assert!(trace, "the lazy edge still resolves through its own handle");
 
     server.shutdown([conn]).await;
 }

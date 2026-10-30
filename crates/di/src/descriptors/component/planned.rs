@@ -61,14 +61,20 @@ impl ComponentConstructionContext {
         }
     }
 
-    /// The planned source of the running factory's edge for `target`, if it planned one.
-    pub(super) fn planned_source(
+    /// The planned source of the running factory's edge for `target`: the edge declared at
+    /// `index` when it matches, otherwise the first matching edge by type.
+    pub(super) fn planned_edge(
         &self,
+        index: Option<usize>,
         target: TypeId,
         qualifier: Option<&str>,
         cardinality: Cardinality,
     ) -> Option<&DepRef> {
-        PlannedDependency::find(self.planned_dependencies(), target, qualifier, cardinality)
+        let planned = self.planned_dependencies();
+
+        index
+            .and_then(|index| PlannedDependency::at(planned, index, target, cardinality))
+            .or_else(|| PlannedDependency::find(planned, target, qualifier, cardinality))
     }
 
     /// Resolves one planned single-value source.
@@ -95,21 +101,23 @@ impl ComponentConstructionContext {
                     .and_then(|parent| parent.root_container().root_target::<H>(target)),
             ),
             DepRef::Transient(plan) => Planned::Resolved(self.build_transient::<H>(plan).await?),
-            DepRef::Many(_) => Planned::Unavailable,
+            DepRef::Many(_) | DepRef::Unplanned => Planned::Unavailable,
         };
 
         Ok(planned)
     }
 
     /// The planned providers of the running factory's `cardinality` edge for `target`,
-    /// with their qualifiers. `None` when the factory planned no such edge or one of its
-    /// providers cannot be answered from the plan.
+    /// with their qualifiers, read at `index` when it matches. `None` when the factory
+    /// planned no such edge or one of its providers cannot be answered from the plan.
     pub(super) async fn planned_many<H: Injectable>(
         &self,
+        index: Option<usize>,
         target: TypeId,
         cardinality: Cardinality,
     ) -> crate::Result<Option<Vec<(&'static str, H)>>> {
-        let Some(DepRef::Many(provided)) = self.planned_source(target, None, cardinality) else {
+        let Some(DepRef::Many(provided)) = self.planned_edge(index, target, None, cardinality)
+        else {
             return Ok(None);
         };
 

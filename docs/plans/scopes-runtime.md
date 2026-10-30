@@ -77,7 +77,8 @@ Implemented in the first slice of #345 (owner, 2026-10-29):
   provider of a collection or keyed edge, or absent for an unsatisfied optional edge. Selection uses
   the same rules and the same reachability as validation, so a planned edge resolves to the target
   validation checked. Config, dynamic, lazy, deferred and fresh edges keep resolving through their
-  own handles.
+  own handles. They stay in the plan as unplanned entries, so every edge keeps its declared
+  position.
 - A scope opened by the runtime stores its instances in a dense slot store laid out by its layout,
   instead of per-instance `HashMap`s. Factories read their planned edges first, so no provider
   selection runs while a planned scope is built. A planned source that cannot answer, such as an
@@ -90,8 +91,12 @@ Implemented in the first slice of #345 (owner, 2026-10-29):
   swappable `ArcSwap`), so slots in a pinned scope need no `ArcSwap` and `Dep<T>` keeps its type.
   It lands with the container kinds (#344). Slots store `Injectable::Stored`, so layouts do not
   change when it does.
-- Next slice: macro-generated factories take their dependencies by position (`ctx.dep(i)`)
-  instead of matching the running slot's edges by type.
+- Generated factories read their edges by declared position (`cx.dep(i)`, `cx.dep_all(i)`,
+  `cx.dep_keyed(i)`), so a planned edge costs one index instead of a search by type. `#[component]`
+  field injection emits these calls, and `#[init]`/`factory = path` factories pass each parameter's
+  position through `FromContainer::from_container_at`. Hand-written `FromContainer` parameters keep
+  the typed lookup by default. Debug builds panic when an edge is read as a different type from the
+  one declared at its position; release builds fall back to the typed lookup.
 
 ### Entries
 
