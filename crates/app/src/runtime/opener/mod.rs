@@ -264,7 +264,8 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
 
     /// Opens the instance to run `entry` as [`open`](Self::open) does, unless the entry's plan
     /// builds nothing: then the container opens the first time something resolves from the
-    /// returned scope, with this builder's seeds.
+    /// returned scope, with this builder's seeds. Until then, reads that never build see only
+    /// the scopes it opens under, not the seeds.
     ///
     /// # Errors
     ///

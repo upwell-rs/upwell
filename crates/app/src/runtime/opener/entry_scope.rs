@@ -13,11 +13,11 @@ use crate::runtime::RuntimeView;
 
 /// An instance of scope `S` opened for an entry by [`ScopeBuilder::open_when_needed`].
 ///
-/// When the entry's plan builds nothing, opening allocates no container. Reads that never
-/// build, such as [`get`](Self::get), see the scope the instance opens under, which holds
-/// everything such a read could find. The container opens the first time something resolves
-/// from the instance, on the runtime generation the entry was planned on, with the builder's
-/// seeds. Any other entry opens the container at once.
+/// When the entry's plan builds nothing, opening allocates no container. Until it opens, reads
+/// that never build, such as [`get`](Self::get), see only the scopes the instance opens under:
+/// the instance's own slots, its seeds included, are empty. The container opens the first time
+/// something resolves from the instance, on the runtime generation the entry was planned on,
+/// and only then receives the builder's seeds. Any other entry opens the container at once.
 ///
 /// [`ScopeBuilder::open_when_needed`]: super::ScopeBuilder::open_when_needed
 pub struct EntryScope<S: Scope> {
@@ -69,7 +69,8 @@ impl<S: Scope> EntryScope<S> {
 
     /// The instance's container once it is open, or the scope it opens under until then.
     ///
-    /// Reads through it that never build see the same components either way.
+    /// Before the container opens, reads through it see only the scopes the instance opens
+    /// under, not the builder's seeds.
     pub fn current(&self) -> &Arc<ScopeContainer> {
         match (self.container.get(), &self.deferred) {
             (Some(container), _) => container,
@@ -79,7 +80,8 @@ impl<S: Scope> EntryScope<S> {
     }
 
     /// The component of type `T` as its handle, if it is built in the instance or the scopes
-    /// it opens under. Never builds or opens anything.
+    /// it opens under. Never builds or opens anything, so before the container opens it does
+    /// not see the builder's seeds.
     pub fn get<T: Component>(&self) -> Option<T::Handle> {
         self.current().get::<T>()
     }
