@@ -15,7 +15,7 @@ use std::sync::{
 };
 
 use upwell::daemon::{App, Inject, handlers, service};
-use upwell::{CallResult, Lazy, MemoryConnectionHandle, PeerInfo, component, injectable};
+use upwell::{CallResult, Dep, Lazy, MemoryConnectionHandle, PeerInfo, component, injectable};
 
 use common::{MemoryServer, deadline};
 
@@ -171,6 +171,23 @@ impl ScopeSvc {
         let resolved = traced.req.conn.id.0 > 0 && traced.trace.id.0 > 0;
 
         Ok((traced.id.0, resolved))
+    }
+
+    /// Replaces the request state behind one live handle, and returns whether a second live
+    /// handle onto the same component still reads the instance the request built.
+    #[rpc]
+    async fn live_handles(
+        Inject(first): Inject<Dep<ReqState>>,
+        Inject(second): Inject<Dep<ReqState>>,
+    ) -> upwell::daemon::Result<bool> {
+        let built = second.snapshot();
+
+        first.replace(Arc::new(ReqState {
+            conn: Arc::clone(&built.conn),
+            id: ReqId(0),
+        }));
+
+        Ok(Arc::ptr_eq(&second.snapshot(), &built))
     }
 
     #[rpc]
@@ -334,6 +351,29 @@ async fn a_factory_falling_back_to_its_async_path_builds_its_defaults_once() {
         (id, TRACED_IDS.load(Ordering::Relaxed)),
         (first, first + 1),
         "the call built its traced state's default once, not once per factory path"
+    );
+
+    server.shutdown([conn]).await;
+}
+
+#[tokio::test]
+async fn live_handles_onto_a_request_component_do_not_share_a_cell() {
+    let server = start().await;
+    let conn = server.connect().await;
+    let result = deadline(
+        "ScopeSvc.live_handles call",
+        conn.call("ScopeSvc.live_handles", enc(&())),
+    )
+    .await
+    .expect("live_handles call returns a response");
+    let unchanged = match result {
+        CallResult::Ok(body) => dec::<bool>(&body),
+        CallResult::Err { .. } => panic!("live_handles call errored"),
+    };
+
+    assert!(
+        unchanged,
+        "the generated factory stores a fixed handle, so each live read gets its own cell"
     );
 
     server.shutdown([conn]).await;
