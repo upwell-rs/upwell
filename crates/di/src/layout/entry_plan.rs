@@ -1,12 +1,11 @@
 use std::any::TypeId;
 
-use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, ScopeId};
+use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, ScopeId, ScopeKey};
 
 use super::{DepRef, SlotIdx, SlotLayout};
 use crate::descriptors::ComponentDescriptor;
 use crate::registry::ProviderSelectionModel;
 use crate::registry::scopes::scope_allows_with;
-use crate::registry::selection::select_single_by;
 
 /// The slots one entry builds when it opens its scope: the slots its targets resolve to and
 /// every slot of the same scope those depend on.
@@ -47,66 +46,45 @@ impl EntryPlan {
     }
 }
 
+/// The runtime provider selection slots are planned with: eager selection from the layout's
+/// scope, over the scopes `can_access` lets a consumer reach.
+pub(crate) struct EagerSelection<'a> {
+    pub(crate) selection: &'a ProviderSelectionModel,
+    pub(crate) can_access: &'a dyn Fn(ScopeKey, ScopeKey) -> bool,
+}
+
 impl SlotLayout {
     /// Plans the slots an entry injecting `targets` builds when it opens this scope.
     ///
     /// A target that a lazy or config handle resolves builds nothing up front. Every other
-    /// target builds the slots it resolves to here, with their dependencies in this scope: its
-    /// concrete type; the providers eager runtime selection picks in `selection` that live in
-    /// this scope, one for a single value or the winner of each qualifier for a keyed map; or
-    /// every provider of a collection.
-    /// `can_reach` is the scope reachability `selection` was validated with.
+    /// target builds the slots it resolves to here, with their dependencies in this scope, as
+    /// [`for_each_selected_slot`](Self::for_each_selected_slot) picks them. `can_reach` is the
+    /// scope reachability `selection` was validated with.
     pub fn plan_entry(
         &self,
         targets: &[DependencyDescriptor],
         selection: &ProviderSelectionModel,
         can_reach: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> EntryPlan {
-        let mut builds = vec![false; self.slots.len()].into_boxed_slice();
         let can_access = |consumer, dependency| scope_allows_with(consumer, dependency, &can_reach);
+        let selector = EagerSelection {
+            selection,
+            can_access: &can_access,
+        };
+        let mut builds = vec![false; self.slots.len()].into_boxed_slice();
 
         for target in targets {
             if target.config || target.resolution != ResolutionMode::Eager {
                 continue;
             }
 
-            let target_id = target.ty.type_id;
-
-            if let Some(slot) = self.slot_of(target_id) {
-                self.include(slot, &mut builds);
-
-                continue;
-            }
-
-            let selected = match target.cardinality {
-                Cardinality::One => selection
-                    .select_runtime_one(
-                        target_id,
-                        target.qualifier,
-                        ResolutionMode::Eager,
-                        self.scope,
-                        &can_access,
-                    )
-                    .into_iter()
-                    .collect(),
-                Cardinality::Keyed => selection.select_runtime_keyed(
-                    target_id,
-                    ResolutionMode::Eager,
-                    self.scope,
-                    &can_access,
-                ),
-                Cardinality::Collection => {
-                    self.for_each_target_slot(target_id, |slot| self.include(slot, &mut builds));
-
-                    continue;
-                }
-            };
-
-            for chosen in selected {
-                if let Some(slot) = self.slot_of(chosen.provider.concrete_ty.type_id) {
-                    self.include(slot, &mut builds);
-                }
-            }
+            self.for_each_selected_slot(
+                &selector,
+                target.ty.type_id,
+                target.qualifier,
+                target.cardinality,
+                |slot| self.include(&selector, slot, &mut builds),
+            );
         }
 
         EntryPlan { builds }
@@ -125,43 +103,61 @@ impl SlotLayout {
         }
     }
 
-    /// Calls `visit` with each slot of this scope a dependency on `target` resolves to: its
-    /// concrete slot; for one value, the provider `qualifier` names or the primary or sole
-    /// provider, as resolution selects among this scope's providers; for a collection or keyed
-    /// map, every provider.
+    /// Calls `visit` with each slot of this scope an eager dependency on `target` resolves to:
+    /// its concrete slot; the providers `selector` picks that live in this scope, one for a
+    /// single value or the winner of each qualifier for a keyed map; or every provider of a
+    /// collection.
     pub(crate) fn for_each_selected_slot(
         &self,
+        selector: &EagerSelection<'_>,
         target: TypeId,
         qualifier: Option<&str>,
         cardinality: Cardinality,
         mut visit: impl FnMut(SlotIdx),
     ) {
-        if cardinality != Cardinality::One {
-            return self.for_each_target_slot(target, visit);
-        }
-
         if let Some(slot) = self.slot_of(target) {
             return visit(slot);
         }
 
-        let providers = self.providers_of(target);
-        let chosen = match qualifier {
-            Some(qualifier) => providers
-                .iter()
-                .find(|provider| provider.descriptor.qualifier == qualifier),
-            None => select_single_by(providers, |provider| provider.descriptor.primary),
+        let selected = match cardinality {
+            Cardinality::One => selector
+                .selection
+                .select_runtime_one(
+                    target,
+                    qualifier,
+                    ResolutionMode::Eager,
+                    self.scope,
+                    &selector.can_access,
+                )
+                .into_iter()
+                .collect(),
+            Cardinality::Keyed => selector.selection.select_runtime_keyed(
+                target,
+                ResolutionMode::Eager,
+                self.scope,
+                &selector.can_access,
+            ),
+            Cardinality::Collection => return self.for_each_target_slot(target, visit),
         };
 
-        if let Some(provider) = chosen {
-            visit(provider.at.slot);
+        for chosen in selected {
+            if let Some(slot) = self.slot_of(chosen.provider.concrete_ty.type_id) {
+                visit(slot);
+            }
         }
     }
 
     /// Marks `slot` and every slot of this scope it depends on in `included`.
     ///
-    /// An edge resolved through its own handle is followed to the slots its target names
-    /// here, so a slot a factory reaches dynamically or hydrates later is built with it.
-    pub(crate) fn include(&self, slot: SlotIdx, included: &mut [bool]) {
+    /// An edge resolved through its own handle is followed to the slots `selector` picks for
+    /// its target here, so a slot a factory reaches dynamically or hydrates later is built
+    /// with it.
+    pub(crate) fn include(
+        &self,
+        selector: &EagerSelection<'_>,
+        slot: SlotIdx,
+        included: &mut [bool],
+    ) {
         if included[slot.index()] {
             return;
         }
@@ -172,25 +168,31 @@ impl SlotLayout {
             match &dependency.source {
                 DepRef::Unplanned => {
                     self.for_each_selected_slot(
+                        selector,
                         dependency.target,
                         dependency.qualifier,
                         dependency.cardinality,
-                        |target| self.include(target, included),
+                        |target| self.include(selector, target, included),
                     );
                 }
 
-                source => self.include_source(source, included),
+                source => self.include_source(selector, source, included),
             }
         }
     }
 
-    fn include_source(&self, source: &DepRef, included: &mut [bool]) {
+    fn include_source(
+        &self,
+        selector: &EagerSelection<'_>,
+        source: &DepRef,
+        included: &mut [bool],
+    ) {
         match source {
-            DepRef::Local(at) => self.include(at.slot, included),
+            DepRef::Local(at) => self.include(selector, at.slot, included),
 
             DepRef::Many(provided) => {
                 for entry in provided.iter() {
-                    self.include_source(&entry.source, included);
+                    self.include_source(selector, &entry.source, included);
                 }
             }
 

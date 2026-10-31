@@ -15,6 +15,7 @@ mod tests;
 pub(crate) use dep_ref::{
     DepRef, PlannedDependency, ProvidedRef, RootTarget, SlotRef, TransientPlan,
 };
+pub(crate) use entry_plan::EagerSelection;
 pub use entry_plan::EntryPlan;
 pub use slot_layout::SlotLayout;
 pub(crate) use slot_layout::{ProviderSlot, SlotIdx, SlotSpec};

@@ -4,12 +4,12 @@ use std::any::TypeId;
 use std::sync::Arc;
 
 use tracing::debug;
-use upwell_core::{Cardinality, ResolutionMode, ScopeId};
+use upwell_core::{Cardinality, ResolutionMode, ScopeId, ScopeKey};
 
 use super::ScopeContainer;
 use crate::descriptors::component::{ComponentConstructionContext, HandleStorage, Running};
 use crate::descriptors::{BoxedComponent, ComponentFactoryDescriptor};
-use crate::layout::{DepRef, PlannedDependency, SlotIdx, SlotLayout};
+use crate::layout::{DepRef, EagerSelection, PlannedDependency, SlotIdx, SlotLayout};
 
 impl ScopeContainer {
     /// Builds every slot holding `target` (the component itself or every provider of the
@@ -158,13 +158,18 @@ impl ScopeContainer {
     ) -> Option<(Arc<SlotLayout>, Vec<bool>)> {
         let store = self.store.slots()?;
         let layout = store.layout();
+        let can_access = |_: ScopeKey, dependency: ScopeKey| self.can_access(dependency);
+        let selector = EagerSelection {
+            selection: &self.registry.selection,
+            can_access: &can_access,
+        };
         let mut needed: Option<Vec<bool>> = None;
 
         slots(layout, &mut |slot| {
             if layout.spec(slot).factory.is_some() && !store.is_built(slot) {
                 let needed = needed.get_or_insert_with(|| vec![false; layout.len()]);
 
-                layout.include(slot, needed);
+                layout.include(&selector, slot, needed);
             }
         });
 
