@@ -240,23 +240,19 @@ fn freeze_candidate(
     catch_unwind(AssertUnwindSafe(|| {
         let parts = context.into_parts();
 
-        let container = Arc::new_cyclic(|weak| {
-            let mut resolvers = parts.resolvers;
-            resolvers.insert(Arc::new(ComponentSource {
+        let container = Arc::new_cyclic(|weak| ScopeContainer {
+            scope: parts.scope,
+            store: parts.store,
+            parent: parts.parent,
+            registry: parts.registry,
+            resolver_base: parts.resolvers,
+            resolvers: std::sync::OnceLock::new(),
+            source: ComponentSource {
                 container: weak.clone(),
-            }));
-
-            ScopeContainer {
-                scope: parts.scope,
-                store: parts.store,
-                parent: parts.parent,
-                registry: parts.registry,
-                resolver_base: resolvers.clone(),
-                resolvers: std::sync::OnceLock::from(resolvers),
-                slot: slot.clone(),
-                generation_lease: None,
-                drop_guard: std::sync::OnceLock::new(),
-            }
+            },
+            slot: slot.clone(),
+            generation_lease: None,
+            drop_guard: std::sync::OnceLock::new(),
         });
 
         slot.attach(&container)?;

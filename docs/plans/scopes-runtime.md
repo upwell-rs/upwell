@@ -215,6 +215,19 @@ pub trait Scope: Send + Sync + 'static {
   container it lives in. Pinned storage therefore needs a handle of the same type that is not backed
   by `ArcSwap`; this is settled before #345 fixes the slot layout.
 - A pinned child of a durable parent uses the parent's generation.
+
+Status (#344): the policy lives on `Scope`/`ScopeKey` with `Pinned` as the default; RPC
+`Connection` and WebSocket `WebsocketConnection` declare `Durable`. Tooling projects it as each
+scope resource's `generations` label. `AppRuntime::scope_generation` and
+`AppRuntime::generations_behind` report the generation an open scope runs on and how far behind
+it is. Every scope below the root stores fixed handles (no `Live`). Opening a scope no longer
+copies the resolver set (each container answers its own `ComponentSource`), and a scope whose
+layout captures nothing (no lazy, deferred, fresh or dynamic edge, no planned transient) is built
+with an owned store and no pending resolver slot. Durable slots are still built when the scope
+opens: building them on first use is deferred to #349, together with on-demand request slots, so
+the synchronous accessors (`RpcCallContext::component`, `ScopeContainer::get`,
+`ComponentSource`, `Deferred::get`) are settled once for every lazy slot. Dropping the second box
+around fixed `Arc` handles is #425.
 - The enum is `#[non_exhaustive]` so a `Rebind` policy can follow once rebinding exists: rebuilt
   onto each new generation in place, with `Live` storage. A `Rebind` scope may only open under the
   root or other `Rebind` scopes, since a rebound child under a pinned parent would mix generations.

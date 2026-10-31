@@ -306,3 +306,37 @@ async fn nested_opening_rejects_an_unpinned_root_parent() {
         }
     ));
 }
+
+#[tokio::test]
+async fn a_durable_scope_reports_the_generations_it_fell_behind() {
+    let (runtime, _) = build_runtime(HashMap::new()).await;
+    let session = runtime
+        .open_scope_from_root(Session::KEY, Vec::new())
+        .await
+        .expect("session opens");
+
+    assert_eq!(runtime.generations_behind(&session), Some(0));
+
+    publish_next(&runtime).await;
+    publish_next(&runtime).await;
+
+    let request = runtime
+        .open_scope(Request::KEY, Arc::clone(&session), Vec::new())
+        .await
+        .expect("request opens under the old session");
+    let fresh = runtime
+        .open_scope_from_root(Session::KEY, Vec::new())
+        .await
+        .expect("a new session opens");
+
+    assert_eq!(Session::KEY.generations(), ScopeGenerations::Durable);
+    assert_eq!(Request::KEY.generations(), ScopeGenerations::Pinned);
+    assert_eq!(
+        runtime.scope_generation(&request),
+        Some(RuntimeGenerationId::INITIAL),
+        "a request opened under an old session runs on the session's generation"
+    );
+    assert_eq!(runtime.generations_behind(&session), Some(2));
+    assert_eq!(runtime.generations_behind(&request), Some(2));
+    assert_eq!(runtime.generations_behind(&fresh), Some(0));
+}

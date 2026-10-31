@@ -43,6 +43,7 @@ pub struct ScopeContainer {
     registry: Arc<ScopeRegistry>,
     resolver_base: ResolverSet,
     resolvers: std::sync::OnceLock<ResolverSet>,
+    source: ComponentSource,
     slot: ScopeResolverSlot,
     generation_lease: Option<Arc<dyn Any + Send + Sync>>,
     drop_guard: std::sync::OnceLock<Box<dyn Any + Send + Sync>>,
@@ -50,7 +51,11 @@ pub struct ScopeContainer {
 
 impl ResolverCtx for ScopeContainer {
     fn resolver(&self, kind: TypeId) -> Option<&dyn Any> {
-        self.resolvers().resolver(kind)
+        if kind == TypeId::of::<ComponentSource>() {
+            return Some(&self.source);
+        }
+
+        self.resolver_base.resolver(kind)
     }
 }
 
@@ -84,22 +89,33 @@ impl ScopeContainer {
         self.scope
     }
 
-    /// The external resolvers threaded into this scope (config store, …), shared with
-    /// child scopes.
+    /// The external resolvers threaded into this scope (config store, …) plus this scope's
+    /// own [`ComponentSource`], built on first call.
+    ///
+    /// The container answers [`ResolverCtx`] lookups without this set, and child scopes
+    /// inherit [`inherited_resolvers`](Self::inherited_resolvers), so opening a scope never
+    /// copies the set.
     pub fn resolvers(&self) -> &ResolverSet {
         self.resolvers.get_or_init(|| {
-            let container = self
-                .slot
-                .resolve()
-                .expect("built scope resolver slot remains attached");
             let mut resolvers = self.resolver_base.clone();
 
             resolvers.insert(Arc::new(ComponentSource {
-                container: Arc::downgrade(&container),
+                container: self.source.container.clone(),
             }));
 
             resolvers
         })
+    }
+
+    /// The external resolvers a scope opened under this one, or a context built over it,
+    /// starts from. Every container answers its own [`ComponentSource`] itself.
+    pub(crate) fn inherited_resolvers(&self) -> ResolverSet {
+        self.resolver_base.clone()
+    }
+
+    /// This scope's own [`ComponentSource`].
+    pub(crate) fn source(&self) -> &ComponentSource {
+        &self.source
     }
 
     pub(crate) fn registry(&self) -> Arc<ScopeRegistry> {

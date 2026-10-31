@@ -123,6 +123,10 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
                 BTreeMap::from([
                     (String::from("rank"), boundary.rank().to_string()),
                     (String::from("scope-id"), boundary.id().as_str().to_string()),
+                    (
+                        String::from("generations"),
+                        boundary.generations().as_str().to_string(),
+                    ),
                 ]),
             );
 

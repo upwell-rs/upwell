@@ -2,7 +2,7 @@ use std::any::TypeId;
 
 use super::super::{Injectable, ProviderDescriptor};
 use super::{BoxedComponent, KeyedStore, SlotStore, from_boxed};
-use crate::layout::{RootTarget, SlotLayout, SlotRef};
+use crate::layout::{RootTarget, SlotIdx, SlotLayout, SlotRef};
 
 /// The instances held by one scope, shared by the under-construction
 /// [`ComponentConstructionContext`](crate::ComponentConstructionContext) and the frozen
@@ -72,6 +72,23 @@ impl ScopeStore {
             }
 
             Self::Slots(store) => store.insert(component),
+        }
+    }
+
+    /// Stores an instance a planned slot's own factory built, at that slot.
+    pub(crate) fn insert_at(
+        &mut self,
+        slot: SlotIdx,
+        component: BoxedComponent,
+    ) -> crate::Result<()> {
+        match self {
+            Self::Slots(store) => {
+                store.insert_at(slot, component);
+
+                Ok(())
+            }
+
+            Self::Keyed(_) => self.insert(component),
         }
     }
 

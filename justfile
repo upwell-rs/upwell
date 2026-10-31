@@ -48,6 +48,7 @@ critical_filter := '''
   | binary_id(=upwell::providers)
   | binary_id(=upwell::rpc_hardening)
   | binary_id(=upwell::scope_local_providers)
+  | binary_id(=upwell::scope_capture)
   | binary_id(=upwell::scopes)
   | binary_id(=upwell::status_codes)
   | binary_id(=upwell::streaming)

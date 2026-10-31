@@ -140,3 +140,31 @@ fn plan_rejects_a_dependency_held_by_no_scope_on_the_chain() {
         "the error names the consumer, target and scope, got {error:?}"
     );
 }
+
+#[test]
+fn a_layout_captures_its_scope_only_through_lazy_or_transient_edges() {
+    let fixture = Fixture::new();
+    let lazy = scoped_component!(Elsewhere, "lazy-consumer", Inner::KEY, || vec![lazy::<
+        Handler,
+    >(
+        "Handler"
+    )]);
+    let selection = fixture.selection(&[lazy]);
+
+    let eager = fixture
+        .inner(&selection, &[fixture.handler])
+        .expect("the eager scope plans");
+    let transient = fixture
+        .inner(&selection, &[fixture.handler, fixture.consumer])
+        .expect("the transient-consuming scope plans");
+    let lazy = fixture
+        .inner(&selection, &[fixture.handler, lazy])
+        .expect("the lazy-consuming scope plans");
+
+    assert!(!eager.captures(), "eager edges read built slots only");
+    assert!(
+        transient.captures(),
+        "a transient reads the scope's in-progress store"
+    );
+    assert!(lazy.captures(), "a lazy handle captures the scope");
+}

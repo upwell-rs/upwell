@@ -84,7 +84,7 @@ impl ScopeContainer {
             return Ok(Self::empty(scope, parent, registry, generation_lease));
         }
 
-        let externals = parent.resolvers().clone();
+        let externals = parent.inherited_resolvers();
 
         Self::build(
             scope,
@@ -121,12 +121,16 @@ impl ScopeContainer {
             return Ok(Self::empty(scope, parent, registry, generation_lease));
         }
 
+        let slot = match layout.captures() {
+            true => ScopeResolverSlot::default(),
+            false => ScopeResolverSlot::detached(),
+        };
         let mut cx = ComponentConstructionContext::new_with_slot(
             scope,
             Some(Arc::clone(&parent)),
             Arc::clone(&registry),
-            parent.resolvers().clone(),
-            ScopeResolverSlot::default(),
+            parent.inherited_resolvers(),
+            slot,
         );
 
         cx.use_layout(Arc::clone(layout));
@@ -144,12 +148,14 @@ impl ScopeContainer {
 
             debug!(component = %component.name, scope = scope.name(), "constructing component");
 
-            cx.set_running(Running::Slot(SlotIdx::new(index)));
+            let slot = SlotIdx::new(index);
+
+            cx.set_running(Running::Slot(slot));
 
             let built = factory.build(&mut cx).await;
 
             cx.set_running(Running::Unplanned);
-            cx.insert(built?)?;
+            cx.insert_at(slot, built?)?;
 
             trace!(component = %component.name, "component ready");
         }
@@ -164,7 +170,7 @@ impl ScopeContainer {
         registry: Arc<ScopeRegistry>,
         generation_lease: GenerationLease,
     ) -> Arc<ScopeContainer> {
-        let externals = parent.resolvers().clone();
+        let externals = parent.inherited_resolvers();
 
         Arc::new_cyclic(|container| ScopeContainer {
             scope,
@@ -173,6 +179,9 @@ impl ScopeContainer {
             registry,
             resolver_base: externals,
             resolvers: std::sync::OnceLock::new(),
+            source: ComponentSource {
+                container: container.clone(),
+            },
             slot: ScopeResolverSlot::attached(container.clone()),
             generation_lease,
             drop_guard: std::sync::OnceLock::new(),
@@ -234,30 +243,25 @@ impl ScopeContainer {
     }
 
     /// Freezes a built scope. The container is built with [`Arc::new_cyclic`] so it can
-    /// hold its own [`ComponentSource`] (a `Weak` self-reference) in its resolver set.
+    /// hold its own [`ComponentSource`] (a `Weak` self-reference).
     fn freeze(
         parts: ComponentConstructionParts,
         generation_lease: GenerationLease,
     ) -> crate::Result<Arc<ScopeContainer>> {
         let slot = parts.slot;
-        let container = Arc::new_cyclic(|weak| {
-            let mut resolvers = parts.resolvers;
-
-            resolvers.insert(Arc::new(ComponentSource {
+        let container = Arc::new_cyclic(|weak| ScopeContainer {
+            scope: parts.scope,
+            store: parts.store,
+            parent: parts.parent,
+            registry: parts.registry,
+            resolver_base: parts.resolvers,
+            resolvers: std::sync::OnceLock::new(),
+            source: ComponentSource {
                 container: weak.clone(),
-            }));
-
-            ScopeContainer {
-                scope: parts.scope,
-                store: parts.store,
-                parent: parts.parent,
-                registry: parts.registry,
-                resolver_base: resolvers.clone(),
-                resolvers: std::sync::OnceLock::from(resolvers),
-                slot: slot.clone(),
-                generation_lease,
-                drop_guard: std::sync::OnceLock::new(),
-            }
+            },
+            slot: slot.for_container(weak),
+            generation_lease,
+            drop_guard: std::sync::OnceLock::new(),
         });
 
         slot.attach(&container)?;

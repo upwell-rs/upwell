@@ -21,12 +21,11 @@ use crate::layout::SlotLayout;
 /// lazy construction later without changing generated factory code.
 pub struct ComponentConstructionContext {
     pub(super) scope: ScopeKey,
-    /// Shared because transients constructed mid-build resolve their own
-    /// dependencies from this same in-progress store. Reads/writes are brief and
-    /// sequential; no guard is held across an await. `None` until the first write,
-    /// so a request-time extraction context, which never stores anything, does not
-    /// allocate one.
-    pub(super) store: Option<SharedStore>,
+    /// The instances built so far. Shared when transients constructed mid-build resolve
+    /// their own dependencies from this same in-progress store; reads and writes are brief
+    /// and sequential, and no guard is held across an await. Empty until the first write,
+    /// so a request-time extraction context, which never stores anything, allocates none.
+    pub(super) store: BuildStore,
     pub(super) parent: Option<Arc<crate::container::ScopeContainer>>,
     pub(super) registry: Arc<crate::container::ScopeRegistry>,
     pub(super) slot: crate::container::ScopeResolverSlot,
@@ -62,6 +61,19 @@ const STORE_POISON: &str = "scope store lock poisoned";
 /// A construction store shared with the transients built while it is in progress.
 pub(crate) type SharedStore = Arc<std::sync::RwLock<ScopeStore>>;
 
+/// Where a construction context keeps the instances it builds.
+#[derive(Default)]
+pub(super) enum BuildStore {
+    /// Nothing stored yet, as in a request-time extraction context.
+    #[default]
+    Empty,
+    /// Owned by the context, for a scope none of whose factories captures it, so no
+    /// transient reads it while it is built.
+    Owned(ScopeStore),
+    /// Shared with the transients built while the scope is in progress.
+    Shared(SharedStore),
+}
+
 pub(crate) struct ComponentConstructionParts {
     pub(crate) scope: ScopeKey,
     pub(crate) store: ScopeStore,
@@ -73,6 +85,12 @@ pub(crate) struct ComponentConstructionParts {
 
 impl ResolverCtx for ComponentConstructionContext {
     fn resolver(&self, kind: TypeId) -> Option<&dyn Any> {
+        if kind == TypeId::of::<crate::container::ComponentSource>()
+            && let Some(parent) = &self.parent
+        {
+            return Some(parent.source());
+        }
+
         self.resolvers.resolver(kind)
     }
 }
@@ -87,7 +105,7 @@ impl ComponentConstructionContext {
     ) -> Self {
         Self {
             scope,
-            store: None,
+            store: BuildStore::Empty,
             parent,
             registry,
             resolvers,
@@ -114,7 +132,7 @@ impl ComponentConstructionContext {
     ) -> Self {
         Self {
             scope,
-            store: Some(store),
+            store: BuildStore::Shared(store),
             parent,
             registry,
             resolvers,
@@ -182,21 +200,37 @@ impl ComponentConstructionContext {
 
     /// The shared handle to this context's store, for transient construction. A
     /// context that has stored nothing hands out a fresh empty store: a transient
-    /// only reads it while it is built, so it observes the same empty state.
+    /// only reads it while it is built, so it observes the same empty state. An owned
+    /// store belongs to a scope whose layout plans no transient, so a transient built
+    /// against it dynamically sees an empty store as well.
     pub(crate) fn store_handle(&self) -> SharedStore {
-        self.store.clone().unwrap_or_default()
+        match &self.store {
+            BuildStore::Shared(store) => Arc::clone(store),
+            BuildStore::Empty | BuildStore::Owned(_) => SharedStore::default(),
+        }
     }
 
     /// Reads this context's store, or `None` when nothing has been stored yet.
     pub(super) fn read_store<R>(&self, read: impl FnOnce(&ScopeStore) -> Option<R>) -> Option<R> {
-        read(&self.store.as_ref()?.read().expect(STORE_POISON))
+        match &self.store {
+            BuildStore::Empty => None,
+            BuildStore::Owned(store) => read(store),
+            BuildStore::Shared(store) => read(&store.read().expect(STORE_POISON)),
+        }
     }
 
-    fn write_store(&mut self) -> std::sync::RwLockWriteGuard<'_, ScopeStore> {
-        self.store
-            .get_or_insert_with(SharedStore::default)
-            .write()
-            .expect(STORE_POISON)
+    /// Writes this context's store. The first write to an empty context shares it, so
+    /// the transients built against a scope without a layout see what it holds.
+    fn write_store<R>(&mut self, write: impl FnOnce(&mut ScopeStore) -> R) -> R {
+        if matches!(self.store, BuildStore::Empty) {
+            self.store = BuildStore::Shared(SharedStore::default());
+        }
+
+        match &mut self.store {
+            BuildStore::Owned(store) => write(store),
+            BuildStore::Shared(store) => write(&mut store.write().expect(STORE_POISON)),
+            BuildStore::Empty => unreachable!("an empty store was just shared"),
+        }
     }
 
     /// Captures this construction scope for forced reconstruction of `H`.
@@ -227,20 +261,32 @@ impl ComponentConstructionContext {
     }
 
     pub(crate) fn insert(&mut self, component: BoxedComponent) -> crate::Result<()> {
-        self.write_store().insert(component)
+        self.write_store(|store| store.insert(component))
+    }
+
+    /// Stores what a planned slot's own factory built, at that slot.
+    pub(crate) fn insert_at(
+        &mut self,
+        slot: crate::layout::SlotIdx,
+        component: BoxedComponent,
+    ) -> crate::Result<()> {
+        self.write_store(|store| store.insert_at(slot, component))
     }
 
     pub(crate) fn register_provider(&mut self, provider: &ProviderDescriptor, ordinal: usize) {
-        self.write_store().register_provider(provider, ordinal);
+        self.write_store(|store| store.register_provider(provider, ordinal));
     }
 
     pub(crate) fn into_parts(self) -> ComponentConstructionParts {
         // The scope is freezing: every transient context sharing this store was
         // dropped when its construction returned, so unwrapping cannot race.
-        let store = match self.store.map(Arc::try_unwrap) {
-            None => ScopeStore::default(),
-            Some(Ok(lock)) => lock.into_inner().expect(STORE_POISON),
-            Some(Err(_)) => panic!("construction store has outstanding readers at scope freeze"),
+        let store = match self.store {
+            BuildStore::Empty => ScopeStore::default(),
+            BuildStore::Owned(store) => store,
+            BuildStore::Shared(store) => match Arc::try_unwrap(store) {
+                Ok(lock) => lock.into_inner().expect(STORE_POISON),
+                Err(_) => panic!("construction store has outstanding readers at scope freeze"),
+            },
         };
 
         ComponentConstructionParts {

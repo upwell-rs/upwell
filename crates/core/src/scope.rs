@@ -45,6 +45,11 @@ pub trait Scope: Send + Sync + 'static {
     /// caching one per scope.
     const IS_TRANSIENT: bool = false;
 
+    /// How an open instance of this scope relates to the runtime generations committed
+    /// while it is open. Ignored for [`Singleton`] and [`Transient`], which the root and
+    /// on-demand construction serve.
+    const GENERATIONS: ScopeGenerations = ScopeGenerations::Pinned;
+
     /// The scope's identity and lifetime metadata as a copyable value.
     const KEY: ScopeKey = ScopeKey::of::<Self>();
 }
@@ -59,6 +64,33 @@ pub struct ScopeKey {
     name: &'static str,
     rank: u8,
     transient: bool,
+    generations: ScopeGenerations,
+}
+
+/// How an open scope relates to the runtime generations committed while it is open.
+///
+/// The policy is static, on the scope type: plans, layouts and the container kind are chosen
+/// when a generation is prepared, never per open.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum ScopeGenerations {
+    /// Keeps the generation it opened under for its whole life: a call, request or message.
+    /// A pinned scope opened under a durable one keeps its parent's generation.
+    #[default]
+    Pinned,
+    /// Spans commits on the generation it opened under, such as a connection, and can
+    /// report how many generations it has fallen behind.
+    Durable,
+}
+
+impl ScopeGenerations {
+    /// The policy's stable lowercase name, as tooling reports it.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pinned => "pinned",
+            Self::Durable => "durable",
+        }
+    }
 }
 
 impl ScopeKey {
@@ -69,6 +101,7 @@ impl ScopeKey {
             name: S::NAME,
             rank: S::RANK,
             transient: S::IS_TRANSIENT,
+            generations: S::GENERATIONS,
         }
     }
 
@@ -90,6 +123,11 @@ impl ScopeKey {
     /// Whether this scope rebuilds its instance on every resolution.
     pub const fn is_transient(&self) -> bool {
         self.transient
+    }
+
+    /// How an open instance of this scope relates to later runtime generations.
+    pub const fn generations(&self) -> ScopeGenerations {
+        self.generations
     }
 }
 
@@ -114,6 +152,7 @@ impl std::fmt::Debug for ScopeKey {
             .field("name", &self.name)
             .field("rank", &self.rank)
             .field("transient", &self.transient)
+            .field("generations", &self.generations)
             .finish()
     }
 }
