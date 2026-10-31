@@ -367,16 +367,15 @@ where
     T::Handle: Injectable<Stored = Live<T>>,
     P: ?Sized + Send + Sync + 'static,
 {
-    let shared = concrete
+    let live = concrete
         .value
         .downcast_ref::<Live<T>>()
-        .expect("the container erases only the concrete box the provider's own descriptor built")
-        .snapshot();
-    let erased: Arc<P> = T::upcast(shared);
+        .expect("the container erases only the concrete box the provider's own descriptor built");
+    let erased: Arc<P> = T::upcast(live.snapshot());
 
     BoxedComponent {
         ty: TypeDescriptor::of::<P>(type_name::<P>()),
-        value: Box::new(Live::new(erased)),
+        value: Box::new(live.with_value(erased)),
     }
 }
 
@@ -387,7 +386,10 @@ pub fn provider_live_cell<P>(erased: &BoxedComponent) -> Option<LiveCell>
 where
     P: ?Sized + Send + Sync + 'static,
 {
-    erased.value.downcast_ref::<Live<P>>().map(LiveCell::of)
+    erased
+        .value
+        .downcast_ref::<Live<P>>()
+        .and_then(<Arc<P> as Injectable>::live_cell)
 }
 
 #[cfg(test)]

@@ -43,6 +43,18 @@ pub struct ComponentConstructionContext {
     /// The planned change a transition handler decides on, set only while that handler
     /// runs during candidate construction.
     change: Option<crate::ComponentChange>,
+    /// How the handles built here are stored.
+    storage: HandleStorage,
+}
+
+/// How a construction context stores the handles its factories build.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum HandleStorage {
+    /// In a swappable cell a transition can republish, as the root stores its singletons.
+    #[default]
+    Swappable,
+    /// As fixed values, for a scope below the root, whose instances no transition rebinds.
+    Fixed,
 }
 
 const STORE_POISON: &str = "scope store lock poisoned";
@@ -84,6 +96,7 @@ impl ComponentConstructionContext {
             running: Running::Unplanned,
             previous: None,
             change: None,
+            storage: HandleStorage::Swappable,
         }
     }
 
@@ -110,6 +123,21 @@ impl ComponentConstructionContext {
             running: Running::Unplanned,
             previous: None,
             change: None,
+            storage: HandleStorage::Swappable,
+        }
+    }
+
+    /// Stores the handles built from now on as `storage` says.
+    pub(crate) fn store_handles(&mut self, storage: HandleStorage) {
+        self.storage = storage;
+    }
+
+    /// Wraps a handle a factory built into the value this context's scope stores.
+    #[doc(hidden)]
+    pub fn stored<H: Injectable>(&self, handle: H) -> H::Stored {
+        match self.storage {
+            HandleStorage::Swappable => handle.into_stored(),
+            HandleStorage::Fixed => handle.into_fixed(),
         }
     }
 
