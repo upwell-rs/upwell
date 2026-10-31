@@ -4,7 +4,7 @@ use std::any::TypeId;
 use std::sync::Arc;
 
 use tracing::debug;
-use upwell_core::ScopeId;
+use upwell_core::{Cardinality, ResolutionMode, ScopeId};
 
 use super::ScopeContainer;
 use crate::descriptors::component::{ComponentConstructionContext, HandleStorage, Running};
@@ -12,8 +12,9 @@ use crate::descriptors::{BoxedComponent, ComponentFactoryDescriptor};
 use crate::layout::{DepRef, PlannedDependency, SlotIdx, SlotLayout};
 
 impl ScopeContainer {
-    /// Builds every slot holding `target` in this scope and the scopes it was opened under
-    /// that their openings left out, with the slots those depend on.
+    /// Builds every slot holding `target` (the component itself or every provider of the
+    /// trait) in this scope and the scopes it was opened under that their openings left out,
+    /// with the slots those depend on.
     ///
     /// Each slot is built once per scope instance, on the runtime generation the instance
     /// opened under, even when several resolutions ask for it at once.
@@ -22,6 +23,55 @@ impl ScopeContainer {
 
         while let Some(container) = current {
             container.ensure_local(target).await?;
+            current = container.parent.as_ref();
+        }
+
+        Ok(())
+    }
+
+    /// Builds, where its scope's opening left it out, what resolving `target` reads: for one
+    /// value, the component `target` names or the provider runtime selection picks for it and
+    /// `qualifier`; for a collection or keyed map, every provider of the trait.
+    pub(crate) async fn ensure_for(
+        self: &Arc<Self>,
+        target: TypeId,
+        qualifier: Option<&str>,
+        cardinality: Cardinality,
+    ) -> crate::Result<()> {
+        if cardinality != Cardinality::One {
+            return self.ensure(target).await;
+        }
+
+        let component = self
+            .registry
+            .selected_runtime_provider(
+                target,
+                qualifier,
+                ResolutionMode::Eager,
+                self.scope,
+                &|scope| self.can_access(scope),
+            )
+            .map_or(target, |provider| provider.concrete_ty.type_id);
+
+        self.ensure_component(component).await
+    }
+
+    /// Builds the component of type `component` and the slots it reads, where its scope's
+    /// opening on this scope's chain left it out.
+    pub(crate) async fn ensure_component(self: &Arc<Self>, component: TypeId) -> crate::Result<()> {
+        let mut current = Some(self);
+
+        while let Some(container) = current {
+            let missing = container.missing(|layout, visit| {
+                if let Some(slot) = layout.slot_of(component) {
+                    visit(slot);
+                }
+            });
+
+            if let Some((layout, needed)) = missing {
+                return container.build_missing(&layout, &needed).await;
+            }
+
             current = container.parent.as_ref();
         }
 

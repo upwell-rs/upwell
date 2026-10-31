@@ -23,8 +23,6 @@ impl ScopeContainer {
     pub async fn resolve<H: Injectable>(self: &Arc<Self>) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
 
-        self.ensure(target).await?;
-
         if let Some(provider) = self.registry.selected_runtime_provider(
             target,
             None,
@@ -47,8 +45,12 @@ impl ScopeContainer {
                 .await;
             }
 
+            self.ensure_component(provider.concrete_ty.type_id).await?;
+
             return Ok(self.resolve_provider_built::<H>(&provider));
         }
+
+        self.ensure_component(target).await?;
 
         if let Some(handle) = self.resolve_built::<H>() {
             return Ok(Some(handle));
@@ -70,8 +72,6 @@ impl ScopeContainer {
         qualifier: &str,
     ) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
-
-        self.ensure(target).await?;
         let Some(provider) = self.registry.selected_runtime_provider(
             target,
             Some(qualifier),
@@ -97,6 +97,8 @@ impl ScopeContainer {
             .await;
         }
 
+        self.ensure_component(provider.concrete_ty.type_id).await?;
+
         Ok(self.resolve_provider_built::<H>(&provider))
     }
 
@@ -113,8 +115,13 @@ impl ScopeContainer {
     pub async fn extract<H: crate::construct::FromContainer>(self: &Arc<Self>) -> crate::Result<H> {
         let dependency = H::dependency();
 
-        if !dependency.config && dependency.resolution == upwell_core::ResolutionMode::Eager {
-            self.ensure(dependency.ty.type_id).await?;
+        if !dependency.config && dependency.resolution == ResolutionMode::Eager {
+            self.ensure_for(
+                dependency.ty.type_id,
+                dependency.qualifier,
+                dependency.cardinality,
+            )
+            .await?;
         }
 
         let cx = ComponentConstructionContext::new_with_slot(
