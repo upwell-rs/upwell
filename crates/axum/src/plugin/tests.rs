@@ -288,3 +288,20 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
             && relationship.to == endpoint.id
     }));
 }
+
+#[test]
+fn joined_route_paths_match_the_router() {
+    use super::entries::join_http_paths;
+
+    assert_eq!(join_http_paths("", "/", "/"), "/");
+    assert_eq!(
+        join_http_paths("/api", "/users", "/{id}"),
+        "/api/users/{id}"
+    );
+    assert_eq!(join_http_paths("", "/users/", "/"), "/users");
+    assert_eq!(
+        join_http_paths("/api", "/users", "/list/"),
+        "/api/users/list/",
+        "a route path ending in `/` keeps it, as the router matches it"
+    );
+}

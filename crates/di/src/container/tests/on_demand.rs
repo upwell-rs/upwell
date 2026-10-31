@@ -406,6 +406,7 @@ async fn resolving_one_provider_builds_only_the_selected_one() {
         ScopeRegistry::new(HashMap::new(), components, providers, HashMap::new())
             .expect("the scope registry validates"),
     );
+    let plan = layout.plan_entry(&[<Arc<dyn Probe> as FromContainer>::dependency()]);
     let scope = ScopeContainer::open_planned(
         root().await,
         registry,
@@ -422,6 +423,11 @@ async fn resolving_one_provider_builds_only_the_selected_one() {
         .await
         .expect("resolving the primary provider does not build the failing one");
 
+    assert_eq!(
+        plan.len(),
+        1,
+        "an entry injecting the trait plans only its primary provider"
+    );
     assert!(probe.is_some());
     assert!(scope.get::<Chosen>().is_some());
     assert!(

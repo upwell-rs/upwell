@@ -456,7 +456,18 @@ async fn the_request_scope_opens_on_first_injection_and_is_shared() {
 
     let none = router.clone().oneshot(get("/visit/none")).await.unwrap();
     let after_none = OPENED.load(Ordering::SeqCst);
-    let shared = router.oneshot(get("/visit/shared")).await.unwrap();
+    let shared = router.clone().oneshot(get("/visit/shared")).await.unwrap();
+    let after_shared = OPENED.load(Ordering::SeqCst);
+    let head = router
+        .oneshot(
+            RawRequest::builder()
+                .method("HEAD")
+                .uri("/visit/shared")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
 
     assert_eq!(none.status(), StatusCode::OK);
     assert_eq!(
@@ -465,13 +476,13 @@ async fn the_request_scope_opens_on_first_injection_and_is_shared() {
     );
     assert_eq!(shared.status(), StatusCode::OK);
     assert_eq!(
-        OPENED.load(Ordering::SeqCst),
-        1,
+        after_shared, 1,
         "middleware and the handler inject from one request scope"
     );
+    assert_eq!(head.status(), StatusCode::OK);
     assert_eq!(
         BYSTANDERS.load(Ordering::SeqCst),
         0,
-        "a route's scope builds only what the route injects"
+        "a route's scope builds only what the route injects, for HEAD as for GET"
     );
 }

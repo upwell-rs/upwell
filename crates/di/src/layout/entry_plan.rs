@@ -1,9 +1,10 @@
 use std::any::TypeId;
 
-use upwell_core::{DependencyDescriptor, ResolutionMode};
+use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode};
 
 use super::{DepRef, SlotIdx, SlotLayout};
 use crate::descriptors::ComponentDescriptor;
+use crate::registry::selection::select_single_by;
 
 /// The slots one entry builds when it opens its scope: the slots its targets resolve to and
 /// every slot of the same scope those depend on.
@@ -48,8 +49,8 @@ impl SlotLayout {
     /// Plans the slots an entry injecting `targets` builds when it opens this scope.
     ///
     /// A target that a lazy or config handle resolves builds nothing up front. Every other
-    /// target builds the slots it resolves to here, by concrete type or by every provider of
-    /// its trait, together with their dependencies in this scope.
+    /// target builds the slots it resolves to here, with their dependencies in this scope: its
+    /// concrete type, the provider a single value selects, or every provider of a collection.
     pub fn plan_entry(&self, targets: &[DependencyDescriptor]) -> EntryPlan {
         let mut builds = vec![false; self.slots.len()].into_boxed_slice();
 
@@ -58,7 +59,12 @@ impl SlotLayout {
                 continue;
             }
 
-            self.for_each_target_slot(target.ty.type_id, |slot| self.include(slot, &mut builds));
+            self.for_each_selected_slot(
+                target.ty.type_id,
+                target.qualifier,
+                target.cardinality,
+                |slot| self.include(slot, &mut builds),
+            );
         }
 
         EntryPlan { builds }
@@ -77,6 +83,38 @@ impl SlotLayout {
         }
     }
 
+    /// Calls `visit` with each slot of this scope a dependency on `target` resolves to: its
+    /// concrete slot; for one value, the provider `qualifier` names or the primary or sole
+    /// provider, as resolution selects among this scope's providers; for a collection or keyed
+    /// map, every provider.
+    pub(crate) fn for_each_selected_slot(
+        &self,
+        target: TypeId,
+        qualifier: Option<&str>,
+        cardinality: Cardinality,
+        mut visit: impl FnMut(SlotIdx),
+    ) {
+        if cardinality != Cardinality::One {
+            return self.for_each_target_slot(target, visit);
+        }
+
+        if let Some(slot) = self.slot_of(target) {
+            return visit(slot);
+        }
+
+        let providers = self.providers_of(target);
+        let chosen = match qualifier {
+            Some(qualifier) => providers
+                .iter()
+                .find(|provider| provider.descriptor.qualifier == qualifier),
+            None => select_single_by(providers, |provider| provider.descriptor.primary),
+        };
+
+        if let Some(provider) = chosen {
+            visit(provider.at.slot);
+        }
+    }
+
     /// Marks `slot` and every slot of this scope it depends on in `included`.
     ///
     /// An edge resolved through its own handle is followed to the slots its target names
@@ -91,9 +129,12 @@ impl SlotLayout {
         for dependency in self.spec(slot).dependencies.iter() {
             match &dependency.source {
                 DepRef::Unplanned => {
-                    self.for_each_target_slot(dependency.target, |target| {
-                        self.include(target, included)
-                    });
+                    self.for_each_selected_slot(
+                        dependency.target,
+                        dependency.qualifier,
+                        dependency.cardinality,
+                        |target| self.include(target, included),
+                    );
                 }
 
                 source => self.include_source(source, included),

@@ -83,7 +83,8 @@ pub(super) fn route_entries_by_path(
     Ok(entries)
 }
 
-/// Joins a global prefix, a controller base and a route path into one normalized path.
+/// Joins a global prefix, a controller base and a route path into one normalized path. A
+/// route path ending in `/` keeps it, as the router matches it.
 pub(super) fn join_http_paths(global: &str, controller: &str, route: &str) -> String {
     let segments = [global, controller, route]
         .into_iter()
@@ -92,8 +93,14 @@ pub(super) fn join_http_paths(global: &str, controller: &str, route: &str) -> St
         .collect::<Vec<_>>();
 
     if segments.is_empty() {
-        String::from("/")
-    } else {
-        format!("/{}", segments.join("/"))
+        return String::from("/");
     }
+
+    let trailing = if route.len() > 1 && route.ends_with('/') {
+        "/"
+    } else {
+        ""
+    };
+
+    format!("/{}{trailing}", segments.join("/"))
 }
