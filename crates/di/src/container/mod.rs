@@ -10,6 +10,7 @@ use crate::descriptors::{Component, Injectable, component::ScopeStore};
 mod candidate;
 mod hot_update;
 mod live;
+mod on_demand;
 mod open;
 mod order;
 mod resolve;
@@ -47,6 +48,9 @@ pub struct ScopeContainer {
     slot: ScopeResolverSlot,
     generation_lease: Option<Arc<dyn Any + Send + Sync>>,
     drop_guard: std::sync::OnceLock<Box<dyn Any + Send + Sync>>,
+    /// Held while slots this scope's opening left out are built on demand, so each is built
+    /// once.
+    building: tokio::sync::Mutex<()>,
 }
 
 impl ResolverCtx for ScopeContainer {
@@ -111,6 +115,11 @@ impl ScopeContainer {
     /// starts from. Every container answers its own [`ComponentSource`] itself.
     pub(crate) fn inherited_resolvers(&self) -> ResolverSet {
         self.resolver_base.clone()
+    }
+
+    /// The instances this scope holds.
+    pub(crate) fn store(&self) -> &ScopeStore {
+        &self.store
     }
 
     /// This scope's own [`ComponentSource`].

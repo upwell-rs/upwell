@@ -125,14 +125,23 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
         .resources
         .iter()
         .filter(|resource| resource.kind == upwell_app::tooling_schema::ResourceKind::Entry)
+        .collect::<Vec<_>>();
+    let entry_ids = entries
+        .iter()
         .map(|resource| resource.id.as_str())
         .collect::<Vec<_>>();
 
     assert_eq!(routes.len(), 2);
     assert_ne!(routes[0].id, routes[1].id);
     assert_eq!(
-        entries,
+        entry_ids,
         ["entry:http/tooling.health", "entry:http/tooling.ready"]
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.labels.get("builds").map(String::as_str) == Some("none")),
+        "a route injecting nothing builds nothing in its request scope"
     );
     assert_eq!(
         route

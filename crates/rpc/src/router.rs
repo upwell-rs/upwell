@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use tracing::{debug, instrument, trace, warn};
+use upwell_core::EntryKey;
 
 use crate::{
     Error,
@@ -15,23 +16,26 @@ use crate::{
 /// in registry validation.
 pub struct RpcRouter {
     routes: HashMap<String, RpcHandler>,
+    entries: HashMap<String, EntryKey>,
 }
 
 impl RpcRouter {
     pub fn from_services(services: &[ResolvedService]) -> Self {
         let mut routes = HashMap::new();
+        let mut entries = HashMap::new();
 
         for service in services {
             for rpc in &service.rpcs {
                 let path = format!("{}.{}", service.descriptor.name, rpc.name);
                 debug!(%path, "registered route");
+                entries.insert(path.clone(), rpc.key);
                 routes.insert(path, rpc.handler);
             }
         }
 
         debug!(count = routes.len(), "router built");
 
-        Self { routes }
+        Self { routes, entries }
     }
 
     #[instrument(level = "debug", skip_all, fields(%path))]
@@ -62,6 +66,11 @@ impl RpcRouter {
     /// Returns the number of registered routes.
     pub fn route_count(&self) -> usize {
         self.routes.len()
+    }
+
+    /// Returns each route path with the stable key of the entry it runs.
+    pub fn entries(&self) -> impl Iterator<Item = (&str, EntryKey)> {
+        self.entries.iter().map(|(path, key)| (path.as_str(), *key))
     }
 
     /// Returns an iterator over all registered route paths.

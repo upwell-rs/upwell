@@ -75,6 +75,9 @@ pub(super) enum BuildStore {
     Owned(ScopeStore),
     /// Shared with the transients built while the scope is in progress.
     Shared(SharedStore),
+    /// The store of an open scope, read while one of its slots is built on demand. The
+    /// built instance is stored by the caller, so nothing writes through this context.
+    Opened(Arc<crate::container::ScopeContainer>),
 }
 
 pub(crate) struct ComponentConstructionParts {
@@ -217,7 +220,9 @@ impl ComponentConstructionContext {
     pub(crate) fn store_handle(&self) -> SharedStore {
         match &self.store {
             BuildStore::Shared(store) => Arc::clone(store),
-            BuildStore::Empty | BuildStore::Owned(_) => SharedStore::default(),
+            BuildStore::Empty | BuildStore::Owned(_) | BuildStore::Opened(_) => {
+                SharedStore::default()
+            }
         }
     }
 
@@ -227,6 +232,7 @@ impl ComponentConstructionContext {
             BuildStore::Empty => None,
             BuildStore::Owned(store) => read(store),
             BuildStore::Shared(store) => read(&store.read().expect(STORE_POISON)),
+            BuildStore::Opened(container) => read(container.store()),
         }
     }
 
@@ -241,6 +247,9 @@ impl ComponentConstructionContext {
             BuildStore::Owned(store) => write(store),
             BuildStore::Shared(store) => write(&mut store.write().expect(STORE_POISON)),
             BuildStore::Empty => unreachable!("an empty store was just shared"),
+            BuildStore::Opened(_) => {
+                unreachable!("a slot built on demand is stored by the open scope, not its context")
+            }
         }
     }
 
@@ -292,7 +301,7 @@ impl ComponentConstructionContext {
         // The scope is freezing: every transient context sharing this store was
         // dropped when its construction returned, so unwrapping cannot race.
         let store = match self.store {
-            BuildStore::Empty => ScopeStore::default(),
+            BuildStore::Empty | BuildStore::Opened(_) => ScopeStore::default(),
             BuildStore::Owned(store) => store,
             BuildStore::Shared(store) => match Arc::try_unwrap(store) {
                 Ok(lock) => lock.into_inner().expect(STORE_POISON),

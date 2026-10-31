@@ -223,9 +223,26 @@ async fn root() -> Arc<ScopeContainer> {
         .expect("root builds")
 }
 
+/// The slot layout of a [`TestScope`] holding `order`, with no providers.
+fn plan(order: &[ComponentDescriptor]) -> crate::SlotLayout {
+    let selection = crate::registry::ProviderSelectionModel::new(order, Vec::new(), HashMap::new())
+        .expect("the components select no providers");
+
+    crate::SlotLayout::plan(
+        TestScope::KEY,
+        &[],
+        order,
+        &HashMap::new(),
+        &selection,
+        |_, _| true,
+    )
+    .expect("the scope plans")
+}
+
 mod children;
 mod drop_guard;
 mod fresh;
+mod on_demand;
 mod providers;
 mod ready;
 mod storage;

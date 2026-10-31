@@ -105,13 +105,13 @@ impl ScopedProtocol for RpcCalls {
 
     async fn call(&self, scope: CallScope, route: Route) -> bool {
         let path = match route {
-            Route::Hello => HELLO,
+            Route::Hello | Route::FanIn => HELLO,
             Route::Scoped => SCOPED,
         };
         let ctx = RpcCallContext::new(
             Vec::new(),
             PeerInfo { addr: None },
-            self.calls.scope(scope).await,
+            self.calls.scope(scope, route).await,
             None,
             CancellationToken::new(),
         );

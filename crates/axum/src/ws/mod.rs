@@ -758,6 +758,7 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
     let max_frame_bytes = config.max_websocket_frame_bytes;
     let connections = runtime.opener::<crate::scope::WebsocketConnection>()?;
     let messages = runtime.opener::<crate::scope::WebsocketMessage>()?;
+    let entries = Arc::new(connection::message_entries(&controllers, &messages)?);
 
     // The pre-built generic upgrade handler opens this socket's WebsocketConnection scope with
     // upgrade and negotiation metadata, then hands the socket to the protocol that owns the
@@ -770,6 +771,7 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
         let shutdown = shutdown.clone();
         let connections = connections.clone();
         let messages = messages.clone();
+        let entries = Arc::clone(&entries);
         let admission = admission.clone();
 
         async move {
@@ -811,7 +813,7 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
                     .open_default();
 
                 let connection = match opening.await {
-                    Ok(scope) => WsConnectionScope::new(scope, messages),
+                    Ok(scope) => WsConnectionScope::new(scope, messages, entries),
 
                     Err(error) => {
                         tracing::error!(

@@ -70,7 +70,7 @@ fn runtime_view(
         RuntimeScopePlan::new(
             Arc::new(empty_topology()),
             Arc::new(HashMap::new()),
-            Arc::new(HashMap::new()),
+            Arc::default(),
             Arc::new(HashMap::new()),
         ),
         Arc::from(resolved),

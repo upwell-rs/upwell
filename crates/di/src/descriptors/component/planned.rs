@@ -50,6 +50,16 @@ impl ComponentConstructionContext {
         self.layout = Some(layout);
     }
 
+    /// Reads the store of the open scope `container`, whose layout this context builds a
+    /// left-out slot of.
+    pub(crate) fn use_opened(&mut self, container: Arc<crate::container::ScopeContainer>) {
+        self.layout = container
+            .store()
+            .slots()
+            .map(|store| Arc::clone(store.layout()));
+        self.store = BuildStore::Opened(container);
+    }
+
     /// Sets the factory whose planned edges the next resolutions use.
     pub(crate) fn set_running(&mut self, running: Running) {
         self.running = running;

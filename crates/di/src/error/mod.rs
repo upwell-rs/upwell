@@ -131,6 +131,13 @@ pub enum Error {
         scope: &'static str,
     },
 
+    /// A slot was given a second instance after it was built.
+    #[error("component '{component}' was built twice in one instance of scope '{scope}'")]
+    SlotBuiltTwice {
+        component: &'static str,
+        scope: &'static str,
+    },
+
     /// A scope was opened with a seed for a component one of its factories builds.
     #[error(
         "scope '{scope}' was opened with a seed for component '{component}', which its factory builds"

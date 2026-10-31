@@ -18,7 +18,7 @@ use crate::scoped::{self, CallScope, CallScoped, Roster, Route, ScopedCalls, Sco
 fn handler(route: Route, scope: Arc<ScopeContainer>) -> BoxFuture<'static, bool> {
     Box::pin(async move {
         match route {
-            Route::Hello => true,
+            Route::Hello | Route::FanIn => true,
             Route::Scoped => scope.get::<CallScoped<0>>().is_some(),
         }
     })
@@ -37,6 +37,6 @@ impl ScopedProtocol for WsMessages {
     }
 
     async fn call(&self, scope: CallScope, route: Route) -> bool {
-        handler(route, self.calls.scope(scope).await).await
+        handler(route, self.calls.scope(scope, route).await).await
     }
 }

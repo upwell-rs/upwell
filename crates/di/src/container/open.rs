@@ -12,7 +12,7 @@ use crate::descriptors::component::{
 };
 use crate::descriptors::{BoxedComponent, ComponentDescriptor};
 use crate::error::Error;
-use crate::layout::{SlotIdx, SlotLayout};
+use crate::layout::{EntryPlan, SlotIdx, SlotLayout};
 
 /// The runtime-generation state object a container retains while it is open.
 type GenerationLease = Option<Arc<dyn Any + Send + Sync>>;
@@ -107,11 +107,15 @@ impl ScopeContainer {
     /// empty fails only when a dependency resolves it, as with a scope opened from a plain
     /// construction order. A seed without a factory-less slot in the layout, or a second seed
     /// for the same slot, fails the opening.
+    ///
+    /// With an entry `plan`, only the slots it lists are built; the others are built on
+    /// demand when something resolves them from the open scope.
     #[doc(hidden)]
     pub async fn open_planned<T: Any + Send + Sync>(
         parent: Arc<ScopeContainer>,
         registry: Arc<ScopeRegistry>,
         layout: &Arc<SlotLayout>,
+        plan: Option<&EntryPlan>,
         seeds: Vec<BoxedComponent>,
         generation_lease: Arc<T>,
     ) -> crate::Result<Arc<ScopeContainer>> {
@@ -150,6 +154,10 @@ impl ScopeContainer {
                 continue;
             };
 
+            if plan.is_some_and(|plan| !plan.builds(slot)) {
+                continue;
+            }
+
             debug!(component = %component.name, scope = scope.name(), "constructing component");
 
             cx.set_running(Running::Slot(slot));
@@ -187,6 +195,7 @@ impl ScopeContainer {
             slot: ScopeResolverSlot::attached(container.clone()),
             generation_lease,
             drop_guard: std::sync::OnceLock::new(),
+            building: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -264,6 +273,7 @@ impl ScopeContainer {
             slot: slot.for_container(weak),
             generation_lease,
             drop_guard: std::sync::OnceLock::new(),
+            building: tokio::sync::Mutex::new(()),
         });
 
         slot.attach(&container)?;

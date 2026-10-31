@@ -124,7 +124,12 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
                 &scopes.seed_destinations,
             )
             .and_then(|snapshot| {
-                snapshot.with_entries(&provider_selection, &scope_topology, &entries)
+                snapshot.with_entries(
+                    &provider_selection,
+                    &scope_topology,
+                    &entries,
+                    &scopes.layouts,
+                )
             })
             .map_err(Error::from)?,
         )?;
@@ -253,7 +258,7 @@ fn plan_effective_graph(
     registry.validate_effective_with_scope_topology(resolved, selection, topology)?;
     crate::entry::validate_targets(registry, selection, topology)?;
 
-    let scopes = ScopePlan::partition(resolved, selection, topology)?;
+    let scopes = ScopePlan::partition(resolved, selection, topology, &registry.entries)?;
 
     Ok((graph, scopes))
 }

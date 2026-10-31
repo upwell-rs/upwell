@@ -245,7 +245,10 @@ impl JsonWs {
         };
 
         let result = match self.routes.get(inbound.dest.as_str()) {
-            Some(handler) => match connection.message().open_default().await {
+            Some(handler) => match connection
+                .open_message(inbound.dest.as_str(), connection.message())
+                .await
+            {
                 Ok(scope) => handler(inbound.payload, scope.into_container()).await,
 
                 Err(error) => Err(WsDispatchError::Inject(error.to_string())),

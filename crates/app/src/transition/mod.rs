@@ -97,7 +97,7 @@ impl CandidateGraph {
 
         crate::entry::validate_targets(registry, &selection, topology)?;
 
-        let scopes = ScopePlan::partition(&components, &selection, topology)?;
+        let scopes = ScopePlan::partition(&components, &selection, topology, &registry.entries)?;
 
         Ok(Self::assemble(
             graph,

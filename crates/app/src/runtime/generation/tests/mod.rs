@@ -110,7 +110,7 @@ async fn prepared_with_hooks(
         RuntimeScopePlan::new(
             topology,
             Arc::new(HashMap::new()),
-            Arc::new(HashMap::new()),
+            Arc::default(),
             Arc::new(HashMap::new()),
         ),
         Arc::from([]),

@@ -56,7 +56,7 @@ pub use error::{
     ProviderOrderCycle, ProviderOrderSourceTraitMismatch, ProviderOrderTargetTraitMismatch, Result,
     ScopeUnreachableDependency, ScopeUnreachableProvider, ScopeViolation,
 };
-pub use layout::SlotLayout;
+pub use layout::{EntryPlan, SlotLayout};
 pub use primitives::{Deferred, Fresh, FreshFromContainer, Lazy};
 pub use registry::{
     ComponentRegistry, DependencyConsumer, DependencyFault, DependencySelectionReason,

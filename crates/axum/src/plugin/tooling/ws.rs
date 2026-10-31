@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use upwell_app::{ResourceDisplay, ToolingContributions, ToolingEndpoint, ToolingRelationshipKind};
 use upwell_core::ItemSource;
 
-use super::join_http_paths;
+use super::super::entries::join_http_paths;
 use crate::plugin::PreparedWsRegistration;
 use crate::ws::{WsControllerDescriptor, WsMessageDescriptor, WsRouteDescriptor};
 

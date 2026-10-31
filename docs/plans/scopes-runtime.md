@@ -337,6 +337,20 @@ removed, so `ScopeOpener` is the only way to open a scope. A scope that does not
 `OpensUnder` for a parent cannot open under it; a hand-written impl the topology does not list
 is caught by a debug assertion until #405 generates both from one declaration.
 
+Status (#348, #349): preparation plans every entry against its scope's layout, per runtime
+generation (`SlotLayout::plan_entry`, carried in `ScopeLayouts` and indexed by `EntryId`). A plan
+lists the slots the entry's eager targets resolve to, by concrete type or every provider of the
+trait, closed over their local dependencies (planned and unplanned edges alike). `.open(&entry)`
+builds only those slots. Every slot is a once-cell, so a slot an opening left out is built on
+demand by `ScopeContainer::resolve`, `resolve_qualified` and `extract` (which `Inject` and `Lazy`
+go through): the slot and the local slots it reads, after ancestor slots it reads, once per scope
+instance under a per-container lock, on the instance's pinned generation. Synchronous reads
+(`ScopeContainer::get`, `ComponentSource`, `RpcCallContext::component`) see only built slots.
+HTTP routes find their entry by method and matched path, RPC calls by method path, WebSocket
+messages by destination (`WsConnectionScope::open_message`); anything without an entry builds
+every slot. Tooling labels each entry with the components it `builds`. Durable scopes still
+build every slot when they open, and `deny_unplanned` strict mode is not implemented.
+
 A request scope opened under an app-chosen parent, such as a per-user `Session` scope the
 app caches and reuses across requests, fits this design: the parent is picked when the scope
 opens (`.under(&session)`), never by re-parenting an open scope. It needs app-declared

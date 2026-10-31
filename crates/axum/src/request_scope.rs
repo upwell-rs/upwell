@@ -5,16 +5,21 @@
 //! time something injects from it ([`Inject`](crate::Inject), [`ScopeHandle`]), and is then
 //! kept in the request extensions, so middleware and the handler share one instance. A
 //! request that injects nothing request-scoped opens no scope.
+//!
+//! A request to a controller route opens its scope with the route's entry plan, which builds
+//! only what the route injects; anything else is built when something resolves it. Other
+//! requests build every slot of the scope.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use axum::extract::Request;
-use axum::http::Extensions;
+use axum::extract::{MatchedPath, Request};
 use axum::http::request::Parts;
+use axum::http::{Extensions, Method};
 use tokio::task::futures::TaskLocalFuture;
 use tower::{Layer, Service};
-use upwell_app::ScopeOpener;
+use upwell_app::{ScopeEntry, ScopeOpener};
 use upwell_config::Cfg;
 use upwell_di::ScopeContainer;
 
@@ -30,8 +35,13 @@ tokio::task_local! {
 /// What every request served by the protocol's router opens its scope from.
 pub(crate) struct RequestScopes {
     opener: ScopeOpener<HttpRequest>,
+    routes: RouteEntries,
     config: Cfg<AxumConfig>,
 }
+
+/// The entry of each controller route, by method and the path the router matches it under.
+#[derive(Default)]
+pub(crate) struct RouteEntries(HashMap<Method, HashMap<Box<str>, ScopeEntry<HttpRequest>>>);
 
 /// Makes [`RequestScopes`] reachable for each request it serves.
 #[derive(Clone)]
@@ -47,10 +57,31 @@ pub(crate) struct RequestScopeService<S> {
 }
 
 impl RequestScopeLayer {
-    pub(crate) fn new(opener: ScopeOpener<HttpRequest>, config: Cfg<AxumConfig>) -> Self {
+    pub(crate) fn new(
+        opener: ScopeOpener<HttpRequest>,
+        routes: RouteEntries,
+        config: Cfg<AxumConfig>,
+    ) -> Self {
         Self {
-            scopes: Arc::new(RequestScopes { opener, config }),
+            scopes: Arc::new(RequestScopes {
+                opener,
+                routes,
+                config,
+            }),
         }
+    }
+}
+
+impl RouteEntries {
+    pub(crate) fn insert(&mut self, method: Method, path: String, entry: ScopeEntry<HttpRequest>) {
+        self.0
+            .entry(method)
+            .or_default()
+            .insert(path.into_boxed_str(), entry);
+    }
+
+    fn get(&self, method: &Method, path: &str) -> Option<&ScopeEntry<HttpRequest>> {
+        self.0.get(method)?.get(path)
     }
 }
 
@@ -133,12 +164,15 @@ async fn open(
     let scopes = REQUEST_SCOPES
         .try_with(Arc::clone)
         .map_err(|_| InjectRejection::MissingScope)?;
-    let scope = scopes
-        .opener
-        .builder()
-        .seed(meta)
-        .open_default()
-        .await
+    let entry = extensions
+        .get::<MatchedPath>()
+        .and_then(|path| scopes.routes.get(&meta.method, path.as_str()));
+    let builder = scopes.opener.builder().seed(meta);
+    let opened = match entry {
+        Some(entry) => builder.open(entry).await,
+        None => builder.open_default().await,
+    };
+    let scope = opened
         .map_err(|error| InjectRejection::ScopeFailed(error.to_string()))?
         .into_container();
 

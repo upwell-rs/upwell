@@ -23,6 +23,8 @@ impl ScopeContainer {
     pub async fn resolve<H: Injectable>(self: &Arc<Self>) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
 
+        self.ensure(target).await?;
+
         if let Some(provider) = self.registry.selected_runtime_provider(
             target,
             None,
@@ -68,6 +70,8 @@ impl ScopeContainer {
         qualifier: &str,
     ) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
+
+        self.ensure(target).await?;
         let Some(provider) = self.registry.selected_runtime_provider(
             target,
             Some(qualifier),
@@ -107,6 +111,12 @@ impl ScopeContainer {
     /// builds on this, so a handler can inject anything a constructor can — not just the
     /// `Injectable` subset that [`resolve`](Self::resolve) covers.
     pub async fn extract<H: crate::construct::FromContainer>(self: &Arc<Self>) -> crate::Result<H> {
+        let dependency = H::dependency();
+
+        if !dependency.config && dependency.resolution == upwell_core::ResolutionMode::Eager {
+            self.ensure(dependency.ty.type_id).await?;
+        }
+
         let cx = ComponentConstructionContext::new_with_slot(
             Transient::KEY,
             Some(Arc::clone(self)),

@@ -88,6 +88,14 @@ impl ScopeStore {
         }
     }
 
+    /// The slot store of a scope opened from a layout.
+    pub(crate) fn slots(&self) -> Option<&SlotStore> {
+        match self {
+            Self::Slots(store) => Some(store),
+            Self::Keyed(_) => None,
+        }
+    }
+
     /// Aliases a built concrete instance under one trait it provides. A slot store
     /// aliases every planned provider when the instance is inserted, so this is a no-op
     /// for it.

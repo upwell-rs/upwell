@@ -9,7 +9,7 @@
 //! instance instead of being constructed twice; and a request-scoped component reading
 //! native request data (a header and a cookie) via `RequestMeta`, reused across two
 //! injections within one request; and the request scope opening on first injection, shared
-//! by middleware and the handler.
+//! by middleware and the handler and building only what the route injects.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -381,6 +381,23 @@ async fn request_scoped_component_reads_request_meta_and_is_shared() {
 /// Request scopes built so far.
 static OPENED: AtomicUsize = AtomicUsize::new(0);
 
+/// [`Bystander`]s built so far.
+static BYSTANDERS: AtomicUsize = AtomicUsize::new(0);
+
+/// A request-scoped component no route injects, so no request builds it.
+#[component(scope = HttpRequest)]
+struct Bystander {}
+
+#[methods]
+impl Bystander {
+    #[init]
+    async fn init(_meta: RequestMeta) -> Self {
+        BYSTANDERS.fetch_add(1, Ordering::SeqCst);
+
+        Self {}
+    }
+}
+
 /// A request-scoped component counting the request scopes that built it.
 #[component(scope = HttpRequest)]
 struct Visit {}
@@ -451,5 +468,10 @@ async fn the_request_scope_opens_on_first_injection_and_is_shared() {
         OPENED.load(Ordering::SeqCst),
         1,
         "middleware and the handler inject from one request scope"
+    );
+    assert_eq!(
+        BYSTANDERS.load(Ordering::SeqCst),
+        0,
+        "a route's scope builds only what the route injects"
     );
 }
