@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::future::Future;
 use std::ptr;
 use std::sync::{Arc, OnceLock};
 
@@ -27,11 +28,10 @@ pub(crate) struct SlotStore {
     later: OnceLock<Box<Later>>,
 }
 
-/// The slots of an open scope built on demand, and the lock their builds hold so each is
-/// built once.
+/// The slots of an open scope built on demand. Each cell is initialized by one build, which
+/// concurrent requests for the same slot wait on, while other slots build independently.
 struct Later {
-    building: tokio::sync::Mutex<()>,
-    values: Box<[OnceLock<SlotValue>]>,
+    values: Box<[tokio::sync::OnceCell<SlotValue>]>,
 }
 
 impl SlotStore {
@@ -102,21 +102,24 @@ impl SlotStore {
         Ok(())
     }
 
-    /// Stores an instance built on demand in the open scope, at its slot.
+    /// Builds `slot` in the open scope with `build`, unless it holds its instance already.
     ///
-    /// The checks are those of [`insert_at`](Self::insert_at).
-    pub(crate) fn insert_built(
+    /// Concurrent calls for the same slot run one build and wait for it. The output is checked
+    /// as [`insert_at`](Self::insert_at) checks it.
+    pub(crate) async fn build_later(
         &self,
         slot: SlotIdx,
-        component: BoxedComponent,
+        build: impl Future<Output = crate::Result<BoxedComponent>>,
     ) -> crate::Result<()> {
         if self.values[slot.index()].is_some() {
-            return Err(self.built_twice(slot));
+            return Ok(());
         }
 
         self.later().values[slot.index()]
-            .set(self.slot_value(slot, component)?)
-            .map_err(|_| self.built_twice(slot))
+            .get_or_try_init(|| async { self.slot_value(slot, build.await?) })
+            .await?;
+
+        Ok(())
     }
 
     /// The stored value of `component`, aliased under every trait `slot` provides.
@@ -142,16 +145,14 @@ impl SlotStore {
         })
     }
 
-    /// Holds the on-demand build lock of this store until the guard drops.
-    pub(crate) async fn lock_builds(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.later().building.lock().await
-    }
-
     fn later(&self) -> &Later {
         self.later.get_or_init(|| {
             Box::new(Later {
-                building: tokio::sync::Mutex::new(()),
-                values: self.values.iter().map(|_| OnceLock::new()).collect(),
+                values: self
+                    .values
+                    .iter()
+                    .map(|_| tokio::sync::OnceCell::new())
+                    .collect(),
             })
         })
     }

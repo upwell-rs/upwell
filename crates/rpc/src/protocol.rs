@@ -7,7 +7,10 @@
 //! ctrl-c) is run by `App::serve`, so this loop only watches its transport and the
 //! shutdown signal.
 
-use std::{collections::HashMap, panic::AssertUnwindSafe, sync::Arc, time::Duration};
+use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
+use std::time::Duration;
 
 use futures::{FutureExt, StreamExt};
 use tokio::{sync::mpsc, task::JoinSet};

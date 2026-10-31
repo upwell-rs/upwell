@@ -4,10 +4,12 @@ use std::any::TypeId;
 use std::sync::Arc;
 
 use tracing::debug;
+use upwell_core::ScopeId;
 
 use super::ScopeContainer;
 use crate::descriptors::component::{ComponentConstructionContext, HandleStorage, Running};
-use crate::layout::{DepRef, SlotIdx, SlotLayout};
+use crate::descriptors::{BoxedComponent, ComponentFactoryDescriptor};
+use crate::layout::{DepRef, PlannedDependency, SlotIdx, SlotLayout};
 
 impl ScopeContainer {
     /// Builds every slot holding `target` in this scope and the scopes it was opened under
@@ -21,6 +23,36 @@ impl ScopeContainer {
         while let Some(container) = current {
             container.ensure_local(target).await?;
             current = container.parent.as_ref();
+        }
+
+        Ok(())
+    }
+
+    /// Builds the slots of the scopes `start` belongs to, itself included, that
+    /// `dependencies` read from an enclosing scope, directly or as one provider of a
+    /// collection.
+    pub(crate) async fn ensure_ancestor_sources(
+        start: Option<&Arc<Self>>,
+        dependencies: &[PlannedDependency],
+    ) -> crate::Result<()> {
+        for dependency in dependencies {
+            let ancestors: Vec<ScopeId> = match &dependency.source {
+                DepRef::Ancestor { layout, .. } => vec![layout.scope().id()],
+                DepRef::Many(provided) => provided
+                    .iter()
+                    .filter_map(|entry| match &entry.source {
+                        DepRef::Ancestor { layout, .. } => Some(layout.scope().id()),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => continue,
+            };
+
+            for scope in ancestors {
+                if let Some(ancestor) = start.and_then(|start| start.in_chain(scope)) {
+                    Box::pin(ancestor.ensure_local(dependency.target)).await?;
+                }
+            }
         }
 
         Ok(())
@@ -45,27 +77,7 @@ impl ScopeContainer {
             return Ok(());
         };
 
-        self.ensure_ancestors(&layout, &needed).await?;
         self.build_missing(&layout, &needed).await
-    }
-
-    /// Builds the slots of the scopes around this one that the slots in `needed` read.
-    async fn ensure_ancestors(&self, layout: &SlotLayout, needed: &[bool]) -> crate::Result<()> {
-        for (index, spec) in layout.slots().iter().enumerate() {
-            if !needed[index] {
-                continue;
-            }
-
-            for dependency in spec.dependencies.iter() {
-                if let DepRef::Ancestor { layout, .. } = &dependency.source
-                    && let Some(ancestor) = self.parent_of(layout.scope().id())
-                {
-                    Box::pin(ancestor.ensure_local(dependency.target)).await?;
-                }
-            }
-        }
-
-        Ok(())
     }
 
     /// Builds the slots in `needed` that are still empty, in layout order, so each reads
@@ -79,7 +91,6 @@ impl ScopeContainer {
             .store
             .slots()
             .expect("a scope building left-out slots was opened from a layout");
-        let _building = store.lock_builds().await;
 
         for (index, spec) in layout.slots().iter().enumerate() {
             let slot = SlotIdx::new(index);
@@ -92,35 +103,47 @@ impl ScopeContainer {
                 continue;
             };
 
-            debug!(
-                component = %spec.component.name,
-                scope = self.scope.name(),
-                "constructing component on demand"
-            );
-
-            let mut cx = ComponentConstructionContext::new_with_slot(
-                self.scope,
-                self.parent.clone(),
-                Arc::clone(&self.registry),
-                self.inherited_resolvers(),
-                self.slot.clone(),
-            );
-
-            cx.use_opened(Arc::clone(self));
-            cx.store_handles(HandleStorage::Fixed);
-            cx.set_running(Running::Slot(slot));
-
-            let built = factory.build(&mut cx).await?;
-
-            store.insert_built(slot, built)?;
+            Self::ensure_ancestor_sources(self.parent.as_ref(), &spec.dependencies).await?;
+            store
+                .build_later(slot, self.build_slot(slot, spec.component.name, factory))
+                .await?;
         }
 
         Ok(())
     }
 
-    /// The container of `scope` among the scopes this one was opened under.
-    fn parent_of(&self, scope: upwell_core::ScopeId) -> Option<&Arc<ScopeContainer>> {
-        let mut current = self.parent.as_ref();
+    /// Runs the factory of `slot` against this open scope.
+    async fn build_slot(
+        self: &Arc<Self>,
+        slot: SlotIdx,
+        component: &'static str,
+        factory: &ComponentFactoryDescriptor,
+    ) -> crate::Result<BoxedComponent> {
+        debug!(
+            target: "upwell::di",
+            component,
+            scope = self.scope.name(),
+            "constructing component on demand"
+        );
+
+        let mut cx = ComponentConstructionContext::new_with_slot(
+            self.scope,
+            self.parent.clone(),
+            Arc::clone(&self.registry),
+            self.inherited_resolvers(),
+            self.slot.clone(),
+        );
+
+        cx.use_opened(Arc::clone(self));
+        cx.store_handles(HandleStorage::Fixed);
+        cx.set_running(Running::Slot(slot));
+
+        factory.build(&mut cx).await
+    }
+
+    /// The container of `scope` among this scope and the scopes it was opened under.
+    fn in_chain(self: &Arc<Self>, scope: ScopeId) -> Option<&Arc<ScopeContainer>> {
+        let mut current = Some(self);
 
         while let Some(container) = current {
             if container.scope.id() == scope {

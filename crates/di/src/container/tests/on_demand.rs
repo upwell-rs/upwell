@@ -163,3 +163,108 @@ async fn an_extraction_builds_the_slot_it_needs() {
     assert!(other.is_some());
     assert_eq!(builds(), [0, 0, 1]);
 }
+
+/// A component whose construction awaits a [`Leaf`] it reaches lazily.
+struct Eager {
+    leaf: Arc<Leaf>,
+}
+
+test_component!(Eager, "eager");
+
+fn construct_eager(
+    cx: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async move {
+        let lazy = <crate::Lazy<Arc<Leaf>> as FromContainer>::from_container(cx).await?;
+        let leaf = lazy.get_or_create().await?;
+
+        Ok(boxed_component("Eager", Arc::new(Eager { leaf })))
+    })
+}
+
+fn eager_descriptor() -> ComponentDescriptor {
+    fn factories() -> &'static [ComponentFactoryDescriptor] {
+        const {
+            &[ComponentFactoryDescriptor {
+                id: "eager",
+                construct: construct_eager,
+                construct_ready: None,
+                dependencies: no_dependencies,
+                role: ComponentFactoryRole::Explicit,
+            }]
+        }
+    }
+
+    let mut descriptor = component::<Eager>("eager", factories);
+
+    descriptor.scope = TestScope::KEY;
+    descriptor
+}
+
+#[tokio::test]
+async fn a_slot_built_on_demand_can_build_another_while_it_runs() {
+    let layout = Arc::new(plan(&[eager_descriptor(), leaf_descriptor()]));
+    let plan = layout.plan_entry(&[]);
+    let scope = open(&layout, Some(&plan)).await;
+
+    let eager = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        scope.resolve::<Arc<Eager>>(),
+    )
+    .await
+    .expect("building a slot from inside another on-demand build does not deadlock")
+    .expect("resolution succeeds")
+    .expect("the component is built on demand");
+
+    assert!(Arc::ptr_eq(
+        &eager.leaf,
+        &scope.get::<Leaf>().expect("the leaf was built on demand")
+    ));
+}
+
+#[tokio::test]
+async fn a_child_builds_the_parent_slots_its_planned_factories_read() {
+    let parent_layout = layout();
+    let mut child_branch = branch_descriptor();
+
+    child_branch.scope = SameNameScope::KEY;
+
+    let order = [leaf_descriptor(), child_branch];
+    let selection =
+        crate::registry::ProviderSelectionModel::new(&order, Vec::new(), HashMap::new())
+            .expect("the components select no providers");
+    let child_layout = Arc::new(
+        crate::SlotLayout::plan(
+            SameNameScope::KEY,
+            &[],
+            &[child_branch],
+            &HashMap::from([(TestScope::ID, Arc::clone(&parent_layout))]),
+            &selection,
+            |_, _| true,
+        )
+        .expect("the child scope plans"),
+    );
+    let parent = open(&parent_layout, Some(&parent_layout.plan_entry(&[]))).await;
+
+    let child = ScopeContainer::open_planned(
+        Arc::clone(&parent),
+        registry(),
+        &child_layout,
+        None,
+        Vec::new(),
+        Arc::new(()),
+    )
+    .await
+    .expect("the child opens and builds the parent slot its branch reads");
+
+    assert_eq!(builds(), [1, 1, 0]);
+    assert!(Arc::ptr_eq(
+        &child
+            .get::<Branch>()
+            .expect("the child built its branch")
+            .leaf,
+        &parent
+            .get::<Leaf>()
+            .expect("the parent built its leaf for the child")
+    ));
+}
