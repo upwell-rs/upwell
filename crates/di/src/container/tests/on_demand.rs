@@ -420,6 +420,16 @@ async fn resolving_one_provider_builds_only_the_selected_one() {
         &selection,
         |_, _| true,
     );
+    let planned = ScopeContainer::open_planned(
+        root().await,
+        Arc::clone(&registry),
+        &layout,
+        Some(&plan),
+        Vec::new(),
+        Arc::new(()),
+    )
+    .await
+    .expect("opening with the entry plan does not build the failing provider");
     let scope = ScopeContainer::open_planned(
         root().await,
         registry,
@@ -430,6 +440,12 @@ async fn resolving_one_provider_builds_only_the_selected_one() {
     )
     .await
     .expect("the scope opens");
+
+    assert!(
+        planned.get::<Chosen>().is_some(),
+        "the entry plan builds the primary provider"
+    );
+    assert!(planned.get::<Broken>().is_none());
 
     let probe = scope
         .resolve::<Arc<dyn Probe>>()
