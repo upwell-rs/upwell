@@ -36,6 +36,7 @@ pub(crate) fn in_table_order(
     let mut sorted: Vec<&EntryDescriptor> = entries.iter().collect();
 
     sorted.sort_by_key(|entry| entry.key);
+
     sorted.into_iter()
 }
 
