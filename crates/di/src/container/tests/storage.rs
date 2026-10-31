@@ -83,3 +83,78 @@ async fn a_child_scope_stores_fixed_handles() {
         "a live handle onto a fixed slot reads the same instance"
     );
 }
+
+/// A hand-written component that declares no dependencies but captures its scope.
+struct Capturing {
+    held: crate::Lazy<Arc<Held>>,
+}
+
+test_component!(Capturing, "capturing");
+
+fn construct_capturing(
+    cx: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async move {
+        let held = <crate::Lazy<Arc<Held>> as crate::FromContainer>::from_container(cx).await?;
+
+        Ok(boxed_component("Capturing", Arc::new(Capturing { held })))
+    })
+}
+
+fn capturing_factories() -> &'static [ComponentFactoryDescriptor] {
+    const {
+        &[ComponentFactoryDescriptor {
+            id: "capturing",
+            construct: construct_capturing,
+            construct_ready: None,
+            dependencies: no_dependencies,
+            role: ComponentFactoryRole::Explicit,
+        }]
+    }
+}
+
+#[tokio::test]
+async fn a_factory_capturing_a_scope_its_layout_did_not_plan_for_still_resolves() {
+    let mut held = component::<Held>("held", factories);
+    let mut capturing = component::<Capturing>("capturing", capturing_factories);
+
+    held.scope = TestScope::KEY;
+    capturing.scope = TestScope::KEY;
+
+    let order = [held, capturing];
+    let selection =
+        crate::registry::ProviderSelectionModel::new(&order, Vec::new(), HashMap::new())
+            .expect("the components select no providers");
+    let layout = crate::SlotLayout::plan(
+        TestScope::KEY,
+        &[],
+        &order,
+        &HashMap::new(),
+        &selection,
+        |_, _| true,
+    )
+    .expect("the scope plans");
+
+    assert!(!layout.captures(), "no declared edge captures the scope");
+
+    let scope = ScopeContainer::open_planned(
+        root().await,
+        registry(),
+        &Arc::new(layout),
+        Vec::new(),
+        Arc::new(()),
+    )
+    .await
+    .expect("the scope opens");
+    let capturing = scope
+        .resolve::<Arc<Capturing>>()
+        .await
+        .expect("resolution succeeds")
+        .expect("the scope holds the capturing component");
+
+    capturing
+        .held
+        .get_or_create()
+        .await
+        .expect("the captured scope resolves its sibling");
+}

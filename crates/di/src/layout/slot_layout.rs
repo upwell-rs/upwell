@@ -87,9 +87,14 @@ impl SlotLayout {
         self.constructs
     }
 
-    /// Whether a factory of this scope captures the scope under construction: a lazy,
-    /// deferred, fresh or dynamic edge, or a transient built against its in-progress store.
-    /// A scope that captures nothing is built without a shared store or resolver slot.
+    /// Whether a factory of this scope declares an edge that captures the scope under
+    /// construction: a lazy, deferred, fresh or dynamic edge, or a transient built against its
+    /// in-progress store.
+    ///
+    /// A scope that plans no capture is built into a store its context owns, with a resolver
+    /// slot created only if a factory captures the scope anyway. A transient resolved there
+    /// for an edge its factory did not declare sees none of the scope's in-progress
+    /// instances, just as undeclared edges are not ordered.
     pub(crate) fn captures(&self) -> bool {
         self.captures
     }
