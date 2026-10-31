@@ -13,8 +13,9 @@ the owner rule applies. Where this file is silent, rustfmt and the Rust API Guid
 - Declare variables at the top of their scope, grouped together, then a blank line before the logic.
 - Separate distinct logical groups inside a function with blank lines.
 - Keep the `return` or trailing expression at the bottom, isolated by a blank line above it. Never
-  chain it directly after a closing brace. A function or closure body of one or two lines is
-  exempt, such as a lone expression or one binding followed by the expression.
+  chain it directly after a closing brace. A function or closure body of one or two statements is
+  exempt: a lone expression, or one statement followed by the trailing expression, however many
+  lines rustfmt wraps them over.
 - Initialize at declaration. No late initialization without a reason.
 - Run `cargo fmt --all`. Format is enforced by CI, so do not hand-format around rustfmt.
 
