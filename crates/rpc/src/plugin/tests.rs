@@ -192,13 +192,6 @@ async fn peer_info_seeds_the_connection_scope_a_request_opens_under() {
         .open_default()
         .await
         .expect("registered peer seed opens the connection scope");
-    let resolved = connection
-        .container()
-        .resolve::<upwell_transport::PeerInfo>()
-        .await
-        .expect("peer resolution succeeds")
-        .expect("peer is seeded");
-
     let request = runtime
         .opener::<RequestScope>()
         .expect("the request scope is declared")
@@ -207,6 +200,12 @@ async fn peer_info_seeds_the_connection_scope_a_request_opens_under() {
         .open_default()
         .await
         .expect("request opens under its declared connection parent");
+    let resolved = request
+        .container()
+        .resolve::<upwell_transport::PeerInfo>()
+        .await
+        .expect("peer resolution succeeds")
+        .expect("the request reaches the peer through its connection");
 
     assert_eq!(resolved.addr, peer.addr);
     assert_eq!(
