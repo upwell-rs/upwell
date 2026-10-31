@@ -80,8 +80,15 @@ impl RouteEntries {
             .insert(path.into_boxed_str(), entry);
     }
 
+    /// The entry of the route serving `method` at `path`. A `HEAD` request without a route of
+    /// its own is served by the `GET` route, so it uses that entry.
     fn get(&self, method: &Method, path: &str) -> Option<&ScopeEntry<HttpRequest>> {
-        self.0.get(method)?.get(path)
+        let routed = self.0.get(method).and_then(|paths| paths.get(path));
+
+        match (routed, method) {
+            (None, &Method::HEAD) => self.0.get(&Method::GET)?.get(path),
+            (routed, _) => routed,
+        }
     }
 }
 
