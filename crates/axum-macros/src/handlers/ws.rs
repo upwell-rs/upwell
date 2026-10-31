@@ -50,7 +50,7 @@ pub(super) fn build_ws_route(
     let ws_protocol = paths.plugin("WebsocketProtocol");
     let ws_respond = paths.plugin("WsRespond");
     let inject = paths.plugin("Inject");
-    let scope_container = paths.plugin("__ScopeContainer");
+    let message_scope = paths.plugin("__MessageScope");
     let dispatch_error = paths.plugin("WsDispatchError");
     let proto = quote!(#protocol);
     let payload_ty = quote!(<#proto as #ws_protocol>::Payload);
@@ -136,7 +136,7 @@ pub(super) fn build_ws_route(
         #ws_route::new(
             #destination,
             ::std::sync::Arc::new(
-                move |__payload: #payload_ty, __scope: ::std::sync::Arc<#scope_container>|
+                move |__payload: #payload_ty, __scope: #message_scope|
                     -> #ws_future_p {
                     let __svc = ::std::sync::Arc::clone(&__svc);
 

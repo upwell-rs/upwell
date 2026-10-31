@@ -176,11 +176,11 @@ pub use upwell_axum_macros::dto;
 /// body/stream path stays wasm-safe. Referenced by generated code and available on every target.
 pub use bytes;
 
-/// Re-exported so `#[message]` ws-handler codegen can name the per-message scope container the
-/// generated handler resolves its `Inject<T>` parameters from. Referenced only by generated code.
+/// The per-message scope a `#[message]` ws handler resolves its `Inject<T>` parameters from,
+/// named by generated code. Referenced only by generated code.
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
 #[doc(hidden)]
-pub use upwell_di::ScopeContainer as __ScopeContainer;
+pub type __MessageScope = upwell_app::EntryScope<crate::scope::WebsocketMessage>;
 
 /// The DI scope container, re-exported for downstream WebSocket protocol implementations.
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]

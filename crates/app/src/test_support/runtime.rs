@@ -12,7 +12,7 @@ use upwell_hooks::{HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookManager};
 
 use crate::runtime::AppConditionState;
 use crate::scope::{ScopeLayouts, SeedDestination};
-use crate::{AppRegistry, PreparedScopeTopology, ScopeTopology};
+use crate::{AppRegistry, EntryDescriptor, PreparedScopeTopology, ScopeTopology};
 
 /// The descriptor the app seeds for its hook manager.
 pub(crate) fn hook_manager_descriptor() -> ComponentDescriptor {
@@ -58,6 +58,7 @@ pub(crate) fn seed_layouts(
     topology: &PreparedScopeTopology,
     destinations: &HashMap<TypeId, SeedDestination>,
     selection: &ProviderSelectionModel,
+    entries: &[EntryDescriptor],
 ) -> ScopeLayouts {
     let mut boundaries: Vec<_> = topology.boundaries().iter().collect();
     let mut layouts = HashMap::new();
@@ -97,5 +98,5 @@ pub(crate) fn seed_layouts(
         layouts.insert(boundary.id(), Arc::new(layout));
     }
 
-    ScopeLayouts::new(layouts, &[], selection, topology)
+    ScopeLayouts::new(layouts, entries, selection, topology)
 }

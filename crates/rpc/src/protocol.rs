@@ -18,7 +18,8 @@ use tokio_util::sync::CancellationToken;
 use tower::{Service, ServiceExt};
 use tracing::{debug, error, info, instrument, warn};
 use upwell_app::{
-    AppRuntime, OpenScope, ProtocolRuntime, ScopeEntry, ScopeOpener, Serve, ShutdownSignal,
+    AppRuntime, EntryScope, OpenScope, ProtocolRuntime, ScopeEntry, ScopeOpener, Serve,
+    ShutdownSignal,
 };
 use upwell_transport::{
     CallResult, Connection, Error as TransportError, PeerInfo, PredefinedCode, Respond,
@@ -370,7 +371,7 @@ async fn serve_connection<C: Connection>(
         builder = builder.seed(peer.clone());
     }
 
-    let connection_scope = match builder.open_default().await {
+    let connection_scope = match builder.open_on_demand().await {
         Ok(scope) => scope,
 
         Err(e) => {
@@ -482,12 +483,15 @@ async fn drive_call<R>(
     let builder = scopes.calls.builder().under(&connection_scope);
     let opening = async {
         match scopes.entries.get(path.as_str()) {
-            Some(entry) => builder.open(entry).await,
-            None => builder.open_default().await,
+            Some(entry) => builder.open_when_needed(entry).await,
+            None => builder
+                .open_default()
+                .await
+                .map(|scope| EntryScope::from_container(scope.into_container())),
         }
     };
     let request_scope = match AssertUnwindSafe(opening).catch_unwind().await {
-        Ok(Ok(scope)) => scope.into_container(),
+        Ok(Ok(scope)) => scope,
 
         Ok(Err(e)) => {
             error!(target: "upwell::daemon", %path, error = %e, "request scope build failed");
