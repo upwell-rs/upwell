@@ -196,7 +196,7 @@ impl ComponentConstructionContext {
         let boxed = crate::container::construct_planned_transient(
             &self.registry,
             self.parent.clone(),
-            self.slot.clone(),
+            self.resolver_slot(),
             self.store_handle(),
             Arc::clone(plan),
         )

@@ -16,8 +16,9 @@ pub(crate) struct ScopeResolverSlot {
 pub(super) enum ScopeResolverSlotState {
     Pending(Arc<std::sync::Mutex<ScopeResolverState>>),
     Attached(Weak<ScopeContainer>),
-    /// For a scope under construction whose layout captures nothing, so no handle can
-    /// reach it before it is built. The built container gets an attached slot.
+    /// For a scope under construction whose layout plans no capture. A factory that captures
+    /// it anyway gets a pending slot from its construction context, and the built container
+    /// gets an attached slot.
     Detached,
 }
 
@@ -49,6 +50,11 @@ impl ScopeResolverSlot {
         Self {
             state: ScopeResolverSlotState::Detached,
         }
+    }
+
+    /// Whether this slot was opened detached, for a scope whose layout plans no capture.
+    pub(crate) fn is_detached(&self) -> bool {
+        matches!(self.state, ScopeResolverSlotState::Detached)
     }
 
     /// The slot the built `container` keeps: this one, or an attached one when this one

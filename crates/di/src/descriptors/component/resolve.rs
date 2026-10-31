@@ -156,7 +156,7 @@ impl ComponentConstructionContext {
         crate::container::construct_transient::<H>(
             &self.registry,
             self.parent.clone(),
-            self.slot.clone(),
+            self.resolver_slot(),
             self.store_handle(),
         )
         .await
@@ -250,7 +250,7 @@ impl ComponentConstructionContext {
             return crate::container::construct_transient_provider::<H>(
                 &self.registry,
                 self.parent.clone(),
-                self.slot.clone(),
+                self.resolver_slot(),
                 self.store_handle(),
                 provider,
             )

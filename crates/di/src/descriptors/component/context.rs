@@ -29,6 +29,9 @@ pub struct ComponentConstructionContext {
     pub(super) parent: Option<Arc<crate::container::ScopeContainer>>,
     pub(super) registry: Arc<crate::container::ScopeRegistry>,
     pub(super) slot: crate::container::ScopeResolverSlot,
+    /// The pending slot created when a factory captures a scope opened with a detached slot,
+    /// because its layout planned no capture.
+    captured: std::sync::OnceLock<crate::container::ScopeResolverSlot>,
     /// The prepared layout this scope is built from, when it is opened from one.
     pub(super) layout: Option<Arc<SlotLayout>>,
     /// The factory being run, whose planned edges resolutions read first.
@@ -110,6 +113,7 @@ impl ComponentConstructionContext {
             registry,
             resolvers,
             slot,
+            captured: std::sync::OnceLock::new(),
             layout: None,
             running: Running::Unplanned,
             previous: None,
@@ -137,6 +141,7 @@ impl ComponentConstructionContext {
             registry,
             resolvers,
             slot,
+            captured: std::sync::OnceLock::new(),
             layout: None,
             running: Running::Unplanned,
             previous: None,
@@ -195,7 +200,13 @@ impl ComponentConstructionContext {
     }
 
     pub(crate) fn resolver_slot(&self) -> crate::container::ScopeResolverSlot {
-        self.slot.clone()
+        match self.slot.is_detached() {
+            true => self
+                .captured
+                .get_or_init(crate::container::ScopeResolverSlot::default)
+                .clone(),
+            false => self.slot.clone(),
+        }
     }
 
     /// The shared handle to this context's store, for transient construction. A
@@ -295,7 +306,7 @@ impl ComponentConstructionContext {
             parent: self.parent,
             registry: self.registry,
             resolvers: self.resolvers,
-            slot: self.slot,
+            slot: self.captured.into_inner().unwrap_or(self.slot),
         }
     }
 
