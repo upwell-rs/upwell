@@ -1,11 +1,9 @@
 //! Scope opening: declared scopes, typed parents, entries, seeds and generation pinning.
 
-use upwell_core::{EntryKey, TypeDescriptor};
-use upwell_di::BoxedComponent;
+use upwell_core::EntryKey;
 
 use super::*;
 use crate::EntryDescriptor;
-use crate::runtime::opener::validate_seeds;
 
 /// A by-value seed declared for the session boundary.
 #[derive(Clone, Debug, PartialEq)]
@@ -191,54 +189,49 @@ async fn an_entry_opens_its_scope_with_the_supplied_seeds() {
 }
 
 #[tokio::test]
-async fn seeds_are_checked_against_the_declared_slots() {
+async fn a_seed_must_fill_one_declared_slot_of_its_scope() {
     /// A seed absent from the application registry.
     struct Unknown;
 
-    let seeds = |types: &[TypeDescriptor]| {
-        types
-            .iter()
-            .map(|ty| BoxedComponent {
-                ty: *ty,
-                value: Box::new(()),
-            })
-            .collect::<Vec<_>>()
-    };
-    let visitor = TypeDescriptor::of::<Visitor>("Visitor");
     let (runtime, _) = build_runtime(visitor_destination()).await;
-    let view = runtime.view();
+    let sessions = runtime.opener::<Session>().expect("session is declared");
+    let requests = runtime.opener::<Request>().expect("request is declared");
+    let session = open_session(&runtime).await;
 
-    let declared = validate_seeds(&view, SESSION_ID, &seeds(&[visitor]));
-    let elsewhere = validate_seeds(&view, REQUEST_ID, &seeds(&[visitor]));
-    let unknown = validate_seeds(
-        &view,
-        SESSION_ID,
-        &seeds(&[TypeDescriptor::of::<Unknown>("Unknown")]),
+    let duplicate = expect_app_error(
+        sessions
+            .builder()
+            .seed(Visitor(1))
+            .seed(Visitor(2))
+            .open_default()
+            .await,
+        "a second seed for the same slot was accepted",
     );
-    let duplicate = validate_seeds(&view, SESSION_ID, &seeds(&[visitor, visitor]));
+    let elsewhere = expect_app_error(
+        requests
+            .builder()
+            .under(&session)
+            .seed(Visitor(1))
+            .open_default()
+            .await,
+        "a session seed was accepted by a request",
+    );
+    let unknown = expect_app_error(
+        sessions.builder().seed(Unknown).open_default().await,
+        "an unregistered seed was accepted",
+    );
 
-    assert!(declared.is_ok());
+    assert!(matches!(
+        duplicate,
+        Error::Di(upwell_di::Error::DuplicateSeed { .. })
+    ));
     assert!(matches!(
         elsewhere,
-        Err(Error::InvalidSeedDestination {
-            expected: SESSION_ID,
-            actual: REQUEST_ID,
-            ..
-        })
+        Error::Di(upwell_di::Error::UnplannedComponent { .. })
     ));
     assert!(matches!(
         unknown,
-        Err(Error::UnregisteredSeed {
-            scope: SESSION_ID,
-            ..
-        })
-    ));
-    assert!(matches!(
-        duplicate,
-        Err(Error::DuplicateSeedType {
-            scope: SESSION_ID,
-            ..
-        })
+        Error::Di(upwell_di::Error::UnplannedComponent { .. })
     ));
 }
 

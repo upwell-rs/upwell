@@ -105,7 +105,8 @@ impl ScopeContainer {
     /// built in layout order, resolving its dependencies through the edges the layout
     /// planned. The layout must belong to the generation of `registry`. A seed slot left
     /// empty fails only when a dependency resolves it, as with a scope opened from a plain
-    /// construction order.
+    /// construction order. A seed without a slot in the layout, or a second seed for the same
+    /// slot, fails the opening.
     #[doc(hidden)]
     pub async fn open_planned<T: Any + Send + Sync>(
         parent: Arc<ScopeContainer>,
@@ -116,6 +117,8 @@ impl ScopeContainer {
     ) -> crate::Result<Arc<ScopeContainer>> {
         let scope = layout.scope();
         let generation_lease: GenerationLease = Some(generation_lease);
+
+        reject_duplicate_seeds(scope, &seeds)?;
 
         if !layout.constructs() && seeds.is_empty() {
             return Ok(Self::empty(scope, parent, registry, generation_lease));
@@ -297,4 +300,23 @@ fn register_providers_for(
 
         cx.register_provider(provider, ordinal);
     }
+}
+
+/// Rejects a second seed for a slot another seed of the same opening already fills.
+fn reject_duplicate_seeds(scope: ScopeKey, seeds: &[BoxedComponent]) -> crate::Result<()> {
+    for (index, seed) in seeds.iter().enumerate() {
+        let type_id = seed.ty.type_id;
+
+        if seeds[..index]
+            .iter()
+            .any(|earlier| earlier.ty.type_id == type_id)
+        {
+            return Err(Error::DuplicateSeed {
+                component: seed.ty.name,
+                scope: scope.name(),
+            });
+        }
+    }
+
+    Ok(())
 }

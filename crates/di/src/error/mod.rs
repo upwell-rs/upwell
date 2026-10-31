@@ -131,6 +131,13 @@ pub enum Error {
         scope: &'static str,
     },
 
+    /// A scope was opened with two seeds for the same slot.
+    #[error("scope '{scope}' was opened with more than one seed for component '{component}'")]
+    DuplicateSeed {
+        component: &'static str,
+        scope: &'static str,
+    },
+
     /// A provider descriptor references a concrete type outside the effective component set.
     #[error("{0}")]
     ProviderComponentMissing(Box<ProviderComponentMissing>),
