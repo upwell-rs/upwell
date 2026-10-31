@@ -97,5 +97,5 @@ pub(crate) fn seed_layouts(
         layouts.insert(boundary.id(), Arc::new(layout));
     }
 
-    ScopeLayouts::new(layouts, &[])
+    ScopeLayouts::new(layouts, &[], selection, topology)
 }

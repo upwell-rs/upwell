@@ -34,17 +34,21 @@ pub(crate) struct ScopeLayouts {
 }
 
 impl ScopeLayouts {
-    /// Plans every entry of `entries` against the scope layouts `by_scope`. An entry into
-    /// the root scope has no plan.
+    /// Plans every entry of `entries` against the scope layouts `by_scope`, selecting
+    /// providers as `selection` does over `topology`. An entry into the root scope has no plan.
     pub(crate) fn new(
         by_scope: HashMap<ScopeId, Arc<SlotLayout>>,
         entries: &[EntryDescriptor],
+        selection: &ProviderSelectionModel,
+        topology: &PreparedScopeTopology,
     ) -> Self {
         let entries = crate::entry::in_table_order(entries)
             .map(|entry| {
-                by_scope
-                    .get(&entry.scope.id())
-                    .map(|layout| layout.plan_entry(&(entry.targets)()))
+                by_scope.get(&entry.scope.id()).map(|layout| {
+                    layout.plan_entry(&(entry.targets)(), selection, |consumer, dependency| {
+                        topology.is_reachable(&consumer, &dependency)
+                    })
+                })
             })
             .collect();
 
@@ -89,7 +93,12 @@ impl ScopePlan {
     ) -> crate::Result<Self> {
         let partitions = DescriptorPartitions::classify(resolved, topology)?;
         let orders = partitions.orders(topology, selection)?;
-        let layouts = ScopeLayouts::new(partitions.layouts(&orders, topology, selection)?, entries);
+        let layouts = ScopeLayouts::new(
+            partitions.layouts(&orders, topology, selection)?,
+            entries,
+            selection,
+            topology,
+        );
 
         Ok(Self {
             singletons: partitions.singletons,

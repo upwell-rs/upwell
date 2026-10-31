@@ -176,7 +176,7 @@ pub(super) fn scope_allows_by_rank(consumer: ScopeKey, dependency: ScopeKey) -> 
     dependency.rank() >= consumer.rank()
 }
 
-pub(super) fn scope_allows_with(
+pub(crate) fn scope_allows_with(
     consumer: ScopeKey,
     dependency: ScopeKey,
     can_reach: &impl Fn(ScopeId, ScopeId) -> bool,
