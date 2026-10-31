@@ -17,18 +17,32 @@ struct SlotValue {
 /// The instances of a scope opened from a prepared [`SlotLayout`], stored densely by slot.
 ///
 /// The layout's type and trait indexes are shared by every instance of the scope, so an
-/// open scope allocates only its values. Each slot is set once: when the scope opens, or
-/// later when a slot its opening did not build is built on demand.
+/// open scope allocates only its values. Each slot is set once: in `values` while the scope
+/// opens, or in `later` when a slot its opening did not build is built on demand. The second
+/// set is allocated by the first such build, so a scope whose opening built everything it
+/// uses reads plain values.
 pub(crate) struct SlotStore {
     layout: Arc<SlotLayout>,
+    values: Box<[Option<SlotValue>]>,
+    later: OnceLock<Box<Later>>,
+}
+
+/// The slots of an open scope built on demand, and the lock their builds hold so each is
+/// built once.
+struct Later {
+    building: tokio::sync::Mutex<()>,
     values: Box<[OnceLock<SlotValue>]>,
 }
 
 impl SlotStore {
     pub(crate) fn new(layout: Arc<SlotLayout>) -> Self {
-        let values = layout.slots().iter().map(|_| OnceLock::new()).collect();
+        let values = layout.slots().iter().map(|_| None).collect();
 
-        Self { layout, values }
+        Self {
+            layout,
+            values,
+            later: OnceLock::new(),
+        }
     }
 
     /// Whether this store was opened from `layout`.
@@ -43,12 +57,21 @@ impl SlotStore {
 
     /// Whether `slot` holds its instance.
     pub(crate) fn is_built(&self, slot: SlotIdx) -> bool {
-        self.values[slot.index()].get().is_some()
+        self.built(slot).is_some()
+    }
+
+    fn built(&self, slot: SlotIdx) -> Option<&SlotValue> {
+        let index = slot.index();
+
+        match &self.values[index] {
+            Some(value) => Some(value),
+            None => self.later.get()?.values[index].get(),
+        }
     }
 
     /// Stores a built or seeded instance in its slot and aliases it under every trait the
     /// slot provides.
-    pub(crate) fn insert(&self, component: BoxedComponent) -> crate::Result<()> {
+    pub(crate) fn insert(&mut self, component: BoxedComponent) -> crate::Result<()> {
         let slot = self
             .layout
             .slot_of(component.ty.type_id)
@@ -60,43 +83,89 @@ impl SlotStore {
         self.insert_at(slot, component)
     }
 
-    /// Stores an instance a slot's own factory built, at that slot.
+    /// Stores an instance a slot's own factory built while the scope opens, at that slot.
     ///
     /// A factory returning another component than its slot holds is rejected before the
     /// instance is aliased under the slot's providers, and so is a second instance for a
     /// slot that already holds one.
-    pub(crate) fn insert_at(&self, slot: SlotIdx, component: BoxedComponent) -> crate::Result<()> {
-        let expected = &self.layout.spec(slot).component;
+    pub(crate) fn insert_at(
+        &mut self,
+        slot: SlotIdx,
+        component: BoxedComponent,
+    ) -> crate::Result<()> {
+        if self.is_built(slot) {
+            return Err(self.built_twice(slot));
+        }
 
-        if expected.ty.type_id != component.ty.type_id {
+        self.values[slot.index()] = Some(self.slot_value(slot, component)?);
+
+        Ok(())
+    }
+
+    /// Stores an instance built on demand in the open scope, at its slot.
+    ///
+    /// The checks are those of [`insert_at`](Self::insert_at).
+    pub(crate) fn insert_built(
+        &self,
+        slot: SlotIdx,
+        component: BoxedComponent,
+    ) -> crate::Result<()> {
+        if self.values[slot.index()].is_some() {
+            return Err(self.built_twice(slot));
+        }
+
+        self.later().values[slot.index()]
+            .set(self.slot_value(slot, component)?)
+            .map_err(|_| self.built_twice(slot))
+    }
+
+    /// The stored value of `component`, aliased under every trait `slot` provides.
+    fn slot_value(&self, slot: SlotIdx, component: BoxedComponent) -> crate::Result<SlotValue> {
+        let spec = self.layout.spec(slot);
+
+        if spec.component.ty.type_id != component.ty.type_id {
             return Err(Error::FactoryOutputMismatch {
-                component: expected.name,
+                component: spec.component.name,
                 built: component.ty.name,
             });
         }
 
-        let providers = self
-            .layout
-            .spec(slot)
+        let providers = spec
             .providers
             .iter()
             .map(|provider| (provider.erase)(&component))
             .collect();
 
-        self.values[slot.index()]
-            .set(SlotValue {
-                component,
-                providers,
+        Ok(SlotValue {
+            component,
+            providers,
+        })
+    }
+
+    /// Holds the on-demand build lock of this store until the guard drops.
+    pub(crate) async fn lock_builds(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.later().building.lock().await
+    }
+
+    fn later(&self) -> &Later {
+        self.later.get_or_init(|| {
+            Box::new(Later {
+                building: tokio::sync::Mutex::new(()),
+                values: self.values.iter().map(|_| OnceLock::new()).collect(),
             })
-            .map_err(|_| Error::SlotBuiltTwice {
-                component: expected.name,
-                scope: self.layout.scope().name(),
-            })
+        })
+    }
+
+    fn built_twice(&self, slot: SlotIdx) -> Error {
+        Error::SlotBuiltTwice {
+            component: self.layout.spec(slot).component.name,
+            scope: self.layout.scope().name(),
+        }
     }
 
     /// The value at `at`, if its slot is built.
     pub(crate) fn value(&self, at: SlotRef) -> Option<&BoxedComponent> {
-        let built = self.values[at.slot.index()].get()?;
+        let built = self.built(at.slot)?;
 
         match at.alias {
             Some(alias) => built.providers.get(alias),
@@ -152,14 +221,15 @@ impl SlotStore {
     }
 
     pub(crate) fn component_count(&self) -> usize {
-        self.values.iter().filter_map(OnceLock::get).count()
+        (0..self.values.len())
+            .filter(|index| self.is_built(SlotIdx::new(*index)))
+            .count()
     }
 
     #[cfg(test)]
     pub(crate) fn provider_count(&self) -> usize {
-        self.values
-            .iter()
-            .filter_map(OnceLock::get)
+        (0..self.values.len())
+            .filter_map(|index| self.built(SlotIdx::new(index)))
             .map(|built| built.providers.len())
             .sum()
     }

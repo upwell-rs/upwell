@@ -253,7 +253,6 @@ fn freeze_candidate(
             slot: slot.clone(),
             generation_lease: None,
             drop_guard: std::sync::OnceLock::new(),
-            building: tokio::sync::Mutex::new(()),
         });
 
         slot.attach(&container)?;

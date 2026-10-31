@@ -75,11 +75,11 @@ impl ScopeContainer {
         layout: &SlotLayout,
         needed: &[bool],
     ) -> crate::Result<()> {
-        let _building = self.building.lock().await;
         let store = self
             .store
             .slots()
             .expect("a scope building left-out slots was opened from a layout");
+        let _building = store.lock_builds().await;
 
         for (index, spec) in layout.slots().iter().enumerate() {
             let slot = SlotIdx::new(index);
@@ -112,7 +112,7 @@ impl ScopeContainer {
 
             let built = factory.build(&mut cx).await?;
 
-            store.insert_at(slot, built)?;
+            store.insert_built(slot, built)?;
         }
 
         Ok(())

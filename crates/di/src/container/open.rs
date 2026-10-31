@@ -195,7 +195,6 @@ impl ScopeContainer {
             slot: ScopeResolverSlot::attached(container.clone()),
             generation_lease,
             drop_guard: std::sync::OnceLock::new(),
-            building: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -273,7 +272,6 @@ impl ScopeContainer {
             slot: slot.for_container(weak),
             generation_lease,
             drop_guard: std::sync::OnceLock::new(),
-            building: tokio::sync::Mutex::new(()),
         });
 
         slot.attach(&container)?;

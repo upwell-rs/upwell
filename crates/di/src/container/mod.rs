@@ -48,9 +48,6 @@ pub struct ScopeContainer {
     slot: ScopeResolverSlot,
     generation_lease: Option<Arc<dyn Any + Send + Sync>>,
     drop_guard: std::sync::OnceLock<Box<dyn Any + Send + Sync>>,
-    /// Held while slots this scope's opening left out are built on demand, so each is built
-    /// once.
-    building: tokio::sync::Mutex<()>,
 }
 
 impl ResolverCtx for ScopeContainer {
