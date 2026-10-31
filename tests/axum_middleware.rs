@@ -8,7 +8,8 @@
 //! all three tiers; the same middleware type resolved at two attach points sharing one
 //! instance instead of being constructed twice; and a request-scoped component reading
 //! native request data (a header and a cookie) via `RequestMeta`, reused across two
-//! injections within one request.
+//! injections within one request; and the request scope opening on first injection, shared
+//! by middleware and the handler.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -187,8 +188,8 @@ async fn raw_layer_and_global_controller_path_middleware_run_in_order() {
     // A plain `axum::middleware::from_fn` closure — standard ecosystem middleware, not our
     // `AxumMiddleware` trait — reaching into the request's DI scope the same way `Inject` does,
     // to prove raw middleware isn't a second-class citizen relative to the DI-backed kind.
-    let raw_layer = axum_middleware::from_fn(|req: RawRequest, next: Next| async move {
-        if let Some(scope) = req.extensions().get::<ScopeHandle>().cloned()
+    let raw_layer = axum_middleware::from_fn(|mut req: RawRequest, next: Next| async move {
+        if let Ok(scope) = ScopeHandle::of(&mut req).await
             && let Ok(log) = scope.0.extract::<CallLog>().await
         {
             log.record("raw");
@@ -369,5 +370,86 @@ async fn request_scoped_component_reads_request_meta_and_is_shared() {
     assert!(
         who.same_instance,
         "AuthUser should be fetched once and shared within the request"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 4: the request scope opens on first injection, once per request, and middleware
+// and the handler share it.
+// ---------------------------------------------------------------------------
+
+/// Request scopes built so far.
+static OPENED: AtomicUsize = AtomicUsize::new(0);
+
+/// A request-scoped component counting the request scopes that built it.
+#[component(scope = HttpRequest)]
+struct Visit {}
+
+#[methods]
+impl Visit {
+    #[init]
+    async fn init(_meta: RequestMeta) -> Self {
+        OPENED.fetch_add(1, Ordering::SeqCst);
+
+        Self {}
+    }
+}
+
+/// Path middleware that injects [`Visit`] before the handler does.
+#[component]
+struct EarlyVisit {}
+
+impl AxumMiddleware for EarlyVisit {
+    async fn handle(&self, mut req: RawRequest, next: Next) -> Response {
+        let scope = ScopeHandle::of(&mut req)
+            .await
+            .expect("the middleware opens the request scope");
+
+        scope
+            .0
+            .extract::<Arc<Visit>>()
+            .await
+            .expect("the request scope holds a visit");
+
+        next.run(req).await
+    }
+}
+
+#[controller(path = "/visit")]
+struct VisitController;
+
+#[handlers]
+impl VisitController {
+    #[get("/none")]
+    async fn none(&self) {}
+
+    #[get("/shared", middleware = [EarlyVisit])]
+    async fn shared(&self, Inject(_visit): Inject<Arc<Visit>>) {}
+}
+
+#[tokio::test]
+async fn the_request_scope_opens_on_first_injection_and_is_shared() {
+    let app = upwell::App::<upwell::axum::Axum>::builder("test-visit")
+        .auto_discover()
+        .build()
+        .await
+        .expect("app builds");
+    let router: Router = app.protocol().router().clone();
+    let get = |uri: &'static str| RawRequest::builder().uri(uri).body(Body::empty()).unwrap();
+
+    let none = router.clone().oneshot(get("/visit/none")).await.unwrap();
+    let after_none = OPENED.load(Ordering::SeqCst);
+    let shared = router.oneshot(get("/visit/shared")).await.unwrap();
+
+    assert_eq!(none.status(), StatusCode::OK);
+    assert_eq!(
+        after_none, 0,
+        "a request that injects nothing opens no scope"
+    );
+    assert_eq!(shared.status(), StatusCode::OK);
+    assert_eq!(
+        OPENED.load(Ordering::SeqCst),
+        1,
+        "middleware and the handler inject from one request scope"
     );
 }

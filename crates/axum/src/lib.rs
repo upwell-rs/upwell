@@ -55,6 +55,8 @@ pub mod protocol;
 #[cfg(not(target_family = "wasm"))]
 pub mod request_meta;
 #[cfg(not(target_family = "wasm"))]
+mod request_scope;
+#[cfg(not(target_family = "wasm"))]
 pub mod scope;
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
 pub mod ws;

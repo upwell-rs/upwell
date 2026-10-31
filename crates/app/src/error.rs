@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use upwell_core::ScopeId;
+use upwell_core::{EntryKey, ScopeId};
 
 /// Errors from the protocol-agnostic application core: registry validation, the DI
 /// engine, config, and hooks.
@@ -67,6 +67,24 @@ pub enum Error {
         /// The descriptor's declared destination.
         expected: ScopeId,
         /// The boundary being opened.
+        actual: ScopeId,
+    },
+
+    /// A scope opener was asked for an entry the application did not register.
+    #[error("entry '{key}' is not registered")]
+    UnknownEntry {
+        /// The requested stable entry identity.
+        key: EntryKey,
+    },
+
+    /// A scope opener was asked for an entry that runs in another scope.
+    #[error("entry '{key}' runs in scope '{actual}', not in opened scope '{expected}'")]
+    EntryScopeMismatch {
+        /// The requested stable entry identity.
+        key: EntryKey,
+        /// The scope the opener opens.
+        expected: ScopeId,
+        /// The scope the entry was registered for.
         actual: ScopeId,
     },
 

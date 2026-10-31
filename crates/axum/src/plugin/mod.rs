@@ -5,7 +5,6 @@ use std::future::Future;
 use std::sync::Arc;
 
 use axum::extract::Request;
-use axum::middleware::{self, Next};
 use axum::response::IntoResponse;
 use axum::routing::Route;
 use tower::{Layer, Service};
@@ -13,23 +12,24 @@ use upwell_app::{
     AppBuilder, AppRegistry, AppRuntime, PreparedProtocol, ProtocolDefinition, ValidationContext,
 };
 use upwell_config::{ConfigBinding, ContainerConfigExt};
-use upwell_core::{Descriptor, Scope, TypeDescriptor};
-use upwell_di::{BoxedComponent, Component, ComponentDescriptor};
+use upwell_core::Descriptor;
+use upwell_di::{Component, ComponentDescriptor};
 
 use crate::config::{AXUM_CONFIG_PATH, AxumConfig};
 use crate::controller::{CONTROLLERS, ControllerDescriptor};
-use crate::extract::ScopeHandle;
 use crate::middleware::{AxumMiddleware, MiddlewareApplier, as_layer};
 use crate::protocol::AxumRuntime;
-use crate::request_meta::{REQUEST_META_DESCRIPTOR, RequestMeta};
+use crate::request_meta::REQUEST_META_DESCRIPTOR;
+use crate::request_scope::RequestScopeLayer;
 use crate::scope::{HttpRequest as HttpRequestScope, SCOPE_TOPOLOGY};
+use timeout::RequestTimeoutLayer;
 
 /// The axum HTTP protocol definition.
 ///
 /// Accumulates the registered/discovered controllers, contributes no extra DI seeds, and
 /// builds the [`AxumRuntime`]: each controller's [`axum::Router`] merged together and
-/// wrapped by a per-request scope layer that opens the request scope and threads it into
-/// the request extensions for the [`Inject`](crate::Inject) extractor.
+/// wrapped by a request-scope layer, so the [`Inject`](crate::Inject) extractor opens the
+/// request scope on first use.
 #[derive(Default)]
 pub struct Axum {
     controllers: Vec<ControllerDescriptor>,
@@ -293,58 +293,18 @@ impl PreparedProtocol for PreparedAxum {
         ));
 
         if config_snapshot.request_timeout_ms > 0 {
-            let timeout = std::time::Duration::from_millis(config_snapshot.request_timeout_ms);
-            router = router.layer(middleware::from_fn(move |request, next: Next| async move {
-                tokio::time::timeout(timeout, next.run(request))
-                    .await
-                    .unwrap_or_else(|_| axum::http::StatusCode::REQUEST_TIMEOUT.into_response())
-            }));
+            router = router.layer(RequestTimeoutLayer::new(std::time::Duration::from_millis(
+                config_snapshot.request_timeout_ms,
+            )));
         }
 
-        // The bridge: a per-request layer that opens the HttpRequest scope (parented at the
-        // singleton root) and inserts its handle into the request extensions. `Inject`
-        // reads it back out; a scope-build failure degrades to 500 rather than panicking.
-        // Also seeds `RequestMeta` (method/URI/headers/cookies) so request-scoped components
-        // and handlers can depend on the native request without axum's own extractors
-        // entering the DI graph.
-        let scope_runtime = runtime.clone();
-        let router = router.layer(middleware::from_fn(
-            move |mut request: Request, next: Next| {
-                let scope_runtime = scope_runtime.clone();
-
-                async move {
-                    let meta = RequestMeta::from_parts(
-                        request.method().clone(),
-                        request.uri().clone(),
-                        request.headers().clone(),
-                    );
-                    let seed = BoxedComponent {
-                        ty: TypeDescriptor::of::<RequestMeta>("RequestMeta"),
-                        value: Box::new(meta),
-                    };
-
-                    match scope_runtime
-                        .open_scope_from_root(HttpRequestScope::KEY, vec![seed])
-                        .await
-                    {
-                        Ok(scope) => {
-                            request.extensions_mut().insert(ScopeHandle(scope));
-
-                            next.run(request).await
-                        }
-
-                        Err(error) => {
-                            tracing::error!(
-                                target: "upwell::axum",
-                                error = %error,
-                                "request scope build failed"
-                            );
-
-                            axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
-                        }
-                    }
-                }
-            },
+        // The bridge: every request runs with the request-scope opener in reach, and its scope
+        // opens on the first injection, seeded with `RequestMeta` (method/URI/headers/cookies)
+        // so request-scoped components can depend on the native request without axum's own
+        // extractors entering the DI graph. A request that injects nothing opens no scope.
+        let router = router.layer(RequestScopeLayer::new(
+            runtime.opener::<HttpRequestScope>()?,
+            config.clone(),
         ));
 
         // One canonical prefix drives both the OpenAPI server/UI URLs and the router nesting, so the
@@ -411,6 +371,7 @@ fn normalize_base_path(base_path: &str) -> String {
 mod entries;
 #[cfg(test)]
 mod tests;
+mod timeout;
 #[cfg(feature = "tooling")]
 pub(crate) mod tooling;
 

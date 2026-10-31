@@ -5,10 +5,10 @@
 //! upgraded socket opens one [`WebsocketConnection`] scope below the root and each inbound
 //! application message opens a [`WebsocketMessage`] child below that connection.
 
-use upwell_app::{ScopeBoundary, ScopeParent, ScopeTopology};
+use upwell_app::{OpensUnder, ScopeBoundary, ScopeParent, ScopeTopology};
 #[cfg(feature = "ws")]
 use upwell_core::ScopeGenerations;
-use upwell_core::{Scope, ScopeId};
+use upwell_core::{Scope, ScopeId, Singleton};
 
 /// One inbound HTTP request.
 pub struct HttpRequest;
@@ -41,6 +41,14 @@ impl Scope for WebsocketMessage {
     const RANK: u8 = 100;
     const NAME: &'static str = "WebsocketMessage";
 }
+
+impl OpensUnder<Singleton> for HttpRequest {}
+
+#[cfg(feature = "ws")]
+impl OpensUnder<Singleton> for WebsocketConnection {}
+
+#[cfg(feature = "ws")]
+impl OpensUnder<WebsocketConnection> for WebsocketMessage {}
 
 #[cfg(not(feature = "ws"))]
 static AXUM_SCOPE_BOUNDARIES: [ScopeBoundary; 1] =
