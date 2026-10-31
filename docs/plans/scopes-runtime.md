@@ -306,8 +306,8 @@ let scope = opener
   The declared scope is validated at that point, and parents are typed, so the per-call path
   does no topology lookup in release builds. It pins a generation (the current one under the
   root, the parent's own under a parent), takes the scope's layout from it and builds the
-  container. `.open(&entry)` uses the scope's layout until entries carry their own plans
-  (#348). Each seed must fill its own factory-less slot.
+  container. `.open(&entry)` builds the slots the entry's plan lists; `.open_default()` builds
+  every slot. Each seed must fill its own factory-less slot.
 - The builder is a stack value with no allocation of its own.
 - `OpensUnder<P>` is defined with the opener, because protocols need typed parents. Protocol scope
   types implement it by hand for the parents their topology lists; `#[scope(parents = [..])]`
@@ -320,9 +320,8 @@ Status (#346, #353 HTTP): `AppRuntime::opener::<S>()` returns the `ScopeOpener<S
 `OpensUnder<P>`, with `Singleton` standing for the root) and `.seed(value)`, then
 `.open(&entry)` or `.open_default()`. The per-call path checks the parent topology only in
 debug builds; a seed without a slot, or a second seed for the same slot, fails the opening in
-every build. Params
-on `builder` arrive with `#[scope]` (#405), and `.open(&entry)` uses the scope's layout until
-entries carry plans (#348). Axum's HTTP requests open through it: a hand-written layer keeps
+every build. Params on `builder` arrive with `#[scope]` (#405), and `.open(&entry)` builds
+what the entry's plan lists (#348, below). Axum's HTTP requests open through it: a hand-written layer keeps
 the opener in reach of the request's task, and the scope opens on the first `Inject` or
 `ScopeHandle` extraction (`ScopeHandle::of` for middleware holding the whole request), so a
 request that injects nothing opens no scope. `RequestMeta` is seeded from the request head
@@ -348,7 +347,10 @@ instance under a per-container lock, on the instance's pinned generation. Synchr
 (`ScopeContainer::get`, `ComponentSource`, `RpcCallContext::component`) see only built slots.
 HTTP routes find their entry by method and matched path, RPC calls by method path, WebSocket
 messages by destination (`WsConnectionScope::open_message`); anything without an entry builds
-every slot. Tooling labels each entry with the components it `builds`. Durable scopes still
+every slot. Opening a scope first builds any enclosing-scope slot its planned factories read
+that the enclosing scope's opening left out. Each on-demand slot is its own async once-cell, so
+a factory built on demand may itself resolve another left-out slot of its scope. Tooling labels
+each entry with the components it `builds`. Durable scopes still
 build every slot when they open, and `deny_unplanned` strict mode is not implemented.
 
 A request scope opened under an app-chosen parent, such as a per-user `Session` scope the

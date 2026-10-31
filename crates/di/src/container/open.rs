@@ -158,6 +158,8 @@ impl ScopeContainer {
                 continue;
             }
 
+            Self::ensure_ancestor_sources(Some(&parent), &spec.dependencies).await?;
+
             debug!(component = %component.name, scope = scope.name(), "constructing component");
 
             cx.set_running(Running::Slot(slot));
