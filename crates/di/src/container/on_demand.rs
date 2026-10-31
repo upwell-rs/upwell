@@ -41,18 +41,14 @@ impl ScopeContainer {
 
         for dependency in dependencies {
             match &dependency.source {
-                DepRef::Ancestor { layout, .. } => {
-                    start
-                        .ensure_in(layout.scope().id(), dependency.target)
-                        .await?;
+                DepRef::Ancestor { layout, at } => {
+                    start.ensure_in(layout.scope().id(), at.slot).await?;
                 }
 
                 DepRef::Many(provided) => {
                     for entry in provided.iter() {
-                        if let DepRef::Ancestor { layout, .. } = &entry.source {
-                            start
-                                .ensure_in(layout.scope().id(), dependency.target)
-                                .await?;
+                        if let DepRef::Ancestor { layout, at } = &entry.source {
+                            start.ensure_in(layout.scope().id(), at.slot).await?;
                         }
                     }
                 }
@@ -64,13 +60,14 @@ impl ScopeContainer {
         Ok(())
     }
 
-    /// Builds the left-out slots holding `target` in the container of `scope` on this
-    /// scope's chain. Checking costs no allocation; only a build is boxed.
-    async fn ensure_in(self: &Arc<Self>, scope: ScopeId, target: TypeId) -> crate::Result<()> {
+    /// Builds `slot` of the container of `scope` on this scope's chain, with the slots it
+    /// reads, when that container's opening left it out. Checking costs no allocation; only a
+    /// build is boxed.
+    async fn ensure_in(self: &Arc<Self>, scope: ScopeId, slot: SlotIdx) -> crate::Result<()> {
         let Some(ancestor) = self.in_chain(scope) else {
             return Ok(());
         };
-        let Some((layout, needed)) = ancestor.missing(target) else {
+        let Some((layout, needed)) = ancestor.missing(|_, visit| visit(slot)) else {
             return Ok(());
         };
 
@@ -78,21 +75,26 @@ impl ScopeContainer {
     }
 
     async fn ensure_local(self: &Arc<Self>, target: TypeId) -> crate::Result<()> {
-        let Some((layout, needed)) = self.missing(target) else {
+        let Some((layout, needed)) =
+            self.missing(|layout, visit| layout.for_each_target_slot(target, visit))
+        else {
             return Ok(());
         };
 
         self.build_missing(&layout, &needed).await
     }
 
-    /// The layout of this scope and the slots to build so every slot holding `target` is
-    /// built, or `None` when they all are.
-    fn missing(&self, target: TypeId) -> Option<(Arc<SlotLayout>, Vec<bool>)> {
+    /// The layout of this scope and the slots to build so every slot `slots` visits is built,
+    /// or `None` when they all are.
+    fn missing(
+        &self,
+        slots: impl FnOnce(&SlotLayout, &mut dyn FnMut(SlotIdx)),
+    ) -> Option<(Arc<SlotLayout>, Vec<bool>)> {
         let store = self.store.slots()?;
         let layout = store.layout();
         let mut needed: Option<Vec<bool>> = None;
 
-        layout.for_each_target_slot(target, |slot| {
+        slots(layout, &mut |slot| {
             if layout.spec(slot).factory.is_some() && !store.is_built(slot) {
                 let needed = needed.get_or_insert_with(|| vec![false; layout.len()]);
 
