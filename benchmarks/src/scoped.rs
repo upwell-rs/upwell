@@ -19,7 +19,7 @@ use upwell_config::{ConfigManager, Dynamic};
 use upwell_core::{ScopeKey, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, ComponentFactoryRole, Injectable, ScopeContainer,
+    ComponentFactoryDescriptor, ComponentFactoryRole, ScopeContainer,
 };
 
 use crate::cases::{Call, Case};
@@ -45,23 +45,24 @@ impl<const N: usize> Component for CallScoped<N> {
     }
 }
 
-fn boxed<const N: usize>() -> BoxedComponent {
+/// Boxes a [`CallScoped`] as `cx`'s scope stores it, like a generated factory.
+fn boxed<const N: usize>(cx: &ComponentConstructionContext) -> BoxedComponent {
     BoxedComponent {
         ty: TypeDescriptor::of::<CallScoped<N>>(CallScoped::<N>::NAME),
-        value: Box::new(Injectable::into_stored(CallScoped::<N>.into_handle())),
+        value: Box::new(cx.stored(CallScoped::<N>.into_handle())),
     }
 }
 
 fn construct<const N: usize>(
-    _cx: &mut ComponentConstructionContext,
+    cx: &mut ComponentConstructionContext,
 ) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
-    Box::pin(async { Ok(boxed::<N>()) })
+    Box::pin(async { Ok(boxed::<N>(cx)) })
 }
 
 fn construct_ready<const N: usize>(
-    _cx: &ComponentConstructionContext,
+    cx: &ComponentConstructionContext,
 ) -> upwell_di::Result<Option<BoxedComponent>> {
-    Ok(Some(boxed::<N>()))
+    Ok(Some(boxed::<N>(cx)))
 }
 
 fn factories<const N: usize>() -> &'static [ComponentFactoryDescriptor] {

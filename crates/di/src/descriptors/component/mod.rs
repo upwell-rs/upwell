@@ -76,8 +76,14 @@ pub trait Injectable: Clone + Send + Sync + 'static {
     type Target: ?Sized + 'static;
 
     /// The value actually held in a scope's box for this handle. `Arc<T>` and
-    /// `Dep<T>` both store a shared `Live<T>`, so they alias one swappable slot;
-    /// by-value handles store themselves.
+    /// `Dep<T>` both store a `Live<T>`, so they alias one slot; by-value handles store
+    /// themselves.
+    ///
+    /// The root stores a swappable `Live<T>`, so every `Dep<T>` read from it shares the cell
+    /// a transition republishes. A scope below the root stores a fixed one
+    /// ([`into_fixed`](Self::into_fixed)): `Arc<T>` reads its instance directly, and each
+    /// `Dep<T>` read from it gets a cell of its own, because nothing republishes that
+    /// instance.
     type Stored: Clone + Send + Sync + 'static;
 
     /// Wraps a freshly built handle into its stored slot. Called once, when the
