@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use upwell_config::{ConfigManager, ConfigReloader};
-use upwell_core::{ResolverSet, Scope, ScopeGenerations, ScopeId, Singleton};
+use upwell_core::{EntryKey, ResolverSet, Scope, ScopeGenerations, ScopeId, Singleton};
 use upwell_di::{EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
@@ -71,11 +71,43 @@ static BOUNDARIES: [ScopeBoundary; 3] = [
     ScopeBoundary::new::<Shared>(&[ScopeParent::Root, ScopeParent::of::<Session>()]),
 ];
 
-/// A fresh empty generation over the test topology, prepared against `base`, plus the
-/// scope registry its root was built from.
+/// A by-value seed declared for the session boundary.
+#[derive(Clone, Debug, PartialEq)]
+struct Visitor(u8);
+
+impl upwell_di::Injectable for Visitor {
+    type Target = Self;
+    type Stored = Self;
+
+    fn into_stored(self) -> Self {
+        self
+    }
+
+    fn from_stored(stored: &Self) -> Self {
+        stored.clone()
+    }
+}
+
+fn key(value: &'static str) -> EntryKey {
+    EntryKey::new(value).expect("valid test entry key")
+}
+
+fn visitor_destination() -> HashMap<TypeId, SeedDestination> {
+    HashMap::from([(
+        TypeId::of::<Visitor>(),
+        SeedDestination {
+            scope: SESSION_ID,
+            type_name: std::any::type_name::<Visitor>(),
+        },
+    )])
+}
+
+/// A fresh empty generation over the test topology, prepared against `base` with the plans of
+/// `entries`, plus the scope registry its root was built from.
 async fn prepared_generation(
     base: RuntimeGenerationId,
     seed_destinations: HashMap<TypeId, SeedDestination>,
+    entries: &[crate::EntryDescriptor],
 ) -> (PreparedRuntimeGeneration, Arc<ScopeRegistry>) {
     let registry = Arc::new(
         ScopeRegistry::new(HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
@@ -95,7 +127,12 @@ async fn prepared_generation(
     let topology = Arc::new(topology);
     let graph = EffectiveGraph::build(base, &upwell_di::ComponentRegistry::default(), |_, _| true)
         .expect("empty graph validates");
-    let layouts = seed_layouts(&topology, &seed_destinations, graph.provider_selection());
+    let layouts = seed_layouts(
+        &topology,
+        &seed_destinations,
+        graph.provider_selection(),
+        entries,
+    );
     let generation = PreparedRuntimeGeneration::new(
         root,
         Arc::clone(&registry),
@@ -129,7 +166,7 @@ async fn build_runtime_with_entries(
     entries: &[crate::EntryDescriptor],
 ) -> (AppRuntime, Arc<ScopeRegistry>) {
     let (generation, registry) =
-        prepared_generation(RuntimeGenerationId::INITIAL, seed_destinations).await;
+        prepared_generation(RuntimeGenerationId::INITIAL, seed_destinations, entries).await;
     let topology = ScopeTopology::new(&BOUNDARIES)
         .prepare()
         .expect("test topology prepares");
@@ -143,7 +180,7 @@ async fn build_runtime_with_entries(
 /// Publishes a fresh empty generation over the runtime's current one.
 async fn publish_next(runtime: &AppRuntime) -> RuntimeView {
     let transition = runtime.begin_transition().await;
-    let (candidate, _) = prepared_generation(transition.base().id(), HashMap::new()).await;
+    let (candidate, _) = prepared_generation(transition.base().id(), HashMap::new(), &[]).await;
 
     transition.publish(candidate).expect("candidate publishes")
 }
@@ -166,5 +203,6 @@ fn expect_app_error<T>(result: crate::Result<T>, message: &str) -> Error {
     }
 }
 
+mod entry_scopes;
 mod release;
 mod scopes;

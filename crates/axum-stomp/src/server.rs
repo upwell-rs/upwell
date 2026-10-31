@@ -537,7 +537,7 @@ impl Stomp {
         let opening = connection.open_message(destination.as_str(), builder);
 
         let scope = match opening.await {
-            Ok(scope) => scope.into_container(),
+            Ok(scope) => scope,
 
             Err(error) => {
                 tracing::error!(target: "upwell::axum", %error, "STOMP message scope build failed");

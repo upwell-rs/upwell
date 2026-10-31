@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use upwell_app::{OpenScope, ScopeBuilder, ScopeEntry, ScopeOpener};
+use upwell_app::{EntryScope, OpenScope, ScopeBuilder, ScopeEntry, ScopeOpener};
 use upwell_di::ScopeContainer;
 
 use super::WsControllerDescriptor;
@@ -45,19 +45,23 @@ impl WsConnectionScope {
 
     /// Opens a message scope `builder` started for a message to `destination`: with the
     /// destination handler's entry plan, which builds only what the handler injects, or with
-    /// every slot of the scope when no handler declares the destination.
+    /// every slot of the scope when no handler declares the destination. A handler whose plan
+    /// builds nothing gets a scope that opens only when something resolves from it.
     ///
     /// # Errors
     ///
-    /// As [`ScopeBuilder::open`].
+    /// As [`ScopeBuilder::open_when_needed`].
     pub async fn open_message(
         &self,
         destination: &str,
         builder: ScopeBuilder<'_, WebsocketMessage, WebsocketConnection>,
-    ) -> upwell_app::Result<OpenScope<WebsocketMessage>> {
+    ) -> upwell_app::Result<EntryScope<WebsocketMessage>> {
         match self.entries.get(destination) {
-            Some(entry) => builder.open(entry).await,
-            None => builder.open_default().await,
+            Some(entry) => builder.open_when_needed(entry).await,
+            None => builder
+                .open_default()
+                .await
+                .map(|scope| EntryScope::from_container(scope.into_container())),
         }
     }
 }

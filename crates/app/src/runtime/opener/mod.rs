@@ -10,11 +10,15 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use upwell_core::{EntryKey, Scope, ScopeId, Singleton, TypeDescriptor};
-use upwell_di::{BoxedComponent, ScopeContainer};
+use upwell_di::{BoxedComponent, EntryPlan, ScopeContainer};
 
 use super::{AppRuntime, RuntimeGeneration, RuntimeView};
 use crate::entry::EntryId;
 use crate::scope::ScopeParent;
+
+mod entry_scope;
+
+pub use entry_scope::EntryScope;
 
 /// Declares that scope `Self` may open under scope `P`.
 ///
@@ -39,6 +43,17 @@ pub struct ScopeOpener<S: Scope> {
 pub struct ScopeEntry<S: Scope> {
     id: EntryId,
     scope: PhantomData<fn() -> S>,
+}
+
+/// The slots opening an instance builds at once; the rest are built on demand.
+#[derive(Clone, Copy, Debug)]
+enum Builds {
+    /// What the entry's plan lists, or every slot when the generation has no plan for it.
+    Entry(EntryId),
+    /// Every slot of the scope.
+    Everything,
+    /// Only the seeds.
+    Nothing,
 }
 
 /// An open instance of scope `S`, usable as a typed parent for [`ScopeBuilder::under`].
@@ -101,34 +116,6 @@ impl AppRuntime {
         }
 
         Ok(RuntimeView::from_generation(generation))
-    }
-
-    /// Builds an instance of `scope` under `parent` from the layout `view` prepared for it:
-    /// the slots `entry`'s plan lists, or every slot without an entry.
-    async fn open_in(
-        &self,
-        view: RuntimeView,
-        scope: ScopeId,
-        parent: Arc<ScopeContainer>,
-        entry: Option<EntryId>,
-        seeds: Vec<BoxedComponent>,
-    ) -> crate::Result<Arc<ScopeContainer>> {
-        let layouts = &view.scope_plan().layouts;
-        let layout = layouts
-            .get(&scope)
-            .ok_or(crate::Error::UndeclaredScopeOpen { scope })?;
-        let plan = entry.and_then(|entry| layouts.entry(entry));
-
-        ScopeContainer::open_planned(
-            parent,
-            Arc::clone(view.scopes()),
-            layout,
-            plan,
-            seeds,
-            view.generation_state(),
-        )
-        .await
-        .map_err(crate::Error::from)
     }
 }
 
@@ -252,7 +239,7 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     /// Fails when the parent belongs to another runtime, a seed has no slot in the scope or
     /// shares one with another seed, or a component fails to build.
     pub async fn open(self, entry: &ScopeEntry<S>) -> crate::Result<OpenScope<S>> {
-        self.open_with(Some(entry.id)).await
+        self.open_with(Builds::Entry(entry.id)).await
     }
 
     /// Opens the instance without an entry: it builds every slot of the scope.
@@ -261,10 +248,57 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     ///
     /// As [`open`](Self::open).
     pub async fn open_default(self) -> crate::Result<OpenScope<S>> {
-        self.open_with(None).await
+        self.open_with(Builds::Everything).await
     }
 
-    async fn open_with(self, entry: Option<EntryId>) -> crate::Result<OpenScope<S>> {
+    /// Opens the instance building nothing but its seeds: every other slot is built when
+    /// something resolves it, so the instance costs only what it is used for.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the parent belongs to another runtime, or a seed has no slot in the scope or
+    /// shares one with another seed.
+    pub async fn open_on_demand(self) -> crate::Result<OpenScope<S>> {
+        self.open_with(Builds::Nothing).await
+    }
+
+    /// Opens the instance to run `entry` as [`open`](Self::open) does, unless the entry's plan
+    /// builds nothing: then the container opens the first time something resolves from the
+    /// returned scope, with this builder's seeds. Until then, reads that never build see only
+    /// the scopes it opens under, not the seeds.
+    ///
+    /// # Errors
+    ///
+    /// As [`open`](Self::open). Seeds and components are checked when the container opens.
+    pub async fn open_when_needed(self, entry: &ScopeEntry<S>) -> crate::Result<EntryScope<S>> {
+        let (view, parent) = self.target()?;
+        let plans_nothing = view
+            .scope_plan()
+            .layouts
+            .entry(entry.id)
+            .is_some_and(EntryPlan::is_empty);
+
+        if plans_nothing {
+            return Ok(EntryScope::deferred(view, parent, entry.id, self.seeds));
+        }
+
+        let container = open_in(view, S::ID, parent, Builds::Entry(entry.id), self.seeds).await?;
+
+        Ok(EntryScope::from_container(container))
+    }
+
+    async fn open_with(self, builds: Builds) -> crate::Result<OpenScope<S>> {
+        let (view, parent) = self.target()?;
+        let container = open_in(view, S::ID, parent, builds, self.seeds).await?;
+
+        Ok(OpenScope {
+            container,
+            scope: PhantomData,
+        })
+    }
+
+    /// The generation the instance opens on and the container it opens under.
+    fn target(&self) -> crate::Result<(RuntimeView, Arc<ScopeContainer>)> {
         let runtime = &self.opener.runtime;
         let (view, parent) = match self.parent {
             Some(parent) => (
@@ -285,15 +319,44 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
             S::NAME
         );
 
-        let container = runtime
-            .open_in(view, S::ID, parent, entry, self.seeds)
-            .await?;
-
-        Ok(OpenScope {
-            container,
-            scope: PhantomData,
-        })
+        Ok((view, parent))
     }
+}
+
+/// Builds an instance of `scope` under `parent` from the layout `view` prepared for it, with
+/// the slots `builds` names.
+async fn open_in(
+    view: RuntimeView,
+    scope: ScopeId,
+    parent: Arc<ScopeContainer>,
+    builds: Builds,
+    seeds: Vec<BoxedComponent>,
+) -> crate::Result<Arc<ScopeContainer>> {
+    let layouts = &view.scope_plan().layouts;
+    let layout = layouts
+        .get(&scope)
+        .ok_or(crate::Error::UndeclaredScopeOpen { scope })?;
+    let nothing;
+    let plan = match builds {
+        Builds::Entry(entry) => layouts.entry(entry),
+        Builds::Everything => None,
+        Builds::Nothing => {
+            nothing = EntryPlan::nothing(layout);
+
+            Some(&nothing)
+        }
+    };
+
+    ScopeContainer::open_planned(
+        parent,
+        Arc::clone(view.scopes()),
+        layout,
+        plan,
+        seeds,
+        view.generation_state(),
+    )
+    .await
+    .map_err(crate::Error::from)
 }
 
 /// Whether the topology `view` runs on lets `S` open under `P`.

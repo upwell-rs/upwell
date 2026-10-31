@@ -249,7 +249,7 @@ impl JsonWs {
                 .open_message(inbound.dest.as_str(), connection.message())
                 .await
             {
-                Ok(scope) => handler(inbound.payload, scope.into_container()).await,
+                Ok(scope) => handler(inbound.payload, scope).await,
 
                 Err(error) => Err(WsDispatchError::Inject(error.to_string())),
             },

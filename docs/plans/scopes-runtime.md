@@ -354,8 +354,17 @@ resolves it, its seed must be supplied when its scope opens, or that resolution 
 resolution of one value builds only the component it names or the provider runtime selection
 picks; a collection or keyed map builds every provider. Each on-demand slot is its own async once-cell, so
 a factory built on demand may itself resolve another left-out slot of its scope. Tooling labels
-each entry with the components it `builds`. Durable scopes still
-build every slot when they open, and `deny_unplanned` strict mode is not implemented.
+each entry with the components it `builds`. `deny_unplanned` strict mode is not implemented.
+
+Status (#353, empty plans and connection scopes): `ScopeBuilder::open_when_needed(&entry)`
+returns an `EntryScope<S>`. When the entry's plan builds nothing it allocates no container:
+reads that never build go to the parent, so they do not see the builder's seeds yet, and the
+container opens with the seeds the first time something resolves from it, on the generation the
+plan was read from. A deferred
+opening that fails stays failed (`DeferredScopeFailed`). RPC calls and WebSocket messages open
+this way, so a method or handler injecting nothing scoped opens no scope. RPC and WebSocket
+connection scopes open with `open_on_demand()`, which builds only their seeds; every
+connection-scoped component is built the first time something resolves it.
 
 A request scope opened under an app-chosen parent, such as a per-user `Session` scope the
 app caches and reuses across requests, fits this design: the parent is picked when the scope
