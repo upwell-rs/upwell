@@ -11,7 +11,9 @@ use super::super::fixture::{Authenticator, lock_test_guard};
 use super::super::gate::GATE_COMPONENT;
 use super::*;
 use crate::test_support::test_component;
-use crate::{AppRegistry, ProtocolDefinition, ScopeBoundary, ScopeParent, ScopeTopology};
+use crate::{
+    AppRegistry, OpensUnder, ProtocolDefinition, ScopeBoundary, ScopeParent, ScopeTopology,
+};
 
 const CALL_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/hardening-call");
 const STEP_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/hardening-step");
@@ -33,6 +35,10 @@ impl Scope for Step {
     const RANK: u8 = 25;
     const NAME: &'static str = "Step";
 }
+
+impl OpensUnder<upwell_core::Singleton> for Call {}
+
+impl OpensUnder<Call> for Step {}
 
 static BOUNDARIES: [ScopeBoundary; 2] = [
     ScopeBoundary::new::<Call>(&[ScopeParent::Root]),
@@ -98,8 +104,15 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
     .await
     .expect("the scoped app builds");
     let runtime = app.runtime();
-    let open_call = runtime
-        .open_scope_from_root(Call::KEY, Vec::new())
+    let calls = runtime
+        .opener::<Call>()
+        .expect("the call scope is declared");
+    let steps = runtime
+        .opener::<Step>()
+        .expect("the step scope is declared");
+    let open_call = calls
+        .builder()
+        .open_default()
         .await
         .expect("a call opens before the switch");
 
@@ -109,12 +122,15 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
         .reload_config()
         .await
         .expect("a switch with an open call commits");
-    let nested = runtime
-        .open_scope(Step::KEY, Arc::clone(&open_call), Vec::new())
+    let nested = steps
+        .builder()
+        .under(&open_call)
+        .open_default()
         .await
         .expect("a step opens under the call opened before the switch");
-    let new_call = runtime
-        .open_scope_from_root(Call::KEY, Vec::new())
+    let new_call = calls
+        .builder()
+        .open_default()
         .await
         .expect("a call opens after the switch");
     let planned = report
@@ -124,12 +140,13 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
     assert!(report.is_committed());
     assert_eq!(planned.role, EffectiveNodeRole::FutureScope(Call::ID));
     assert_eq!(
-        call_scheme(&open_call),
+        call_scheme(open_call.container()),
         "primary",
         "the open call is not migrated"
     );
     assert_eq!(
         nested
+            .container()
             .get::<CallGate>()
             .expect("the step resolves its call's gate")
             .scheme,
@@ -137,7 +154,7 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
         "a nested opening inherits its parent's pinned generation"
     );
     assert_eq!(
-        call_scheme(&new_call),
+        call_scheme(new_call.container()),
         "fallback",
         "a new call uses the new plan"
     );

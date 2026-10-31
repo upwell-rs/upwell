@@ -45,20 +45,6 @@ pub enum Error {
         parent: ScopeId,
     },
 
-    /// A child was opened over a parent it does not declare.
-    #[error(
-        "scope '{child}' opens only under {}, but parent '{actual}' was supplied",
-        quoted(.expected)
-    )]
-    InvalidScopeParent {
-        /// The requested child boundary.
-        child: ScopeId,
-        /// Every topology-declared parent identity, in declaration order.
-        expected: Box<[ScopeId]>,
-        /// The supplied parent container's identity.
-        actual: ScopeId,
-    },
-
     /// A dynamic seed is registered for another boundary.
     #[error("seed type '{type_name}' belongs to scope '{expected}', not opened scope '{actual}'")]
     InvalidSeedDestination {

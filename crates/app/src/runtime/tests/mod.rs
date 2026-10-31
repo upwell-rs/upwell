@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use upwell_config::{ConfigManager, ConfigReloader};
-use upwell_core::{ResolverSet, Scope, ScopeGenerations, ScopeId, TypeDescriptor};
-use upwell_di::{BoxedComponent, EffectiveGraph, ScopeContainer, ScopeRegistry};
+use upwell_core::{ResolverSet, Scope, ScopeGenerations, ScopeId, Singleton};
+use upwell_di::{EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
 use super::*;
 use crate::test_support::{empty_condition, seed_hook_manager, seed_layouts};
-use crate::{Error, ScopeBoundary, ScopeParent, ScopeTopology};
+use crate::{Error, OpensUnder, ScopeBoundary, ScopeParent, ScopeTopology};
 
 const SESSION_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/session");
 const REQUEST_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/request");
@@ -58,6 +58,12 @@ impl Scope for RequestAlias {
     const RANK: u8 = 1;
     const NAME: &'static str = "Caller Metadata";
 }
+
+impl OpensUnder<Singleton> for Session {}
+impl OpensUnder<Session> for Request {}
+impl OpensUnder<Session> for RequestAlias {}
+impl OpensUnder<Singleton> for Shared {}
+impl OpensUnder<Session> for Shared {}
 
 static BOUNDARIES: [ScopeBoundary; 3] = [
     ScopeBoundary::new::<Session>(&[ScopeParent::Root]),
@@ -142,11 +148,15 @@ async fn publish_next(runtime: &AppRuntime) -> RuntimeView {
     transition.publish(candidate).expect("candidate publishes")
 }
 
-fn seed<T: Send + Sync + 'static>() -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<T>(std::any::type_name::<T>()),
-        value: Box::new(()),
-    }
+/// Opens a session under the root of `runtime`'s current generation.
+async fn open_session(runtime: &AppRuntime) -> OpenScope<Session> {
+    runtime
+        .opener::<Session>()
+        .expect("session is declared")
+        .builder()
+        .open_default()
+        .await
+        .expect("session opens")
 }
 
 fn expect_app_error<T>(result: crate::Result<T>, message: &str) -> Error {
@@ -156,6 +166,5 @@ fn expect_app_error<T>(result: crate::Result<T>, message: &str) -> Error {
     }
 }
 
-mod opener;
 mod release;
 mod scopes;

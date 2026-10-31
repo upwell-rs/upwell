@@ -50,7 +50,7 @@ pub use transition_hooks::{
 /// construction orders keyed by stable scope identity, the prepared protocol-owned
 /// topology, and the resolved component set. The hook manager is generation-local and
 /// read from the pinned current view. A protocol opens its declared boundaries through
-/// [`open_scope`](Self::open_scope).
+/// [`ScopeOpener`]s it prepares with [`opener`](Self::opener).
 #[derive(Clone)]
 pub struct AppRuntime {
     name: Arc<str>,

@@ -91,9 +91,10 @@ pub use utoipa;
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
 pub use ws::{
     ControllerWsRoute, SOCKET_SEND_TIMEOUT, WS_CONTROLLERS, WebsocketController, WebsocketHandler,
-    WebsocketProtocol, WebsocketUpgradeMeta, WsConnectionMeta, WsConnectionSettings,
-    WsControllerDescriptor, WsControllerRegistration, WsDispatchError, WsFuture, WsHandlerFn,
-    WsIdle, WsMessageDescriptor, WsMessageMode, WsRespond, WsRoute, WsRouteDescriptor, WsShutdown,
+    WebsocketProtocol, WebsocketUpgradeMeta, WsConnectionMeta, WsConnectionScope,
+    WsConnectionSettings, WsControllerDescriptor, WsControllerRegistration, WsDispatchError,
+    WsFuture, WsHandlerFn, WsIdle, WsMessageDescriptor, WsMessageMode, WsRespond, WsRoute,
+    WsRouteDescriptor, WsShutdown,
 };
 
 /// The `PubSubProtocol` capability (server side): the seam a topic-bearing protocol implements so

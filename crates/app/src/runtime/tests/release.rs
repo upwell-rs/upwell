@@ -61,10 +61,7 @@ async fn a_pinned_view_defers_release_until_it_drops() {
 #[tokio::test]
 async fn an_open_scope_defers_release_until_it_closes() {
     let (runtime, _) = build_runtime(HashMap::new()).await;
-    let session = runtime
-        .open_scope_from_root(Session::KEY, Vec::new())
-        .await
-        .expect("session opens");
+    let session = open_session(&runtime).await;
 
     let (_, committed) = capture_events(publish_next(&runtime)).await;
     let still_alive = displaced(&runtime);

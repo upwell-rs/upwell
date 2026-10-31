@@ -8,7 +8,6 @@ use axum::extract::ws::WebSocket;
 use futures::StreamExt;
 use upwell_app::AppRuntime;
 use upwell_core::TypeDescriptor;
-use upwell_di::ScopeContainer;
 #[cfg(feature = "tungstenite")]
 use upwell_test_utils::{TestEnvironment, TestServer, deadline};
 
@@ -51,7 +50,7 @@ impl WebsocketProtocol for TestProtocol {
     async fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: Arc<ScopeContainer>,
+        connection: crate::ws::WsConnectionScope,
         shutdown: WsShutdown,
     ) {
         let _ = (self, socket, connection, shutdown);
@@ -82,7 +81,7 @@ impl WebsocketProtocol for MultiEndpointProtocol {
     async fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: Arc<ScopeContainer>,
+        connection: crate::ws::WsConnectionScope,
         shutdown: WsShutdown,
     ) {
         let _ = (self, socket, connection, shutdown);
@@ -196,7 +195,7 @@ impl WebsocketProtocol for DuplicateProtocol {
     async fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: Arc<ScopeContainer>,
+        connection: crate::ws::WsConnectionScope,
         shutdown: WsShutdown,
     ) {
         let _ = (self, socket, connection, shutdown);
@@ -344,10 +343,11 @@ impl WebsocketProtocol for RequiredSubprotocol {
     async fn serve(
         self: Arc<Self>,
         mut socket: WebSocket,
-        connection: Arc<ScopeContainer>,
+        connection: crate::ws::WsConnectionScope,
         shutdown: WsShutdown,
     ) {
         let selected = connection
+            .container()
             .extract::<WsConnectionMeta>()
             .await
             .expect("connection metadata resolves")
@@ -355,6 +355,7 @@ impl WebsocketProtocol for RequiredSubprotocol {
             .unwrap_or_default()
             .to_owned();
         let upgrade = connection
+            .container()
             .extract::<WebsocketUpgradeMeta>()
             .await
             .expect("upgrade metadata resolves");
