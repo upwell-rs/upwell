@@ -118,6 +118,13 @@ pub enum Error {
         scope: &'static str,
     },
 
+    /// A factory built another component than the slot it runs for holds.
+    #[error("the factory for component '{component}' built '{built}' instead")]
+    FactoryOutputMismatch {
+        component: &'static str,
+        built: &'static str,
+    },
+
     #[error("component '{component}' has no slot in the layout of scope '{scope}'")]
     UnplannedComponent {
         component: &'static str,

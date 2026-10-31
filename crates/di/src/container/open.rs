@@ -142,13 +142,12 @@ impl ScopeContainer {
 
         for (index, spec) in layout.slots().iter().enumerate() {
             let component = &spec.component;
+            let slot = SlotIdx::new(index);
             let Some(factory) = spec.factory else {
                 continue;
             };
 
             debug!(component = %component.name, scope = scope.name(), "constructing component");
-
-            let slot = SlotIdx::new(index);
 
             cx.set_running(Running::Slot(slot));
 

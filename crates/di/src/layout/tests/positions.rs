@@ -1,6 +1,8 @@
 //! Planned edges keep their declared positions and are read by them.
 
 use super::*;
+use crate::descriptors::BoxedComponent;
+use crate::descriptors::component::{ScopeStore, SlotStore};
 
 #[test]
 fn plan_leaves_unplanned_edges_to_the_dynamic_path() {
@@ -78,4 +80,32 @@ fn a_planned_edge_read_as_another_type_is_a_bug() {
         TypeId::of::<Seed>(),
         Cardinality::One,
     );
+}
+
+#[test]
+fn a_slot_rejects_an_instance_of_another_component() {
+    let fixture = Fixture::new();
+    let selection = fixture.selection(&[]);
+
+    let layout = fixture
+        .inner(&selection, &[fixture.handler])
+        .expect("the inner scope plans");
+    let mut store = ScopeStore::Slots(SlotStore::new(Arc::new(layout)));
+    let built = BoxedComponent {
+        ty: TypeDescriptor::of::<Consumer>("Consumer"),
+        value: Box::new(()),
+    };
+
+    let rejected = store
+        .insert_at(SlotIdx::new(1), built)
+        .expect_err("the handler slot holds only a handler");
+
+    assert!(matches!(
+        rejected,
+        Error::FactoryOutputMismatch {
+            component: "handler",
+            built: "Consumer",
+        }
+    ));
+    assert_eq!(store.component_count(), 0, "nothing was stored");
 }

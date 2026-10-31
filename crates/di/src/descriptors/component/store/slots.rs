@@ -46,18 +46,26 @@ impl SlotStore {
                 scope: self.layout.scope().name(),
             })?;
 
-        self.insert_at(slot, component);
-
-        Ok(())
+        self.insert_at(slot, component)
     }
 
     /// Stores an instance a slot's own factory built, at that slot.
-    pub(crate) fn insert_at(&mut self, slot: SlotIdx, component: BoxedComponent) {
-        debug_assert_eq!(
-            self.layout.slot_of(component.ty.type_id),
-            Some(slot),
-            "a factory built another component than its slot holds"
-        );
+    ///
+    /// A factory returning another component than its slot holds is rejected before the
+    /// instance is aliased under the slot's providers.
+    pub(crate) fn insert_at(
+        &mut self,
+        slot: SlotIdx,
+        component: BoxedComponent,
+    ) -> crate::Result<()> {
+        let expected = &self.layout.spec(slot).component;
+
+        if expected.ty.type_id != component.ty.type_id {
+            return Err(Error::FactoryOutputMismatch {
+                component: expected.name,
+                built: component.ty.name,
+            });
+        }
 
         let providers = self
             .layout
@@ -71,6 +79,8 @@ impl SlotStore {
             component,
             providers,
         });
+
+        Ok(())
     }
 
     /// The value at `at`, if its slot is built.
