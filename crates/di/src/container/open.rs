@@ -105,8 +105,8 @@ impl ScopeContainer {
     /// built in layout order, resolving its dependencies through the edges the layout
     /// planned. The layout must belong to the generation of `registry`. A seed slot left
     /// empty fails only when a dependency resolves it, as with a scope opened from a plain
-    /// construction order. A seed without a slot in the layout, or a second seed for the same
-    /// slot, fails the opening.
+    /// construction order. A seed without a factory-less slot in the layout, or a second seed
+    /// for the same slot, fails the opening.
     #[doc(hidden)]
     pub async fn open_planned<T: Any + Send + Sync>(
         parent: Arc<ScopeContainer>,
@@ -118,7 +118,7 @@ impl ScopeContainer {
         let scope = layout.scope();
         let generation_lease: GenerationLease = Some(generation_lease);
 
-        reject_duplicate_seeds(scope, &seeds)?;
+        validate_seeds(layout, &seeds)?;
 
         if !layout.constructs() && seeds.is_empty() {
             return Ok(Self::empty(scope, parent, registry, generation_lease));
@@ -302,19 +302,27 @@ fn register_providers_for(
     }
 }
 
-/// Rejects a second seed for a slot another seed of the same opening already fills.
-fn reject_duplicate_seeds(scope: ScopeKey, seeds: &[BoxedComponent]) -> crate::Result<()> {
+/// Checks that each seed fills its own factory-less slot of `layout`, so no seed is replaced
+/// by a factory's output or by another seed.
+fn validate_seeds(layout: &SlotLayout, seeds: &[BoxedComponent]) -> crate::Result<()> {
+    let scope = layout.scope().name();
+
     for (index, seed) in seeds.iter().enumerate() {
         let type_id = seed.ty.type_id;
+        let component = seed.ty.name;
+        let slot = layout
+            .slot_of(type_id)
+            .ok_or(Error::UnplannedComponent { component, scope })?;
+
+        if layout.spec(slot).factory.is_some() {
+            return Err(Error::SeedForBuiltComponent { component, scope });
+        }
 
         if seeds[..index]
             .iter()
             .any(|earlier| earlier.ty.type_id == type_id)
         {
-            return Err(Error::DuplicateSeed {
-                component: seed.ty.name,
-                scope: scope.name(),
-            });
+            return Err(Error::DuplicateSeed { component, scope });
         }
     }
 

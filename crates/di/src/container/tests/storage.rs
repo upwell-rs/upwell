@@ -25,6 +25,22 @@ fn factories() -> &'static [ComponentFactoryDescriptor] {
     }
 }
 
+/// The slot layout of a [`TestScope`] holding `order`, with no providers.
+fn plan(order: &[ComponentDescriptor]) -> crate::SlotLayout {
+    let selection = crate::registry::ProviderSelectionModel::new(order, Vec::new(), HashMap::new())
+        .expect("the components select no providers");
+
+    crate::SlotLayout::plan(
+        TestScope::KEY,
+        &[],
+        order,
+        &HashMap::new(),
+        &selection,
+        |_, _| true,
+    )
+    .expect("the scope plans")
+}
+
 fn stored(container: &ScopeContainer) -> &Live<Held> {
     container
         .store
@@ -121,19 +137,7 @@ async fn a_factory_capturing_a_scope_its_layout_did_not_plan_for_still_resolves(
     held.scope = TestScope::KEY;
     capturing.scope = TestScope::KEY;
 
-    let order = [held, capturing];
-    let selection =
-        crate::registry::ProviderSelectionModel::new(&order, Vec::new(), HashMap::new())
-            .expect("the components select no providers");
-    let layout = crate::SlotLayout::plan(
-        TestScope::KEY,
-        &[],
-        &order,
-        &HashMap::new(),
-        &selection,
-        |_, _| true,
-    )
-    .expect("the scope plans");
+    let layout = plan(&[held, capturing]);
 
     assert!(!layout.captures(), "no declared edge captures the scope");
 
@@ -157,4 +161,28 @@ async fn a_factory_capturing_a_scope_its_layout_did_not_plan_for_still_resolves(
         .get_or_create()
         .await
         .expect("the captured scope resolves its sibling");
+}
+
+#[tokio::test]
+async fn a_seed_for_a_component_a_factory_builds_is_rejected() {
+    let mut held = component::<Held>("held", factories);
+
+    held.scope = TestScope::KEY;
+
+    let layout = plan(&[held]);
+
+    let error = match ScopeContainer::open_planned(
+        root().await,
+        registry(),
+        &Arc::new(layout),
+        vec![boxed_component("Held", Arc::new(Held))],
+        Arc::new(()),
+    )
+    .await
+    {
+        Ok(_) => panic!("a seed for a factory-built component was accepted"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(error, Error::SeedForBuiltComponent { .. }));
 }

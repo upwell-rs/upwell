@@ -131,6 +131,15 @@ pub enum Error {
         scope: &'static str,
     },
 
+    /// A scope was opened with a seed for a component one of its factories builds.
+    #[error(
+        "scope '{scope}' was opened with a seed for component '{component}', which its factory builds"
+    )]
+    SeedForBuiltComponent {
+        component: &'static str,
+        scope: &'static str,
+    },
+
     /// A scope was opened with two seeds for the same slot.
     #[error("scope '{scope}' was opened with more than one seed for component '{component}'")]
     DuplicateSeed {

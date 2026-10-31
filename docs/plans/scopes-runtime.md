@@ -304,8 +304,10 @@ let scope = opener
 
 - A serve loop prepares one opener per scope it opens and resolves each entry's `EntryId` once.
   The declared scope is validated at that point, and parents are typed, so the per-call path
-  does no topology lookup in release builds; it loads the entry's plan from the current
-  generation and builds the container. Seeds are checked against the slots they fill.
+  does no topology lookup in release builds. It pins a generation (the current one under the
+  root, the parent's own under a parent), takes the scope's layout from it and builds the
+  container. `.open(&entry)` uses the scope's layout until entries carry their own plans
+  (#348). Each seed must fill its own factory-less slot.
 - The builder is a stack value with no allocation of its own.
 - `OpensUnder<P>` is defined with the opener, because protocols need typed parents. Protocol scope
   types implement it by hand for the parents their topology lists; `#[scope(parents = [..])]`
