@@ -303,21 +303,22 @@ let scope = opener
 ```
 
 - A serve loop prepares one opener per scope it opens and resolves each entry's `EntryId` once.
-  Validation (declared scope, parents, seed types) happens at that point, so the per-call path does
-  no topology lookup or seed check; it loads the entry's plan from the current generation and
-  builds the container.
+  The declared scope is validated at that point, and parents are typed, so the per-call path
+  does no topology lookup in release builds; it loads the entry's plan from the current
+  generation and builds the container. Seeds are checked against the slots they fill.
 - The builder is a stack value with no allocation of its own.
 - `OpensUnder<P>` is defined with the opener, because protocols need typed parents. Protocol scope
   types implement it by hand for the parents their topology lists; `#[scope(parents = [..])]`
   generates it (#405).
-- The ad hoc `open_scope_*` API, with its per-call validation, becomes framework-internal once the
-  protocols move over, in line with the access rule above.
+- The ad hoc `open_scope_*` API, with its per-call validation, is removed once the protocols move
+  over, in line with the access rule above.
 
 Status (#346, #353 HTTP): `AppRuntime::opener::<S>()` returns the `ScopeOpener<S>`, and
 `ScopeOpener::entry(key)` resolves an entry once. `builder()` takes `.under(&parent)` (typed by
 `OpensUnder<P>`, with `Singleton` standing for the root) and `.seed(value)`, then
-`.open(&entry)` or `.open_default()`. The per-call path checks the parent topology and seeds
-only in debug builds; a seed without a slot still fails in release, when it is stored. Params
+`.open(&entry)` or `.open_default()`. The per-call path checks the parent topology only in
+debug builds; a seed without a slot, or a second seed for the same slot, fails the opening in
+every build. Params
 on `builder` arrive with `#[scope]` (#405), and `.open(&entry)` uses the scope's layout until
 entries carry plans (#348). Axum's HTTP requests open through it: a hand-written layer keeps
 the opener in reach of the request's task, and the scope opens on the first `Inject` or
@@ -330,9 +331,9 @@ Status (#353 RPC and WebSocket): the RPC serve loop prepares its connection and 
 per serve, and each call opens `.under(&connection)`. The WebSocket upgrade opens the connection
 through an opener and hands protocols a `WsConnectionScope`, whose `message()` starts a message
 scope under it; STOMP and JSON-WS open every message that way. The ad hoc `open_scope*` API is
-removed, so `ScopeOpener` is the only way to open a scope. A parent outside the topology is a
-compile error through `OpensUnder`; seeds are checked against their declared slots in debug
-builds.
+removed, so `ScopeOpener` is the only way to open a scope. A scope that does not implement
+`OpensUnder` for a parent cannot open under it; a hand-written impl the topology does not list
+is caught by a debug assertion until #405 generates both from one declaration.
 
 A request scope opened under an app-chosen parent, such as a per-user `Session` scope the
 app caches and reuses across requests, fits this design: the parent is picked when the scope

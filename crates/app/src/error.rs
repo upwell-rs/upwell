@@ -45,17 +45,6 @@ pub enum Error {
         parent: ScopeId,
     },
 
-    /// A dynamic seed is registered for another boundary.
-    #[error("seed type '{type_name}' belongs to scope '{expected}', not opened scope '{actual}'")]
-    InvalidSeedDestination {
-        /// The seeded Rust type name.
-        type_name: &'static str,
-        /// The descriptor's declared destination.
-        expected: ScopeId,
-        /// The boundary being opened.
-        actual: ScopeId,
-    },
-
     /// A scope opener was asked for an entry the application did not register.
     #[error("entry '{key}' is not registered")]
     UnknownEntry {
@@ -72,24 +61,6 @@ pub enum Error {
         expected: ScopeId,
         /// The scope the entry was registered for.
         actual: ScopeId,
-    },
-
-    /// A dynamic seed has no factory-less descriptor registered for this application.
-    #[error("seed type '{type_name}' is not registered for opened scope '{scope}'")]
-    UnregisteredSeed {
-        /// The boundary being opened.
-        scope: ScopeId,
-        /// The seeded Rust type name.
-        type_name: &'static str,
-    },
-
-    /// The same concrete seed type was supplied more than once.
-    #[error("seed type '{type_name}' is supplied more than once for scope '{scope}'")]
-    DuplicateSeedType {
-        /// The boundary being opened.
-        scope: ScopeId,
-        /// The duplicated Rust type name.
-        type_name: &'static str,
     },
 
     #[error(

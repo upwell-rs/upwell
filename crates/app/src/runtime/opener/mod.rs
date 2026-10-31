@@ -2,8 +2,8 @@
 //!
 //! An opener checks once, when it is created, that its scope is declared, and resolves each
 //! entry it opens for once. Opening an instance then pins a runtime generation, takes the
-//! scope's prepared layout and builds the container, with no topology lookup or seed check
-//! on the way.
+//! scope's prepared layout and builds the container. The parent's place in the topology is
+//! checked only in debug builds; each seed is checked against the slot it fills.
 
 use std::any::Any;
 use std::marker::PhantomData;
@@ -247,8 +247,8 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     ///
     /// # Errors
     ///
-    /// Fails when the parent belongs to another runtime, a seed has no slot in the scope, or
-    /// a component fails to build.
+    /// Fails when the parent belongs to another runtime, a seed has no slot in the scope or
+    /// shares one with another seed, or a component fails to build.
     pub async fn open(self, _entry: &ScopeEntry<S>) -> crate::Result<OpenScope<S>> {
         self.open_default().await
     }
@@ -279,11 +279,6 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
             "`OpensUnder` lists a parent the topology of `{}` does not",
             S::NAME
         );
-        debug_assert!(
-            validate_seeds(&view, S::ID, &self.seeds).is_ok(),
-            "a seed of `{}` is duplicated or has no slot in it",
-            S::NAME
-        );
 
         let container = runtime.open_in(view, S::ID, parent, self.seeds).await?;
 
@@ -306,37 +301,4 @@ fn opens_under<S: Scope, P: Scope>(view: &RuntimeView) -> bool {
         .topology
         .boundary(&S::ID)
         .is_some_and(|boundary| boundary.opens_under(parent))
-}
-
-/// Whether `seeds` are distinct and each fills a declared slot of `scope`.
-pub(super) fn validate_seeds(
-    view: &RuntimeView,
-    scope: ScopeId,
-    seeds: &[BoxedComponent],
-) -> crate::Result<()> {
-    for (index, seed) in seeds.iter().enumerate() {
-        let type_id = seed.ty.type_id;
-        let type_name = (seed.ty.type_name)();
-
-        if seeds[..index]
-            .iter()
-            .any(|candidate| candidate.ty.type_id == type_id)
-        {
-            return Err(crate::Error::DuplicateSeedType { scope, type_name });
-        }
-
-        let Some(destination) = view.scope_plan().seed_destinations.get(&type_id) else {
-            return Err(crate::Error::UnregisteredSeed { scope, type_name });
-        };
-
-        if destination.scope != scope {
-            return Err(crate::Error::InvalidSeedDestination {
-                type_name: destination.type_name,
-                expected: destination.scope,
-                actual: scope,
-            });
-        }
-    }
-
-    Ok(())
 }
