@@ -18,6 +18,13 @@ pub struct EntryPlan {
 }
 
 impl EntryPlan {
+    /// A plan of `layout` that builds nothing, for a scope whose every slot is built on demand.
+    pub fn nothing(layout: &SlotLayout) -> Self {
+        Self {
+            builds: vec![false; layout.len()].into_boxed_slice(),
+        }
+    }
+
     /// Whether opening the scope for this entry builds `slot`.
     pub(crate) fn builds(&self, slot: SlotIdx) -> bool {
         self.builds[slot.index()]

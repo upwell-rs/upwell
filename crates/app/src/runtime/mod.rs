@@ -29,7 +29,7 @@ mod transition_hooks;
 pub(crate) use generation::PreparedRuntimeGeneration;
 pub use generation::{AppConditionState, DisplacedGeneration, RuntimeView};
 use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransitionCoordinator};
-pub use opener::{OpenScope, OpensUnder, ScopeBuilder, ScopeEntry, ScopeOpener};
+pub use opener::{EntryScope, OpenScope, OpensUnder, ScopeBuilder, ScopeEntry, ScopeOpener};
 #[cfg(feature = "tooling")]
 pub(crate) use reload::{resolve_staged_transition, staged_condition_snapshot};
 pub(crate) use report::TRANSITION_TARGET;

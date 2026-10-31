@@ -23,10 +23,12 @@ use std::sync::Arc;
 use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket, close_code};
 use futures::future::BoxFuture;
 use tokio::time::Duration;
-use upwell_app::{AppRegistry, AppRuntime};
+use upwell_app::{AppRegistry, AppRuntime, EntryScope};
 use upwell_config::ContainerConfigExt;
 use upwell_core::{DependencyDescriptor, EntryKey, ItemSource, Scope, TypeDescriptor};
 use upwell_di::ScopeContainer;
+
+use crate::scope::WebsocketMessage;
 
 pub use connection::WsConnectionScope;
 
@@ -44,13 +46,15 @@ pub type WsFuture<P> =
 
 /// A type-erased message handler for protocol `P`. It is handed the decoded
 /// [`Payload`](WebsocketProtocol::Payload) and the message's
-/// [`WebsocketMessage`-scope](crate::scope::WebsocketMessage) container, so it can decode the payload into the
+/// [`WebsocketMessage`-scope](crate::scope::WebsocketMessage) instance, so it can decode the payload into the
 /// handler's parameter *and* resolve the handler's `Inject<T>` parameters from the scope chain
 /// (message → connection → singleton) before running the
 /// controller method (the singleton captured by `Arc`) and turning the response into `P`'s
 /// [`Outcome`](WebsocketProtocol::Outcome).
 pub type WsHandlerFn<P> = Arc<
-    dyn Fn(<P as WebsocketProtocol>::Payload, Arc<ScopeContainer>) -> WsFuture<P> + Send + Sync,
+    dyn Fn(<P as WebsocketProtocol>::Payload, EntryScope<WebsocketMessage>) -> WsFuture<P>
+        + Send
+        + Sync,
 >;
 
 /// What can go wrong dispatching one message, independent of the wire protocol framing it.
@@ -810,7 +814,7 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
                     .seed(WsConnectionMeta {
                         selected_subprotocol,
                     })
-                    .open_default();
+                    .open_on_demand();
 
                 let connection = match opening.await {
                     Ok(scope) => WsConnectionScope::new(scope, messages, entries),

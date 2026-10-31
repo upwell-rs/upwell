@@ -1,40 +1,7 @@
 //! Scope opening: declared scopes, typed parents, entries, seeds and generation pinning.
 
-use upwell_core::EntryKey;
-
 use super::*;
 use crate::EntryDescriptor;
-
-/// A by-value seed declared for the session boundary.
-#[derive(Clone, Debug, PartialEq)]
-struct Visitor(u8);
-
-impl upwell_di::Injectable for Visitor {
-    type Target = Self;
-    type Stored = Self;
-
-    fn into_stored(self) -> Self {
-        self
-    }
-
-    fn from_stored(stored: &Self) -> Self {
-        stored.clone()
-    }
-}
-
-fn key(value: &'static str) -> EntryKey {
-    EntryKey::new(value).expect("valid test entry key")
-}
-
-fn visitor_destination() -> HashMap<TypeId, SeedDestination> {
-    HashMap::from([(
-        TypeId::of::<Visitor>(),
-        SeedDestination {
-            scope: SESSION_ID,
-            type_name: std::any::type_name::<Visitor>(),
-        },
-    )])
-}
 
 #[tokio::test]
 async fn an_opener_requires_a_declared_scope() {

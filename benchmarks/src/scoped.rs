@@ -15,14 +15,14 @@ use std::sync::Arc;
 
 use tokio::runtime::Runtime;
 use upwell_app::{
-    App, AppBuilder, EntryDescriptor, OpenScope, OpensUnder, ProtocolDefinition, ScopeEntry,
-    ScopeOpener,
+    App, AppBuilder, EntryDescriptor, EntryScope, OpenScope, OpensUnder, ProtocolDefinition,
+    ScopeEntry, ScopeOpener,
 };
 use upwell_config::{ConfigManager, Dynamic};
 use upwell_core::{EntryKey, Scope, ScopeKey, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
-    ComponentFactoryDescriptor, ComponentFactoryRole, ScopeContainer,
+    ComponentFactoryDescriptor, ComponentFactoryRole,
 };
 
 use crate::cases::{Call, Case};
@@ -293,7 +293,7 @@ where
             .opener::<C>()
             .expect("the connection scope is declared")
             .builder()
-            .open_default()
+            .open_on_demand()
             .await
             .expect("benchmark connection scope opens");
         let per_call = app
@@ -310,22 +310,23 @@ where
         }
     }
 
-    /// The scope a call to `route` resolves through. A per-call scope opens with the route's
-    /// entry plan, as a protocol opens it for a routed call.
-    pub async fn scope(&self, scope: CallScope, route: Route) -> Arc<ScopeContainer> {
+    /// The scope a call to `route` resolves through. A per-call scope opens for the route's
+    /// entry as a protocol opens it for a routed call: deferred when the entry plans nothing.
+    pub async fn scope(&self, scope: CallScope, route: Route) -> EntryScope<P> {
         if let CallScope::Connection = scope {
-            return Arc::clone(self.connection.container());
+            return EntryScope::from_container(Arc::clone(self.connection.container()));
         }
 
         let builder = self.per_call.builder().under(&self.connection);
         let opened = match self.entries.get(route) {
-            Some(entry) => builder.open(entry).await,
-            None => builder.open_default().await,
+            Some(entry) => builder.open_when_needed(entry).await,
+            None => builder
+                .open_default()
+                .await
+                .map(|scope| EntryScope::from_container(scope.into_container())),
         };
 
-        opened
-            .expect("benchmark per-call scope opens")
-            .into_container()
+        opened.expect("benchmark per-call scope opens")
     }
 }
 

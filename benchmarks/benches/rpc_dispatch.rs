@@ -16,6 +16,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
+use upwell_app::EntryScope;
 use upwell_benchmarks::rpc;
 use upwell_core::ResolverSet;
 use upwell_di::{ScopeContainer, ScopeRegistry};
@@ -117,7 +118,7 @@ fn router_dispatch(c: &mut Criterion) {
                     let ctx = RpcCallContext::new(
                         Vec::new(),
                         PeerInfo { addr: None },
-                        Arc::clone(&scope),
+                        EntryScope::from_container(Arc::clone(&scope)),
                         None,
                         CancellationToken::new(),
                     );

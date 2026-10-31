@@ -99,11 +99,9 @@ where
     H: FromContainer,
 {
     async fn from_context(ctx: &RpcCallContext) -> crate::Result<Self> {
-        ctx.scope()
-            .extract::<H>()
-            .await
-            .map(Inject)
-            .map_err(Error::from)
+        let scope = ctx.scope().container().await.map_err(Error::from)?;
+
+        scope.extract::<H>().await.map(Inject).map_err(Error::from)
     }
 }
 

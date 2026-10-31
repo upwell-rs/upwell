@@ -6,16 +6,14 @@
 //! protocol's own work and the same for every case, so a bench measures the per-message scope
 //! and resolution alone. The handler future is boxed, as every WebSocket handler's is.
 
-use std::sync::Arc;
-
 use futures::future::BoxFuture;
+use upwell_app::EntryScope;
 use upwell_axum::Axum;
 use upwell_axum::scope::{WebsocketConnection, WebsocketMessage};
-use upwell_di::ScopeContainer;
 
 use crate::scoped::{self, CallScope, CallScoped, Roster, Route, ScopedCalls, ScopedProtocol};
 
-fn handler(route: Route, scope: Arc<ScopeContainer>) -> BoxFuture<'static, bool> {
+fn handler(route: Route, scope: EntryScope<WebsocketMessage>) -> BoxFuture<'static, bool> {
     Box::pin(async move {
         match route {
             Route::Hello | Route::FanIn => true,

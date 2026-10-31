@@ -4,10 +4,12 @@ use std::{fmt, future::Future, pin::Pin, sync::Mutex};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use upwell_app::EntryScope;
 use upwell_core::{DependencyDescriptor, EntryKey, ItemSource, ResolverCtx, TypeDescriptor};
-use upwell_di::{Component, ScopeContainer};
+use upwell_di::Component;
 
 use crate::extract::ErrorResponse;
+use crate::scope::Request;
 
 /// The interaction pattern of an RPC method, following gRPC's four kinds.
 ///
@@ -46,17 +48,18 @@ pub struct ParameterDescriptor {
 /// Context passed to an RPC handler on invocation.
 ///
 /// Carries the raw postcard-encoded payload bytes and the call's **request
-/// scope** — a `ScopeContainer` layered request → connection → singleton, so
-/// `component::<T>()` and the `Inject<H>` extractor resolve singleton-, connection-,
-/// and request-scoped components uniformly through it. Handler extractors (e.g.
-/// `Payload<T>`) deserialize from `payload`.
+/// scope**, layered request → connection → singleton, so `component::<T>()` and the
+/// `Inject<H>` extractor resolve singleton-, connection-, and request-scoped components
+/// uniformly through it. A call whose method's entry plans nothing opens its request scope
+/// only when something resolves from it. Handler extractors (e.g. `Payload<T>`) deserialize
+/// from `payload`.
 ///
 /// For streaming calls, `requests` holds the inbound item stream (taken once by
 /// the `Streaming<T>` extractor) and `cancel` fires when the peer cancels the
 /// call or the connection drops.
 pub struct RpcCallContext {
     pub payload: Vec<u8>,
-    pub(crate) scope: std::sync::Arc<ScopeContainer>,
+    pub(crate) scope: EntryScope<Request>,
     /// The remote peer, carried directly so the `Peer` extractor reaches it
     /// without a connection-scope container — letting an otherwise-empty
     /// connection scope be skipped.
@@ -71,7 +74,7 @@ pub struct RpcCallContext {
 /// external resolver reach a handler the same way they reach a constructor.
 impl ResolverCtx for RpcCallContext {
     fn resolver(&self, kind: TypeId) -> Option<&dyn Any> {
-        self.scope.resolver(kind)
+        self.scope.current().resolver(kind)
     }
 }
 
@@ -82,7 +85,7 @@ impl RpcCallContext {
     pub fn new(
         payload: Vec<u8>,
         peer: upwell_transport::PeerInfo,
-        scope: std::sync::Arc<ScopeContainer>,
+        scope: EntryScope<Request>,
         requests: Option<mpsc::Receiver<Vec<u8>>>,
         cancel: CancellationToken,
     ) -> Self {
@@ -96,7 +99,7 @@ impl RpcCallContext {
     }
 
     /// The call's request scope, for resolving scoped components.
-    pub(crate) fn scope(&self) -> &std::sync::Arc<ScopeContainer> {
+    pub(crate) fn scope(&self) -> &EntryScope<Request> {
         &self.scope
     }
 

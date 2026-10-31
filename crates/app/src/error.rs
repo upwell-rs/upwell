@@ -63,6 +63,13 @@ pub enum Error {
         actual: ScopeId,
     },
 
+    /// A deferred scope instance failed to open earlier, so it cannot open again.
+    #[error("the deferred instance of scope '{scope}' failed to open")]
+    DeferredScopeFailed {
+        /// The scope of the instance.
+        scope: ScopeId,
+    },
+
     #[error(
         "missing config for component '{component}': no binding of type '{type_name}' \
          at path '{path}'"
