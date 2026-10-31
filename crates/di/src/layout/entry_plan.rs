@@ -52,8 +52,9 @@ impl SlotLayout {
     ///
     /// A target that a lazy or config handle resolves builds nothing up front. Every other
     /// target builds the slots it resolves to here, with their dependencies in this scope: its
-    /// concrete type, the provider eager runtime selection picks in `selection` for a single
-    /// value (when that provider lives in this scope), or every provider of a collection.
+    /// concrete type; the providers eager runtime selection picks in `selection` that live in
+    /// this scope, one for a single value or the winner of each qualifier for a keyed map; or
+    /// every provider of a collection.
     /// `can_reach` is the scope reachability `selection` was validated with.
     pub fn plan_entry(
         &self,
@@ -71,30 +72,41 @@ impl SlotLayout {
 
             let target_id = target.ty.type_id;
 
-            if target.cardinality == Cardinality::One && self.slot_of(target_id).is_none() {
-                let selected = selection.select_runtime_one(
-                    target_id,
-                    target.qualifier,
-                    ResolutionMode::Eager,
-                    self.scope,
-                    &can_access,
-                );
-
-                if let Some(slot) =
-                    selected.and_then(|chosen| self.slot_of(chosen.provider.concrete_ty.type_id))
-                {
-                    self.include(slot, &mut builds);
-                }
+            if let Some(slot) = self.slot_of(target_id) {
+                self.include(slot, &mut builds);
 
                 continue;
             }
 
-            self.for_each_selected_slot(
-                target.ty.type_id,
-                target.qualifier,
-                target.cardinality,
-                |slot| self.include(slot, &mut builds),
-            );
+            let selected = match target.cardinality {
+                Cardinality::One => selection
+                    .select_runtime_one(
+                        target_id,
+                        target.qualifier,
+                        ResolutionMode::Eager,
+                        self.scope,
+                        &can_access,
+                    )
+                    .into_iter()
+                    .collect(),
+                Cardinality::Keyed => selection.select_runtime_keyed(
+                    target_id,
+                    ResolutionMode::Eager,
+                    self.scope,
+                    &can_access,
+                ),
+                Cardinality::Collection => {
+                    self.for_each_target_slot(target_id, |slot| self.include(slot, &mut builds));
+
+                    continue;
+                }
+            };
+
+            for chosen in selected {
+                if let Some(slot) = self.slot_of(chosen.provider.concrete_ty.type_id) {
+                    self.include(slot, &mut builds);
+                }
+            }
         }
 
         EntryPlan { builds }
