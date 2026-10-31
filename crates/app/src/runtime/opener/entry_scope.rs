@@ -21,25 +21,33 @@ use crate::runtime::RuntimeView;
 ///
 /// [`ScopeBuilder::open_when_needed`]: super::ScopeBuilder::open_when_needed
 pub struct EntryScope<S: Scope> {
-    container: OnceCell<Arc<ScopeContainer>>,
-    deferred: Option<Deferred>,
+    state: State,
     scope: PhantomData<fn() -> S>,
 }
 
-/// What a deferred [`EntryScope`] opens from.
+/// Whether an [`EntryScope`]'s container opened with it or waits for its first resolution.
+///
+/// An open instance is only its container; the deferred state, once-cell included, lives
+/// behind its own box so it costs nothing when the container opens at once.
+enum State {
+    Open(Arc<ScopeContainer>),
+    Deferred(Box<Deferred>),
+}
+
+/// What a deferred [`EntryScope`] opens from, and its container once open.
 struct Deferred {
     view: RuntimeView,
     parent: Arc<ScopeContainer>,
     entry: EntryId,
     seeds: Mutex<Option<Vec<BoxedComponent>>>,
+    container: OnceCell<Arc<ScopeContainer>>,
 }
 
 impl<S: Scope> EntryScope<S> {
     /// An instance whose container is already open.
     pub fn from_container(container: Arc<ScopeContainer>) -> Self {
         Self {
-            container: OnceCell::new_with(Some(container)),
-            deferred: None,
+            state: State::Open(container),
             scope: PhantomData,
         }
     }
@@ -51,20 +59,23 @@ impl<S: Scope> EntryScope<S> {
         seeds: Vec<BoxedComponent>,
     ) -> Self {
         Self {
-            container: OnceCell::new(),
-            deferred: Some(Deferred {
+            state: State::Deferred(Box::new(Deferred {
                 view,
                 parent,
                 entry,
                 seeds: Mutex::new(Some(seeds)),
-            }),
+                container: OnceCell::new(),
+            })),
             scope: PhantomData,
         }
     }
 
     /// Whether the instance's container is open.
     pub fn is_open(&self) -> bool {
-        self.container.initialized()
+        match &self.state {
+            State::Open(_) => true,
+            State::Deferred(deferred) => deferred.container.initialized(),
+        }
     }
 
     /// The instance's container once it is open, or the scope it opens under until then.
@@ -72,10 +83,9 @@ impl<S: Scope> EntryScope<S> {
     /// Before the container opens, reads through it see only the scopes the instance opens
     /// under, not the builder's seeds.
     pub fn current(&self) -> &Arc<ScopeContainer> {
-        match (self.container.get(), &self.deferred) {
-            (Some(container), _) => container,
-            (None, Some(deferred)) => &deferred.parent,
-            (None, None) => unreachable!("an entry scope without a container is deferred"),
+        match &self.state {
+            State::Open(container) => container,
+            State::Deferred(deferred) => deferred.container.get().unwrap_or(&deferred.parent),
         }
     }
 
@@ -92,29 +102,10 @@ impl<S: Scope> EntryScope<S> {
     ///
     /// Fails when the deferred container fails to open, now or on an earlier call.
     pub async fn container(&self) -> crate::Result<&Arc<ScopeContainer>> {
-        self.container
-            .get_or_try_init(|| async {
-                let deferred = self
-                    .deferred
-                    .as_ref()
-                    .expect("an entry scope without a container is deferred");
-                let seeds = deferred
-                    .seeds
-                    .lock()
-                    .expect("deferred seeds lock poisoned")
-                    .take()
-                    .ok_or(crate::Error::DeferredScopeFailed { scope: S::ID })?;
-
-                open_in(
-                    deferred.view.clone(),
-                    S::ID,
-                    Arc::clone(&deferred.parent),
-                    Builds::Entry(deferred.entry),
-                    seeds,
-                )
-                .await
-            })
-            .await
+        match &self.state {
+            State::Open(container) => Ok(container),
+            State::Deferred(deferred) => deferred.open::<S>().await,
+        }
     }
 
     /// Resolves `H` from the instance, opening its container first if it is deferred.
@@ -126,5 +117,31 @@ impl<S: Scope> EntryScope<S> {
         let container = self.container().await?;
 
         container.extract::<H>().await.map_err(crate::Error::from)
+    }
+}
+
+impl Deferred {
+    /// The container, opened on the first call with the seeds and on the generation it was
+    /// planned on.
+    async fn open<S: Scope>(&self) -> crate::Result<&Arc<ScopeContainer>> {
+        self.container
+            .get_or_try_init(|| async {
+                let seeds = self
+                    .seeds
+                    .lock()
+                    .expect("deferred seeds lock poisoned")
+                    .take()
+                    .ok_or(crate::Error::DeferredScopeFailed { scope: S::ID })?;
+
+                open_in(
+                    self.view.clone(),
+                    S::ID,
+                    Arc::clone(&self.parent),
+                    Builds::Entry(self.entry),
+                    seeds,
+                )
+                .await
+            })
+            .await
     }
 }
