@@ -174,7 +174,7 @@ fn prepared_rpc_projects_only_retained_service_and_route_facts() {
 }
 
 #[tokio::test]
-async fn peer_info_seed_opens_only_at_connection_destination() {
+async fn peer_info_seeds_the_connection_scope_a_request_opens_under() {
     let app = App::<Rpc>::builder("rpc-scope-seed-test")
         .config_source(ConfigManager::<Dynamic>::empty())
         .build()
@@ -185,51 +185,32 @@ async fn peer_info_seed_opens_only_at_connection_destination() {
         addr: Some("127.0.0.1:1234".parse().expect("valid test address")),
     };
     let connection = runtime
-        .open_scope_from_root(
-            ConnectionScope::KEY,
-            vec![BoxedComponent {
-                ty: TypeDescriptor::of::<upwell_transport::PeerInfo>("PeerInfo"),
-                value: Box::new(peer.clone()),
-            }],
-        )
+        .opener::<ConnectionScope>()
+        .expect("the connection scope is declared")
+        .builder()
+        .seed(peer.clone())
+        .open_default()
         .await
         .expect("registered peer seed opens the connection scope");
     let resolved = connection
+        .container()
         .resolve::<upwell_transport::PeerInfo>()
         .await
         .expect("peer resolution succeeds")
         .expect("peer is seeded");
 
-    assert_eq!(resolved.addr, peer.addr);
-
-    let error = match runtime
-        .open_scope(
-            RequestScope::KEY,
-            Arc::clone(&connection),
-            vec![BoxedComponent {
-                ty: TypeDescriptor::of::<upwell_transport::PeerInfo>("PeerInfo"),
-                value: Box::new(peer),
-            }],
-        )
-        .await
-    {
-        Ok(_) => panic!("peer seed was accepted at the request boundary"),
-        Err(error) => error,
-    };
-
-    assert!(matches!(
-        error,
-        upwell_app::Error::InvalidSeedDestination {
-            expected: <ConnectionScope as Scope>::ID,
-            actual: <RequestScope as Scope>::ID,
-            ..
-        }
-    ));
-
     let request = runtime
-        .open_scope(RequestScope::KEY, connection, Vec::new())
+        .opener::<RequestScope>()
+        .expect("the request scope is declared")
+        .builder()
+        .under(&connection)
+        .open_default()
         .await
         .expect("request opens under its declared connection parent");
 
-    assert_eq!(request.scope().id(), <RequestScope as Scope>::ID);
+    assert_eq!(resolved.addr, peer.addr);
+    assert_eq!(
+        request.container().scope().id(),
+        <RequestScope as Scope>::ID
+    );
 }

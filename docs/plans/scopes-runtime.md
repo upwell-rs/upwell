@@ -324,8 +324,15 @@ the opener in reach of the request's task, and the scope opens on the first `Inj
 `ScopeHandle` extraction (`ScopeHandle::of` for middleware holding the whole request), so a
 request that injects nothing opens no scope. `RequestMeta` is seeded from the request head
 when the scope opens. The request timeout is a hand-written layer too, so neither allocates a
-boxed `from_fn` future. RPC and WebSocket still use the ad hoc API, which stays public until
-they move.
+boxed `from_fn` future.
+
+Status (#353 RPC and WebSocket): the RPC serve loop prepares its connection and call openers once
+per serve, and each call opens `.under(&connection)`. The WebSocket upgrade opens the connection
+through an opener and hands protocols a `WsConnectionScope`, whose `message()` starts a message
+scope under it; STOMP and JSON-WS open every message that way. The ad hoc `open_scope*` API is
+removed, so `ScopeOpener` is the only way to open a scope. A parent outside the topology is a
+compile error through `OpensUnder`; seeds are checked against their declared slots in debug
+builds.
 
 A request scope opened under an app-chosen parent, such as a per-user `Session` scope the
 app caches and reuses across requests, fits this design: the parent is picked when the scope

@@ -6,8 +6,8 @@
 //! protocol, so they are defined here in the daemon (RPC) layer with stable identities
 //! and an explicit root-to-connection-to-request topology.
 
-use upwell_app::{ScopeBoundary, ScopeParent, ScopeTopology};
-use upwell_core::{Scope, ScopeGenerations, ScopeId};
+use upwell_app::{OpensUnder, ScopeBoundary, ScopeParent, ScopeTopology};
+use upwell_core::{Scope, ScopeGenerations, ScopeId, Singleton};
 
 /// A per-connection scope: a live session between the daemon and one remote peer.
 /// Outlives the requests multiplexed over it, so it ranks above [`Request`].
@@ -28,6 +28,10 @@ impl Scope for Request {
     const RANK: u8 = 100;
     const NAME: &'static str = "Request";
 }
+
+impl OpensUnder<Singleton> for Connection {}
+
+impl OpensUnder<Connection> for Request {}
 
 static RPC_SCOPE_BOUNDARIES: [ScopeBoundary; 2] = [
     ScopeBoundary::new::<Connection>(&[ScopeParent::Root]),

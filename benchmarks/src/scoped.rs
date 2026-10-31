@@ -14,9 +14,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use tokio::runtime::Runtime;
-use upwell_app::{App, AppBuilder, ProtocolDefinition};
+use upwell_app::{App, AppBuilder, OpenScope, OpensUnder, ProtocolDefinition, ScopeOpener};
 use upwell_config::{ConfigManager, Dynamic};
-use upwell_core::{ScopeKey, TypeDescriptor};
+use upwell_core::{Scope, ScopeKey, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentFactoryRole, ScopeContainer,
@@ -190,38 +190,46 @@ pub enum Route {
     Scoped,
 }
 
-/// A built application with one open connection scope, opening per-call scopes under it.
-pub struct ScopedCalls<D: ProtocolDefinition> {
-    app: App<D>,
-    connection: Arc<ScopeContainer>,
-    per_call: ScopeKey,
+/// A built application with one open connection scope `C`, opening per-call scopes `P` under
+/// it through the same prepared openers a protocol's dispatch loop holds.
+pub struct ScopedCalls<D: ProtocolDefinition, C: Scope, P: Scope> {
+    _app: App<D>,
+    connection: OpenScope<C>,
+    per_call: ScopeOpener<P>,
 }
 
-impl<D: ProtocolDefinition> ScopedCalls<D> {
-    /// Builds `builder` with `roster` in the `per_call` scope, then opens one `connection` scope
+impl<D, C, P> ScopedCalls<D, C, P>
+where
+    D: ProtocolDefinition,
+    C: OpensUnder<Singleton>,
+    P: OpensUnder<C>,
+{
+    /// Builds `builder` with `roster` in the per-call scope, then opens one connection scope
     /// from the root.
-    pub async fn build(
-        builder: AppBuilder<D>,
-        connection: ScopeKey,
-        per_call: ScopeKey,
-        roster: Roster,
-    ) -> Self
+    pub async fn build(builder: AppBuilder<D>, roster: Roster) -> Self
     where
         D::Error: std::fmt::Debug,
     {
         let app = roster
-            .register(builder, per_call)
+            .register(builder, P::KEY)
             .build()
             .await
             .expect("benchmark app builds");
         let connection = app
             .runtime()
-            .open_scope_from_root(connection, Vec::new())
+            .opener::<C>()
+            .expect("the connection scope is declared")
+            .builder()
+            .open_default()
             .await
             .expect("benchmark connection scope opens");
+        let per_call = app
+            .runtime()
+            .opener::<P>()
+            .expect("the per-call scope is declared");
 
         Self {
-            app,
+            _app: app,
             connection,
             per_call,
         }
@@ -230,14 +238,16 @@ impl<D: ProtocolDefinition> ScopedCalls<D> {
     /// The scope a call's handler resolves through.
     pub async fn scope(&self, scope: CallScope) -> Arc<ScopeContainer> {
         match scope {
-            CallScope::Connection => Arc::clone(&self.connection),
+            CallScope::Connection => Arc::clone(self.connection.container()),
 
             CallScope::PerCall => self
-                .app
-                .runtime()
-                .open_scope(self.per_call, Arc::clone(&self.connection), Vec::new())
+                .per_call
+                .builder()
+                .under(&self.connection)
+                .open_default()
                 .await
-                .expect("benchmark per-call scope opens"),
+                .expect("benchmark per-call scope opens")
+                .into_container(),
         }
     }
 }

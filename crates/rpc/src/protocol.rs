@@ -3,7 +3,7 @@
 //! [`RpcRuntime`] implements the [`ProtocolRuntime`]/[`Serve`] traits from `upwell-app`: it owns the
 //! router + middleware stack and drives the per-connection / per-call loop over any
 //! [`Transport`](upwell_transport::Transport), opening connection and request scopes
-//! through the [`AppRuntime`]. The serve envelope (lifecycle hooks, reload triggers,
+//! through [`ScopeOpener`]s prepared from the [`AppRuntime`] once per serve. The serve envelope (lifecycle hooks, reload triggers,
 //! ctrl-c) is run by `App::serve`, so this loop only watches its transport and the
 //! shutdown signal.
 
@@ -14,9 +14,7 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 use tower::{Service, ServiceExt};
 use tracing::{debug, error, info, instrument, warn};
-use upwell_app::{AppRuntime, ProtocolRuntime, Serve, ShutdownSignal};
-use upwell_core::{Scope, TypeDescriptor};
-use upwell_di::{BoxedComponent, ScopeContainer};
+use upwell_app::{AppRuntime, OpenScope, ProtocolRuntime, ScopeOpener, Serve, ShutdownSignal};
 use upwell_transport::{
     CallResult, Connection, Error as TransportError, PeerInfo, PredefinedCode, Respond,
     RespondStream, ResponseSink, StatusCode, Transport,
@@ -146,6 +144,10 @@ where
 
         info!(target: "upwell::daemon", app = runtime.name(), transport = transport_name, "serve starting");
 
+        let scopes = Arc::new(RpcScopes {
+            connections: runtime.opener()?,
+            calls: runtime.opener()?,
+        });
         let connection_cancel = CancellationToken::new();
         let mut connections = JoinSet::new();
         let mut serve_error = None;
@@ -162,11 +164,11 @@ where
                             let service = self.service.clone();
                             let error_handler = self.error_handler.clone();
                             let needs_peer = self.needs_peer;
-                            let runtime = runtime.clone();
+                            let scopes = Arc::clone(&scopes);
                             let cancel = connection_cancel.clone();
                             let max_calls = self.limits.max_calls_per_connection;
                             connections.spawn(async move {
-                                serve_connection(conn, service, error_handler, needs_peer, runtime, cancel, max_calls)
+                                serve_connection(conn, service, error_handler, needs_peer, scopes, cancel, max_calls)
                                     .await;
                             });
                         }
@@ -241,6 +243,12 @@ where
             None => Ok(()),
         }
     }
+}
+
+/// The openers of the scopes the RPC protocol opens, prepared once per serve.
+struct RpcScopes {
+    connections: ScopeOpener<ConnectionScope>,
+    calls: ScopeOpener<RequestScope>,
 }
 
 fn is_transient_accept_error(error: &std::io::Error) -> bool {
@@ -330,7 +338,7 @@ async fn serve_connection<C: Connection>(
     service: RpcService,
     error_handler: Option<Arc<dyn ErrorHandler>>,
     needs_peer: bool,
-    runtime: AppRuntime,
+    scopes: Arc<RpcScopes>,
     shutdown: CancellationToken,
     max_calls: usize,
 ) {
@@ -341,19 +349,13 @@ async fn serve_connection<C: Connection>(
     // extractor regardless, so an otherwise-empty connection scope is skipped. A
     // failed factory closes the connection.
     let peer = conn.peer().clone();
-    let seeds = if needs_peer {
-        vec![BoxedComponent {
-            ty: TypeDescriptor::of::<PeerInfo>("PeerInfo"),
-            value: Box::new(peer.clone()),
-        }]
-    } else {
-        Vec::new()
-    };
+    let mut builder = scopes.connections.builder();
 
-    let connection_scope = match runtime
-        .open_scope_from_root(ConnectionScope::KEY, seeds)
-        .await
-    {
+    if needs_peer {
+        builder = builder.seed(peer.clone());
+    }
+
+    let connection_scope = match builder.open_default().await {
         Ok(scope) => scope,
 
         Err(e) => {
@@ -387,8 +389,8 @@ async fn serve_connection<C: Connection>(
                     let path = call.path;
                     let service = service.clone();
                     let error_handler = error_handler.clone();
-                    let connection_scope = Arc::clone(&connection_scope);
-                    let runtime = runtime.clone();
+                    let connection_scope = connection_scope.clone();
+                    let calls = scopes.calls.clone();
                     let peer = peer.clone();
 
                     debug!(target: "upwell::daemon", %path, "dispatching call");
@@ -400,7 +402,7 @@ async fn serve_connection<C: Connection>(
                         call.cancel,
                         peer,
                         connection_scope,
-                        runtime,
+                        calls,
                         responder,
                         service,
                         error_handler,
@@ -454,53 +456,50 @@ async fn drive_call<R>(
     requests: Option<mpsc::Receiver<Vec<u8>>>,
     cancel: CancellationToken,
     peer: PeerInfo,
-    connection_scope: Arc<ScopeContainer>,
-    runtime: AppRuntime,
+    connection_scope: OpenScope<ConnectionScope>,
+    calls: ScopeOpener<RequestScope>,
     responder: R,
     mut service: RpcService,
     error_handler: Option<Arc<dyn ErrorHandler>>,
 ) where
     R: Respond + RespondStream + Send + 'static,
 {
-    let request_scope =
-        match AssertUnwindSafe(runtime.open_scope(RequestScope::KEY, connection_scope, Vec::new()))
-            .catch_unwind()
-            .await
-        {
-            Ok(Ok(scope)) => scope,
+    let opening = calls.builder().under(&connection_scope).open_default();
+    let request_scope = match AssertUnwindSafe(opening).catch_unwind().await {
+        Ok(Ok(scope)) => scope.into_container(),
 
-            Ok(Err(e)) => {
-                error!(target: "upwell::daemon", %path, error = %e, "request scope build failed");
-                let response = apply_error_handler(
-                    &error_handler,
-                    &path,
-                    ErrorResponse::from(crate::Error::from(e)),
-                )
+        Ok(Err(e)) => {
+            error!(target: "upwell::daemon", %path, error = %e, "request scope build failed");
+            let response = apply_error_handler(
+                &error_handler,
+                &path,
+                ErrorResponse::from(crate::Error::from(e)),
+            )
+            .await;
+            let _ = responder
+                .respond(CallResult::Err {
+                    code: response.code,
+                    body: response.body,
+                })
                 .await;
-                let _ = responder
-                    .respond(CallResult::Err {
-                        code: response.code,
-                        body: response.body,
-                    })
-                    .await;
 
-                return;
-            }
+            return;
+        }
 
-            Err(_) => {
-                error!(target: "upwell::daemon", %path, "request scope build panicked");
-                let response =
-                    apply_error_handler(&error_handler, &path, internal_error_response()).await;
-                let _ = responder
-                    .respond(CallResult::Err {
-                        code: response.code,
-                        body: response.body,
-                    })
-                    .await;
+        Err(_) => {
+            error!(target: "upwell::daemon", %path, "request scope build panicked");
+            let response =
+                apply_error_handler(&error_handler, &path, internal_error_response()).await;
+            let _ = responder
+                .respond(CallResult::Err {
+                    code: response.code,
+                    body: response.body,
+                })
+                .await;
 
-                return;
-            }
-        };
+            return;
+        }
+    };
 
     let ctx = RpcCallContext::new(payload, peer, request_scope, requests, cancel);
     let request = RpcRequest::new(path.clone(), ctx);

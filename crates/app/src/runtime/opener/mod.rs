@@ -1,5 +1,4 @@
-//! Opening scope instances: the prepared [`ScopeOpener`] protocols and users share, and the
-//! ad hoc API it replaces.
+//! Opening scope instances through the prepared [`ScopeOpener`] protocols and users share.
 //!
 //! An opener checks once, when it is created, that its scope is declared, and resolves each
 //! entry it opens for once. Opening an instance then pins a runtime generation, takes the
@@ -17,8 +16,6 @@ use super::{AppRuntime, RuntimeGeneration, RuntimeView};
 use crate::entry::EntryId;
 use crate::scope::ScopeParent;
 
-mod adhoc;
-
 /// Declares that scope `Self` may open under scope `P`.
 ///
 /// Implement it for every parent the scope's topology lists, with [`Singleton`] standing for
@@ -29,9 +26,9 @@ pub trait OpensUnder<P: Scope>: Scope {}
 /// The prepared opener of scope `S`, shared by protocols and user code.
 ///
 /// Created once with [`AppRuntime::opener`], which checks that `S` is declared. Cloning it
-/// is cheap.
+/// bumps one reference count.
 pub struct ScopeOpener<S: Scope> {
-    runtime: AppRuntime,
+    runtime: Arc<AppRuntime>,
     scope: PhantomData<fn() -> S>,
 }
 
@@ -73,7 +70,7 @@ impl AppRuntime {
         }
 
         Ok(ScopeOpener {
-            runtime: self.clone(),
+            runtime: Arc::new(self.clone()),
             scope: PhantomData,
         })
     }
@@ -176,7 +173,7 @@ impl<S: Scope> ScopeOpener<S> {
 impl<S: Scope> Clone for ScopeOpener<S> {
     fn clone(&self) -> Self {
         Self {
-            runtime: self.runtime.clone(),
+            runtime: Arc::clone(&self.runtime),
             scope: PhantomData,
         }
     }
@@ -283,7 +280,7 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
             S::NAME
         );
         debug_assert!(
-            runtime.validate_seeds(&view, S::ID, &self.seeds).is_ok(),
+            validate_seeds(&view, S::ID, &self.seeds).is_ok(),
             "a seed of `{}` is duplicated or has no slot in it",
             S::NAME
         );
@@ -309,4 +306,37 @@ fn opens_under<S: Scope, P: Scope>(view: &RuntimeView) -> bool {
         .topology
         .boundary(&S::ID)
         .is_some_and(|boundary| boundary.opens_under(parent))
+}
+
+/// Whether `seeds` are distinct and each fills a declared slot of `scope`.
+pub(super) fn validate_seeds(
+    view: &RuntimeView,
+    scope: ScopeId,
+    seeds: &[BoxedComponent],
+) -> crate::Result<()> {
+    for (index, seed) in seeds.iter().enumerate() {
+        let type_id = seed.ty.type_id;
+        let type_name = (seed.ty.type_name)();
+
+        if seeds[..index]
+            .iter()
+            .any(|candidate| candidate.ty.type_id == type_id)
+        {
+            return Err(crate::Error::DuplicateSeedType { scope, type_name });
+        }
+
+        let Some(destination) = view.scope_plan().seed_destinations.get(&type_id) else {
+            return Err(crate::Error::UnregisteredSeed { scope, type_name });
+        };
+
+        if destination.scope != scope {
+            return Err(crate::Error::InvalidSeedDestination {
+                type_name: destination.type_name,
+                expected: destination.scope,
+                actual: scope,
+            });
+        }
+    }
+
+    Ok(())
 }

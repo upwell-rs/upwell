@@ -11,7 +11,6 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use upwell_axum::Axum;
 use upwell_axum::scope::{WebsocketConnection, WebsocketMessage};
-use upwell_core::Scope;
 use upwell_di::ScopeContainer;
 
 use crate::scoped::{self, CallScope, CallScoped, Roster, Route, ScopedCalls, ScopedProtocol};
@@ -27,18 +26,12 @@ fn handler(route: Route, scope: Arc<ScopeContainer>) -> BoxFuture<'static, bool>
 
 /// An axum application whose messages open a `WebsocketMessage` scope under one connection.
 pub struct WsMessages {
-    calls: ScopedCalls<Axum>,
+    calls: ScopedCalls<Axum, WebsocketConnection, WebsocketMessage>,
 }
 
 impl ScopedProtocol for WsMessages {
     async fn build(roster: Roster) -> Self {
-        let calls = ScopedCalls::build(
-            scoped::builder("ws-message-bench"),
-            WebsocketConnection::KEY,
-            WebsocketMessage::KEY,
-            roster,
-        )
-        .await;
+        let calls = ScopedCalls::build(scoped::builder("ws-message-bench"), roster).await;
 
         Self { calls }
     }

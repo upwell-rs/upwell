@@ -206,7 +206,6 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
 
     use axum::extract::ws::WebSocket;
     use upwell_app::AppRuntime;
-    use upwell_di::ScopeContainer;
 
     /// WebSocket protocol used only to retain endpoint metadata.
     struct ToolingWsProtocol;
@@ -228,7 +227,7 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
         async fn serve(
             self: Arc<Self>,
             _socket: WebSocket,
-            _connection: Arc<ScopeContainer>,
+            _connection: crate::ws::WsConnectionScope,
             _shutdown: crate::WsShutdown,
         ) {
         }

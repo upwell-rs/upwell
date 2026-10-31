@@ -8,7 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use tokio_util::sync::CancellationToken;
-use upwell_core::{EntryKey, Scope, TypeDescriptor};
+use upwell_core::{EntryKey, TypeDescriptor};
 use upwell_rpc::descriptors::{RpcCallContext, RpcHandler, RpcOutcome, RpcResponse};
 use upwell_rpc::scope::{Connection, Request};
 use upwell_rpc::{
@@ -88,19 +88,13 @@ fn scoped(
 /// An RPC application whose calls open a request scope under one connection scope, then
 /// dispatch through an [`RpcRouter`] serving [`HELLO`] and [`SCOPED`].
 pub struct RpcCalls {
-    calls: ScopedCalls<Rpc>,
+    calls: ScopedCalls<Rpc, Connection, Request>,
     router: RpcRouter,
 }
 
 impl ScopedProtocol for RpcCalls {
     async fn build(roster: Roster) -> Self {
-        let calls = ScopedCalls::build(
-            scoped::builder("rpc-call-bench"),
-            Connection::KEY,
-            Request::KEY,
-            roster,
-        )
-        .await;
+        let calls = ScopedCalls::build(scoped::builder("rpc-call-bench"), roster).await;
         let router = router(vec![
             descriptor("hello", hello),
             descriptor("scoped", scoped),
