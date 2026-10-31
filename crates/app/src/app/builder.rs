@@ -1,11 +1,12 @@
 use upwell_config::{
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigManager, ConfigProperties,
 };
-use upwell_core::{Descriptor, Singleton as SingletonScope, TypeDescriptor};
+use upwell_core::{Descriptor, EntryKey, Scope, Singleton as SingletonScope, TypeDescriptor};
 use upwell_di::{BoxedComponent, Component, ComponentDescriptor, Injectable, ProviderDescriptor};
 use upwell_dirs::DirectoriesManager;
 
 use super::App;
+use crate::entry::{EntryDescriptor, EntryTargets};
 use crate::host::ExecutionMode;
 use crate::plugin::{EarlyPluginCatalog, Plugin, PluginCatalog, PluginWithOptions};
 use crate::protocol::ProtocolDefinition;
@@ -113,7 +114,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             T::ID,
             T::NAME,
             TypeDescriptor::of::<T>(T::NAME),
-            &SingletonScope,
+            SingletonScope::KEY,
         ));
 
         self.instances.push(BoxedComponent {
@@ -124,9 +125,8 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         self
     }
 
-    /// Merges every link-time-registered component and provider descriptor (and the
-    /// protocol's own variants) into the app, and enables
-    /// config auto-discovery.
+    /// Merges every link-time-registered component, provider and `#[entry]` descriptor (and
+    /// the protocol's own variants) into the app, and enables config auto-discovery.
     pub fn auto_discover(mut self) -> Self {
         let discovered = AppRegistry::collect();
 
@@ -134,6 +134,10 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
 
         for provider in discovered.providers {
             self.registry.add_provider(provider);
+        }
+
+        for entry in discovered.entries {
+            self.registry.add_entry(entry);
         }
 
         self.auto_discovery_enabled = true;
@@ -180,6 +184,31 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
     /// [`ProviderDescriptor::of`].
     pub fn provider_descriptor(mut self, descriptor: &'static ProviderDescriptor) -> Self {
         self.registry.add_provider(*descriptor);
+
+        self
+    }
+
+    /// Registers an entry into scope `S` that injects `T`, a tuple of injectable types, under
+    /// the stable identity `key`.
+    ///
+    /// Preparation fails when `S` is not opened by the active protocol, or when a target
+    /// cannot be resolved from `S`.
+    pub fn scope_entry<S: Scope, T: EntryTargets>(self, key: EntryKey) -> Self {
+        self.entry_descriptor(EntryDescriptor::new::<S, T>(key))
+    }
+
+    /// Registers the entry `E` declares, such as the marker type an `#[entry]` function
+    /// generates. An entry that discovery also registers is kept once.
+    pub fn entry<E>(self) -> Self
+    where
+        E: Descriptor<EntryDescriptor>,
+    {
+        self.entry_descriptor(<E as Descriptor<EntryDescriptor>>::DESCRIPTOR)
+    }
+
+    /// Registers an entry descriptor, for entries assembled without a typed target tuple.
+    pub fn entry_descriptor(mut self, descriptor: EntryDescriptor) -> Self {
+        self.registry.add_entry(descriptor);
 
         self
     }

@@ -4,14 +4,16 @@
 
 use std::sync::Arc;
 
-use upwell_core::{ScopeId, StaticScope};
+use upwell_core::{Scope, ScopeId};
 use upwell_di::{Component as _, ComponentDescriptor, EffectiveNodeRole, factories};
 
 use super::super::fixture::{Authenticator, lock_test_guard};
 use super::super::gate::GATE_COMPONENT;
 use super::*;
 use crate::test_support::test_component;
-use crate::{AppRegistry, ProtocolDefinition, ScopeBoundary, ScopeParent, ScopeTopology};
+use crate::{
+    AppRegistry, OpensUnder, ProtocolDefinition, ScopeBoundary, ScopeParent, ScopeTopology,
+};
 
 const CALL_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/hardening-call");
 const STEP_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/hardening-step");
@@ -22,23 +24,25 @@ struct Call;
 /// A nested step scope opened under a call.
 struct Step;
 
-impl StaticScope for Call {
+impl Scope for Call {
     const ID: ScopeId = CALL_ID;
     const RANK: u8 = 50;
     const NAME: &'static str = "Call";
 }
 
-impl StaticScope for Step {
+impl Scope for Step {
     const ID: ScopeId = STEP_ID;
     const RANK: u8 = 25;
     const NAME: &'static str = "Step";
 }
 
-static CALL: Call = Call;
-static STEP: Step = Step;
+impl OpensUnder<upwell_core::Singleton> for Call {}
+
+impl OpensUnder<Call> for Step {}
+
 static BOUNDARIES: [ScopeBoundary; 2] = [
-    ScopeBoundary::new(&CALL, ScopeParent::Root),
-    ScopeBoundary::new(&STEP, ScopeParent::Boundary(CALL_ID)),
+    ScopeBoundary::new::<Call>(&[ScopeParent::Root]),
+    ScopeBoundary::new::<Step>(&[ScopeParent::Boundary(CALL_ID)]),
 ];
 
 /// A protocol declaring the call and step scopes.
@@ -73,7 +77,7 @@ async fn construct_call_gate(authenticator: Arc<dyn Authenticator>) -> CallGate 
 }
 
 static CALL_GATE_COMPONENT: ComponentDescriptor = ComponentDescriptor::of::<CallGate>()
-    .with_scope(&CALL)
+    .with_scope(Call::KEY)
     .with_factories(factories!["static" => construct_call_gate]);
 
 fn call_scheme(scope: &Arc<upwell_di::ScopeContainer>) -> &'static str {
@@ -100,8 +104,15 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
     .await
     .expect("the scoped app builds");
     let runtime = app.runtime();
-    let open_call = runtime
-        .open_scope_from_root(&CALL, Vec::new())
+    let calls = runtime
+        .opener::<Call>()
+        .expect("the call scope is declared");
+    let steps = runtime
+        .opener::<Step>()
+        .expect("the step scope is declared");
+    let open_call = calls
+        .builder()
+        .open_default()
         .await
         .expect("a call opens before the switch");
 
@@ -111,12 +122,15 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
         .reload_config()
         .await
         .expect("a switch with an open call commits");
-    let nested = runtime
-        .open_scope(&STEP, Arc::clone(&open_call), Vec::new())
+    let nested = steps
+        .builder()
+        .under(&open_call)
+        .open_default()
         .await
         .expect("a step opens under the call opened before the switch");
-    let new_call = runtime
-        .open_scope_from_root(&CALL, Vec::new())
+    let new_call = calls
+        .builder()
+        .open_default()
         .await
         .expect("a call opens after the switch");
     let planned = report
@@ -126,12 +140,13 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
     assert!(report.is_committed());
     assert_eq!(planned.role, EffectiveNodeRole::FutureScope(Call::ID));
     assert_eq!(
-        call_scheme(&open_call),
+        call_scheme(open_call.container()),
         "primary",
         "the open call is not migrated"
     );
     assert_eq!(
         nested
+            .container()
             .get::<CallGate>()
             .expect("the step resolves its call's gate")
             .scheme,
@@ -139,7 +154,7 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
         "a nested opening inherits its parent's pinned generation"
     );
     assert_eq!(
-        call_scheme(&new_call),
+        call_scheme(new_call.container()),
         "fallback",
         "a new call uses the new plan"
     );
@@ -154,5 +169,59 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
     assert!(
         runtime.displaced_generations().is_empty(),
         "closing the call releases the displaced generation"
+    );
+}
+
+#[tokio::test]
+async fn a_slot_built_on_demand_after_a_switch_uses_its_scopes_generation() {
+    let _guard = lock_test_guard().await;
+    let dir = auth_config_dir("primary");
+    let key = upwell_core::EntryKey::new("test/hardening-call").expect("valid entry key");
+
+    reset_faults();
+
+    let app = auth_builder::<ScopedProtocol>(
+        &config_dir_of(&dir),
+        &PRIMARY_COMPONENT,
+        &GATE_COMPONENT,
+        &[&CALL_GATE_COMPONENT],
+    )
+    .entry_descriptor(crate::EntryDescriptor::new::<Call, ()>(key))
+    .build()
+    .await
+    .expect("the scoped app builds");
+    let runtime = app.runtime();
+    let calls = runtime
+        .opener::<Call>()
+        .expect("the call scope is declared");
+    let entry = calls.entry(key).expect("the call entry is registered");
+    let open_call = calls
+        .builder()
+        .open(&entry)
+        .await
+        .expect("a call opens before the switch");
+    let built_at_open = open_call.container().get::<CallGate>().is_some();
+
+    write_auth_config(&config_dir_of(&dir), "fallback");
+
+    runtime
+        .reload_config()
+        .await
+        .expect("a switch with an open call commits");
+
+    let gate = open_call
+        .container()
+        .resolve::<Arc<CallGate>>()
+        .await
+        .expect("resolution succeeds")
+        .expect("the gate is built on demand");
+
+    assert!(
+        !built_at_open,
+        "the entry injects nothing, so its call builds nothing"
+    );
+    assert_eq!(
+        gate.scheme, "primary",
+        "a slot built after the switch comes from the generation its call opened under"
     );
 }

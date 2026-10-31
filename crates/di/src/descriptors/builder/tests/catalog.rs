@@ -6,7 +6,7 @@ use std::any::TypeId;
 
 use upwell_core::{
     ConditionPredicate, ConditionScalar, ConditionScalarKind, ConfigFactDescriptor,
-    DescriptorSource, ResolutionMode, Singleton,
+    DescriptorSource, ResolutionMode, Scope, Singleton,
 };
 
 use super::*;
@@ -63,7 +63,7 @@ fn evaluate(
             TypeId::of::<dyn Greeter>(),
             None,
             ResolutionMode::Eager,
-            &Singleton,
+            Singleton::KEY,
             &|_, _| true,
         )
         .expect("one greeter is selected")

@@ -4,7 +4,7 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use upwell_core::{ResolutionMode, Scope};
+use upwell_core::{ResolutionMode, ScopeKey};
 
 use crate::descriptors::{ComponentDescriptor, ProviderDescriptor};
 use crate::error::Error;
@@ -84,8 +84,8 @@ impl ScopeRegistry {
         trait_id: TypeId,
         qualifier: Option<&str>,
         resolution: ResolutionMode,
-        scope: &dyn Scope,
-        can_access: &impl Fn(&'static dyn Scope) -> bool,
+        scope: ScopeKey,
+        can_access: &impl Fn(ScopeKey) -> bool,
     ) -> Option<ProviderDescriptor> {
         self.selection
             .select_runtime_one(trait_id, qualifier, resolution, scope, &|_, dependency| {
@@ -98,8 +98,8 @@ impl ScopeRegistry {
         &'a self,
         trait_id: TypeId,
         resolution: ResolutionMode,
-        scope: &'a dyn Scope,
-        can_access: impl Fn(&'static dyn Scope) -> bool + 'a,
+        scope: ScopeKey,
+        can_access: impl Fn(ScopeKey) -> bool + 'a,
     ) -> impl Iterator<Item = ProviderDescriptor> + 'a {
         self.selection
             .runtime_collection(trait_id, resolution, scope, move |_, dependency| {
@@ -111,8 +111,8 @@ impl ScopeRegistry {
         &self,
         trait_id: TypeId,
         resolution: ResolutionMode,
-        scope: &dyn Scope,
-        can_access: &impl Fn(&'static dyn Scope) -> bool,
+        scope: ScopeKey,
+        can_access: &impl Fn(ScopeKey) -> bool,
     ) -> Vec<ProviderDescriptor> {
         self.selection
             .select_runtime_keyed(trait_id, resolution, scope, &|_, dependency| {

@@ -1,5 +1,6 @@
 /target
 /benchmarks/target
+/benchmarks/criterion
 debug/
 release/
 *.rs.bk

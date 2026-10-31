@@ -30,7 +30,7 @@ fn provider_lookup_uses_the_prebuilt_concrete_index() {
         erase: unerased,
         live: |_| None,
     };
-    let component = ComponentDescriptor::manual("counted", "Counted", concrete_ty, &Singleton);
+    let component = ComponentDescriptor::manual("counted", "Counted", concrete_ty, Singleton::KEY);
     let registry = ScopeRegistry::new(
         HashMap::new(),
         HashMap::from([(component.ty.type_id, component)]),
@@ -98,8 +98,12 @@ fn single_provider_selection_is_shared_and_ambiguity_aware() {
 #[test]
 fn registry_construction_completes_missing_provider_ordinals() {
     let provider = test_provider("Unplanned", "unplanned", false);
-    let component =
-        ComponentDescriptor::manual("unplanned", "Unplanned", provider.concrete_ty, &Singleton);
+    let component = ComponentDescriptor::manual(
+        "unplanned",
+        "Unplanned",
+        provider.concrete_ty,
+        Singleton::KEY,
+    );
     let registry = ScopeRegistry::new(
         HashMap::new(),
         HashMap::from([(component.ty.type_id, component)]),
@@ -145,7 +149,7 @@ fn registry_indexes_follow_final_provider_order_for_first_wins_lookups() {
                 provider.qualifier,
                 provider.concrete_ty.name,
                 provider.concrete_ty,
-                &Singleton,
+                Singleton::KEY,
             );
 
             (component.ty.type_id, component)

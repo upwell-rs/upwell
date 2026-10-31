@@ -1,10 +1,16 @@
 use std::any::TypeId;
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-use upwell_core::{ScopeId, Singleton, StaticScope, Transient};
-use upwell_di::{ComponentDescriptor, EffectiveGraph, ProviderSelectionModel, topological_sort};
+use upwell_core::{Scope, ScopeId, Singleton, Transient};
+use upwell_di::{
+    ComponentDescriptor, EffectiveGraph, EntryPlan, ProviderSelectionModel, SlotLayout,
+    topological_sort,
+};
 
 use super::PreparedScopeTopology;
+use crate::entry::{EntryDescriptor, EntryId};
 
 /// The validated construction plan for root, transient, and protocol-owned scopes.
 #[derive(Debug)]
@@ -12,7 +18,52 @@ pub(crate) struct ScopePlan {
     pub(crate) singletons: Vec<ComponentDescriptor>,
     pub(crate) transient: HashMap<TypeId, ComponentDescriptor>,
     pub(crate) orders: HashMap<ScopeId, Vec<ComponentDescriptor>>,
+    pub(crate) layouts: ScopeLayouts,
     pub(crate) seed_destinations: HashMap<TypeId, SeedDestination>,
+}
+
+/// The prepared slot layout of every protocol-owned scope, and the plan of every entry
+/// opening one of them.
+///
+/// Entry plans are indexed like the application's [`EntryTable`](crate::EntryTable), whose
+/// entries are fixed while each runtime generation plans them against its own layouts.
+#[derive(Debug, Default)]
+pub(crate) struct ScopeLayouts {
+    by_scope: HashMap<ScopeId, Arc<SlotLayout>>,
+    entries: Box<[Option<EntryPlan>]>,
+}
+
+impl ScopeLayouts {
+    /// Plans every entry of `entries` against the scope layouts `by_scope`, selecting
+    /// providers as `selection` does over `topology`. An entry into the root scope has no plan.
+    pub(crate) fn new(
+        by_scope: HashMap<ScopeId, Arc<SlotLayout>>,
+        entries: &[EntryDescriptor],
+        selection: &ProviderSelectionModel,
+        topology: &PreparedScopeTopology,
+    ) -> Self {
+        let entries = crate::entry::in_table_order(entries)
+            .map(|entry| {
+                by_scope.get(&entry.scope.id()).map(|layout| {
+                    layout.plan_entry(&(entry.targets)(), selection, |consumer, dependency| {
+                        topology.is_reachable(&consumer, &dependency)
+                    })
+                })
+            })
+            .collect();
+
+        Self { by_scope, entries }
+    }
+
+    /// The slot layout of `scope`.
+    pub(crate) fn get(&self, scope: &ScopeId) -> Option<&Arc<SlotLayout>> {
+        self.by_scope.get(scope)
+    }
+
+    /// The plan of the entry with dense identity `id`.
+    pub(crate) fn entry(&self, id: EntryId) -> Option<&EntryPlan> {
+        self.entries.get(id.index())?.as_ref()
+    }
 }
 
 /// The declared destination and diagnostic name of a factory-less scoped component.
@@ -38,14 +89,22 @@ impl ScopePlan {
         resolved: &[ComponentDescriptor],
         selection: &ProviderSelectionModel,
         topology: &PreparedScopeTopology,
+        entries: &[EntryDescriptor],
     ) -> crate::Result<Self> {
         let partitions = DescriptorPartitions::classify(resolved, topology)?;
         let orders = partitions.orders(topology, selection)?;
+        let layouts = ScopeLayouts::new(
+            partitions.layouts(&orders, topology, selection)?,
+            entries,
+            selection,
+            topology,
+        );
 
         Ok(Self {
             singletons: partitions.singletons,
             transient: partitions.transient,
             orders,
+            layouts,
             seed_destinations: partitions.seed_destinations,
         })
     }
@@ -168,6 +227,51 @@ impl DescriptorPartitions {
         Ok(orders)
     }
 
+    /// Plans each boundary's slot layout from its construction order, parents before
+    /// children, so every layout can point into the layouts of the scopes around it.
+    fn layouts(
+        &self,
+        orders: &HashMap<ScopeId, Vec<ComponentDescriptor>>,
+        topology: &PreparedScopeTopology,
+        selection: &ProviderSelectionModel,
+    ) -> crate::Result<HashMap<ScopeId, Arc<SlotLayout>>> {
+        let mut boundaries: Vec<_> = topology.boundaries().iter().collect();
+        let mut layouts = HashMap::with_capacity(boundaries.len());
+
+        boundaries.sort_by_key(|boundary| Reverse(boundary.rank()));
+
+        for boundary in boundaries {
+            let scope = boundary.id();
+            let seeded: Vec<ComponentDescriptor> = self
+                .descriptors_by_scope
+                .get(&scope)
+                .into_iter()
+                .flatten()
+                .filter(|component| self.is_seeded(&scope, component))
+                .copied()
+                .collect();
+            let order = orders.get(&scope).map_or(&[][..], Vec::as_slice);
+            let layout = SlotLayout::plan(
+                boundary.scope(),
+                &seeded,
+                order,
+                &layouts,
+                selection,
+                |consumer, dependency| topology.is_reachable(&consumer, &dependency),
+            )?;
+
+            layouts.insert(scope, Arc::new(layout));
+        }
+
+        Ok(layouts)
+    }
+
+    fn is_seeded(&self, scope: &ScopeId, component: &ComponentDescriptor) -> bool {
+        self.factoryless_by_scope
+            .get(scope)
+            .is_some_and(|seeded| seeded.contains(&component.ty.type_id))
+    }
+
     fn prebuilt(
         &self,
         scope: &ScopeId,
@@ -176,7 +280,7 @@ impl DescriptorPartitions {
     ) -> HashSet<TypeId> {
         let mut prebuilt = root.clone();
 
-        for ancestor in topology.ancestors(scope) {
+        for ancestor in topology.common_ancestors(scope).iter().copied() {
             if ancestor == Singleton::ID {
                 continue;
             }

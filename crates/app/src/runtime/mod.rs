@@ -12,13 +12,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use upwell_config::ConfigReloader;
-use upwell_core::{RuntimeGenerationId, Scope, ScopeId};
-use upwell_di::{BoxedComponent, ComponentDescriptor, ScopeContainer};
+use upwell_core::{RuntimeGenerationId, ScopeId};
+use upwell_di::{ComponentDescriptor, ScopeContainer};
 use upwell_hooks::HookManager;
 
-use crate::scope::{PreparedScopeTopology, ScopeParent, SeedDestination};
+use crate::entry::EntryTable;
+use crate::scope::{PreparedScopeTopology, ScopeLayouts, SeedDestination};
 
 mod generation;
+mod opener;
 mod reentrancy;
 mod reload;
 mod report;
@@ -27,6 +29,7 @@ mod transition_hooks;
 pub(crate) use generation::PreparedRuntimeGeneration;
 pub use generation::{AppConditionState, DisplacedGeneration, RuntimeView};
 use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransitionCoordinator};
+pub use opener::{OpenScope, OpensUnder, ScopeBuilder, ScopeEntry, ScopeOpener};
 #[cfg(feature = "tooling")]
 pub(crate) use reload::{resolve_staged_transition, staged_condition_snapshot};
 pub(crate) use report::TRANSITION_TARGET;
@@ -47,7 +50,7 @@ pub use transition_hooks::{
 /// construction orders keyed by stable scope identity, the prepared protocol-owned
 /// topology, and the resolved component set. The hook manager is generation-local and
 /// read from the pinned current view. A protocol opens its declared boundaries through
-/// [`open_scope`](Self::open_scope).
+/// [`ScopeOpener`]s it prepares with [`opener`](Self::opener).
 #[derive(Clone)]
 pub struct AppRuntime {
     name: Arc<str>,
@@ -55,6 +58,8 @@ pub struct AppRuntime {
     /// The config reloader this runtime's transactional reload drives. Shared with the
     /// app handle, so its serialization lock covers both pipelines.
     reloader: ConfigReloader,
+    /// The application's prepared entry points, fixed for its lifetime.
+    entries: Arc<EntryTable>,
 }
 
 /// A non-owning [`AppRuntime`] reference, so framework handles seeded into the runtime's
@@ -64,6 +69,7 @@ pub(crate) struct WeakAppRuntime {
     name: Arc<str>,
     transitions: WeakTransitionCoordinator,
     reloader: ConfigReloader,
+    entries: Arc<EntryTable>,
 }
 
 impl WeakAppRuntime {
@@ -75,6 +81,7 @@ impl WeakAppRuntime {
             name: Arc::clone(&self.name),
             transitions,
             reloader: self.reloader.clone(),
+            entries: Arc::clone(&self.entries),
         })
     }
 }
@@ -84,6 +91,7 @@ impl WeakAppRuntime {
 pub(crate) struct RuntimeScopePlan {
     topology: Arc<PreparedScopeTopology>,
     orders: Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>>,
+    layouts: Arc<ScopeLayouts>,
     seed_destinations: Arc<HashMap<TypeId, SeedDestination>>,
 }
 
@@ -91,11 +99,13 @@ impl RuntimeScopePlan {
     pub(crate) fn new(
         topology: Arc<PreparedScopeTopology>,
         orders: Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>>,
+        layouts: Arc<ScopeLayouts>,
         seed_destinations: Arc<HashMap<TypeId, SeedDestination>>,
     ) -> Self {
         Self {
             topology,
             orders,
+            layouts,
             seed_destinations,
         }
     }
@@ -104,6 +114,12 @@ impl RuntimeScopePlan {
     /// reuses this plan.
     pub(crate) fn orders(&self) -> &Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>> {
         &self.orders
+    }
+
+    /// The slot layout of each protocol-owned scope, shared with any candidate that reuses
+    /// this plan.
+    pub(crate) fn layouts(&self) -> &Arc<ScopeLayouts> {
+        &self.layouts
     }
 
     /// The declared destination of each factory-less scoped component, shared with any
@@ -118,11 +134,13 @@ impl AppRuntime {
         name: Arc<str>,
         generation: PreparedRuntimeGeneration,
         reloader: ConfigReloader,
+        entries: Arc<EntryTable>,
     ) -> Self {
         Self {
             name,
             transitions: RuntimeTransitionCoordinator::new(generation),
             reloader,
+            entries,
         }
     }
 
@@ -132,6 +150,7 @@ impl AppRuntime {
             name: Arc::clone(&self.name),
             transitions: self.transitions.downgrade(),
             reloader: self.reloader.clone(),
+            entries: Arc::clone(&self.entries),
         }
     }
 
@@ -198,6 +217,29 @@ impl AppRuntime {
         self.view().id()
     }
 
+    /// The runtime generation an open scope runs on: the one it opened under or, for a scope
+    /// opened under another, its parent's. `None` for a scope this runtime did not open.
+    pub fn scope_generation(&self, scope: &ScopeContainer) -> Option<RuntimeGenerationId> {
+        let generation = scope.generation_lease::<RuntimeGeneration>()?;
+
+        self.transitions
+            .owns(&generation)
+            .then(|| RuntimeView::from_generation(generation).id())
+    }
+
+    /// How many runtime generations committed after the one an open scope runs on.
+    ///
+    /// A scope keeps its generation for its whole life, and a scope opened under it inherits
+    /// that generation, so a call on an old connection runs on the connection's generation.
+    /// A protocol reads this for a
+    /// [`Durable`](upwell_core::ScopeGenerations::Durable) scope to drain or reconnect it
+    /// once it has fallen behind. `None` for a scope this runtime did not open.
+    pub fn generations_behind(&self, scope: &ScopeContainer) -> Option<u64> {
+        let opened = self.scope_generation(scope)?;
+
+        Some(self.generation().get().saturating_sub(opened.get()))
+    }
+
     /// The generations that committed transitions displaced but whose roots are still
     /// alive, oldest first.
     ///
@@ -212,161 +254,6 @@ impl AppRuntime {
 
     pub(crate) async fn begin_transition(&self) -> generation::RuntimeTransition {
         self.transitions.begin().await
-    }
-
-    /// Opens a declared child boundary over its only valid parent.
-    ///
-    /// The boundary's prepared scope metadata is used for construction. The caller's
-    /// `scope` contributes only its stable identity. Every dynamic seed must have a
-    /// factory-less descriptor registered at this exact destination and may appear once.
-    pub async fn open_scope(
-        &self,
-        scope: &'static dyn Scope,
-        parent: Arc<ScopeContainer>,
-        seeds: Vec<BoxedComponent>,
-    ) -> crate::Result<Arc<ScopeContainer>> {
-        let Some(generation) = parent.generation_lease::<RuntimeGeneration>() else {
-            let current = self.view();
-
-            if !parent.belongs_to_registry(current.scopes()) {
-                return Err(crate::Error::ForeignScopeParent {
-                    child: scope.id(),
-                    parent: parent.scope().id(),
-                });
-            }
-
-            return Err(crate::Error::UnpinnedScopeParent {
-                child: scope.id(),
-                parent: parent.scope().id(),
-            });
-        };
-
-        if !self.transitions.owns(&generation) {
-            return Err(crate::Error::ForeignScopeParent {
-                child: scope.id(),
-                parent: parent.scope().id(),
-            });
-        }
-
-        let view = RuntimeView::from_generation(generation);
-
-        self.open_scope_with_view(view, scope, parent, seeds).await
-    }
-
-    /// Opens a root-owned boundary after pinning one current runtime generation.
-    ///
-    /// Protocols should use this for boundaries whose declared parent is the application root.
-    /// Nested boundaries use [`open_scope`](Self::open_scope) so they inherit their parent's
-    /// pinned generation.
-    pub async fn open_scope_from_root(
-        &self,
-        scope: &'static dyn Scope,
-        seeds: Vec<BoxedComponent>,
-    ) -> crate::Result<Arc<ScopeContainer>> {
-        let view = self.view();
-        let root = Arc::clone(view.root());
-
-        self.open_scope_with_view(view, scope, root, seeds).await
-    }
-
-    async fn open_scope_with_view(
-        &self,
-        view: RuntimeView,
-        scope: &'static dyn Scope,
-        parent: Arc<ScopeContainer>,
-        seeds: Vec<BoxedComponent>,
-    ) -> crate::Result<Arc<ScopeContainer>> {
-        let child = scope.id();
-        let boundary = view
-            .scope_plan()
-            .topology
-            .boundary(&child)
-            .ok_or(crate::Error::UndeclaredScopeOpen { scope: child })?;
-
-        self.validate_parent(&view, child, boundary.parent(), &parent)?;
-        self.validate_seeds(&view, child, &seeds)?;
-
-        let order = view
-            .scope_plan()
-            .orders
-            .get(&child)
-            .map_or(&[][..], Vec::as_slice);
-
-        ScopeContainer::open_child_with_generation_lease(
-            boundary.scope(),
-            parent,
-            Arc::clone(view.scopes()),
-            order,
-            seeds,
-            view.generation_state(),
-        )
-        .await
-        .map_err(crate::Error::from)
-    }
-
-    fn validate_parent(
-        &self,
-        view: &RuntimeView,
-        child: ScopeId,
-        expected: ScopeParent,
-        parent: &Arc<ScopeContainer>,
-    ) -> crate::Result<()> {
-        let actual = parent.scope().id();
-
-        if !parent.belongs_to_registry(view.scopes()) {
-            return Err(crate::Error::ForeignScopeParent {
-                child,
-                parent: actual,
-            });
-        }
-
-        let valid = match expected {
-            ScopeParent::Root => Arc::ptr_eq(parent, view.root()),
-            ScopeParent::Boundary(expected) => actual == expected,
-        };
-
-        if !valid {
-            return Err(crate::Error::InvalidScopeParent {
-                child,
-                expected: expected.id(),
-                actual,
-            });
-        }
-
-        Ok(())
-    }
-
-    fn validate_seeds(
-        &self,
-        view: &RuntimeView,
-        scope: ScopeId,
-        seeds: &[BoxedComponent],
-    ) -> crate::Result<()> {
-        for (index, seed) in seeds.iter().enumerate() {
-            let type_id = seed.ty.type_id;
-            let type_name = (seed.ty.type_name)();
-
-            if seeds[..index]
-                .iter()
-                .any(|candidate| candidate.ty.type_id == type_id)
-            {
-                return Err(crate::Error::DuplicateSeedType { scope, type_name });
-            }
-
-            let Some(destination) = view.scope_plan().seed_destinations.get(&type_id) else {
-                return Err(crate::Error::UnregisteredSeed { scope, type_name });
-            };
-
-            if destination.scope != scope {
-                return Err(crate::Error::InvalidSeedDestination {
-                    type_name: destination.type_name,
-                    expected: destination.scope,
-                    actual: scope,
-                });
-            }
-        }
-
-        Ok(())
     }
 }
 

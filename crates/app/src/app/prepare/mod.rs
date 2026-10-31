@@ -10,6 +10,7 @@ use upwell_dirs::DirectoriesManager;
 
 use super::{AppBuilder, PreparedApp};
 use crate::builtins::RuntimeReloader;
+use crate::entry::EntryTable;
 use crate::error::Error;
 use crate::host::ExecutionMode;
 use crate::lifecycle::ShutdownSignal;
@@ -69,6 +70,8 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
 
         let tree = finalize_config(config_source, &dirs, auto_discovery_enabled, &mut registry)?;
         let scope_topology = Arc::new(D::SCOPE_TOPOLOGY.prepare().map_err(Error::from)?);
+        let entries =
+            Arc::new(EntryTable::new(&registry.entries, &scope_topology).map_err(Error::from)?);
 
         select_catalog(&mut registry)?;
 
@@ -120,6 +123,14 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
                 &instances,
                 &scopes.seed_destinations,
             )
+            .and_then(|snapshot| {
+                snapshot.with_entries(
+                    &provider_selection,
+                    &scope_topology,
+                    &entries,
+                    &scopes.layouts,
+                )
+            })
             .map_err(Error::from)?,
         )?;
         let scope_registry = Arc::new(
@@ -154,7 +165,9 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             scope_registry,
             scope_topology,
             scope_orders: Arc::new(scopes.orders),
+            scope_layouts: Arc::new(scopes.layouts),
             seed_destinations: Arc::new(scopes.seed_destinations),
+            entries,
             resolvers,
         })
     }
@@ -243,8 +256,9 @@ fn plan_effective_graph(
     let selection = graph.provider_selection();
 
     registry.validate_effective_with_scope_topology(resolved, selection, topology)?;
+    crate::entry::validate_targets(registry, selection, topology)?;
 
-    let scopes = ScopePlan::partition(resolved, selection, topology)?;
+    let scopes = ScopePlan::partition(resolved, selection, topology, &registry.entries)?;
 
     Ok((graph, scopes))
 }

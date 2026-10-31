@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use axum::http::{HeaderMap, Method, Uri};
-use upwell_core::TypeDescriptor;
+use upwell_core::{Scope, TypeDescriptor};
 use upwell_di::{ComponentDescriptor, Injectable};
 
 use crate::scope::HttpRequest as HttpRequestScope;
@@ -81,7 +81,7 @@ pub(crate) static REQUEST_META_DESCRIPTOR: ComponentDescriptor = ComponentDescri
     "__upwell_request_meta",
     "RequestMeta",
     TypeDescriptor::of::<RequestMeta>("RequestMeta"),
-    &HttpRequestScope,
+    HttpRequestScope::KEY,
 );
 
 #[cfg(test)]

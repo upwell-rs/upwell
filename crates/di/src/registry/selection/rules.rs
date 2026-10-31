@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use upwell_core::{DependencyDescriptor, ResolutionMode, Scope};
+use upwell_core::{DependencyDescriptor, ResolutionMode, ScopeKey};
 
 use super::{
     DependencySelectionReason, DependencySelectionStage, ProviderSelection, ProviderSelectionModel,
@@ -44,7 +44,7 @@ pub(crate) fn select(
     consumer: &ComponentDescriptor,
     dependency: &DependencyDescriptor,
     components: &[ComponentDescriptor],
-    can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
+    can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
 ) -> crate::Result<Vec<SelectedDependency>> {
     let order = registry.provider_order(components)?;
     let model = ProviderSelectionModel::new(components, registry.providers.clone(), order)?;
@@ -143,8 +143,8 @@ pub(crate) fn keyed_results(
 pub(crate) fn direct_component_is_selectable(
     component: ComponentDescriptor,
     dependency: &DependencyDescriptor,
-    consumer: &dyn Scope,
-    can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
+    consumer: ScopeKey,
+    can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
 ) -> bool {
     match dependency.resolution {
         ResolutionMode::Deferred => !component.scope.is_transient(),

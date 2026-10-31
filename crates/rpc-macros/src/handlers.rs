@@ -422,7 +422,15 @@ fn expand_method(
     let rpc_call_context = paths.plugin("RpcCallContext");
     let rpc_descriptor = paths.plugin("RpcDescriptor");
     let type_descriptor = paths.core("TypeDescriptor");
+    let entry_key_owner = paths.core("EntryKeyOwner");
+    let from_container = paths.core("FromContainer");
+    let entry_key = paths.core("entry_key");
     let ret = handler_return_type(paths);
+    let key_segment = upwell_macros_core::entry::handler_segment(method_ident)?;
+    let targets = param_types
+        .iter()
+        .filter_map(|ty| attr::first_type_arg(ty, "Inject"))
+        .map(|ty| quote!(<#ty as #from_container>::dependency()));
 
     let wrap = |inner: TokenStream| match output_wrap {
         OutputWrap::None => inner,
@@ -438,6 +446,7 @@ fn expand_method(
         let body = wrap(quote!(<#self_ty>::#method_ident(&__svc, #(#arg_idents),*).await));
 
         quote! {
+            #[allow(non_snake_case)]
             fn #wrapper_ident(ctx: #rpc_call_context) -> #ret {
                 ::std::boxed::Box::pin(async move {
                     let __svc = ctx
@@ -460,6 +469,7 @@ fn expand_method(
         let body = wrap(quote!(<#self_ty>::#method_ident(#(#arg_idents),*).await));
 
         quote! {
+            #[allow(non_snake_case)]
             fn #wrapper_ident(ctx: #rpc_call_context) -> #ret {
                 #dispatch(
                     move |#(#arg_idents: #extractor_types),*| async move { #body },
@@ -482,6 +492,13 @@ fn expand_method(
             output: #type_descriptor::of::<#output_ty>(#output_name),
             handler: #wrapper_ident,
             source: ::core::option::Option::Some(#source),
+            key: #entry_key!(
+                "rpc/",
+                <#self_ty as #entry_key_owner>::KEY_SEGMENT,
+                ".",
+                #key_segment,
+            ),
+            targets: || ::std::vec![#(#targets),*],
         }
     };
 

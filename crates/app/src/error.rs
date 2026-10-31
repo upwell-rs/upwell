@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use upwell_core::ScopeId;
+use upwell_core::{EntryKey, ScopeId};
 
 /// Errors from the protocol-agnostic application core: registry validation, the DI
 /// engine, config, and hooks.
@@ -45,44 +45,22 @@ pub enum Error {
         parent: ScopeId,
     },
 
-    /// A child was opened over a parent other than its declared parent.
-    #[error("scope '{child}' requires parent '{expected}', but parent '{actual}' was supplied")]
-    InvalidScopeParent {
-        /// The requested child boundary.
-        child: ScopeId,
-        /// The topology-declared parent identity.
+    /// A scope opener was asked for an entry the application did not register.
+    #[error("entry '{key}' is not registered")]
+    UnknownEntry {
+        /// The requested stable entry identity.
+        key: EntryKey,
+    },
+
+    /// A scope opener was asked for an entry that runs in another scope.
+    #[error("entry '{key}' runs in scope '{actual}', not in opened scope '{expected}'")]
+    EntryScopeMismatch {
+        /// The requested stable entry identity.
+        key: EntryKey,
+        /// The scope the opener opens.
         expected: ScopeId,
-        /// The supplied parent container's identity.
+        /// The scope the entry was registered for.
         actual: ScopeId,
-    },
-
-    /// A dynamic seed is registered for another boundary.
-    #[error("seed type '{type_name}' belongs to scope '{expected}', not opened scope '{actual}'")]
-    InvalidSeedDestination {
-        /// The seeded Rust type name.
-        type_name: &'static str,
-        /// The descriptor's declared destination.
-        expected: ScopeId,
-        /// The boundary being opened.
-        actual: ScopeId,
-    },
-
-    /// A dynamic seed has no factory-less descriptor registered for this application.
-    #[error("seed type '{type_name}' is not registered for opened scope '{scope}'")]
-    UnregisteredSeed {
-        /// The boundary being opened.
-        scope: ScopeId,
-        /// The seeded Rust type name.
-        type_name: &'static str,
-    },
-
-    /// The same concrete seed type was supplied more than once.
-    #[error("seed type '{type_name}' is supplied more than once for scope '{scope}'")]
-    DuplicateSeedType {
-        /// The boundary being opened.
-        scope: ScopeId,
-        /// The duplicated Rust type name.
-        type_name: &'static str,
     },
 
     #[error(
@@ -237,6 +215,10 @@ pub enum Error {
     #[error(transparent)]
     ScopeTopology(#[from] crate::scope::ScopeTopologyError),
 
+    /// An entry point failed preparation.
+    #[error(transparent)]
+    Entry(#[from] crate::entry::EntryError),
+
     /// Plugin declarations could not be resolved into one deterministic effective plan.
     #[error(transparent)]
     Composition(#[from] crate::CompositionDiagnostics),
@@ -263,3 +245,12 @@ impl From<upwell_config::ConfigReloadError> for Error {
 
 /// The app-layer result type.
 pub type Result<T, E = Error> = core::result::Result<T, E>;
+
+/// Renders `items` as a comma-separated list of quoted values for error messages.
+pub(crate) fn quoted(items: &[impl std::fmt::Display]) -> String {
+    items
+        .iter()
+        .map(|item| format!("'{item}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}

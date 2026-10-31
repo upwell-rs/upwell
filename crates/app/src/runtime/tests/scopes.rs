@@ -1,212 +1,295 @@
-//! Scope opening: declared boundaries, parents, seeds and generation pinning.
+//! Scope opening: declared scopes, typed parents, entries, seeds and generation pinning.
+
+use upwell_core::EntryKey;
 
 use super::*;
+use crate::EntryDescriptor;
+
+/// A by-value seed declared for the session boundary.
+#[derive(Clone, Debug, PartialEq)]
+struct Visitor(u8);
+
+impl upwell_di::Injectable for Visitor {
+    type Target = Self;
+    type Stored = Self;
+
+    fn into_stored(self) -> Self {
+        self
+    }
+
+    fn from_stored(stored: &Self) -> Self {
+        stored.clone()
+    }
+}
+
+fn key(value: &'static str) -> EntryKey {
+    EntryKey::new(value).expect("valid test entry key")
+}
+
+fn visitor_destination() -> HashMap<TypeId, SeedDestination> {
+    HashMap::from([(
+        TypeId::of::<Visitor>(),
+        SeedDestination {
+            scope: SESSION_ID,
+            type_name: std::any::type_name::<Visitor>(),
+        },
+    )])
+}
 
 #[tokio::test]
-async fn open_rejects_undeclared_and_wrong_parent_boundaries() {
+async fn an_opener_requires_a_declared_scope() {
     let (runtime, _) = build_runtime(HashMap::new()).await;
 
     let undeclared = expect_app_error(
-        runtime.open_scope_from_root(&OTHER, Vec::new()).await,
-        "undeclared boundary was accepted",
-    );
-    let wrong_parent = expect_app_error(
-        runtime
-            .open_scope(&REQUEST, runtime.root(), Vec::new())
-            .await,
-        "request opened without its session parent",
+        runtime.opener::<Other>(),
+        "an opener was prepared for an undeclared scope",
     );
 
     assert!(matches!(
         undeclared,
         Error::UndeclaredScopeOpen { scope: OTHER_ID }
     ));
-    assert!(matches!(
-        wrong_parent,
-        Error::UnpinnedScopeParent {
-            child: REQUEST_ID,
-            parent: <upwell_core::Singleton as StaticScope>::ID,
-        }
-    ));
 }
 
 #[tokio::test]
-async fn open_rejects_foreign_runtime_and_noncanonical_root_parents() {
-    let (runtime, registry) = build_runtime(HashMap::new()).await;
-    let (foreign, _) = build_runtime(HashMap::new()).await;
-    let alternate_root = ScopeContainer::build_root(&[], Vec::new(), ResolverSet::new(), registry)
-        .await
-        .expect("alternate root builds");
-
-    let foreign_error = expect_app_error(
-        runtime
-            .open_scope(&SESSION, foreign.root(), Vec::new())
-            .await,
-        "foreign runtime root was accepted",
-    );
-    let alternate_error = expect_app_error(
-        runtime
-            .open_scope(&SESSION, alternate_root, Vec::new())
-            .await,
-        "same-registry noncanonical root was accepted",
-    );
-
-    assert!(matches!(
-        foreign_error,
-        Error::ForeignScopeParent {
-            child: SESSION_ID,
-            parent: <upwell_core::Singleton as StaticScope>::ID,
-        }
-    ));
-    assert!(matches!(
-        alternate_error,
-        Error::UnpinnedScopeParent {
-            child: SESSION_ID,
-            parent: <upwell_core::Singleton as StaticScope>::ID,
-        }
-    ));
-}
-
-#[tokio::test]
-async fn open_uses_declared_scope_metadata_and_retains_empty_boundaries() {
+async fn a_multi_parent_scope_opens_under_each_typed_parent() {
     let (runtime, _) = build_runtime(HashMap::new()).await;
-    let session = runtime
-        .open_scope_from_root(&SESSION, Vec::new())
+    let shared = runtime.opener::<Shared>().expect("shared is declared");
+    let session = open_session(&runtime).await;
+
+    let under_root = shared
+        .builder()
+        .open_default()
         .await
-        .expect("session opens");
+        .expect("shared opens under the root");
+    let under_session = shared
+        .builder()
+        .under(&session)
+        .open_default()
+        .await
+        .expect("shared opens under a session");
+
+    assert_eq!(under_root.container().scope(), Shared::KEY);
+    assert_eq!(under_session.container().scope(), Shared::KEY);
+}
+
+#[tokio::test]
+async fn a_parent_from_another_runtime_is_rejected() {
+    let (runtime, _) = build_runtime(HashMap::new()).await;
+    let (foreign, _) = build_runtime(HashMap::new()).await;
+    let foreign_session = open_session(&foreign).await;
+
+    let error = expect_app_error(
+        runtime
+            .opener::<Request>()
+            .expect("request is declared")
+            .builder()
+            .under(&foreign_session)
+            .open_default()
+            .await,
+        "a foreign runtime's session was accepted as a parent",
+    );
+
+    assert!(matches!(
+        error,
+        Error::ForeignScopeParent {
+            child: REQUEST_ID,
+            parent: SESSION_ID,
+        }
+    ));
+}
+
+#[tokio::test]
+async fn an_opened_scope_takes_its_prepared_metadata() {
+    let (runtime, _) = build_runtime(HashMap::new()).await;
+    let session = open_session(&runtime).await;
+
     let request = runtime
-        .open_scope(&REQUEST_ALIAS, session, Vec::new())
+        .opener::<RequestAlias>()
+        .expect("the alias shares the request's identity")
+        .builder()
+        .under(&session)
+        .open_default()
         .await
         .expect("request opens by stable identity");
 
-    assert_eq!(request.scope().id(), REQUEST_ID);
-    assert_eq!(request.scope().name(), REQUEST.name());
-    assert_eq!(request.scope().rank(), REQUEST.rank());
-    assert!(!Arc::ptr_eq(&request, &runtime.root()));
+    assert_eq!(request.container().scope().id(), REQUEST_ID);
+    assert_eq!(request.container().scope().name(), Request::NAME);
+    assert_eq!(request.container().scope().rank(), Request::RANK);
 }
 
 #[tokio::test]
-async fn open_validates_seed_registration_destination_and_uniqueness() {
-    /// A seed declared for the session boundary.
-    struct SessionSeed;
-    /// A seed declared for the request boundary.
-    struct RequestSeed;
-    /// A seed absent from the application registry.
-    struct UnknownSeed;
+async fn an_opener_resolves_only_entries_of_its_scope() {
+    let entries = [
+        EntryDescriptor::new::<Request, ()>(key("test/get-user")),
+        EntryDescriptor::new::<Session, ()>(key("test/login")),
+    ];
+    let (runtime, _) = build_runtime_with_entries(HashMap::new(), &entries).await;
+    let requests = runtime.opener::<Request>().expect("request is declared");
 
-    let destinations = HashMap::from([
-        (
-            TypeId::of::<SessionSeed>(),
-            SeedDestination {
-                scope: SESSION_ID,
-                type_name: std::any::type_name::<SessionSeed>(),
-            },
-        ),
-        (
-            TypeId::of::<RequestSeed>(),
-            SeedDestination {
-                scope: REQUEST_ID,
-                type_name: std::any::type_name::<RequestSeed>(),
-            },
-        ),
-    ]);
-    let (runtime, _) = build_runtime(destinations).await;
-
-    let wrong_destination = expect_app_error(
-        runtime
-            .open_scope_from_root(&SESSION, vec![seed::<RequestSeed>()])
-            .await,
-        "wrong-destination seed was accepted",
+    let get_user = requests
+        .entry(key("test/get-user"))
+        .expect("a request entry resolves");
+    let login = expect_app_error(
+        requests.entry(key("test/login")),
+        "a session entry resolved for the request opener",
     );
-    let unregistered = expect_app_error(
-        runtime
-            .open_scope_from_root(&SESSION, vec![seed::<UnknownSeed>()])
-            .await,
-        "unregistered seed was accepted",
-    );
-    let duplicate = expect_app_error(
-        runtime
-            .open_scope_from_root(&SESSION, vec![seed::<SessionSeed>(), seed::<SessionSeed>()])
-            .await,
-        "duplicate seed type was accepted",
+    let unknown = expect_app_error(
+        requests.entry(key("test/missing")),
+        "an unregistered entry resolved",
     );
 
+    assert_eq!(get_user.id().index(), 0);
     assert!(matches!(
-        wrong_destination,
-        Error::InvalidSeedDestination {
+        login,
+        Error::EntryScopeMismatch {
             expected: REQUEST_ID,
             actual: SESSION_ID,
             ..
         }
     ));
-    assert!(matches!(
-        unregistered,
-        Error::UnregisteredSeed {
-            scope: SESSION_ID,
-            ..
-        }
-    ));
-    assert!(matches!(
-        duplicate,
-        Error::DuplicateSeedType {
-            scope: SESSION_ID,
-            ..
-        }
-    ));
+    assert!(matches!(unknown, Error::UnknownEntry { .. }));
 }
 
 #[tokio::test]
-async fn nested_opening_inherits_its_parent_generation_after_publication() {
-    let (runtime, _) = build_runtime(HashMap::new()).await;
-    let old_session = runtime
-        .open_scope_from_root(&SESSION, Vec::new())
-        .await
-        .expect("old session opens");
-    let old_generation = old_session
-        .generation_lease::<RuntimeGeneration>()
-        .map(RuntimeView::from_generation)
-        .expect("session pins a runtime generation");
+async fn an_entry_opens_its_scope_with_the_supplied_seeds() {
+    let entries = [EntryDescriptor::new::<Session, ()>(key("test/login"))];
+    let (runtime, _) = build_runtime_with_entries(visitor_destination(), &entries).await;
+    let sessions = runtime.opener::<Session>().expect("session is declared");
+    let login = sessions
+        .entry(key("test/login"))
+        .expect("the session entry resolves");
 
-    let committed = publish_next(&runtime).await;
-    let old_request = runtime
-        .open_scope(&REQUEST, old_session, Vec::new())
+    let unseeded = sessions
+        .builder()
+        .open(&login)
         .await
-        .expect("request opens under old session");
-    let old_request_generation = old_request
-        .generation_lease::<RuntimeGeneration>()
-        .map(RuntimeView::from_generation)
-        .expect("request inherits a runtime generation");
-    let new_session = runtime
-        .open_scope_from_root(&SESSION, Vec::new())
+        .expect("a seed slot no dependency needs may stay empty");
+    let seeded = sessions
+        .builder()
+        .seed(Visitor(7))
+        .open(&login)
         .await
-        .expect("new session opens");
-    let new_generation = new_session
-        .generation_lease::<RuntimeGeneration>()
-        .map(RuntimeView::from_generation)
-        .expect("new session pins a runtime generation");
+        .expect("the entry opens its scope");
+    let visitor = |session: &OpenScope<Session>| {
+        session
+            .container()
+            .resolvers()
+            .get_arc::<upwell_di::ComponentSource>()
+            .expect("an open scope exposes its component source")
+            .resolve::<Visitor>()
+    };
 
-    assert_eq!(old_generation.id(), RuntimeGenerationId::INITIAL);
-    assert_eq!(old_request_generation.id(), RuntimeGenerationId::INITIAL);
-    assert_eq!(new_generation.id(), committed.id());
-    assert_eq!(new_generation.id(), RuntimeGenerationId::new(1));
+    assert_eq!(visitor(&unseeded), None);
+    assert_eq!(
+        visitor(&seeded),
+        Some(Visitor(7)),
+        "the seed fills its slot"
+    );
 }
 
 #[tokio::test]
-async fn nested_opening_rejects_an_unpinned_root_parent() {
-    let (runtime, _) = build_runtime(HashMap::new()).await;
+async fn a_seed_must_fill_one_declared_slot_of_its_scope() {
+    /// A seed absent from the application registry.
+    struct Unknown;
 
-    let error = expect_app_error(
-        runtime
-            .open_scope(&SESSION, runtime.root(), Vec::new())
+    let (runtime, _) = build_runtime(visitor_destination()).await;
+    let sessions = runtime.opener::<Session>().expect("session is declared");
+    let requests = runtime.opener::<Request>().expect("request is declared");
+    let session = open_session(&runtime).await;
+
+    let duplicate = expect_app_error(
+        sessions
+            .builder()
+            .seed(Visitor(1))
+            .seed(Visitor(2))
+            .open_default()
             .await,
-        "root parent was accepted by the nested-opening API",
+        "a second seed for the same slot was accepted",
+    );
+    let elsewhere = expect_app_error(
+        requests
+            .builder()
+            .under(&session)
+            .seed(Visitor(1))
+            .open_default()
+            .await,
+        "a session seed was accepted by a request",
+    );
+    let unknown = expect_app_error(
+        sessions.builder().seed(Unknown).open_default().await,
+        "an unregistered seed was accepted",
     );
 
     assert!(matches!(
-        error,
-        Error::UnpinnedScopeParent {
-            child: SESSION_ID,
-            parent: <upwell_core::Singleton as StaticScope>::ID,
-        }
+        duplicate,
+        Error::Di(upwell_di::Error::DuplicateSeed { .. })
     ));
+    assert!(matches!(
+        elsewhere,
+        Error::Di(upwell_di::Error::UnplannedComponent { .. })
+    ));
+    assert!(matches!(
+        unknown,
+        Error::Di(upwell_di::Error::UnplannedComponent { .. })
+    ));
+}
+
+#[tokio::test]
+async fn a_child_runs_on_its_parent_generation_after_publication() {
+    let (runtime, _) = build_runtime(HashMap::new()).await;
+    let requests = runtime.opener::<Request>().expect("request is declared");
+    let old_session = open_session(&runtime).await;
+
+    let committed = publish_next(&runtime).await;
+    let old_request = requests
+        .builder()
+        .under(&old_session)
+        .open_default()
+        .await
+        .expect("request opens under the old session");
+    let new_session = open_session(&runtime).await;
+
+    assert_eq!(
+        runtime.scope_generation(old_session.container()),
+        Some(RuntimeGenerationId::INITIAL)
+    );
+    assert_eq!(
+        runtime.scope_generation(old_request.container()),
+        Some(RuntimeGenerationId::INITIAL),
+        "a child runs on the generation its parent opened under"
+    );
+    assert_eq!(
+        runtime.scope_generation(new_session.container()),
+        Some(committed.id()),
+        "a scope opened under the root runs on the current generation"
+    );
+    assert_eq!(committed.id(), RuntimeGenerationId::new(1));
+}
+
+#[tokio::test]
+async fn a_durable_scope_reports_the_generations_it_fell_behind() {
+    let (runtime, _) = build_runtime(HashMap::new()).await;
+    let session = open_session(&runtime).await;
+
+    assert_eq!(runtime.generations_behind(session.container()), Some(0));
+
+    publish_next(&runtime).await;
+    publish_next(&runtime).await;
+
+    let request = runtime
+        .opener::<Request>()
+        .expect("request is declared")
+        .builder()
+        .under(&session)
+        .open_default()
+        .await
+        .expect("request opens under the old session");
+    let fresh = open_session(&runtime).await;
+
+    assert_eq!(Session::KEY.generations(), ScopeGenerations::Durable);
+    assert_eq!(Request::KEY.generations(), ScopeGenerations::Pinned);
+    assert_eq!(runtime.generations_behind(session.container()), Some(2));
+    assert_eq!(runtime.generations_behind(request.container()), Some(2));
+    assert_eq!(runtime.generations_behind(fresh.container()), Some(0));
 }

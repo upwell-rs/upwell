@@ -4373,6 +4373,7 @@ dependencies = [
  "arc-swap",
  "clap",
  "futures",
+ "linkme",
  "serde",
  "serde_json",
  "tempfile",
@@ -4664,6 +4665,7 @@ dependencies = [
 name = "upwell-macros-core"
 version = "0.20.0"
 dependencies = [
+ "heck",
  "proc-macro2",
  "quote",
  "syn 2.0.119",

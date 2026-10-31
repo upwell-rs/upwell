@@ -1,7 +1,7 @@
 use std::any::TypeId;
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, ResolutionMode, Scope, ScopeId, StaticScope, TypeDescriptor,
+    Cardinality, DependencyDescriptor, ResolutionMode, Scope, ScopeId, ScopeKey, TypeDescriptor,
 };
 use upwell_di::{
     ComponentFactoryDescriptor, ComponentRegistry, DependencyTarget, ProviderDescriptor,
@@ -24,7 +24,7 @@ struct Missing;
 
 macro_rules! test_scope {
     ($type:ty, $id:expr, $name:literal, $rank:expr) => {
-        impl StaticScope for $type {
+        impl Scope for $type {
             const ID: ScopeId = $id;
             const RANK: u8 = $rank;
             const NAME: &'static str = $name;
@@ -37,14 +37,10 @@ test_scope!(Child, CHILD_ID, "Child", 50);
 test_scope!(Sibling, SIBLING_ID, "Sibling", 50);
 test_scope!(Missing, MISSING_ID, "Missing", 25);
 
-static PARENT: Parent = Parent;
-static CHILD: Child = Child;
-static SIBLING: Sibling = Sibling;
-static MISSING: Missing = Missing;
 static BOUNDARIES: [ScopeBoundary; 3] = [
-    ScopeBoundary::new(&PARENT, ScopeParent::Root),
-    ScopeBoundary::new(&CHILD, ScopeParent::Boundary(PARENT_ID)),
-    ScopeBoundary::new(&SIBLING, ScopeParent::Root),
+    ScopeBoundary::new::<Parent>(&[ScopeParent::Root]),
+    ScopeBoundary::new::<Child>(&[ScopeParent::Boundary(PARENT_ID)]),
+    ScopeBoundary::new::<Sibling>(&[ScopeParent::Root]),
 ];
 
 /// A root-scoped test component.
@@ -148,7 +144,7 @@ fn no_factory() -> &'static [ComponentFactoryDescriptor] {
 fn descriptor<T: 'static>(
     id: &'static str,
     name: &'static str,
-    scope: &'static dyn Scope,
+    scope: ScopeKey,
     factories: fn() -> &'static [ComponentFactoryDescriptor],
 ) -> ComponentDescriptor {
     ComponentDescriptor::manual(id, name, TypeDescriptor::of::<T>(name), scope)

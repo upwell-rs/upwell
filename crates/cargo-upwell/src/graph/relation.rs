@@ -30,7 +30,9 @@ fn relation_family(index: &GraphIndex, edge: &Relationship) -> Option<GraphRelat
         RelationshipKind::Provides | RelationshipKind::Gates => {
             Some(GraphRelationFamily::Dependencies)
         }
-        RelationshipKind::OpensScope => Some(GraphRelationFamily::Scopes),
+        RelationshipKind::OpensScope | RelationshipKind::Enters => {
+            Some(GraphRelationFamily::Scopes)
+        }
         RelationshipKind::Hooks => Some(GraphRelationFamily::Lifecycle),
         RelationshipKind::Contains
         | RelationshipKind::Contributes

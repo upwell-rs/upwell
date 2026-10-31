@@ -38,6 +38,34 @@ declaration, generated API, CLI, plugin, tooling, feature, and error reference. 
 [named application migration guide](../../docs/named-application-migration.md) focuses on replacing
 the removed expression form and choosing between a named host and the direct builder.
 
+### Entries
+
+Every unit of work that runs inside a scope registers one `EntryDescriptor`: its stable
+`EntryKey`, the scope it runs in, and the dependencies it injects. Code that opens a scope itself
+registers through the builder, and plugins through `PluginContributions::entry`:
+
+```rust
+builder.scope_entry::<TenantJob, (Arc<TenantDb>, Cfg<Limits>)>(
+    upwell::namespaced_id!(EntryKey, "app/tenant-reconcile"),
+)
+```
+
+A free function declares an entry with `#[entry]`. Its parameters are the targets, and the macro
+generates a marker type named after it that discovery collects and the builder can register
+explicitly. The key defaults to `app/<function name in snake_case>`:
+
+```rust
+#[entry(scope = TenantJob)]
+async fn reconcile(db: Arc<TenantDb>, limits: Cfg<Limits>) -> Result<()> { /* .. */ }
+
+builder.entry::<Reconcile>()
+```
+
+Preparation rejects duplicate keys, scopes the protocol does not open, and targets that the
+entry's scope cannot resolve. Reload candidates are checked the same way. The prepared app indexes
+entries by dense `EntryId` in `PreparedApp::entries`, and `cargo upwell inspect` lists them as
+`entry` resources.
+
 ## Internal role
 
 The protocol crates (`upwell-rpc`, `upwell-axum`) build directly on this crate: each provides definition, prepared, and runtime states plus [`Serve`] implementations, and drives requests through the [`AppRuntime`] handle. The `upwell` facade re-exports the whole surface, and named `app!` declarations (in `upwell-macros`) generate lifecycle hosts whose configured builders target the [`AppBuilder`] here.

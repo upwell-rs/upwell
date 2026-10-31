@@ -16,6 +16,10 @@ pub(crate) struct ScopeResolverSlot {
 pub(super) enum ScopeResolverSlotState {
     Pending(Arc<std::sync::Mutex<ScopeResolverState>>),
     Attached(Weak<ScopeContainer>),
+    /// For a scope under construction whose layout plans no capture. A factory that captures
+    /// it anyway gets a pending slot from its construction context, and the built container
+    /// gets an attached slot.
+    Detached,
 }
 
 /// Mutable hydration state shared while a scope is under construction.
@@ -39,6 +43,28 @@ impl ScopeResolverSlot {
     pub(super) fn attached(container: Weak<ScopeContainer>) -> Self {
         Self {
             state: ScopeResolverSlotState::Attached(container),
+        }
+    }
+
+    pub(super) fn detached() -> Self {
+        Self {
+            state: ScopeResolverSlotState::Detached,
+        }
+    }
+
+    /// Whether this slot was opened detached, for a scope whose layout plans no capture.
+    pub(crate) fn is_detached(&self) -> bool {
+        matches!(self.state, ScopeResolverSlotState::Detached)
+    }
+
+    /// The slot the built `container` keeps: this one, or an attached one when this one
+    /// was detached.
+    pub(super) fn for_container(&self, container: &Weak<ScopeContainer>) -> Self {
+        match self.state {
+            ScopeResolverSlotState::Detached => Self::attached(container.clone()),
+            ScopeResolverSlotState::Pending(_) | ScopeResolverSlotState::Attached(_) => {
+                self.clone()
+            }
         }
     }
 
@@ -72,6 +98,7 @@ impl ScopeResolverSlot {
             ScopeResolverSlotState::Attached(container) => {
                 container.upgrade().ok_or(Error::ScopeUnavailable)
             }
+            ScopeResolverSlotState::Detached => Err(Error::ScopeUnavailable),
         }
     }
 

@@ -1,6 +1,7 @@
 //! Runtime invalidation defaults for the transactional config reload.
 
 use super::*;
+use upwell_core::Scope;
 
 struct ManualRoot;
 
@@ -45,7 +46,7 @@ fn runtime_invalidated_factoryless_singleton_requires_restart() {
         "manual-root",
         "ManualRoot",
         TypeDescriptor::of::<ManualRoot>("ManualRoot"),
-        &Singleton,
+        Singleton::KEY,
     )]);
     let invalidated = BTreeSet::from(["manual-root"]);
 
@@ -77,7 +78,7 @@ async fn construct_counted_transient() -> CountedTransient {
 
 fn counted_transient() -> ComponentDescriptor {
     ComponentDescriptor::of::<CountedTransient>()
-        .with_scope(&Transient)
+        .with_scope(Transient::KEY)
         .with_factories(upwell_di::factories!["counted-transient" => construct_counted_transient])
         .without_retention()
 }

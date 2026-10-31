@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::executor::block_on;
-use upwell_core::{ResolverSet, Scope, ScopeId, Singleton, TypeDescriptor};
+use upwell_core::{ResolverSet, Scope, ScopeId, ScopeKey, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentDescriptor, Injectable, ScopeContainer, ScopeRegistry,
 };
@@ -190,7 +190,7 @@ fn desc<const N: usize>() -> ComponentDescriptor {
         <C<N> as Component>::ID,
         <C<N> as Component>::NAME,
         TypeDescriptor::of::<C<N>>(<C<N> as Component>::NAME),
-        &Singleton,
+        Singleton::KEY,
     )
 }
 
@@ -212,48 +212,24 @@ struct Layer2;
 struct Layer3;
 
 impl Scope for Layer1 {
-    fn id(&self) -> ScopeId {
-        ScopeId::new("test/layer-1").expect("valid test scope ID")
-    }
-
-    fn rank(&self) -> u8 {
-        1
-    }
-
-    fn name(&self) -> &'static str {
-        "Layer1"
-    }
+    const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/layer-1");
+    const RANK: u8 = 1;
+    const NAME: &'static str = "Layer1";
 }
 
 impl Scope for Layer2 {
-    fn id(&self) -> ScopeId {
-        ScopeId::new("test/layer-2").expect("valid test scope ID")
-    }
-
-    fn rank(&self) -> u8 {
-        2
-    }
-
-    fn name(&self) -> &'static str {
-        "Layer2"
-    }
+    const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/layer-2");
+    const RANK: u8 = 2;
+    const NAME: &'static str = "Layer2";
 }
 
 impl Scope for Layer3 {
-    fn id(&self) -> ScopeId {
-        ScopeId::new("test/layer-3").expect("valid test scope ID")
-    }
-
-    fn rank(&self) -> u8 {
-        3
-    }
-
-    fn name(&self) -> &'static str {
-        "Layer3"
-    }
+    const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/layer-3");
+    const RANK: u8 = 3;
+    const NAME: &'static str = "Layer3";
 }
 
-static LAYER_SCOPES: [&'static dyn Scope; 4] = [&Singleton, &Layer1, &Layer2, &Layer3];
+static LAYER_SCOPES: [ScopeKey; 4] = [Singleton::KEY, Layer1::KEY, Layer2::KEY, Layer3::KEY];
 
 async fn build_graph(entries: &[Entry], width: usize, layers: usize) -> Arc<ScopeContainer> {
     let registry = Arc::new(

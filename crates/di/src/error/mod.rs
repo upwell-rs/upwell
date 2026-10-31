@@ -104,6 +104,56 @@ pub enum Error {
     #[error("dependency cycle: no construction order for components: {0}")]
     DependencyCycle(String),
 
+    #[error(
+        "dependency '{dependency}' of component '{component_id}' resolves to '{target}' in scope '{scope}', which is not open on every chain of the consumer"
+    )]
+    UnplacedDependency {
+        /// Stable consumer component identity.
+        component_id: String,
+        /// Human-readable dependency description.
+        dependency: String,
+        /// Stable identity of the selected component.
+        target: String,
+        /// The selected component's scope.
+        scope: &'static str,
+    },
+
+    /// A factory built another component than the slot it runs for holds.
+    #[error("the factory for component '{component}' built '{built}' instead")]
+    FactoryOutputMismatch {
+        component: &'static str,
+        built: &'static str,
+    },
+
+    #[error("component '{component}' has no slot in the layout of scope '{scope}'")]
+    UnplannedComponent {
+        component: &'static str,
+        scope: &'static str,
+    },
+
+    /// A slot was given a second instance after it was built.
+    #[error("component '{component}' was built twice in one instance of scope '{scope}'")]
+    SlotBuiltTwice {
+        component: &'static str,
+        scope: &'static str,
+    },
+
+    /// A scope was opened with a seed for a component one of its factories builds.
+    #[error(
+        "scope '{scope}' was opened with a seed for component '{component}', which its factory builds"
+    )]
+    SeedForBuiltComponent {
+        component: &'static str,
+        scope: &'static str,
+    },
+
+    /// A scope was opened with two seeds for the same slot.
+    #[error("scope '{scope}' was opened with more than one seed for component '{component}'")]
+    DuplicateSeed {
+        component: &'static str,
+        scope: &'static str,
+    },
+
     /// A provider descriptor references a concrete type outside the effective component set.
     #[error("{0}")]
     ProviderComponentMissing(Box<ProviderComponentMissing>),

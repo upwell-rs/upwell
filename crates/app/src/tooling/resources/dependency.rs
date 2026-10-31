@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, Singleton,
-    StaticScope, Transient,
+    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, Scope, Singleton,
+    Transient,
 };
 use upwell_di::{DependencyTarget, ProviderDescriptor};
 use upwell_tooling_schema::{RelationshipKind, ResourceKind};

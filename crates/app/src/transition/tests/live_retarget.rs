@@ -1,6 +1,7 @@
 //! Runtime propagation of live retarget closures under an empty invalidation set.
 
 use super::*;
+use upwell_core::Scope;
 
 unit_component!(
     RetargetDependent,
@@ -35,7 +36,7 @@ async fn construct_retarget_closure_transient(_: Arc<LiveConsumer>) -> RetargetC
 
 fn retarget_closure_transient() -> ComponentDescriptor {
     ComponentDescriptor::of::<RetargetClosureTransient>()
-        .with_scope(&Transient)
+        .with_scope(Transient::KEY)
         .with_factories(upwell_di::factories![
             "retarget-closure-transient" => construct_retarget_closure_transient
         ])

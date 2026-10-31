@@ -16,6 +16,7 @@ pub mod construct;
 pub mod container;
 pub mod descriptors;
 pub mod error;
+pub mod layout;
 mod observability;
 mod primitives;
 pub mod registry;
@@ -31,10 +32,10 @@ pub use condition::{
 };
 pub use construct::{
     ComponentChange, Factory, FactoryOutput, FromContainer, HotUpdate, HotUpdateCommit,
-    HotUpdateFactory, HotUpdateOutput, OneShot, Previous, ReplacementFactory, dependency_of,
-    dependency_of_observed, dispatch_factory, dispatch_hot_update, dispatch_replacement,
-    dispatch_transition, factory_dependencies, hot_update_dependencies, replacement_dependencies,
-    short_name,
+    HotUpdateFactory, HotUpdateOutput, OneShot, Previous, ReadyFactory, ReplacementFactory,
+    dependency_of, dependency_of_observed, dispatch_factory, dispatch_hot_update,
+    dispatch_ready_factory, dispatch_replacement, dispatch_transition, factory_dependencies,
+    hot_update_dependencies, replacement_dependencies, short_name,
 };
 pub use container::{
     ComponentContainer, ComponentSource, ScopeContainer, ScopeRegistry, topological_sort,
@@ -46,19 +47,20 @@ pub use descriptors::{
     ComponentFactoryRole, ConditionDescriptor, DeclaredScope, Dep, DependencyDescriptor,
     DependencyObservation, DescriptorFor, Dynamic, GenerationSnapshot, Injectable, Live, LiveCell,
     LiveRebind, LiveRef, PROVIDERS, Provided, ProviderDescriptor, ProviderMappingId, ProviderOf,
-    ProviderOrder, ProviderOrderDirection, Registration, RegistryFor, ResolutionMode, Scope,
-    ScopeId, ServiceComponent, Singleton, StaticScope, Transient, TypeDescriptor, UpwellDescriptor,
-    Wired, Wiring, erase_provider, provider_live_cell,
+    ProviderOrder, ProviderOrderDirection, ReadyComponentFactory, Registration, RegistryFor,
+    ResolutionMode, Scope, ScopeId, ScopeKey, ServiceComponent, Singleton, Transient,
+    TypeDescriptor, UpwellDescriptor, Wired, Wiring, erase_provider, provider_live_cell,
 };
 pub use error::{
     DeferredTransientDependency, Error, InvalidFreshDependency, ProviderComponentMissing,
     ProviderOrderCycle, ProviderOrderSourceTraitMismatch, ProviderOrderTargetTraitMismatch, Result,
     ScopeUnreachableDependency, ScopeUnreachableProvider, ScopeViolation,
 };
+pub use layout::{EntryPlan, SlotLayout};
 pub use primitives::{Deferred, Fresh, FreshFromContainer, Lazy};
 pub use registry::{
-    ComponentRegistry, DependencySelectionReason, DependencySelectionStage, DependencyTarget,
-    ProviderSelectionModel, SelectedDependency,
+    ComponentRegistry, DependencyConsumer, DependencyFault, DependencySelectionReason,
+    DependencySelectionStage, DependencyTarget, ProviderSelectionModel, SelectedDependency,
 };
 pub use root::{ROOT_RESOLVER_ID, ROOT_RESOLVER_NAME, RootResolver, root_resolver_descriptor};
 pub use transition::{

@@ -8,7 +8,59 @@
 # `CodeRabbit routing` workflow adds that label to every pull request whose base is `release/*`
 # and removes it when the base moves elsewhere.
 reviews:
+  profile: assertive
   auto_review:
     enabled: false
     labels:
       - coderabbit-review
+  path_instructions:
+    - path: "**/*.rs"
+      instructions: |
+        Review against docs/rust-style.md. Its owner rules win over the Google guide where they differ.
+        Report violations only in lines this pull request adds or changes. Do not report pre-existing
+        violations; you may suggest a follow-up instead.
+
+        Enforce strictly:
+        - A blank line after every block statement (if, for, match, while, loop), including before a return.
+        - Variables declared at the top of their scope, grouped, then a blank line before the logic.
+        - The return or trailing expression at the bottom, isolated by a blank line. Exempt: a function
+          or closure body of one or two statements, that is a lone expression or one statement followed
+          by the trailing expression, however many lines rustfmt wraps them over. Do not flag those, and
+          never ask for a blank line at the start or end of a block (rustfmt removes it).
+        - No `//` comments in bodies, fields, or macro output. Allowed: SAFETY: notes, reasons for ignoring
+          an error, and fn-level bug or odd-behavior notes.
+        - Every struct, enum, and trait has a brief /// doc.
+        - Tests live in <module>/tests.rs behind `#[cfg(test)] mod tests;`. Flag inline `mod tests {`.
+        - Trait items ordered: associated types, then consts, then fns.
+        - Libraries use typed errors (thiserror or a small enum). Flag anyhow in library crates.
+        - Flag `.clone()` used where borrowing or moving would do. Flag &Vec, &String, &Box, and &Option parameters.
+        - Flag nested brace imports such as `use a::{b::C, d}`.
+        - Flag `unwrap()` outside tests. Prefer match, if let, let-else, or expect("reason").
+        - Flag Box<dyn Trait> where a static generic would do, and Unknown(u8) wire variants.
+        - Flag locks held across an unrelated .await, and lock crates other than std::sync or tokio::sync.
+        - Log lines use an explicit `target: "upwell::<area>"`.
+        - Finite choice sets are Rust enums, not bools or integers.
+        - If the pull request adds to a file that is already large (around 400 lines) or a long function,
+          suggest splitting it into cohesive modules or functions.
+    - path: "**/tests.rs"
+      instructions: |
+        Test files follow docs/rust-style.md. Use expect("what was expected") rather than unwrap. Keep
+        repeated setup in shared helpers or an internal macro_rules!, and flag duplicated scaffolding. Run
+        tests with cargo nextest, not cargo test. A test module may use a module-level #![allow(dead_code)].
+    - path: "crates/*macros*/**/*.rs"
+      instructions: |
+        Proc-macro crate. Optional codegen is gated by cfg!(feature = "x") inside the macro crate. Flag any
+        emitted #[cfg(feature = ...)] or #[cfg_attr(feature = ...)] in user code. Keep the user's original
+        token spans (syn::Error::new_spanned) and reuse user identifiers and paths verbatim. Path arguments
+        are raw syn::Path values. Prefer functions, types, and macro_rules! over new proc-macro codegen.
+    - path: "**/Cargo.toml"
+      instructions: |
+        Flag any new dependency that brings in openssl, openssl-sys, or rsa, and any new dependency the pull
+        request does not justify. The owner approves new dependencies, and the project uses rustls. The known
+        openssl path through cargo-generate and git2 predates this rule, so do not flag it.
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - files: docs/rust-style.md
+        applyTo: "**/*.rs"

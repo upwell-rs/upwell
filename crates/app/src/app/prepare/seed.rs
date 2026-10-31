@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use upwell_core::{Singleton as SingletonScope, TypeDescriptor};
+use upwell_core::{Scope, Singleton as SingletonScope, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentDescriptor, Injectable, RootResolver,
     root_resolver_descriptor,
@@ -31,7 +31,7 @@ pub(crate) static HOOK_MANAGER_DESCRIPTOR: ComponentDescriptor = ComponentDescri
     HOOK_MANAGER_ID,
     HOOK_MANAGER_NAME,
     TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-    &SingletonScope,
+    SingletonScope::KEY,
 );
 
 /// Rejects a factory-less root singleton that nothing seeded before any factory runs.

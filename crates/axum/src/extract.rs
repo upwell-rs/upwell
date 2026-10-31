@@ -3,14 +3,14 @@
 //! The integration surface between the framework's dependency injection and axum is a
 //! single [`ScopeHandle`] — an `Arc` of the request's
 //! [`ScopeContainer`](upwell_di::ScopeContainer) — carried in the request's
-//! [`Extensions`](axum::http::Extensions). The protocol's scope layer opens the request
-//! scope and inserts the handle; [`Inject`] reads it back out and resolves a component
-//! through the scope chain. Native axum extractors (`Json`, `Path`, `Query`, `State`, …)
+//! [`Extensions`](axum::http::Extensions). The first [`Inject`] or [`ScopeHandle`] extraction
+//! of a request opens its scope and inserts the handle; later ones read it back out, and
+//! [`Inject`] resolves a component through the scope chain. Native axum extractors (`Json`, `Path`, `Query`, `State`, …)
 //! are untouched and compose with [`Inject`] in the same handler signature.
 
 use std::sync::Arc;
 
-use axum::extract::FromRequestParts;
+use axum::extract::{FromRequestParts, Request};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
@@ -18,10 +18,30 @@ use upwell_di::{FromContainer, ScopeContainer};
 
 /// The per-request DI scope, carried in request extensions.
 ///
-/// Inserted by the protocol's scope layer at the start of every request and read by
-/// [`Inject`]. Cloning is cheap — it is an `Arc` bump.
+/// Inserted when a request's scope opens, on its first [`Inject`] or [`ScopeHandle`]
+/// extraction. Middleware holding the whole request reaches it with [`ScopeHandle::of`].
+/// Cloning is cheap — it is an `Arc` bump.
 #[derive(Clone)]
 pub struct ScopeHandle(pub Arc<ScopeContainer>);
+
+impl ScopeHandle {
+    /// The scope of `request`, opened on first use.
+    ///
+    /// # Errors
+    ///
+    /// As the [`ScopeHandle`] extractor.
+    pub async fn of(request: &mut Request) -> Result<Self, InjectRejection> {
+        crate::request_scope::of_request(request).await.map(Self)
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for ScopeHandle {
+    type Rejection = InjectRejection;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        crate::request_scope::of_parts(parts).await.map(Self)
+    }
+}
 
 /// Injects anything a constructor parameter can be — any [`FromContainer`] — from the
 /// request's scope: a component handle (`Arc<T>`, `Dep<T>`, a by-value injectable), every
@@ -40,8 +60,11 @@ pub struct Inject<H>(pub H);
 /// both arms render as `500 Internal Server Error` (and log the cause).
 #[derive(Debug)]
 pub enum InjectRejection {
-    /// No [`ScopeHandle`] in the request extensions — the scope layer was not installed.
+    /// The request is not served by the protocol's router, so it has no scope to open.
     MissingScope,
+
+    /// The request's scope failed to open. Carries the underlying error.
+    ScopeFailed(String),
 
     /// The requested type could not be extracted from the container (no such component or
     /// provider, or a resolver-backed value like `Cfg<T>` was unavailable). Carries the type
@@ -55,7 +78,15 @@ impl IntoResponse for InjectRejection {
             InjectRejection::MissingScope => {
                 tracing::error!(
                     target: "upwell::axum",
-                    "request scope handle missing from extensions; is the Axum scope layer installed?"
+                    "request scope unavailable; is the request served by the Axum protocol's router?"
+                );
+            }
+
+            InjectRejection::ScopeFailed(error) => {
+                tracing::error!(
+                    target: "upwell::axum",
+                    error = %error,
+                    "request scope build failed"
                 );
             }
 
@@ -81,12 +112,7 @@ where
     type Rejection = InjectRejection;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let scope = parts
-            .extensions
-            .get::<ScopeHandle>()
-            .ok_or(InjectRejection::MissingScope)?
-            .0
-            .clone();
+        let scope = crate::request_scope::of_parts(parts).await?;
 
         scope.extract::<H>().await.map(Inject).map_err(|error| {
             InjectRejection::Unresolved(std::any::type_name::<H>(), error.to_string())

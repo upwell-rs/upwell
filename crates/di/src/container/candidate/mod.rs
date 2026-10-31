@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use tracing::{debug, info, instrument, trace};
-use upwell_core::{ResolverSet, Singleton};
+use upwell_core::{ResolverSet, Scope, Singleton};
 
 use super::{ComponentSource, ScopeContainer, ScopeRegistry, ScopeResolverSlot};
 use crate::construct::{ErasedOneShot, take_selection};
@@ -64,7 +64,7 @@ impl ScopeContainer {
 
         let slot = ScopeResolverSlot::default();
         let mut context = ComponentConstructionContext::new_with_slot(
-            &Singleton,
+            Singleton::KEY,
             None,
             Arc::clone(&registry),
             externals,
@@ -75,7 +75,7 @@ impl ScopeContainer {
             context.insert(BoxedComponent {
                 ty: descriptor.ty,
                 value: Box::new(Injectable::into_stored(RootResolver::new())),
-            });
+            })?;
             register_candidate_providers(&mut context, &registry, descriptor)?;
         }
 
@@ -85,7 +85,7 @@ impl ScopeContainer {
                 .component(type_id)
                 .expect("candidate inputs were validated");
 
-            context.insert(component);
+            context.insert(component)?;
             register_candidate_providers(&mut context, &registry, descriptor)?;
         }
 
@@ -108,7 +108,7 @@ impl ScopeContainer {
 
             validate_factory_output(descriptor, &component)?;
 
-            context.insert(component);
+            context.insert(component)?;
             register_candidate_providers(&mut context, &registry, descriptor)?;
 
             trace!(component = %descriptor.name, "candidate component ready");
@@ -121,7 +121,7 @@ impl ScopeContainer {
         }
 
         info!(
-            count = root.store.components.len(),
+            count = root.store.component_count(),
             "candidate root prepared"
         );
 
@@ -214,7 +214,7 @@ async fn construct_declared(
     };
     let factory = factory.ok_or(Error::MissingComponent(descriptor.name))?;
 
-    (factory.construct)(context).await
+    factory.build(context).await
 }
 
 fn register_candidate_providers(
@@ -240,23 +240,19 @@ fn freeze_candidate(
     catch_unwind(AssertUnwindSafe(|| {
         let parts = context.into_parts();
 
-        let container = Arc::new_cyclic(|weak| {
-            let mut resolvers = parts.resolvers;
-            resolvers.insert(Arc::new(ComponentSource {
+        let container = Arc::new_cyclic(|weak| ScopeContainer {
+            scope: parts.scope,
+            store: parts.store,
+            parent: parts.parent,
+            registry: parts.registry,
+            resolver_base: parts.resolvers,
+            resolvers: std::sync::OnceLock::new(),
+            source: ComponentSource {
                 container: weak.clone(),
-            }));
-
-            ScopeContainer {
-                scope: parts.scope,
-                store: parts.store,
-                parent: parts.parent,
-                registry: parts.registry,
-                resolver_base: resolvers.clone(),
-                resolvers: std::sync::OnceLock::from(resolvers),
-                slot: slot.clone(),
-                generation_lease: None,
-                drop_guard: std::sync::OnceLock::new(),
-            }
+            },
+            slot: slot.clone(),
+            generation_lease: None,
+            drop_guard: std::sync::OnceLock::new(),
         });
 
         slot.attach(&container)?;

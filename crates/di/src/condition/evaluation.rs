@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use upwell_core::{
-    ConditionDescriptor, ConditionInputId, ConditionPredicate, ConditionPurity, StaticScope,
+    ConditionDescriptor, ConditionInputId, ConditionPredicate, ConditionPurity, Scope,
 };
 
 use super::{

@@ -4,17 +4,17 @@ use std::collections::{HashMap, HashSet};
 mod dependencies;
 pub(crate) mod order;
 mod resolution;
-mod scopes;
+pub(crate) mod scopes;
 pub(crate) mod selection;
 
 use scopes::{scope_allows_by_rank, scope_allows_with};
 
 pub use selection::{
-    DependencySelectionReason, DependencySelectionStage, DependencyTarget, ProviderSelectionModel,
-    SelectedDependency,
+    DependencyConsumer, DependencyFault, DependencySelectionReason, DependencySelectionStage,
+    DependencyTarget, ProviderSelectionModel, SelectedDependency,
 };
 
-use upwell_core::{Scope, ScopeId};
+use upwell_core::{ScopeId, ScopeKey};
 
 use crate::descriptors::{COMPONENTS, ComponentDescriptor, PROVIDERS, ProviderDescriptor};
 use crate::error::Error;
@@ -166,7 +166,7 @@ impl ComponentRegistry {
         &self,
         components: &[ComponentDescriptor],
         selection: &selection::ProviderSelectionModel,
-        can_access: impl Fn(&dyn Scope, &dyn Scope) -> bool,
+        can_access: impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<()> {
         self.validate_component_ids(components)?;
         selection::validate_provider_components(components, &self.providers)?;

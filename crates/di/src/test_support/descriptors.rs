@@ -5,7 +5,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, Singleton,
+    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, Scope, Singleton,
     TypeDescriptor,
 };
 
@@ -26,6 +26,7 @@ macro_rules! unbuilt_factories {
                 &[$crate::descriptors::ComponentFactoryDescriptor {
                     id: $id,
                     construct: $crate::test_support::unbuilt,
+                    construct_ready: ::core::option::Option::None,
                     dependencies: $dependencies,
                     role: $crate::descriptors::ComponentFactoryRole::$role,
                 }]
@@ -45,6 +46,7 @@ pub(crate) const fn unbuilt_recipe(
     ComponentFactoryDescriptor {
         id,
         construct: unbuilt,
+        construct_ready: None,
         dependencies,
         role,
     }
@@ -77,7 +79,7 @@ pub(crate) const fn planned(
         id,
         name: id,
         ty,
-        scope: &Singleton,
+        scope: Singleton::KEY,
         condition: None,
         factories,
         hooks: upwell_hooks::no_hooks,

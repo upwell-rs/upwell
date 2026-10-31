@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, ResolutionMode, ResolverSet, ScopeId, Singleton,
-    StaticScope, Transient, TypeDescriptor,
+    Cardinality, DependencyDescriptor, ResolutionMode, ResolverSet, Scope, ScopeId, Singleton,
+    Transient, TypeDescriptor,
 };
 
 use super::resolver_slot::ScopeResolverSlotState;
@@ -25,31 +25,15 @@ struct TestScope;
 struct SameNameScope;
 
 impl Scope for TestScope {
-    fn id(&self) -> ScopeId {
-        ScopeId::new("test/container").expect("valid test scope ID")
-    }
-
-    fn rank(&self) -> u8 {
-        1
-    }
-
-    fn name(&self) -> &'static str {
-        "Test"
-    }
+    const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/container");
+    const RANK: u8 = 1;
+    const NAME: &'static str = "Test";
 }
 
 impl Scope for SameNameScope {
-    fn id(&self) -> ScopeId {
-        ScopeId::new("test/same-name").expect("valid test scope ID")
-    }
-
-    fn rank(&self) -> u8 {
-        1
-    }
-
-    fn name(&self) -> &'static str {
-        "Test"
-    }
+    const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/same-name");
+    const RANK: u8 = 1;
+    const NAME: &'static str = "Test";
 }
 
 const FRESH_TARGET_SCOPE_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/fresh-target");
@@ -57,7 +41,7 @@ const FRESH_OWNER_SCOPE_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test
 
 struct FreshTargetScope;
 
-impl StaticScope for FreshTargetScope {
+impl Scope for FreshTargetScope {
     const ID: ScopeId = FRESH_TARGET_SCOPE_ID;
     const RANK: u8 = 2;
     const NAME: &'static str = "FreshTarget";
@@ -65,7 +49,7 @@ impl StaticScope for FreshTargetScope {
 
 struct FreshOwnerScope;
 
-impl StaticScope for FreshOwnerScope {
+impl Scope for FreshOwnerScope {
     const ID: ScopeId = FRESH_OWNER_SCOPE_ID;
     const RANK: u8 = 1;
     const NAME: &'static str = "FreshOwner";
@@ -161,18 +145,21 @@ fn fresh_target_factory(
 static TARGET_PROVIDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: target_provider_factory,
+    construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
 }];
 static OWNER_PROVIDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: owner_provider_factory,
+    construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
 }];
 static FRESH_TARGET_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: fresh_target_factory,
+    construct_ready: None,
     dependencies: fresh_target_dependencies,
     role: ComponentFactoryRole::Explicit,
 }];
@@ -236,7 +223,26 @@ async fn root() -> Arc<ScopeContainer> {
         .expect("root builds")
 }
 
+/// The slot layout of a [`TestScope`] holding `order`, with no providers.
+fn plan(order: &[ComponentDescriptor]) -> crate::SlotLayout {
+    let selection = crate::registry::ProviderSelectionModel::new(order, Vec::new(), HashMap::new())
+        .expect("the components select no providers");
+
+    crate::SlotLayout::plan(
+        TestScope::KEY,
+        &[],
+        order,
+        &HashMap::new(),
+        &selection,
+        |_, _| true,
+    )
+    .expect("the scope plans")
+}
+
 mod children;
 mod drop_guard;
 mod fresh;
+mod on_demand;
 mod providers;
+mod ready;
+mod storage;

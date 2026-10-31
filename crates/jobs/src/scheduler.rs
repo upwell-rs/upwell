@@ -32,7 +32,7 @@ use arc_swap::ArcSwap;
 use std::pin::Pin;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-use upwell_core::{DependencyDescriptor, ResolverCtx, ResolverCtxExt, TypeDescriptor};
+use upwell_core::{DependencyDescriptor, ResolverCtx, ResolverCtxExt, Scope, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentFactoryRole, ComponentSource, GenerationSnapshot,
@@ -436,6 +436,7 @@ fn scheduler_deps() -> Vec<DependencyDescriptor> {
 static SCHEDULER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: scheduler_construct,
+    construct_ready: None,
     dependencies: scheduler_deps,
     role: ComponentFactoryRole::Explicit,
 }];
@@ -498,7 +499,7 @@ impl upwell_core::Descriptor<ComponentDescriptor> for JobScheduler {
         id: SCHEDULER_ID,
         name: SCHEDULER_NAME,
         ty: TypeDescriptor::of::<JobScheduler>(SCHEDULER_NAME),
-        scope: &Singleton,
+        scope: Singleton::KEY,
         condition: None,
         factories: scheduler_factories,
         hooks: scheduler_hooks,

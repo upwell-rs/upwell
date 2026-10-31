@@ -9,7 +9,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use upwell_core::{Singleton, StaticScope};
+use upwell_core::{Scope, Singleton};
 
 use super::ScopeContainer;
 use crate::descriptors::component::GenerationSnapshot;
@@ -56,8 +56,7 @@ impl ScopeContainer {
 
         let active = self
             .store
-            .components
-            .get(&descriptor.ty.type_id)
+            .component(descriptor.ty.type_id)
             .ok_or(Error::MissingComponent(descriptor.name))?;
 
         let boxed =

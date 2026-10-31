@@ -64,9 +64,11 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
                     responses: &[],
                 },
                 source: Some(upwell_core::item_source!("ToolingController::health")),
+                key: upwell_core::namespaced_id!(upwell_core::EntryKey, "http/tooling.health"),
+                targets: Vec::new,
             },
             crate::HttpRouteDescriptor {
-                handler: "health",
+                handler: "ready",
                 method: "GET",
                 path: "/ready",
                 path_parameters: &[],
@@ -78,12 +80,14 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
                     responses: &[],
                 },
                 source: None,
+                key: upwell_core::namespaced_id!(upwell_core::EntryKey, "http/tooling.ready"),
+                targets: Vec::new,
             },
         ]
     }
 
     let controller = crate::ControllerDescriptor {
-        id: "tooling-controller",
+        id: "tooling",
         name: "ToolingController",
         ty: upwell_core::TypeDescriptor::of::<ToolingController>("ToolingController"),
         base: "/api",
@@ -117,8 +121,28 @@ fn prepared_axum_projects_static_http_routes_without_building_runtime() {
         })
         .expect("health route resource exists");
 
+    let entries = document
+        .resources
+        .iter()
+        .filter(|resource| resource.kind == upwell_app::tooling_schema::ResourceKind::Entry)
+        .collect::<Vec<_>>();
+    let entry_ids = entries
+        .iter()
+        .map(|resource| resource.id.as_str())
+        .collect::<Vec<_>>();
+
     assert_eq!(routes.len(), 2);
     assert_ne!(routes[0].id, routes[1].id);
+    assert_eq!(
+        entry_ids,
+        ["entry:http/tooling.health", "entry:http/tooling.ready"]
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.labels.get("builds").map(String::as_str) == Some("none")),
+        "a route injecting nothing builds nothing in its request scope"
+    );
     assert_eq!(
         route
             .display
@@ -191,7 +215,6 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
 
     use axum::extract::ws::WebSocket;
     use upwell_app::AppRuntime;
-    use upwell_di::ScopeContainer;
 
     /// WebSocket protocol used only to retain endpoint metadata.
     struct ToolingWsProtocol;
@@ -213,7 +236,7 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
         async fn serve(
             self: Arc<Self>,
             _socket: WebSocket,
-            _connection: Arc<ScopeContainer>,
+            _connection: crate::ws::WsConnectionScope,
             _shutdown: crate::WsShutdown,
         ) {
         }
@@ -264,4 +287,21 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
             && relationship.from == "protocol:upwell/axum"
             && relationship.to == endpoint.id
     }));
+}
+
+#[test]
+fn joined_route_paths_match_the_router() {
+    use super::entries::join_http_paths;
+
+    assert_eq!(join_http_paths("", "/", "/"), "/");
+    assert_eq!(
+        join_http_paths("/api", "/users", "/{id}"),
+        "/api/users/{id}"
+    );
+    assert_eq!(join_http_paths("", "/users/", "/"), "/users");
+    assert_eq!(
+        join_http_paths("/api", "/users", "/list/"),
+        "/api/users/list/",
+        "a route path ending in `/` keeps it, as the router matches it"
+    );
 }

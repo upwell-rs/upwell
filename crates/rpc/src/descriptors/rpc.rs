@@ -4,16 +4,15 @@ use std::{fmt, future::Future, pin::Pin, sync::Mutex};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use upwell_core::{ItemSource, ResolverCtx, TypeDescriptor};
+use upwell_core::{DependencyDescriptor, EntryKey, ItemSource, ResolverCtx, TypeDescriptor};
 use upwell_di::{Component, ScopeContainer};
 
 use crate::extract::ErrorResponse;
 
 /// The interaction pattern of an RPC method, following gRPC's four kinds.
 ///
-/// Only `Unary` is served today. The streaming variants are the target of the
-/// streaming plan (`specs/002-streaming-rpcs/plan.md`); they are not yet
-/// produced by the `#[rpc]` macro nor handled by the runtime.
+/// Only `Unary` is served today. The streaming variants are planned; they are
+/// not yet produced by the `#[rpc]` macro nor handled by the runtime.
 #[derive(Clone, Copy, Debug)]
 pub enum OperationKind {
     /// One request, one response.
@@ -110,6 +109,10 @@ impl RpcCallContext {
     /// Resolves the component of type `T` (e.g. the stateful service singleton) as
     /// its handle (`Arc<T>` by default), through the request → connection →
     /// singleton chain. `None` if no such component is registered.
+    ///
+    /// This read never builds anything: a request-scoped component the method's entry did not
+    /// plan is `None` until something builds it. Inject request-scoped components with
+    /// [`Inject`](crate::Inject), which builds them on demand.
     pub fn component<T: Component>(&self) -> Option<T::Handle> {
         self.scope.get::<T>()
     }
@@ -155,6 +158,10 @@ pub struct RpcDescriptor {
     pub handler: RpcHandler,
     /// The handler method's declaration, when the registering macro recorded it.
     pub source: Option<ItemSource>,
+    /// The method's stable entry identity: `rpc/<service ID>.<method>`.
+    pub key: EntryKey,
+    /// The dependency edges of the method's injected parameters, in parameter order.
+    pub targets: fn() -> Vec<DependencyDescriptor>,
 }
 
 impl fmt::Debug for RpcDescriptor {
@@ -164,6 +171,7 @@ impl fmt::Debug for RpcDescriptor {
             .field("operation", &self.operation)
             .field("parameters", &self.parameters)
             .field("output", &self.output)
+            .field("key", &self.key)
             .finish_non_exhaustive()
     }
 }

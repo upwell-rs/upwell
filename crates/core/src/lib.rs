@@ -12,6 +12,7 @@
 pub mod condition;
 pub mod dependency;
 pub mod descriptor;
+pub mod entry;
 pub mod generation;
 pub mod id;
 pub mod resolver;
@@ -28,11 +29,13 @@ pub use condition::{
 };
 pub use dependency::{Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode};
 pub use descriptor::{Descriptor, DescriptorFor, RegistryFor, RuntimeDescriptor, UpwellDescriptor};
+pub use entry::{EntryKey, EntryKeyOwner};
 pub use generation::RuntimeGenerationId;
 pub use id::{FRAMEWORK_NAMESPACE, IdErrorKind, InvalidNamespacedId, NamespacedIdType};
 pub use resolver::{Resolver, ResolverCtx, ResolverCtxExt, ResolverSet};
 pub use scope::{
-    InvalidScopeId, InvalidScopeIdReason, Scope, ScopeId, Singleton, StaticScope, Transient,
+    InvalidScopeId, InvalidScopeIdReason, Scope, ScopeGenerations, ScopeId, ScopeKey, Singleton,
+    Transient,
 };
 pub use source::{DescriptorSource, ItemSource};
 pub use types::{TypeDescriptor, type_id_of};

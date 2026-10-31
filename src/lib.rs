@@ -51,12 +51,13 @@ pub use upwell_di::{
     FromContainer, GenerationSnapshot, HotUpdate, HotUpdateFactory, HotUpdateOutput, Injectable,
     Lazy, Live, LiveCell, LiveRebind, LiveRef, NodeAction, OneShot, PROVIDERS, PlannedNode,
     Previous, Provided, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
-    ReasonKind, Registration, RegistryFor, ReplacementFactory, RootResolver, ScopeContainer,
-    ScopeRegistry, ServiceComponent, StaleGraphCandidate, TransitionPlan, TransitionReason,
-    UpwellDescriptor, ValidatedConditionEvaluation, Wired, Wiring, dependency_of,
-    dependency_of_observed, dispatch_factory, dispatch_hot_update, dispatch_replacement,
-    dispatch_transition, erase_provider, factories, factory_dependencies, from_boxed,
-    hot_update_dependencies, provider_live_cell, replacement_dependencies, topological_sort,
+    ReadyComponentFactory, ReadyFactory, ReasonKind, Registration, RegistryFor, ReplacementFactory,
+    RootResolver, ScopeContainer, ScopeRegistry, ServiceComponent, StaleGraphCandidate,
+    TransitionPlan, TransitionReason, UpwellDescriptor, ValidatedConditionEvaluation, Wired,
+    Wiring, dependency_of, dependency_of_observed, dispatch_factory, dispatch_hot_update,
+    dispatch_ready_factory, dispatch_replacement, dispatch_transition, erase_provider, factories,
+    factory_dependencies, from_boxed, hot_update_dependencies, provider_live_cell,
+    replacement_dependencies, topological_sort,
 };
 /// The DI layer's own error/result, exposed under distinct names so macro-generated
 /// **factory** code can name them without colliding with another layer's `Error`/`Result`.
@@ -115,17 +116,18 @@ pub use upwell_app::{
     ComponentRetired, ComponentRetirement, ComponentTransitionReport, CompositionDiagnostic,
     CompositionDiagnostics, CompositionDirective, CompositionEdge, CompositionPhase,
     CompositionTarget, ContributionId, ContributionProvenance, Contributor, DisplacedGeneration,
-    EarlyPluginCatalog, EarlyPluginPlan, EffectivePluginPlan, ExecutionMode, HostError,
-    IdErrorKind, Initial, InstallationOrigin, InstallationProvenance, InvalidCompositionId,
-    LifecyclePhase, LogFormat, LoggingConfig, PendingTransition, PhaseError, PhaseTiming, Plugin,
-    PluginContribution, PluginContributionKind, PluginContributions, PluginDeclaration, PluginId,
-    PluginPlanError, PluginRelation, PluginResolutionPlan, PluginSlotId, PluginWithOptions,
-    PreBuild, PreBuildContext, PreparedApp, PreparedProtocol, PreparedScopeTopology,
-    ProtocolDefinition, ProtocolId, ProtocolPluginRegistrar, ProtocolRuntime, RelationKind,
-    RelationTarget, ReplacementDecision, ResolvedPlugin, RestartReason, RestartRequired,
-    RetirementContext, RetirementReason, RuntimeReloader, RuntimeTransitionReport, RuntimeView,
-    ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError, Serve, ServerConfig, Setup,
-    ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents, SuppressionDecision, TransitionAborted,
+    ENTRIES, EarlyPluginCatalog, EarlyPluginPlan, EffectivePluginPlan, EntryDescriptor, EntryError,
+    EntryId, EntryOwner, EntryTable, EntryTargets, ExecutionMode, HostError, IdErrorKind, Initial,
+    InstallationOrigin, InstallationProvenance, InvalidCompositionId, LifecyclePhase, LogFormat,
+    LoggingConfig, PendingTransition, PhaseError, PhaseTiming, Plugin, PluginContribution,
+    PluginContributionKind, PluginContributions, PluginDeclaration, PluginId, PluginPlanError,
+    PluginRelation, PluginResolutionPlan, PluginSlotId, PluginWithOptions, PreBuild,
+    PreBuildContext, PreparedApp, PreparedProtocol, PreparedScopeTopology, ProtocolDefinition,
+    ProtocolId, ProtocolPluginRegistrar, ProtocolRuntime, RelationKind, RelationTarget,
+    ReplacementDecision, ResolvedPlugin, RestartReason, RestartRequired, RetirementContext,
+    RetirementReason, RuntimeReloader, RuntimeTransitionReport, RuntimeView, ScopeBoundary,
+    ScopeParent, ScopeTopology, ScopeTopologyError, Serve, ServerConfig, Setup, ShutdownHandle,
+    ShutdownSignal, SlotPolicy, SpanEvents, SuppressionDecision, TransitionAborted,
     TransitionAttemptId, TransitionCommitted, TransitionDecision, TransitionFailure,
     TransitionHookContext, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,
     TransitionOutcomeContext, TransitionPhase, TransitionProposal, TransitionRejection,
@@ -189,7 +191,7 @@ pub use upwell_transport::{
 // always available; the RPC daemon macros (`service`/`handlers`/`rpc`) live in the `daemon`
 // module behind the `daemon` feature.
 // ---------------------------------------------------------------------------
-pub use upwell_macros::{app, component, config, injectable, methods, when};
+pub use upwell_macros::{app, component, config, entry, injectable, methods, when};
 
 /// Re-exported so macro-generated code can reference the `#[distributed_slice]` attribute
 /// through the facade crate without user crates depending on `linkme` directly. The generated
@@ -429,7 +431,7 @@ pub mod axum {
 pub mod prelude {
     // The macros are built for the host and usable from any target (their generated server code is
     // gated out on wasm); the framework *types* are the daemon-stack surface, compiled out on wasm.
-    pub use crate::{app, component, config, injectable, methods, when};
+    pub use crate::{app, component, config, entry, injectable, methods, when};
 
     #[cfg(not(target_family = "wasm"))]
     pub use crate::{

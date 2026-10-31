@@ -9,7 +9,7 @@ pub(super) const DIAGNOSTIC_DEPENDENCY_SCOPE_ID: upwell_core::ScopeId =
 
 pub(super) struct DiagnosticConsumerScope;
 
-impl StaticScope for DiagnosticConsumerScope {
+impl Scope for DiagnosticConsumerScope {
     const ID: upwell_core::ScopeId = DIAGNOSTIC_CONSUMER_SCOPE_ID;
     const RANK: u8 = 1;
     const NAME: &'static str = "Diagnostic Consumer";
@@ -17,10 +17,11 @@ impl StaticScope for DiagnosticConsumerScope {
 
 pub(super) struct DiagnosticDependencyScope;
 
-impl StaticScope for DiagnosticDependencyScope {
+impl Scope for DiagnosticDependencyScope {
     const ID: upwell_core::ScopeId = DIAGNOSTIC_DEPENDENCY_SCOPE_ID;
     const RANK: u8 = 2;
     const NAME: &'static str = "Diagnostic Dependency";
+    const GENERATIONS: upwell_core::ScopeGenerations = upwell_core::ScopeGenerations::Durable;
 }
 
 pub(super) struct DiagnosticConsumer;
@@ -69,6 +70,7 @@ pub(super) static DIAGNOSTIC_CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1]
     [ComponentFactoryDescriptor {
         id: "diagnostic-consumer",
         construct,
+        construct_ready: None,
         dependencies: diagnostic_dependency,
         role: ComponentFactoryRole::Explicit,
     }];
@@ -81,6 +83,7 @@ pub(super) static DIAGNOSTIC_PROVIDER_CONSUMER_FACTORIES: [ComponentFactoryDescr
     [ComponentFactoryDescriptor {
         id: "diagnostic-provider-consumer",
         construct,
+        construct_ready: None,
         dependencies: diagnostic_provider_dependency,
         role: ComponentFactoryRole::Explicit,
     }];
@@ -93,7 +96,7 @@ pub(super) static DIAGNOSTIC_CONSUMER: ComponentDescriptor = ComponentDescriptor
     id: "stable-consumer-id",
     name: "Friendly Consumer Name",
     ty: TypeDescriptor::of::<DiagnosticConsumer>("DiagnosticConsumer"),
-    scope: &DiagnosticConsumerScope,
+    scope: DiagnosticConsumerScope::KEY,
     condition: None,
     factories: diagnostic_consumer_factories,
     hooks: upwell_hooks::no_hooks,
@@ -104,7 +107,7 @@ pub(super) static DIAGNOSTIC_DEPENDENCY: ComponentDescriptor = ComponentDescript
     id: "stable-dependency-id",
     name: "Friendly Dependency Name",
     ty: TypeDescriptor::of::<DiagnosticDependency>("DiagnosticDependency"),
-    scope: &DiagnosticDependencyScope,
+    scope: DiagnosticDependencyScope::KEY,
     condition: None,
     factories,
     hooks: upwell_hooks::no_hooks,
@@ -115,7 +118,7 @@ pub(super) static DIAGNOSTIC_PROVIDER_CONSUMER: ComponentDescriptor = ComponentD
     id: "stable-provider-consumer-id",
     name: "Friendly Provider Consumer",
     ty: TypeDescriptor::of::<DiagnosticProviderConsumer>("DiagnosticProviderConsumer"),
-    scope: &DiagnosticConsumerScope,
+    scope: DiagnosticConsumerScope::KEY,
     condition: None,
     factories: diagnostic_provider_consumer_factories,
     hooks: upwell_hooks::no_hooks,
@@ -126,7 +129,7 @@ pub(super) static DIAGNOSTIC_PROVIDER_COMPONENT: ComponentDescriptor = Component
     id: "stable-provider-component-id",
     name: "Friendly Provider Component",
     ty: TypeDescriptor::of::<DiagnosticProviderComponent>("DiagnosticProviderComponent"),
-    scope: &DiagnosticDependencyScope,
+    scope: DiagnosticDependencyScope::KEY,
     condition: None,
     factories,
     hooks: upwell_hooks::no_hooks,
@@ -149,8 +152,8 @@ pub(super) static DIAGNOSTIC_PROVIDER: ProviderDescriptor = ProviderDescriptor {
 };
 
 pub(super) static DIAGNOSTIC_SCOPE_BOUNDARIES: [ScopeBoundary; 2] = [
-    ScopeBoundary::new(&DiagnosticConsumerScope, ScopeParent::Root),
-    ScopeBoundary::new(&DiagnosticDependencyScope, ScopeParent::Root),
+    ScopeBoundary::new::<DiagnosticConsumerScope>(&[ScopeParent::Root]),
+    ScopeBoundary::new::<DiagnosticDependencyScope>(&[ScopeParent::Root]),
 ];
 
 #[derive(Default)]

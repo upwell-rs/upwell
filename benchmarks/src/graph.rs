@@ -86,6 +86,7 @@ fn factories<const HI: usize, const LO: usize>() -> &'static [ComponentFactoryDe
         &[ComponentFactoryDescriptor {
             id: "explicit",
             construct: construct::<HI, LO>,
+            construct_ready: None,
             dependencies: dependencies::<HI, LO>,
             role: ComponentFactoryRole::Explicit,
         }]

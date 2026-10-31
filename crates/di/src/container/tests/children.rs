@@ -9,7 +9,7 @@ async fn empty_child_scope_retains_its_identity() {
     let registry = registry();
 
     let child = ScopeContainer::open_child(
-        &TestScope,
+        TestScope::KEY,
         Arc::clone(&root),
         Arc::clone(&registry),
         &[],
@@ -19,10 +19,10 @@ async fn empty_child_scope_retains_its_identity() {
     .expect("open child");
 
     assert!(!Arc::ptr_eq(&root, &child));
-    assert_eq!(child.scope().id(), TestScope.id());
+    assert_eq!(child.scope().id(), TestScope::ID);
     assert!(child.belongs_to_registry(&registry));
     assert!(!child.belongs_to_registry(&self::registry()));
-    assert!(!child.can_access(&SameNameScope));
+    assert!(!child.can_access(SameNameScope::KEY));
     assert!(matches!(
         child.slot.state,
         ScopeResolverSlotState::Attached(_)
@@ -52,10 +52,15 @@ async fn child_scope_with_a_seed_is_built() {
         value: Box::new(7u8),
     };
 
-    let child =
-        ScopeContainer::open_child(&TestScope, Arc::clone(&root), registry(), &[], vec![seed])
-            .await
-            .expect("open child");
+    let child = ScopeContainer::open_child(
+        TestScope::KEY,
+        Arc::clone(&root),
+        registry(),
+        &[],
+        vec![seed],
+    )
+    .await
+    .expect("open child");
 
     assert!(
         !Arc::ptr_eq(&root, &child),

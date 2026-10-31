@@ -12,6 +12,7 @@
 pub mod app;
 pub mod builtins;
 pub mod composition;
+pub mod entry;
 pub mod error;
 pub mod host;
 pub mod lifecycle;
@@ -39,6 +40,9 @@ pub use composition::{
     PluginDeclaration, PluginId, PluginRelation, PluginResolutionPlan, PluginSlotId, ProtocolId,
     RelationKind, RelationTarget, ReplacementDecision, ResolvedPlugin, SlotPolicy,
     SuppressionDecision, extend_late_plugins, resolve_early_plugins,
+};
+pub use entry::{
+    ENTRIES, EntryDescriptor, EntryError, EntryId, EntryOwner, EntryTable, EntryTargets,
 };
 pub use error::{Error, Result};
 pub use host::{
@@ -71,12 +75,12 @@ pub use protocol::{
 pub use registry::{AppConditionEvaluation, AppRegistry};
 pub use runtime::{
     AppConditionState, AppRuntime, ComponentRetired, ComponentRetirement,
-    ComponentTransitionReport, DisplacedGeneration, PendingTransition, PhaseTiming,
-    RetirementContext, RetirementReason, RuntimeTransitionReport, RuntimeView, TransitionAborted,
-    TransitionAttemptId, TransitionCommitted, TransitionDecision, TransitionFailure,
-    TransitionHookContext, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,
-    TransitionOutcomeContext, TransitionPhase, TransitionProposal, TransitionRejection,
-    TransitionVerdict,
+    ComponentTransitionReport, DisplacedGeneration, OpenScope, OpensUnder, PendingTransition,
+    PhaseTiming, RetirementContext, RetirementReason, RuntimeTransitionReport, RuntimeView,
+    ScopeBuilder, ScopeEntry, ScopeOpener, TransitionAborted, TransitionAttemptId,
+    TransitionCommitted, TransitionDecision, TransitionFailure, TransitionHookContext,
+    TransitionHookOutcome, TransitionHookReport, TransitionOutcome, TransitionOutcomeContext,
+    TransitionPhase, TransitionProposal, TransitionRejection, TransitionVerdict,
 };
 pub use scope::{
     PreparedScopeTopology, ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError,
@@ -88,7 +92,7 @@ pub use tooling::{
     ToolingProjectionError, ToolingRelationshipKind,
 };
 pub use transition::{CandidateGraph, RestartReason, RestartRequired};
-pub use upwell_core::{Scope, ScopeId, StaticScope, namespaced_id};
+pub use upwell_core::{EntryKey, Scope, ScopeId, ScopeKey, namespaced_id};
 
 #[cfg(feature = "tooling")]
 pub use upwell_tooling_schema as tooling_schema;

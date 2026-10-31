@@ -1,26 +1,33 @@
 use std::ops::Deref;
 use std::{any::Any, fmt, sync::Arc};
 
-use upwell_core::{ConditionDescriptor, DependencyDescriptor, Scope, Singleton, TypeDescriptor};
+use upwell_core::{
+    ConditionDescriptor, DependencyDescriptor, Scope, ScopeKey, Singleton, TypeDescriptor,
+};
 use upwell_hooks::{HookDescriptor, no_hooks};
 
 mod context;
 mod factory;
 mod live;
+mod planned;
 mod provider;
+mod resolve;
 mod snapshot;
 mod store;
 
 pub use context::ComponentConstructionContext;
-pub(crate) use context::SharedStore;
+pub(crate) use context::{ComponentConstructionParts, HandleStorage, SharedStore};
 pub use factory::{
     ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole,
-    DeclaredScope, Registration,
+    DeclaredScope, ReadyComponentFactory, Registration,
 };
 pub use live::{Dep, Live, LiveCell, LiveRebind, LiveRef};
+pub(crate) use planned::Running;
 pub use provider::{ProviderDescriptor, ProviderOrder, ProviderOrderDirection};
 pub use snapshot::GenerationSnapshot;
 pub(crate) use store::ScopeStore;
+#[cfg(test)]
+pub(crate) use store::SlotStore;
 pub use store::{BoxedComponent, from_boxed};
 
 /// Metadata trait for types registerable as components.
@@ -71,13 +78,27 @@ pub trait Injectable: Clone + Send + Sync + 'static {
     type Target: ?Sized + 'static;
 
     /// The value actually held in a scope's box for this handle. `Arc<T>` and
-    /// `Dep<T>` both store a shared `Live<T>`, so they alias one swappable slot;
-    /// by-value handles store themselves.
+    /// `Dep<T>` both store a `Live<T>`, so they alias one slot; by-value handles store
+    /// themselves.
+    ///
+    /// The root stores a swappable `Live<T>`, so every `Dep<T>` read from it shares the cell
+    /// a transition republishes. A scope below the root stores a fixed one
+    /// ([`into_fixed`](Self::into_fixed)): `Arc<T>` reads its instance directly, and each
+    /// `Dep<T>` read from it gets a cell of its own, because nothing republishes that
+    /// instance.
     type Stored: Clone + Send + Sync + 'static;
 
     /// Wraps a freshly built handle into its stored slot. Called once, when the
     /// instance is first inserted into a scope.
     fn into_stored(self) -> Self::Stored;
+
+    /// Wraps a freshly built handle stored in a scope below the root. No transition
+    /// rebinds such an instance, so a handle may store it without a swappable cell.
+    /// Defaults to [`into_stored`](Self::into_stored).
+    #[doc(hidden)]
+    fn into_fixed(self) -> Self::Stored {
+        self.into_stored()
+    }
 
     /// Derives this handle from a stored slot. Called on every resolution — a
     /// snapshot for `Arc<T>`, a shared clone for `Dep<T>`, a plain clone otherwise.
@@ -179,7 +200,7 @@ pub struct ComponentDescriptor {
     pub id: &'static str,
     pub name: &'static str,
     pub ty: TypeDescriptor,
-    pub scope: &'static dyn Scope,
+    pub scope: ScopeKey,
     /// Optional root condition. Provider mappings inherit this component's eligibility.
     pub condition: Option<&'static ConditionDescriptor>,
     pub factories: fn() -> &'static [ComponentFactoryDescriptor],
@@ -207,7 +228,7 @@ impl ComponentDescriptor {
             id: T::ID,
             name: T::NAME,
             ty: TypeDescriptor::of::<T>(T::NAME),
-            scope: &Singleton,
+            scope: Singleton::KEY,
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
@@ -223,7 +244,7 @@ impl ComponentDescriptor {
         id: &'static str,
         name: &'static str,
         ty: TypeDescriptor,
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
     ) -> Self {
         Self {
             id,

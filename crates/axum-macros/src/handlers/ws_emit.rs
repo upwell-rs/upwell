@@ -17,6 +17,9 @@ pub(super) fn emit(handlers: &AxumHandlers, cx: &HandlerContext, out: &mut Token
     let ws_message_descriptor = paths.plugin("WsMessageDescriptor");
     let ws_message_mode = paths.plugin("WsMessageMode");
     let type_descriptor = paths.core("TypeDescriptor");
+    let entry_key_owner = paths.core("EntryKeyOwner");
+    let from_container = paths.core("FromContainer");
+    let entry_key = paths.core("entry_key");
     let ws_routes_slice = handlers
         .routes_slice
         .clone()
@@ -30,6 +33,7 @@ pub(super) fn emit(handlers: &AxumHandlers, cx: &HandlerContext, out: &mut Token
         let destination = &spec.destination;
         let builder = &spec.builder;
         let handler = spec.handler_name.to_string();
+        let key_segment = &spec.key_segment;
         let source = upwell_macros_core::source::item_source(
             spec.handler_name.span(),
             &upwell_macros_core::source::associated_item(self_ty, &spec.handler_name),
@@ -58,6 +62,10 @@ pub(super) fn emit(handlers: &AxumHandlers, cx: &HandlerContext, out: &mut Token
             .unwrap_or_else(|| quote!(::core::option::Option::None));
         let codec = &spec.codec;
         let codec_name = codec.to_string();
+        let targets = spec
+            .targets
+            .iter()
+            .map(|ty| quote!(<#ty as #from_container>::dependency()));
         quote! {
             #ws_route_descriptor::new_described::<#protocol>(
                 #ws_message_descriptor {
@@ -68,6 +76,13 @@ pub(super) fn emit(handlers: &AxumHandlers, cx: &HandlerContext, out: &mut Token
                     reply: #reply,
                     codec: #type_descriptor::of::<#codec>(#codec_name),
                     source: ::core::option::Option::Some(#source),
+                    key: #entry_key!(
+                        "ws/",
+                        <#self_ty as #entry_key_owner>::KEY_SEGMENT,
+                        ".",
+                        #key_segment,
+                    ),
+                    targets: || ::std::vec![#(#targets),*],
                 },
                 |runtime| {
                     let svc = runtime

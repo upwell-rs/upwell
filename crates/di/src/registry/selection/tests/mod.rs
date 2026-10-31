@@ -1,6 +1,4 @@
-use upwell_core::{
-    Cardinality, DependencyDescriptor, Singleton, StaticScope, Transient, TypeDescriptor,
-};
+use upwell_core::{Cardinality, DependencyDescriptor, Scope, Singleton, Transient, TypeDescriptor};
 
 use super::*;
 use crate::descriptors::ComponentFactoryDescriptor;
@@ -13,7 +11,7 @@ const FAR_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/selection-far
 
 struct NearScope;
 
-impl StaticScope for NearScope {
+impl Scope for NearScope {
     const ID: ScopeId = NEAR_ID;
     const RANK: u8 = 1;
     const NAME: &'static str = "Near";
@@ -21,7 +19,7 @@ impl StaticScope for NearScope {
 
 struct FarScope;
 
-impl StaticScope for FarScope {
+impl Scope for FarScope {
     const ID: ScopeId = FAR_ID;
     const RANK: u8 = 2;
     const NAME: &'static str = "Far";
@@ -56,7 +54,7 @@ fn selected_trait(
 }
 
 fn reaches(consumer: ScopeId, dependency: ScopeId) -> bool {
-    consumer == dependency || dependency == FAR_ID || dependency == Singleton.id()
+    consumer == dependency || dependency == FAR_ID || dependency == Singleton::ID
 }
 
 fn selected_types(selected: &[SelectedDependency]) -> Vec<TypeId> {
@@ -70,4 +68,5 @@ fn selected_types(selected: &[SelectedDependency]) -> Vec<TypeId> {
 }
 
 mod eager;
+mod fault;
 mod fresh;

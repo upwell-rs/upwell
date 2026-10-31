@@ -1,14 +1,16 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 
-use upwell_core::{ResolutionMode, Scope, ScopeId};
+use upwell_core::{ResolutionMode, ScopeId, ScopeKey};
 
 use crate::descriptors::{ComponentDescriptor, ProviderDescriptor};
 
 mod dependency;
+mod fault;
 pub(crate) mod rules;
 mod runtime;
 
+pub use fault::{DependencyConsumer, DependencyFault};
 pub(crate) use rules::{provider_matches, select, select_single_by, validate_provider_components};
 
 /// Producer-authoritative target selected for one validated dependency edge.
@@ -210,8 +212,8 @@ impl ProviderSelectionModel {
         trait_id: TypeId,
         qualifier: Option<&str>,
         resolution: ResolutionMode,
-        consumer: &dyn Scope,
-        can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
+        consumer: ScopeKey,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> Vec<String> {
         self.providers_for_trait(trait_id)
             .iter()
@@ -229,8 +231,8 @@ impl ProviderSelectionModel {
         &self,
         trait_id: TypeId,
         qualifier: Option<&str>,
-        consumer: &dyn Scope,
-        can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
+        consumer: ScopeKey,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> bool {
         self.providers_for_trait(trait_id)
             .iter()
@@ -246,9 +248,9 @@ impl ProviderSelectionModel {
 
     fn is_visible(
         &self,
-        consumer: &dyn Scope,
+        consumer: ScopeKey,
         provider: &ProviderDescriptor,
-        can_access: &(impl Fn(&dyn Scope, &'static dyn Scope) -> bool + ?Sized),
+        can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
     ) -> bool {
         can_access(
             consumer,

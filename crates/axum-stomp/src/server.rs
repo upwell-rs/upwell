@@ -37,14 +37,11 @@ use stomp_parser::headers::{HeaderValue, StompVersion, StompVersions};
 use stomp_parser::server::{ConnectedFrameBuilder, ErrorFrame, ReceiptFrameBuilder};
 use tokio::sync::mpsc;
 use upwell_axum::axum::extract::ws::{Message, WebSocket};
-use upwell_axum::{
-    AppRuntime, BoxedComponent, ComponentDescriptor, ScopeContainer, TypeDescriptor,
-    WebsocketMessageScope,
-};
+use upwell_axum::{AppRuntime, ComponentDescriptor, Scope, TypeDescriptor, WebsocketMessageScope};
 
 use upwell_axum::{
-    MessageReply, PubSubProtocol, SOCKET_SEND_TIMEOUT, WebsocketProtocol, WsControllerDescriptor,
-    WsDispatchError, WsHandlerFn, WsIdle, WsRespond, WsShutdown,
+    MessageReply, PubSubProtocol, SOCKET_SEND_TIMEOUT, WebsocketProtocol, WsConnectionScope,
+    WsControllerDescriptor, WsDispatchError, WsHandlerFn, WsIdle, WsRespond, WsShutdown,
 };
 
 pub use auth::{
@@ -63,21 +60,21 @@ static STOMP_HEADERS_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manu
     "__upwell_stomp_headers",
     "StompHeaders",
     TypeDescriptor::of::<StompHeaders>("StompHeaders"),
-    &WebsocketMessageScope,
+    WebsocketMessageScope::KEY,
 );
 
 static STOMP_SESSION_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
     "__upwell_stomp_session",
     "StompSession",
     TypeDescriptor::of::<StompSession>("StompSession"),
-    &WebsocketMessageScope,
+    WebsocketMessageScope::KEY,
 );
 
 static STOMP_PRINCIPAL_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
     "__upwell_stomp_principal",
     "StompPrincipal",
     TypeDescriptor::of::<StompPrincipal>("StompPrincipal"),
-    &WebsocketMessageScope,
+    WebsocketMessageScope::KEY,
 );
 
 /// STOMP's protocol-specific instantiation of the neutral topic bus.
@@ -181,7 +178,6 @@ impl WebsocketProtocol for Stomp {
         Ok(Self {
             app_routes,
             broker: Arc::clone(bus.registry()),
-            runtime: runtime.clone(),
             config,
         })
     }
@@ -189,11 +185,11 @@ impl WebsocketProtocol for Stomp {
     async fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: Arc<ScopeContainer>,
+        connection: WsConnectionScope,
         mut shutdown: WsShutdown,
     ) {
         let (mut sender, mut receiver) = socket.split();
-        let mut idle = WsIdle::from_connection(&connection);
+        let mut idle = WsIdle::from_connection(connection.container());
         // The handshake must come first: read one frame and expect CONNECT/STOMP. A non-CONNECT
         // opener (or a parse failure) is a protocol violation — reply ERROR and abandon the socket.
         let opener = loop {
@@ -344,7 +340,7 @@ impl Stomp {
     async fn negotiate(
         &self,
         message: Message,
-        connection: &Arc<ScopeContainer>,
+        connection: &WsConnectionScope,
     ) -> Result<(StompVersion, StompPrincipal), StompError> {
         let bytes = match message {
             Message::Text(text) => text.as_bytes().to_vec(),
@@ -384,7 +380,7 @@ impl Stomp {
         let principal = match &self.config.authenticator {
             Some(authenticator) => {
                 Arc::clone(authenticator)
-                    .authenticate(connect, Arc::clone(connection))
+                    .authenticate(connect, Arc::clone(connection.container()))
                     .await?
             }
 
@@ -401,7 +397,7 @@ impl Stomp {
         bytes: Vec<u8>,
         tx: &mpsc::Sender<OutFrame>,
         conn_id: ConnectionId,
-        connection: &Arc<ScopeContainer>,
+        connection: &WsConnectionScope,
         principal: &StompPrincipal,
     ) -> std::ops::ControlFlow<()> {
         use std::ops::ControlFlow::{Break, Continue};
@@ -517,7 +513,7 @@ impl Stomp {
         &self,
         message: InboundMessage,
         conn_id: ConnectionId,
-        connection: &Arc<ScopeContainer>,
+        connection: &WsConnectionScope,
         principal: &StompPrincipal,
         reply: ReplyContext<'_>,
     ) -> bool {
@@ -533,27 +529,15 @@ impl Stomp {
             return true;
         };
 
-        let seeds = vec![
-            BoxedComponent {
-                ty: TypeDescriptor::of::<StompHeaders>("StompHeaders"),
-                value: Box::new(headers),
-            },
-            BoxedComponent {
-                ty: TypeDescriptor::of::<StompSession>("StompSession"),
-                value: Box::new(StompSession::new(Arc::clone(&self.broker), conn_id)),
-            },
-            BoxedComponent {
-                ty: TypeDescriptor::of::<StompPrincipal>("StompPrincipal"),
-                value: Box::new(principal.clone()),
-            },
-        ];
+        let builder = connection
+            .message()
+            .seed(headers)
+            .seed(StompSession::new(Arc::clone(&self.broker), conn_id))
+            .seed(principal.clone());
+        let opening = connection.open_message(destination.as_str(), builder);
 
-        let scope = match self
-            .runtime
-            .open_scope(&WebsocketMessageScope, Arc::clone(connection), seeds)
-            .await
-        {
-            Ok(scope) => scope,
+        let scope = match opening.await {
+            Ok(scope) => scope.into_container(),
 
             Err(error) => {
                 tracing::error!(target: "upwell::axum", %error, "STOMP message scope build failed");

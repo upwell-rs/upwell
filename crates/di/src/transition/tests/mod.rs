@@ -24,7 +24,7 @@ trait Authenticator: Send + Sync {}
 
 const AUTHENTICATOR: TypeDescriptor = TypeDescriptor::of::<dyn Authenticator>("Authenticator");
 
-impl upwell_core::StaticScope for RequestScope {
+impl upwell_core::Scope for RequestScope {
     const ID: upwell_core::ScopeId =
         upwell_core::namespaced_id!(upwell_core::ScopeId, "test/request");
     const RANK: u8 = 1;

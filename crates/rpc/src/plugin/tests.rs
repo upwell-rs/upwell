@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use upwell_app::tooling_schema::RelationshipKind;
 use upwell_app::{App, ProtocolDefinition, ScopeParent};
 use upwell_config::{ConfigManager, Dynamic};
-use upwell_core::{StaticScope, TypeDescriptor};
+use upwell_core::{Scope, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentFactoryRole, Injectable, Singleton,
@@ -53,6 +53,7 @@ fn no_dependencies() -> Vec<upwell_core::DependencyDescriptor> {
 static SENTINEL_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: construct_sentinel,
+    construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Default,
 }];
@@ -65,7 +66,7 @@ static SENTINEL_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     id: SentinelComponent::ID,
     name: SentinelComponent::NAME,
     ty: TypeDescriptor::of::<SentinelComponent>(SentinelComponent::NAME),
-    scope: &Singleton,
+    scope: Singleton::KEY,
     condition: None,
     factories: sentinel_factories,
     hooks: upwell_hooks::no_hooks,
@@ -109,15 +110,15 @@ fn empty_service_fails_during_prepare_before_component_construction() {
 fn rpc_scope_topology_declares_connection_and_request_path() {
     let topology = SCOPE_TOPOLOGY.prepare().expect("RPC topology is valid");
     let connection = topology
-        .boundary(&<ConnectionScope as StaticScope>::ID)
+        .boundary(&<ConnectionScope as Scope>::ID)
         .expect("connection boundary is declared");
     let request = topology
-        .boundary(&<RequestScope as StaticScope>::ID)
+        .boundary(&<RequestScope as Scope>::ID)
         .expect("request boundary is declared");
 
     assert_eq!(Rpc::SCOPE_TOPOLOGY.boundaries().len(), 2);
-    assert_eq!(connection.parent(), ScopeParent::Root);
-    assert_eq!(request.parent(), ScopeParent::of::<ConnectionScope>());
+    assert_eq!(connection.parents(), [ScopeParent::Root]);
+    assert_eq!(request.parents(), [ScopeParent::of::<ConnectionScope>()]);
 }
 
 #[cfg(feature = "tooling")]
@@ -173,7 +174,7 @@ fn prepared_rpc_projects_only_retained_service_and_route_facts() {
 }
 
 #[tokio::test]
-async fn peer_info_seed_opens_only_at_connection_destination() {
+async fn peer_info_seeds_the_connection_scope_a_request_opens_under() {
     let app = App::<Rpc>::builder("rpc-scope-seed-test")
         .config_source(ConfigManager::<Dynamic>::empty())
         .build()
@@ -184,51 +185,31 @@ async fn peer_info_seed_opens_only_at_connection_destination() {
         addr: Some("127.0.0.1:1234".parse().expect("valid test address")),
     };
     let connection = runtime
-        .open_scope_from_root(
-            &ConnectionScope,
-            vec![BoxedComponent {
-                ty: TypeDescriptor::of::<upwell_transport::PeerInfo>("PeerInfo"),
-                value: Box::new(peer.clone()),
-            }],
-        )
+        .opener::<ConnectionScope>()
+        .expect("the connection scope is declared")
+        .builder()
+        .seed(peer.clone())
+        .open_default()
         .await
         .expect("registered peer seed opens the connection scope");
-    let resolved = connection
+    let request = runtime
+        .opener::<RequestScope>()
+        .expect("the request scope is declared")
+        .builder()
+        .under(&connection)
+        .open_default()
+        .await
+        .expect("request opens under its declared connection parent");
+    let resolved = request
+        .container()
         .resolve::<upwell_transport::PeerInfo>()
         .await
         .expect("peer resolution succeeds")
-        .expect("peer is seeded");
+        .expect("the request reaches the peer through its connection");
 
     assert_eq!(resolved.addr, peer.addr);
-
-    let error = match runtime
-        .open_scope(
-            &RequestScope,
-            Arc::clone(&connection),
-            vec![BoxedComponent {
-                ty: TypeDescriptor::of::<upwell_transport::PeerInfo>("PeerInfo"),
-                value: Box::new(peer),
-            }],
-        )
-        .await
-    {
-        Ok(_) => panic!("peer seed was accepted at the request boundary"),
-        Err(error) => error,
-    };
-
-    assert!(matches!(
-        error,
-        upwell_app::Error::InvalidSeedDestination {
-            expected: <ConnectionScope as StaticScope>::ID,
-            actual: <RequestScope as StaticScope>::ID,
-            ..
-        }
-    ));
-
-    let request = runtime
-        .open_scope(&RequestScope, connection, Vec::new())
-        .await
-        .expect("request opens under its declared connection parent");
-
-    assert_eq!(request.scope().id(), <RequestScope as StaticScope>::ID);
+    assert_eq!(
+        request.container().scope().id(),
+        <RequestScope as Scope>::ID
+    );
 }

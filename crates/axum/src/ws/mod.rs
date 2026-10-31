@@ -12,6 +12,7 @@
 //! sets up its own routing and the app never sees a route. Concrete protocols live in downstream
 //! crates such as `upwell-axum-json-ws` and `upwell-axum-stomp`.
 
+mod connection;
 pub mod pubsub;
 
 use std::any::{Any, TypeId};
@@ -24,8 +25,10 @@ use futures::future::BoxFuture;
 use tokio::time::Duration;
 use upwell_app::{AppRegistry, AppRuntime};
 use upwell_config::ContainerConfigExt;
-use upwell_core::{ItemSource, TypeDescriptor};
-use upwell_di::{BoxedComponent, ScopeContainer};
+use upwell_core::{DependencyDescriptor, EntryKey, ItemSource, Scope, TypeDescriptor};
+use upwell_di::ScopeContainer;
+
+pub use connection::WsConnectionScope;
 
 /// How long the framework waits for a WS close handshake to flush before abandoning the socket.
 /// Bounds [`mount_ws`]'s error-path close send so a peer that never drains its receive buffer
@@ -180,6 +183,10 @@ pub struct WsMessageDescriptor {
     pub codec: TypeDescriptor,
     /// The handler method's declaration, when the registering macro recorded it.
     pub source: Option<ItemSource>,
+    /// The handler's stable entry identity: `ws/<controller ID>.<handler>`.
+    pub key: EntryKey,
+    /// The dependency edges of the handler's `Inject<T>` parameters, in parameter order.
+    pub targets: fn() -> Vec<DependencyDescriptor>,
 }
 
 impl WsRouteDescriptor {
@@ -386,8 +393,8 @@ pub trait WebsocketProtocol: Send + Sync + Sized + 'static {
 
     /// Builds the protocol's routing from prepared controllers and endpoint `options`. Called once
     /// per `register_ws` entrypoint at app build. The protocol keeps whatever
-    /// it needs from `runtime` (e.g. a clone, to open per-message
-    /// [`WebsocketMessage`](crate::scope::WebsocketMessage) scopes while serving).
+    /// it needs from `runtime`; per-message scopes open through the [`WsConnectionScope`]
+    /// each connection is served with.
     fn build(
         controllers: &[WsControllerDescriptor],
         runtime: &AppRuntime,
@@ -395,13 +402,14 @@ pub trait WebsocketProtocol: Send + Sync + Sized + 'static {
     ) -> Result<Self, Self::BuildError>;
 
     /// Drives one upgraded connection until the peer closes it or graceful shutdown fires.
-    /// `connection` is this socket's
+    /// `connection` holds this socket's
     /// [`WebsocketConnection`](crate::scope::WebsocketConnection) scope (opened once by the
-    /// framework); the protocol parents each per-message scope at it.
+    /// framework); the protocol opens each per-message scope under it with
+    /// [`WsConnectionScope::message`].
     fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: Arc<ScopeContainer>,
+        connection: WsConnectionScope,
         shutdown: WsShutdown,
     ) -> impl Future<Output = ()> + Send;
 
@@ -491,7 +499,7 @@ pub(crate) static WEBSOCKET_UPGRADE_META_DESCRIPTOR: upwell_di::ComponentDescrip
         "__upwell_websocket_upgrade_meta",
         "WebsocketUpgradeMeta",
         TypeDescriptor::of::<WebsocketUpgradeMeta>("WebsocketUpgradeMeta"),
-        &crate::scope::WebsocketConnection,
+        crate::scope::WebsocketConnection::KEY,
     );
 
 /// Metadata selected while accepting one WebSocket upgrade.
@@ -528,7 +536,7 @@ pub(crate) static WS_CONNECTION_META_DESCRIPTOR: upwell_di::ComponentDescriptor 
         "__upwell_ws_connection_meta",
         "WsConnectionMeta",
         TypeDescriptor::of::<WsConnectionMeta>("WsConnectionMeta"),
-        &crate::scope::WebsocketConnection,
+        crate::scope::WebsocketConnection::KEY,
     );
 
 /// Tracks peer activity without spawning a feeder or timer task. A silent connection is probed
@@ -748,7 +756,9 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
     let admission = WsAdmission::new(config.max_websocket_connections)?;
     let max_message_bytes = config.max_websocket_message_bytes;
     let max_frame_bytes = config.max_websocket_frame_bytes;
-    let runtime = runtime.clone();
+    let connections = runtime.opener::<crate::scope::WebsocketConnection>()?;
+    let messages = runtime.opener::<crate::scope::WebsocketMessage>()?;
+    let entries = Arc::new(connection::message_entries(&controllers, &messages)?);
 
     // The pre-built generic upgrade handler opens this socket's WebsocketConnection scope with
     // upgrade and negotiation metadata, then hands the socket to the protocol that owns the
@@ -759,7 +769,9 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
                               ws: WebSocketUpgrade| {
         let proto = Arc::clone(&proto);
         let shutdown = shutdown.clone();
-        let runtime = runtime.clone();
+        let connections = connections.clone();
+        let messages = messages.clone();
+        let entries = Arc::clone(&entries);
         let admission = admission.clone();
 
         async move {
@@ -792,25 +804,16 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
             ws.on_upgrade(move |mut socket| async move {
                 // Keep the admission permit for exactly the lifetime of this upgraded connection.
                 let _permit = permit;
-                let upgrade_seed = BoxedComponent {
-                    ty: TypeDescriptor::of::<WebsocketUpgradeMeta>("WebsocketUpgradeMeta"),
-                    value: Box::new(WebsocketUpgradeMeta::from_parts(method, uri, headers)),
-                };
-                let connection_seed = BoxedComponent {
-                    ty: TypeDescriptor::of::<WsConnectionMeta>("WsConnectionMeta"),
-                    value: Box::new(WsConnectionMeta {
+                let opening = connections
+                    .builder()
+                    .seed(WebsocketUpgradeMeta::from_parts(method, uri, headers))
+                    .seed(WsConnectionMeta {
                         selected_subprotocol,
-                    }),
-                };
+                    })
+                    .open_default();
 
-                let connection = match runtime
-                    .open_scope_from_root(
-                        &crate::scope::WebsocketConnection,
-                        vec![upgrade_seed, connection_seed],
-                    )
-                    .await
-                {
-                    Ok(scope) => scope,
+                let connection = match opening.await {
+                    Ok(scope) => WsConnectionScope::new(scope, messages, entries),
 
                     Err(error) => {
                         tracing::error!(

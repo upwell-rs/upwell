@@ -3,8 +3,8 @@
 use std::any::TypeId;
 
 use upwell_core::{
-    Cardinality, DependencyObservation, ProviderMappingId, ResolutionMode, ScopeId, Singleton,
-    StaticScope,
+    Cardinality, DependencyObservation, ProviderMappingId, ResolutionMode, Scope, ScopeId,
+    Singleton,
 };
 
 use super::plan::{self};

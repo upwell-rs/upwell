@@ -26,9 +26,19 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_urlencoded = "0.7"
 postcard = { version = "1", features = ["use-std"] }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net"] }
 tokio-util = "0.7"
 futures = "0.3"
+axum = "0.8"
+tower = { version = "0.5", features = ["util"] }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+# The framework comparison: the Upwell facade for macro-built apps, and summer-rs. summer-web's
+# default `http2` feature is off so every framework serves the same axum build.
+upwell = { path = "..", default-features = false, features = ["axum"] }
+summer = "0.7"
+summer-web = { version = "0.7", default-features = false }
 
 [[bench]]
 name = "di_hot_paths"
@@ -64,4 +74,24 @@ harness = false
 
 [[bench]]
 name = "reload_allocations"
+harness = false
+
+[[bench]]
+name = "http_request"
+harness = false
+
+[[bench]]
+name = "scoped_call"
+harness = false
+
+[[bench]]
+name = "http_raw"
+harness = false
+
+[[bench]]
+name = "http_summer"
+harness = false
+
+[[bench]]
+name = "http_upwell"
 harness = false

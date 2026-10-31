@@ -10,7 +10,7 @@
 //! Macro bodies that parse as comma-separated expressions (`matches!`, `format!`, …) are
 //! lowered the same way.
 
-use proc_macro2::{Span, TokenStream, TokenTree};
+use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, quote, quote_spanned};
 use syn::ext::IdentExt;
 use syn::punctuated::Punctuated;
@@ -122,7 +122,7 @@ impl Lowering {
 
         let read = quote!(#read_input(<#path as #condition_input>::read(#context)));
 
-        *receiver = Expr::Verbatim(respan(read, span));
+        *receiver = Expr::Verbatim(crate::source::respan(read, span));
 
         self.record(InputSource::Type(path), field, span);
     }
@@ -259,28 +259,6 @@ pub(super) fn is_resolve(func: &Expr) -> bool {
 
         _ => false,
     }
-}
-
-/// Locates every token of `tokens` at `span`, keeping each token's own name resolution, so
-/// diagnostics about a rewritten receiver point at the user's token rather than at the
-/// component macro.
-fn respan(tokens: TokenStream, span: Span) -> TokenStream {
-    tokens
-        .into_iter()
-        .map(|mut token| {
-            if let TokenTree::Group(group) = &token {
-                let mut respanned =
-                    proc_macro2::Group::new(group.delimiter(), respan(group.stream(), span));
-
-                respanned.set_span(group.span().located_at(span));
-                token = TokenTree::Group(respanned);
-            } else {
-                token.set_span(token.span().located_at(span));
-            }
-
-            token
-        })
-        .collect()
 }
 
 /// The dotted field path of a field-access chain rooted at an input receiver.
