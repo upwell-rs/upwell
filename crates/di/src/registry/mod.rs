@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 mod dependencies;
 pub(crate) mod order;
 mod resolution;
-mod scopes;
+pub(crate) mod scopes;
 pub(crate) mod selection;
 
 use scopes::{scope_allows_by_rank, scope_allows_with};

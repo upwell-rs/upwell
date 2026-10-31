@@ -95,6 +95,15 @@ async fn open(
     .expect("the scope opens")
 }
 
+/// The plan of an entry injecting `targets` into `layout`, whose components select no
+/// providers.
+fn entry_plan(layout: &crate::SlotLayout, targets: &[DependencyDescriptor]) -> crate::EntryPlan {
+    let selection = crate::registry::ProviderSelectionModel::new(&[], Vec::new(), HashMap::new())
+        .expect("an empty selection model validates");
+
+    layout.plan_entry(targets, &selection, |_, _| true)
+}
+
 fn builds() -> [usize; 3] {
     [&LEAVES, &BRANCHES, &OTHERS].map(|count| count.load(Ordering::SeqCst))
 }
@@ -102,7 +111,7 @@ fn builds() -> [usize; 3] {
 #[tokio::test]
 async fn an_entry_builds_its_targets_and_their_local_dependencies_only() {
     let layout = layout();
-    let plan = layout.plan_entry(&[<Arc<Branch> as FromContainer>::dependency()]);
+    let plan = entry_plan(&layout, &[<Arc<Branch> as FromContainer>::dependency()]);
 
     let scope = open(&layout, Some(&plan)).await;
 
@@ -117,7 +126,7 @@ async fn an_entry_builds_its_targets_and_their_local_dependencies_only() {
 #[tokio::test]
 async fn a_left_out_slot_is_built_once_on_demand() {
     let layout = layout();
-    let plan = layout.plan_entry(&[]);
+    let plan = entry_plan(&layout, &[]);
     let scope = open(&layout, Some(&plan)).await;
 
     let resolutions = (0..8).map(|_| {
@@ -153,7 +162,7 @@ async fn a_left_out_slot_is_built_once_on_demand() {
 #[tokio::test]
 async fn an_extraction_builds_the_slot_it_needs() {
     let layout = layout();
-    let plan = layout.plan_entry(&[]);
+    let plan = entry_plan(&layout, &[]);
     let scope = open(&layout, Some(&plan)).await;
 
     let other = scope
@@ -206,7 +215,7 @@ fn eager_descriptor() -> ComponentDescriptor {
 #[tokio::test]
 async fn a_slot_built_on_demand_can_build_another_while_it_runs() {
     let layout = Arc::new(plan(&[eager_descriptor(), leaf_descriptor()]));
-    let plan = layout.plan_entry(&[]);
+    let plan = entry_plan(&layout, &[]);
     let scope = open(&layout, Some(&plan)).await;
 
     let eager = tokio::time::timeout(
@@ -246,7 +255,7 @@ async fn a_child_builds_the_parent_slots_its_planned_factories_read() {
         )
         .expect("the child scope plans"),
     );
-    let parent = open(&parent_layout, Some(&parent_layout.plan_entry(&[]))).await;
+    let parent = open(&parent_layout, Some(&entry_plan(&parent_layout, &[]))).await;
 
     let child = ScopeContainer::open_planned(
         Arc::clone(&parent),
@@ -356,7 +365,7 @@ async fn a_child_builds_only_the_parent_provider_it_reads() {
         &[prober],
         &HashMap::from([(TestScope::ID, Arc::clone(&parent_layout))]),
     ));
-    let parent = open(&parent_layout, Some(&parent_layout.plan_entry(&[]))).await;
+    let parent = open(&parent_layout, Some(&entry_plan(&parent_layout, &[]))).await;
 
     let child = ScopeContainer::open_planned(
         Arc::clone(&parent),
@@ -406,12 +415,16 @@ async fn resolving_one_provider_builds_only_the_selected_one() {
         ScopeRegistry::new(HashMap::new(), components, providers, HashMap::new())
             .expect("the scope registry validates"),
     );
-    let plan = layout.plan_entry(&[<Arc<dyn Probe> as FromContainer>::dependency()]);
+    let plan = layout.plan_entry(
+        &[<Arc<dyn Probe> as FromContainer>::dependency()],
+        &selection,
+        |_, _| true,
+    );
     let scope = ScopeContainer::open_planned(
         root().await,
         registry,
         &layout,
-        Some(&layout.plan_entry(&[])),
+        Some(&entry_plan(&layout, &[])),
         Vec::new(),
         Arc::new(()),
     )

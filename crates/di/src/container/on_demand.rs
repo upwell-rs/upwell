@@ -31,15 +31,31 @@ impl ScopeContainer {
 
     /// Builds, where its scope's opening left it out, what resolving `target` reads: for one
     /// value, the component `target` names or the provider runtime selection picks for it and
-    /// `qualifier`; for a collection or keyed map, every provider of the trait.
+    /// `qualifier`; for a keyed map, the provider winning each qualifier; for a collection,
+    /// every provider of the trait.
     pub(crate) async fn ensure_for(
         self: &Arc<Self>,
         target: TypeId,
         qualifier: Option<&str>,
         cardinality: Cardinality,
     ) -> crate::Result<()> {
-        if cardinality != Cardinality::One {
+        if cardinality == Cardinality::Collection {
             return self.ensure(target).await;
+        }
+
+        if cardinality == Cardinality::Keyed {
+            let winners = self.registry.selected_runtime_keyed(
+                target,
+                ResolutionMode::Eager,
+                self.scope,
+                &|scope| self.can_access(scope),
+            );
+
+            for provider in winners {
+                self.ensure_component(provider.concrete_ty.type_id).await?;
+            }
+
+            return Ok(());
         }
 
         let component = self

@@ -1,9 +1,11 @@
 use std::any::TypeId;
 
-use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode};
+use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, ScopeId};
 
 use super::{DepRef, SlotIdx, SlotLayout};
 use crate::descriptors::ComponentDescriptor;
+use crate::registry::ProviderSelectionModel;
+use crate::registry::scopes::scope_allows_with;
 use crate::registry::selection::select_single_by;
 
 /// The slots one entry builds when it opens its scope: the slots its targets resolve to and
@@ -50,12 +52,40 @@ impl SlotLayout {
     ///
     /// A target that a lazy or config handle resolves builds nothing up front. Every other
     /// target builds the slots it resolves to here, with their dependencies in this scope: its
-    /// concrete type, the provider a single value selects, or every provider of a collection.
-    pub fn plan_entry(&self, targets: &[DependencyDescriptor]) -> EntryPlan {
+    /// concrete type, the provider eager runtime selection picks in `selection` for a single
+    /// value (when that provider lives in this scope), or every provider of a collection.
+    /// `can_reach` is the scope reachability `selection` was validated with.
+    pub fn plan_entry(
+        &self,
+        targets: &[DependencyDescriptor],
+        selection: &ProviderSelectionModel,
+        can_reach: impl Fn(ScopeId, ScopeId) -> bool,
+    ) -> EntryPlan {
         let mut builds = vec![false; self.slots.len()].into_boxed_slice();
+        let can_access = |consumer, dependency| scope_allows_with(consumer, dependency, &can_reach);
 
         for target in targets {
             if target.config || target.resolution != ResolutionMode::Eager {
+                continue;
+            }
+
+            let target_id = target.ty.type_id;
+
+            if target.cardinality == Cardinality::One && self.slot_of(target_id).is_none() {
+                let selected = selection.select_runtime_one(
+                    target_id,
+                    target.qualifier,
+                    ResolutionMode::Eager,
+                    self.scope,
+                    &can_access,
+                );
+
+                if let Some(slot) =
+                    selected.and_then(|chosen| self.slot_of(chosen.provider.concrete_ty.type_id))
+                {
+                    self.include(slot, &mut builds);
+                }
+
                 continue;
             }
 
