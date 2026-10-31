@@ -358,8 +358,9 @@ each entry with the components it `builds`. `deny_unplanned` strict mode is not 
 
 Status (#353, empty plans and connection scopes): `ScopeBuilder::open_when_needed(&entry)`
 returns an `EntryScope<S>`. When the entry's plan builds nothing it allocates no container:
-reads that never build go to the parent, and the container opens with the builder's seeds the
-first time something resolves from it, on the generation the plan was read from. A deferred
+reads that never build go to the parent, so they do not see the builder's seeds yet, and the
+container opens with the seeds the first time something resolves from it, on the generation the
+plan was read from. A deferred
 opening that fails stays failed (`DeferredScopeFailed`). RPC calls and WebSocket messages open
 this way, so a method or handler injecting nothing scoped opens no scope. RPC and WebSocket
 connection scopes open with `open_on_demand()`, which builds only their seeds; every
