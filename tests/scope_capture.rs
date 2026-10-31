@@ -18,6 +18,7 @@ struct Plain {
     id: u64,
 }
 
+/// A service whose handler injects a lazy handle to a request component.
 #[service(id = "capture", version = "0.1")]
 struct CaptureSvc;
 

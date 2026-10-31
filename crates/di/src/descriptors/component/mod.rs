@@ -26,6 +26,8 @@ pub(crate) use planned::Running;
 pub use provider::{ProviderDescriptor, ProviderOrder, ProviderOrderDirection};
 pub use snapshot::GenerationSnapshot;
 pub(crate) use store::ScopeStore;
+#[cfg(test)]
+pub(crate) use store::SlotStore;
 pub use store::{BoxedComponent, from_boxed};
 
 /// Metadata trait for types registerable as components.

@@ -82,11 +82,7 @@ impl ScopeStore {
         component: BoxedComponent,
     ) -> crate::Result<()> {
         match self {
-            Self::Slots(store) => {
-                store.insert_at(slot, component);
-
-                Ok(())
-            }
+            Self::Slots(store) => store.insert_at(slot, component),
 
             Self::Keyed(_) => self.insert(component),
         }
