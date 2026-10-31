@@ -35,34 +35,61 @@ impl ScopeContainer {
         start: Option<&Arc<Self>>,
         dependencies: &[PlannedDependency],
     ) -> crate::Result<()> {
-        for dependency in dependencies {
-            let ancestors: Vec<ScopeId> = match &dependency.source {
-                DepRef::Ancestor { layout, .. } => vec![layout.scope().id()],
-                DepRef::Many(provided) => provided
-                    .iter()
-                    .filter_map(|entry| match &entry.source {
-                        DepRef::Ancestor { layout, .. } => Some(layout.scope().id()),
-                        _ => None,
-                    })
-                    .collect(),
-                _ => continue,
-            };
+        let Some(start) = start else {
+            return Ok(());
+        };
 
-            for scope in ancestors {
-                if let Some(ancestor) = start.and_then(|start| start.in_chain(scope)) {
-                    Box::pin(ancestor.ensure_local(dependency.target)).await?;
+        for dependency in dependencies {
+            match &dependency.source {
+                DepRef::Ancestor { layout, .. } => {
+                    start
+                        .ensure_in(layout.scope().id(), dependency.target)
+                        .await?;
                 }
+
+                DepRef::Many(provided) => {
+                    for entry in provided.iter() {
+                        if let DepRef::Ancestor { layout, .. } = &entry.source {
+                            start
+                                .ensure_in(layout.scope().id(), dependency.target)
+                                .await?;
+                        }
+                    }
+                }
+
+                _ => {}
             }
         }
 
         Ok(())
     }
 
-    async fn ensure_local(self: &Arc<Self>, target: TypeId) -> crate::Result<()> {
-        let Some(store) = self.store.slots() else {
+    /// Builds the left-out slots holding `target` in the container of `scope` on this
+    /// scope's chain. Checking costs no allocation; only a build is boxed.
+    async fn ensure_in(self: &Arc<Self>, scope: ScopeId, target: TypeId) -> crate::Result<()> {
+        let Some(ancestor) = self.in_chain(scope) else {
             return Ok(());
         };
-        let layout = Arc::clone(store.layout());
+        let Some((layout, needed)) = ancestor.missing(target) else {
+            return Ok(());
+        };
+
+        Box::pin(ancestor.build_missing(&layout, &needed)).await
+    }
+
+    async fn ensure_local(self: &Arc<Self>, target: TypeId) -> crate::Result<()> {
+        let Some((layout, needed)) = self.missing(target) else {
+            return Ok(());
+        };
+
+        self.build_missing(&layout, &needed).await
+    }
+
+    /// The layout of this scope and the slots to build so every slot holding `target` is
+    /// built, or `None` when they all are.
+    fn missing(&self, target: TypeId) -> Option<(Arc<SlotLayout>, Vec<bool>)> {
+        let store = self.store.slots()?;
+        let layout = store.layout();
         let mut needed: Option<Vec<bool>> = None;
 
         layout.for_each_target_slot(target, |slot| {
@@ -73,11 +100,7 @@ impl ScopeContainer {
             }
         });
 
-        let Some(needed) = needed else {
-            return Ok(());
-        };
-
-        self.build_missing(&layout, &needed).await
+        Some((Arc::clone(layout), needed?))
     }
 
     /// Builds the slots in `needed` that are still empty, in layout order, so each reads
