@@ -14,9 +14,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use tokio::runtime::Runtime;
-use upwell_app::{App, AppBuilder, OpenScope, OpensUnder, ProtocolDefinition, ScopeOpener};
+use upwell_app::{
+    App, AppBuilder, EntryDescriptor, OpenScope, OpensUnder, ProtocolDefinition, ScopeEntry,
+    ScopeOpener,
+};
 use upwell_config::{ConfigManager, Dynamic};
-use upwell_core::{Scope, ScopeKey, Singleton, TypeDescriptor};
+use upwell_core::{EntryKey, Scope, ScopeKey, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentFactoryRole, ScopeContainer,
@@ -188,6 +191,71 @@ pub enum Route {
 
     /// A handler that resolves [`CallScoped<0>`] from its scope.
     Scoped,
+
+    /// A handler whose entry injects the [`FanIn`](fan_in::FanIn) consumer, so its call builds
+    /// the consumer and every edge it reads. The handler itself resolves nothing.
+    FanIn,
+}
+
+impl Route {
+    /// The stable key of this route's entry.
+    fn key(self) -> EntryKey {
+        let key = match self {
+            Self::Hello => "bench/hello",
+            Self::Scoped => "bench/scoped",
+            Self::FanIn => "bench/fan-in",
+        };
+
+        EntryKey::new(key).expect("bench entry keys are valid")
+    }
+
+    /// The entry of this route in scope `P`, when `roster` registers what it injects.
+    fn entry<P: Scope>(self, roster: Roster) -> Option<EntryDescriptor> {
+        let key = self.key();
+
+        match (self, roster) {
+            (Self::Hello, _) => Some(EntryDescriptor::new::<P, ()>(key)),
+            (Self::Scoped, Roster::Unused(0)) => None,
+            (Self::Scoped, _) => Some(EntryDescriptor::new::<P, (Arc<CallScoped<0>>,)>(key)),
+            (Self::FanIn, Roster::FanIn) => {
+                Some(EntryDescriptor::new::<P, (Arc<fan_in::FanIn>,)>(key))
+            }
+            (Self::FanIn, Roster::Unused(_)) => None,
+        }
+    }
+}
+
+/// The entry each [`Route`] opens its per-call scope for, when its roster registers one.
+struct RouteEntries<P: Scope> {
+    hello: Option<ScopeEntry<P>>,
+    scoped: Option<ScopeEntry<P>>,
+    fan_in: Option<ScopeEntry<P>>,
+}
+
+impl<P: Scope> RouteEntries<P> {
+    fn new(opener: &ScopeOpener<P>, roster: Roster) -> Self {
+        let entry = |route: Route| {
+            route.entry::<P>(roster).map(|_| {
+                opener
+                    .entry(route.key())
+                    .expect("the bench registers every route entry it opens")
+            })
+        };
+
+        Self {
+            hello: entry(Route::Hello),
+            scoped: entry(Route::Scoped),
+            fan_in: entry(Route::FanIn),
+        }
+    }
+
+    fn get(&self, route: Route) -> Option<&ScopeEntry<P>> {
+        match route {
+            Route::Hello => self.hello.as_ref(),
+            Route::Scoped => self.scoped.as_ref(),
+            Route::FanIn => self.fan_in.as_ref(),
+        }
+    }
 }
 
 /// A built application with one open connection scope `C`, opening per-call scopes `P` under
@@ -196,6 +264,7 @@ pub struct ScopedCalls<D: ProtocolDefinition, C: Scope, P: Scope> {
     _app: App<D>,
     connection: OpenScope<C>,
     per_call: ScopeOpener<P>,
+    entries: RouteEntries<P>,
 }
 
 impl<D, C, P> ScopedCalls<D, C, P>
@@ -210,11 +279,15 @@ where
     where
         D::Error: std::fmt::Debug,
     {
-        let app = roster
-            .register(builder, P::KEY)
-            .build()
-            .await
-            .expect("benchmark app builds");
+        let routes = [Route::Hello, Route::Scoped, Route::FanIn];
+        let builder = routes
+            .into_iter()
+            .filter_map(|route| route.entry::<P>(roster))
+            .fold(
+                roster.register(builder, P::KEY),
+                AppBuilder::entry_descriptor,
+            );
+        let app = builder.build().await.expect("benchmark app builds");
         let connection = app
             .runtime()
             .opener::<C>()
@@ -227,28 +300,32 @@ where
             .runtime()
             .opener::<P>()
             .expect("the per-call scope is declared");
+        let entries = RouteEntries::new(&per_call, roster);
 
         Self {
             _app: app,
             connection,
             per_call,
+            entries,
         }
     }
 
-    /// The scope a call's handler resolves through.
-    pub async fn scope(&self, scope: CallScope) -> Arc<ScopeContainer> {
-        match scope {
-            CallScope::Connection => Arc::clone(self.connection.container()),
-
-            CallScope::PerCall => self
-                .per_call
-                .builder()
-                .under(&self.connection)
-                .open_default()
-                .await
-                .expect("benchmark per-call scope opens")
-                .into_container(),
+    /// The scope a call to `route` resolves through. A per-call scope opens with the route's
+    /// entry plan, as a protocol opens it for a routed call.
+    pub async fn scope(&self, scope: CallScope, route: Route) -> Arc<ScopeContainer> {
+        if let CallScope::Connection = scope {
+            return Arc::clone(self.connection.container());
         }
+
+        let builder = self.per_call.builder().under(&self.connection);
+        let opened = match self.entries.get(route) {
+            Some(entry) => builder.open(entry).await,
+            None => builder.open_default().await,
+        };
+
+        opened
+            .expect("benchmark per-call scope opens")
+            .into_container()
     }
 }
 
@@ -281,8 +358,8 @@ impl<P: ScopedProtocol> Call for ScopedCall<P> {
 /// - `scoped`: a handler resolving one per-call component, the only one registered.
 /// - `unused/N`: the injection-free handler in a fresh per-call scope with `N` registered
 ///   components it never uses.
-/// - `fan_in/8`: the injection-free handler in a fresh per-call scope whose components include
-///   one factory reading eight dependency edges.
+/// - `fan_in/8`: a handler whose entry injects one factory reading eight dependency edges, in a
+///   fresh per-call scope.
 pub fn cases<P: ScopedProtocol>(runtime: &Runtime) -> Vec<Case<ScopedCall<P>>> {
     let case = |roster, scope, route| ScopedCall {
         fixture: runtime.block_on(P::build(roster)),
@@ -313,7 +390,7 @@ pub fn cases<P: ScopedProtocol>(runtime: &Runtime) -> Vec<Case<ScopedCall<P>>> {
 
     cases.push(Case::new(
         format!("fan_in/{FAN_IN}"),
-        case(Roster::FanIn, CallScope::PerCall, Route::Hello),
+        case(Roster::FanIn, CallScope::PerCall, Route::FanIn),
     ));
 
     cases

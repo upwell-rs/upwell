@@ -7,14 +7,16 @@
 //! ctrl-c) is run by `App::serve`, so this loop only watches its transport and the
 //! shutdown signal.
 
-use std::{panic::AssertUnwindSafe, sync::Arc, time::Duration};
+use std::{collections::HashMap, panic::AssertUnwindSafe, sync::Arc, time::Duration};
 
 use futures::{FutureExt, StreamExt};
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 use tower::{Service, ServiceExt};
 use tracing::{debug, error, info, instrument, warn};
-use upwell_app::{AppRuntime, OpenScope, ProtocolRuntime, ScopeOpener, Serve, ShutdownSignal};
+use upwell_app::{
+    AppRuntime, OpenScope, ProtocolRuntime, ScopeEntry, ScopeOpener, Serve, ShutdownSignal,
+};
 use upwell_transport::{
     CallResult, Connection, Error as TransportError, PeerInfo, PredefinedCode, Respond,
     RespondStream, ResponseSink, StatusCode, Transport,
@@ -144,9 +146,16 @@ where
 
         info!(target: "upwell::daemon", app = runtime.name(), transport = transport_name, "serve starting");
 
+        let calls = runtime.opener::<RequestScope>()?;
+        let entries = self
+            .router
+            .entries()
+            .map(|(path, key)| Ok((path.to_owned(), calls.entry(key)?)))
+            .collect::<crate::Result<_>>()?;
         let scopes = Arc::new(RpcScopes {
             connections: runtime.opener()?,
-            calls: runtime.opener()?,
+            calls,
+            entries,
         });
         let connection_cancel = CancellationToken::new();
         let mut connections = JoinSet::new();
@@ -246,9 +255,12 @@ where
 }
 
 /// The openers of the scopes the RPC protocol opens, prepared once per serve.
+///
+/// A call to a routed method opens its request scope with the method's entry plan.
 struct RpcScopes {
     connections: ScopeOpener<ConnectionScope>,
     calls: ScopeOpener<RequestScope>,
+    entries: HashMap<String, ScopeEntry<RequestScope>>,
 }
 
 fn is_transient_accept_error(error: &std::io::Error) -> bool {
@@ -390,7 +402,7 @@ async fn serve_connection<C: Connection>(
                     let service = service.clone();
                     let error_handler = error_handler.clone();
                     let connection_scope = connection_scope.clone();
-                    let calls = scopes.calls.clone();
+                    let scopes = Arc::clone(&scopes);
                     let peer = peer.clone();
 
                     debug!(target: "upwell::daemon", %path, "dispatching call");
@@ -402,7 +414,7 @@ async fn serve_connection<C: Connection>(
                         call.cancel,
                         peer,
                         connection_scope,
-                        calls,
+                        scopes,
                         responder,
                         service,
                         error_handler,
@@ -457,14 +469,20 @@ async fn drive_call<R>(
     cancel: CancellationToken,
     peer: PeerInfo,
     connection_scope: OpenScope<ConnectionScope>,
-    calls: ScopeOpener<RequestScope>,
+    scopes: Arc<RpcScopes>,
     responder: R,
     mut service: RpcService,
     error_handler: Option<Arc<dyn ErrorHandler>>,
 ) where
     R: Respond + RespondStream + Send + 'static,
 {
-    let opening = calls.builder().under(&connection_scope).open_default();
+    let builder = scopes.calls.builder().under(&connection_scope);
+    let opening = async {
+        match scopes.entries.get(path.as_str()) {
+            Some(entry) => builder.open(entry).await,
+            None => builder.open_default().await,
+        }
+    };
     let request_scope = match AssertUnwindSafe(opening).catch_unwind().await {
         Ok(Ok(scope)) => scope.into_container(),
 

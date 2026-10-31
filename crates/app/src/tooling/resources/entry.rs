@@ -31,6 +31,16 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
                 ),
             ]);
 
+            if let Some(builds) = &entry.builds {
+                let builds = if builds.is_empty() {
+                    String::from("none")
+                } else {
+                    builds.join(", ")
+                };
+
+                labels.insert(String::from("builds"), builds);
+            }
+
             if let Some(owner) = descriptor.owner {
                 labels.insert(
                     String::from("owner-type"),

@@ -103,24 +103,27 @@ impl AppRuntime {
         Ok(RuntimeView::from_generation(generation))
     }
 
-    /// Builds an instance of `scope` under `parent` from the layout `view` prepared for it.
+    /// Builds an instance of `scope` under `parent` from the layout `view` prepared for it:
+    /// the slots `entry`'s plan lists, or every slot without an entry.
     async fn open_in(
         &self,
         view: RuntimeView,
         scope: ScopeId,
         parent: Arc<ScopeContainer>,
+        entry: Option<EntryId>,
         seeds: Vec<BoxedComponent>,
     ) -> crate::Result<Arc<ScopeContainer>> {
-        let layout = view
-            .scope_plan()
-            .layouts
+        let layouts = &view.scope_plan().layouts;
+        let layout = layouts
             .get(&scope)
             .ok_or(crate::Error::UndeclaredScopeOpen { scope })?;
+        let plan = entry.and_then(|entry| layouts.entry(entry));
 
         ScopeContainer::open_planned(
             parent,
             Arc::clone(view.scopes()),
             layout,
+            plan,
             seeds,
             view.generation_state(),
         )
@@ -240,26 +243,28 @@ impl<'a, S: Scope, P: Scope> ScopeBuilder<'a, S, P> {
 }
 
 impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
-    /// Opens the instance to run `entry`.
-    ///
-    /// Every entry of a scope shares the scope's layout until entries carry their own plans
-    /// (#348).
+    /// Opens the instance to run `entry`: it builds what the entry's plan lists, the entry's
+    /// targets and what they depend on in the scope, and builds any other slot on demand when
+    /// something resolves it.
     ///
     /// # Errors
     ///
     /// Fails when the parent belongs to another runtime, a seed has no slot in the scope or
     /// shares one with another seed, or a component fails to build.
-    pub async fn open(self, _entry: &ScopeEntry<S>) -> crate::Result<OpenScope<S>> {
-        self.open_default().await
+    pub async fn open(self, entry: &ScopeEntry<S>) -> crate::Result<OpenScope<S>> {
+        self.open_with(Some(entry.id)).await
     }
 
-    /// Opens the instance without an entry: it builds the scope's eager slots and resolves
-    /// the rest on demand.
+    /// Opens the instance without an entry: it builds every slot of the scope.
     ///
     /// # Errors
     ///
     /// As [`open`](Self::open).
     pub async fn open_default(self) -> crate::Result<OpenScope<S>> {
+        self.open_with(None).await
+    }
+
+    async fn open_with(self, entry: Option<EntryId>) -> crate::Result<OpenScope<S>> {
         let runtime = &self.opener.runtime;
         let (view, parent) = match self.parent {
             Some(parent) => (
@@ -280,7 +285,9 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
             S::NAME
         );
 
-        let container = runtime.open_in(view, S::ID, parent, self.seeds).await?;
+        let container = runtime
+            .open_in(view, S::ID, parent, entry, self.seeds)
+            .await?;
 
         Ok(OpenScope {
             container,

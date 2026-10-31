@@ -302,10 +302,13 @@ impl PreparedProtocol for PreparedAxum {
         // opens on the first injection, seeded with `RequestMeta` (method/URI/headers/cookies)
         // so request-scoped components can depend on the native request without axum's own
         // extractors entering the DI graph. A request that injects nothing opens no scope.
-        let router = router.layer(RequestScopeLayer::new(
-            runtime.opener::<HttpRequestScope>()?,
-            config.clone(),
-        ));
+        let requests = runtime.opener::<HttpRequestScope>()?;
+        let routes = entries::route_entries_by_path(
+            &self.controllers,
+            &normalize_base_path(&config_snapshot.base_path),
+            &requests,
+        )?;
+        let router = router.layer(RequestScopeLayer::new(requests, routes, config.clone()));
 
         // One canonical prefix drives both the OpenAPI server/UI URLs and the router nesting, so the
         // documented server, the spec URL a UI fetches, and the actual route all agree.

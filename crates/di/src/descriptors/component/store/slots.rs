@@ -1,6 +1,6 @@
 use std::any::TypeId;
 use std::ptr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use super::super::{Injectable, ProviderDescriptor};
 use super::{BoxedComponent, from_boxed};
@@ -17,15 +17,16 @@ struct SlotValue {
 /// The instances of a scope opened from a prepared [`SlotLayout`], stored densely by slot.
 ///
 /// The layout's type and trait indexes are shared by every instance of the scope, so an
-/// open scope allocates only its values.
+/// open scope allocates only its values. Each slot is set once: when the scope opens, or
+/// later when a slot its opening did not build is built on demand.
 pub(crate) struct SlotStore {
     layout: Arc<SlotLayout>,
-    values: Box<[Option<SlotValue>]>,
+    values: Box<[OnceLock<SlotValue>]>,
 }
 
 impl SlotStore {
     pub(crate) fn new(layout: Arc<SlotLayout>) -> Self {
-        let values = layout.slots().iter().map(|_| None).collect();
+        let values = layout.slots().iter().map(|_| OnceLock::new()).collect();
 
         Self { layout, values }
     }
@@ -35,9 +36,19 @@ impl SlotStore {
         ptr::eq(Arc::as_ptr(&self.layout), layout)
     }
 
+    /// The layout this store was opened from.
+    pub(crate) fn layout(&self) -> &Arc<SlotLayout> {
+        &self.layout
+    }
+
+    /// Whether `slot` holds its instance.
+    pub(crate) fn is_built(&self, slot: SlotIdx) -> bool {
+        self.values[slot.index()].get().is_some()
+    }
+
     /// Stores a built or seeded instance in its slot and aliases it under every trait the
     /// slot provides.
-    pub(crate) fn insert(&mut self, component: BoxedComponent) -> crate::Result<()> {
+    pub(crate) fn insert(&self, component: BoxedComponent) -> crate::Result<()> {
         let slot = self
             .layout
             .slot_of(component.ty.type_id)
@@ -52,12 +63,9 @@ impl SlotStore {
     /// Stores an instance a slot's own factory built, at that slot.
     ///
     /// A factory returning another component than its slot holds is rejected before the
-    /// instance is aliased under the slot's providers.
-    pub(crate) fn insert_at(
-        &mut self,
-        slot: SlotIdx,
-        component: BoxedComponent,
-    ) -> crate::Result<()> {
+    /// instance is aliased under the slot's providers, and so is a second instance for a
+    /// slot that already holds one.
+    pub(crate) fn insert_at(&self, slot: SlotIdx, component: BoxedComponent) -> crate::Result<()> {
         let expected = &self.layout.spec(slot).component;
 
         if expected.ty.type_id != component.ty.type_id {
@@ -75,17 +83,20 @@ impl SlotStore {
             .map(|provider| (provider.erase)(&component))
             .collect();
 
-        self.values[slot.index()] = Some(SlotValue {
-            component,
-            providers,
-        });
-
-        Ok(())
+        self.values[slot.index()]
+            .set(SlotValue {
+                component,
+                providers,
+            })
+            .map_err(|_| Error::SlotBuiltTwice {
+                component: expected.name,
+                scope: self.layout.scope().name(),
+            })
     }
 
     /// The value at `at`, if its slot is built.
     pub(crate) fn value(&self, at: SlotRef) -> Option<&BoxedComponent> {
-        let built = self.values[at.slot.index()].as_ref()?;
+        let built = self.values[at.slot.index()].get()?;
 
         match at.alias {
             Some(alias) => built.providers.get(alias),
@@ -141,14 +152,14 @@ impl SlotStore {
     }
 
     pub(crate) fn component_count(&self) -> usize {
-        self.values.iter().flatten().count()
+        self.values.iter().filter_map(OnceLock::get).count()
     }
 
     #[cfg(test)]
     pub(crate) fn provider_count(&self) -> usize {
         self.values
             .iter()
-            .flatten()
+            .filter_map(OnceLock::get)
             .map(|built| built.providers.len())
             .sum()
     }
@@ -157,6 +168,6 @@ impl SlotStore {
         self.layout
             .providers_of(trait_id)
             .iter()
-            .filter(|provider| self.values[provider.at.slot.index()].is_some())
+            .filter(|provider| self.is_built(provider.at.slot))
     }
 }

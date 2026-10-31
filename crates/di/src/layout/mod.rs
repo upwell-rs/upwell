@@ -6,6 +6,7 @@
 //! without selecting providers.
 
 mod dep_ref;
+mod entry_plan;
 mod planner;
 mod slot_layout;
 #[cfg(test)]
@@ -14,5 +15,6 @@ mod tests;
 pub(crate) use dep_ref::{
     DepRef, PlannedDependency, ProvidedRef, RootTarget, SlotRef, TransientPlan,
 };
+pub use entry_plan::EntryPlan;
 pub use slot_layout::SlotLayout;
 pub(crate) use slot_layout::{ProviderSlot, SlotIdx, SlotSpec};

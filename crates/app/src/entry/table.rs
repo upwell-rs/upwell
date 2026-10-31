@@ -28,20 +28,30 @@ pub struct EntryTable {
     entries: Box<[EntryDescriptor]>,
 }
 
+/// `entries` in the order an [`EntryTable`] holds them, so a position is the
+/// [`EntryId::index`] of the entry there.
+pub(crate) fn in_table_order(
+    entries: &[EntryDescriptor],
+) -> impl Iterator<Item = &EntryDescriptor> {
+    let mut sorted: Vec<&EntryDescriptor> = entries.iter().collect();
+
+    sorted.sort_by_key(|entry| entry.key);
+    sorted.into_iter()
+}
+
 impl EntryTable {
     pub(crate) fn new(
         entries: &[EntryDescriptor],
         topology: &PreparedScopeTopology,
     ) -> Result<Self, EntryError> {
-        let mut entries = entries.to_vec();
-
         if u32::try_from(entries.len()).is_err() {
             return Err(EntryError::TooManyEntries {
                 count: entries.len(),
             });
         }
 
-        entries.sort_by_key(|entry| entry.key);
+        let entries: Vec<EntryDescriptor> = in_table_order(entries).copied().collect();
+
         validate_keys(&entries)?;
         validate_scopes(&entries, topology)?;
 

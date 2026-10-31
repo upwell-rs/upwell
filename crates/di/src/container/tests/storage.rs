@@ -25,22 +25,6 @@ fn factories() -> &'static [ComponentFactoryDescriptor] {
     }
 }
 
-/// The slot layout of a [`TestScope`] holding `order`, with no providers.
-fn plan(order: &[ComponentDescriptor]) -> crate::SlotLayout {
-    let selection = crate::registry::ProviderSelectionModel::new(order, Vec::new(), HashMap::new())
-        .expect("the components select no providers");
-
-    crate::SlotLayout::plan(
-        TestScope::KEY,
-        &[],
-        order,
-        &HashMap::new(),
-        &selection,
-        |_, _| true,
-    )
-    .expect("the scope plans")
-}
-
 fn stored(container: &ScopeContainer) -> &Live<Held> {
     container
         .store
@@ -145,6 +129,7 @@ async fn a_factory_capturing_a_scope_its_layout_did_not_plan_for_still_resolves(
         root().await,
         registry(),
         &Arc::new(layout),
+        None,
         Vec::new(),
         Arc::new(()),
     )
@@ -175,6 +160,7 @@ async fn a_seed_for_a_component_a_factory_builds_is_rejected() {
         root().await,
         registry(),
         &Arc::new(layout),
+        None,
         vec![boxed_component("Held", Arc::new(Held))],
         Arc::new(()),
     )

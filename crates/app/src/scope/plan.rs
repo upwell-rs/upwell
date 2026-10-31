@@ -5,10 +5,12 @@ use std::sync::Arc;
 
 use upwell_core::{Scope, ScopeId, Singleton, Transient};
 use upwell_di::{
-    ComponentDescriptor, EffectiveGraph, ProviderSelectionModel, SlotLayout, topological_sort,
+    ComponentDescriptor, EffectiveGraph, EntryPlan, ProviderSelectionModel, SlotLayout,
+    topological_sort,
 };
 
 use super::PreparedScopeTopology;
+use crate::entry::{EntryDescriptor, EntryId};
 
 /// The validated construction plan for root, transient, and protocol-owned scopes.
 #[derive(Debug)]
@@ -20,8 +22,45 @@ pub(crate) struct ScopePlan {
     pub(crate) seed_destinations: HashMap<TypeId, SeedDestination>,
 }
 
-/// The prepared slot layout of every protocol-owned scope, keyed by scope.
-pub(crate) type ScopeLayouts = HashMap<ScopeId, Arc<SlotLayout>>;
+/// The prepared slot layout of every protocol-owned scope, and the plan of every entry
+/// opening one of them.
+///
+/// Entry plans are indexed like the application's [`EntryTable`](crate::EntryTable), whose
+/// entries are fixed while each runtime generation plans them against its own layouts.
+#[derive(Debug, Default)]
+pub(crate) struct ScopeLayouts {
+    by_scope: HashMap<ScopeId, Arc<SlotLayout>>,
+    entries: Box<[Option<EntryPlan>]>,
+}
+
+impl ScopeLayouts {
+    /// Plans every entry of `entries` against the scope layouts `by_scope`. An entry into
+    /// the root scope has no plan.
+    pub(crate) fn new(
+        by_scope: HashMap<ScopeId, Arc<SlotLayout>>,
+        entries: &[EntryDescriptor],
+    ) -> Self {
+        let entries = crate::entry::in_table_order(entries)
+            .map(|entry| {
+                by_scope
+                    .get(&entry.scope.id())
+                    .map(|layout| layout.plan_entry(&(entry.targets)()))
+            })
+            .collect();
+
+        Self { by_scope, entries }
+    }
+
+    /// The slot layout of `scope`.
+    pub(crate) fn get(&self, scope: &ScopeId) -> Option<&Arc<SlotLayout>> {
+        self.by_scope.get(scope)
+    }
+
+    /// The plan of the entry with dense identity `id`.
+    pub(crate) fn entry(&self, id: EntryId) -> Option<&EntryPlan> {
+        self.entries.get(id.index())?.as_ref()
+    }
+}
 
 /// The declared destination and diagnostic name of a factory-less scoped component.
 #[derive(Clone, Copy, Debug)]
@@ -46,10 +85,11 @@ impl ScopePlan {
         resolved: &[ComponentDescriptor],
         selection: &ProviderSelectionModel,
         topology: &PreparedScopeTopology,
+        entries: &[EntryDescriptor],
     ) -> crate::Result<Self> {
         let partitions = DescriptorPartitions::classify(resolved, topology)?;
         let orders = partitions.orders(topology, selection)?;
-        let layouts = partitions.layouts(&orders, topology, selection)?;
+        let layouts = ScopeLayouts::new(partitions.layouts(&orders, topology, selection)?, entries);
 
         Ok(Self {
             singletons: partitions.singletons,
@@ -185,7 +225,7 @@ impl DescriptorPartitions {
         orders: &HashMap<ScopeId, Vec<ComponentDescriptor>>,
         topology: &PreparedScopeTopology,
         selection: &ProviderSelectionModel,
-    ) -> crate::Result<ScopeLayouts> {
+    ) -> crate::Result<HashMap<ScopeId, Arc<SlotLayout>>> {
         let mut boundaries: Vec<_> = topology.boundaries().iter().collect();
         let mut layouts = HashMap::with_capacity(boundaries.len());
 

@@ -1,10 +1,12 @@
 //! The entries Axum contributes: one per controller route and, for mounted WebSocket
 //! protocols, one per described message handler.
 
-use upwell_app::{EntryDescriptor, EntryOwner};
+use axum::http::Method;
+use upwell_app::{EntryDescriptor, EntryOwner, ScopeOpener};
 use upwell_core::Scope;
 
 use crate::controller::ControllerDescriptor;
+use crate::request_scope::RouteEntries;
 use crate::scope::HttpRequest;
 
 /// One entry per route of every controller, running in the HTTP request scope and owned by
@@ -53,4 +55,45 @@ pub(super) fn message_entries<'a>(
                     source: message.source,
                 })
         })
+}
+
+/// The entry of every controller route, by method and the path the router matches it under
+/// below `base_prefix`.
+pub(super) fn route_entries_by_path(
+    controllers: &[ControllerDescriptor],
+    base_prefix: &str,
+    opener: &ScopeOpener<HttpRequest>,
+) -> crate::Result<RouteEntries> {
+    let mut entries = RouteEntries::default();
+
+    for controller in controllers {
+        for route in (controller.routes)() {
+            let method = Method::from_bytes(route.method.as_bytes()).map_err(|_| {
+                crate::Error::Config(format!(
+                    "route `{}` declares the invalid HTTP method `{}`",
+                    route.key, route.method
+                ))
+            })?;
+            let path = join_http_paths(base_prefix, controller.base, route.path);
+
+            entries.insert(method, path, opener.entry(route.key)?);
+        }
+    }
+
+    Ok(entries)
+}
+
+/// Joins a global prefix, a controller base and a route path into one normalized path.
+pub(super) fn join_http_paths(global: &str, controller: &str, route: &str) -> String {
+    let segments = [global, controller, route]
+        .into_iter()
+        .flat_map(|path| path.split('/'))
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+
+    if segments.is_empty() {
+        String::from("/")
+    } else {
+        format!("/{}", segments.join("/"))
+    }
 }

@@ -11,6 +11,7 @@ mod table;
 mod validate;
 
 pub use descriptor::{ENTRIES, EntryDescriptor, EntryOwner, EntryTargets};
+pub(crate) use table::in_table_order;
 pub use table::{EntryId, EntryTable};
 pub use validate::EntryError;
 pub(crate) use validate::validate_targets;

@@ -109,6 +109,10 @@ impl RpcCallContext {
     /// Resolves the component of type `T` (e.g. the stateful service singleton) as
     /// its handle (`Arc<T>` by default), through the request → connection →
     /// singleton chain. `None` if no such component is registered.
+    ///
+    /// This read never builds anything: a request-scoped component the method's entry did not
+    /// plan is `None` until something builds it. Inject request-scoped components with
+    /// [`Inject`](crate::Inject), which builds them on demand.
     pub fn component<T: Component>(&self) -> Option<T::Handle> {
         self.scope.get::<T>()
     }

@@ -8,7 +8,7 @@ use upwell_di::{
 };
 
 use crate::entry::{EntryDescriptor, EntryTable};
-use crate::scope::{PreparedScopeTopology, SeedDestination};
+use crate::scope::{PreparedScopeTopology, ScopeLayouts, SeedDestination};
 
 /// Immutable callback-free input for prepared-state tooling projection.
 pub(crate) struct ProjectionSnapshot {
@@ -103,12 +103,23 @@ impl ProjectionSnapshot {
         selection: &ProviderSelectionModel,
         topology: &PreparedScopeTopology,
         entries: &EntryTable,
+        layouts: &ScopeLayouts,
     ) -> upwell_di::Result<Self> {
-        self.entries = entries
-            .entries()
-            .iter()
-            .map(|entry| EntrySnapshot::capture(selection, topology, *entry))
-            .collect::<upwell_di::Result<_>>()?;
+        self.entries =
+            entries
+                .iter()
+                .map(|(id, entry)| {
+                    let builds = layouts.get(&entry.scope.id()).zip(layouts.entry(id)).map(
+                        |(layout, plan)| {
+                            plan.components(layout)
+                                .map(|component| component.id)
+                                .collect()
+                        },
+                    );
+
+                    EntrySnapshot::capture(selection, topology, *entry, builds)
+                })
+                .collect::<upwell_di::Result<_>>()?;
 
         Ok(self)
     }
@@ -296,6 +307,9 @@ impl DependencySnapshot {
 pub(crate) struct EntrySnapshot {
     pub(crate) descriptor: EntryDescriptor,
     pub(crate) targets: Vec<DependencySnapshot>,
+    /// The IDs of the components the entry builds when it opens its scope, in construction
+    /// order. `None` for an entry into the root scope, which opens nothing.
+    pub(crate) builds: Option<Vec<&'static str>>,
 }
 
 impl EntrySnapshot {
@@ -306,6 +320,7 @@ impl EntrySnapshot {
         selection: &ProviderSelectionModel,
         topology: &PreparedScopeTopology,
         descriptor: EntryDescriptor,
+        builds: Option<Vec<&'static str>>,
     ) -> upwell_di::Result<Self> {
         let key = descriptor.key.as_str();
         let consumer = ComponentDescriptor::manual(
@@ -321,6 +336,7 @@ impl EntrySnapshot {
                 .into_iter()
                 .map(|target| DependencySnapshot::capture(selection, topology, consumer, target))
                 .collect::<upwell_di::Result<_>>()?,
+            builds,
         })
     }
 }

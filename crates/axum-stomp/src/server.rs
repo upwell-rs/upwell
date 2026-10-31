@@ -529,12 +529,12 @@ impl Stomp {
             return true;
         };
 
-        let opening = connection
+        let builder = connection
             .message()
             .seed(headers)
             .seed(StompSession::new(Arc::clone(&self.broker), conn_id))
-            .seed(principal.clone())
-            .open_default();
+            .seed(principal.clone());
+        let opening = connection.open_message(destination.as_str(), builder);
 
         let scope = match opening.await {
             Ok(scope) => scope.into_container(),

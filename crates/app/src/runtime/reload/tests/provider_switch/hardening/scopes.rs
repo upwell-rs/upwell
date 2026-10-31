@@ -171,3 +171,57 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
         "closing the call releases the displaced generation"
     );
 }
+
+#[tokio::test]
+async fn a_slot_built_on_demand_after_a_switch_uses_its_scopes_generation() {
+    let _guard = lock_test_guard().await;
+    let dir = auth_config_dir("primary");
+    let key = upwell_core::EntryKey::new("test/hardening-call").expect("valid entry key");
+
+    reset_faults();
+
+    let app = auth_builder::<ScopedProtocol>(
+        &config_dir_of(&dir),
+        &PRIMARY_COMPONENT,
+        &GATE_COMPONENT,
+        &[&CALL_GATE_COMPONENT],
+    )
+    .entry_descriptor(crate::EntryDescriptor::new::<Call, ()>(key))
+    .build()
+    .await
+    .expect("the scoped app builds");
+    let runtime = app.runtime();
+    let calls = runtime
+        .opener::<Call>()
+        .expect("the call scope is declared");
+    let entry = calls.entry(key).expect("the call entry is registered");
+    let open_call = calls
+        .builder()
+        .open(&entry)
+        .await
+        .expect("a call opens before the switch");
+    let built_at_open = open_call.container().get::<CallGate>().is_some();
+
+    write_auth_config(&config_dir_of(&dir), "fallback");
+
+    runtime
+        .reload_config()
+        .await
+        .expect("a switch with an open call commits");
+
+    let gate = open_call
+        .container()
+        .resolve::<Arc<CallGate>>()
+        .await
+        .expect("resolution succeeds")
+        .expect("the gate is built on demand");
+
+    assert!(
+        !built_at_open,
+        "the entry injects nothing, so its call builds nothing"
+    );
+    assert_eq!(
+        gate.scheme, "primary",
+        "a slot built after the switch comes from the generation its call opened under"
+    );
+}
