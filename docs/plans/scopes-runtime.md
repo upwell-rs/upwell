@@ -349,8 +349,10 @@ HTTP routes find their entry by method and matched path, RPC calls by method pat
 messages by destination (`WsConnectionScope::open_message`); anything without an entry builds
 every slot. Opening a scope first builds any factory-backed enclosing-scope slot its planned
 factories read that the enclosing scope's opening left out: that exact slot and what it reads,
-not other providers of its trait. A factory-less slot is never built on demand, so its seed
-must be supplied when its scope opens. Each on-demand slot is its own async once-cell, so
+not other providers of its trait. A factory-less slot is never built on demand: if anything
+resolves it, its seed must be supplied when its scope opens, or that resolution fails. A
+resolution of one value builds only the component it names or the provider runtime selection
+picks; a collection or keyed map builds every provider. Each on-demand slot is its own async once-cell, so
 a factory built on demand may itself resolve another left-out slot of its scope. Tooling labels
 each entry with the components it `builds`. Durable scopes still
 build every slot when they open, and `deny_unplanned` strict mode is not implemented.

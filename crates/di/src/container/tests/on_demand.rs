@@ -61,6 +61,7 @@ macro_rules! scoped {
             let mut descriptor = component::<$ty>($id, factories);
 
             descriptor.scope = TestScope::KEY;
+
             descriptor
         }
     };
@@ -198,6 +199,7 @@ fn eager_descriptor() -> ComponentDescriptor {
     let mut descriptor = component::<Eager>("eager", factories);
 
     descriptor.scope = TestScope::KEY;
+
     descriptor
 }
 
@@ -323,6 +325,7 @@ fn broken_descriptor() -> ComponentDescriptor {
     let mut descriptor = component::<Broken>("broken", factories);
 
     descriptor.scope = TestScope::KEY;
+
     descriptor
 }
 
@@ -370,6 +373,59 @@ async fn a_child_builds_only_the_parent_provider_it_reads() {
     assert!(parent.get::<Chosen>().is_some());
     assert!(
         parent.get::<Broken>().is_none(),
+        "the unselected provider stays unbuilt"
+    );
+}
+
+#[tokio::test]
+async fn resolving_one_provider_builds_only_the_selected_one() {
+    let order = [chosen_descriptor(), broken_descriptor()];
+    let providers = vec![
+        ProviderDescriptor::of::<Chosen, dyn Probe>("dyn Probe").primary(),
+        ProviderDescriptor::of::<Broken, dyn Probe>("dyn Probe").qualifier("broken"),
+    ];
+    let selection =
+        crate::registry::ProviderSelectionModel::new(&order, providers.clone(), HashMap::new())
+            .expect("the providers name registered components");
+    let layout = Arc::new(
+        crate::SlotLayout::plan(
+            TestScope::KEY,
+            &[],
+            &order,
+            &HashMap::new(),
+            &selection,
+            |_, _| true,
+        )
+        .expect("the scope plans"),
+    );
+    let components = order
+        .iter()
+        .map(|component| (component.ty.type_id, *component))
+        .collect();
+    let registry = Arc::new(
+        ScopeRegistry::new(HashMap::new(), components, providers, HashMap::new())
+            .expect("the scope registry validates"),
+    );
+    let scope = ScopeContainer::open_planned(
+        root().await,
+        registry,
+        &layout,
+        Some(&layout.plan_entry(&[])),
+        Vec::new(),
+        Arc::new(()),
+    )
+    .await
+    .expect("the scope opens");
+
+    let probe = scope
+        .resolve::<Arc<dyn Probe>>()
+        .await
+        .expect("resolving the primary provider does not build the failing one");
+
+    assert!(probe.is_some());
+    assert!(scope.get::<Chosen>().is_some());
+    assert!(
+        scope.get::<Broken>().is_none(),
         "the unselected provider stays unbuilt"
     );
 }
