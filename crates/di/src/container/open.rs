@@ -8,7 +8,7 @@ use upwell_core::{ResolverSet, Scope, ScopeKey, Singleton};
 
 use super::{ComponentSource, ScopeContainer, ScopeRegistry, ScopeResolverSlot};
 use crate::descriptors::component::{
-    ComponentConstructionContext, ComponentConstructionParts, Running, ScopeStore,
+    ComponentConstructionContext, ComponentConstructionParts, HandleStorage, Running, ScopeStore,
 };
 use crate::descriptors::{BoxedComponent, ComponentDescriptor};
 use crate::error::Error;
@@ -130,6 +130,7 @@ impl ScopeContainer {
         );
 
         cx.use_layout(Arc::clone(layout));
+        cx.store_handles(HandleStorage::Fixed);
 
         for seed in seeds {
             cx.insert(seed)?;
@@ -190,6 +191,10 @@ impl ScopeContainer {
         externals: ResolverSet,
         generation_lease: GenerationLease,
     ) -> crate::Result<Arc<ScopeContainer>> {
+        let storage = match parent {
+            Some(_) => HandleStorage::Fixed,
+            None => HandleStorage::Swappable,
+        };
         let mut cx = ComponentConstructionContext::new_with_slot(
             scope,
             parent,
@@ -197,6 +202,8 @@ impl ScopeContainer {
             externals,
             ScopeResolverSlot::default(),
         );
+
+        cx.store_handles(storage);
 
         for seed in seeds {
             let type_id = seed.ty.type_id;

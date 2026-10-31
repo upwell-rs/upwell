@@ -16,7 +16,7 @@ mod snapshot;
 mod store;
 
 pub use context::ComponentConstructionContext;
-pub(crate) use context::{ComponentConstructionParts, SharedStore};
+pub(crate) use context::{ComponentConstructionParts, HandleStorage, SharedStore};
 pub use factory::{
     ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole,
     DeclaredScope, ReadyComponentFactory, Registration,
@@ -83,6 +83,14 @@ pub trait Injectable: Clone + Send + Sync + 'static {
     /// Wraps a freshly built handle into its stored slot. Called once, when the
     /// instance is first inserted into a scope.
     fn into_stored(self) -> Self::Stored;
+
+    /// Wraps a freshly built handle stored in a scope below the root. No transition
+    /// rebinds such an instance, so a handle may store it without a swappable cell.
+    /// Defaults to [`into_stored`](Self::into_stored).
+    #[doc(hidden)]
+    fn into_fixed(self) -> Self::Stored {
+        self.into_stored()
+    }
 
     /// Derives this handle from a stored slot. Called on every resolution — a
     /// snapshot for `Arc<T>`, a shared clone for `Dep<T>`, a plain clone otherwise.

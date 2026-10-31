@@ -89,8 +89,12 @@ Implemented in the first slice of #345 (owner, 2026-10-29):
 - While #136 and #140 are open, a placement is the component's declared scope.
 - The pinned storage handle is decided: `Live<T>` becomes an enum internally (a fixed `Arc<T>` or the
   swappable `ArcSwap`), so slots in a pinned scope need no `ArcSwap` and `Dep<T>` keeps its type.
-  It lands with the container kinds (#344). Slots store `Injectable::Stored`, so layouts do not
-  change when it does.
+  Slots store `Injectable::Stored`, so layouts do not change when it does. The first #344 slice
+  landed it for every scope below the root: only transitions republish `Live` cells, and they
+  only republish root singletons, so a child scope's factories store fixed handles
+  (`Injectable::into_fixed`, chosen by the construction context). A `Dep<T>` read from a fixed
+  slot gets its own cell, and provider aliases keep the kind of the instance they alias. The root,
+  transients and `Fresh` rebuilds keep swappable cells.
 - Generated factories read their edges by declared position (`cx.dep(i)`, `cx.dep_all(i)`,
   `cx.dep_keyed(i)`), so a planned edge costs one index instead of a search by type. `#[component]`
   field injection emits these calls, and `#[init]`/`factory = path` factories pass each parameter's

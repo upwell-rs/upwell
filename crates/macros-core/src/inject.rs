@@ -177,7 +177,6 @@ pub fn field_injection_component(
     let components_slice = paths.core("COMPONENTS");
     let dependency_descriptor = paths.core("DependencyDescriptor");
     let component = paths.core("Component");
-    let injectable = paths.core("Injectable");
     let distributed_slice = paths.core("linkme::distributed_slice");
     let linkme_crate = paths.core("linkme");
     let result = paths.core("DiResult");
@@ -301,7 +300,9 @@ pub fn field_injection_component(
                 >,
             > {
                 ::std::boxed::Box::pin(async move {
-                    ::core::result::Result::Ok(__upwell_boxed(#construct))
+                    let __instance = #construct;
+
+                    ::core::result::Result::Ok(__upwell_boxed(cx, __instance))
                 })
             }
 
@@ -311,16 +312,19 @@ pub fn field_injection_component(
             ) -> #result<::core::option::Option<#boxed_component>> {
                 #(#ready_reads)*
 
-                ::core::result::Result::Ok(::core::option::Option::Some(
-                    __upwell_boxed(#construct_ready),
-                ))
+                let __instance = #construct_ready;
+
+                ::core::result::Result::Ok(::core::option::Option::Some(__upwell_boxed(cx, __instance)))
             }
 
-            fn __upwell_boxed(instance: #self_ident) -> #boxed_component {
+            fn __upwell_boxed(
+                cx: &#component_construction_context,
+                instance: #self_ident,
+            ) -> #boxed_component {
                 #boxed_component {
                     ty: #type_descriptor::of::<#self_ident>(#name),
                     value: ::std::boxed::Box::new(
-                        #injectable::into_stored(<#self_ident as #component>::into_handle(instance)),
+                        cx.stored(<#self_ident as #component>::into_handle(instance)),
                     ),
                 }
             }

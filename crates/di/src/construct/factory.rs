@@ -7,7 +7,7 @@ use std::pin::Pin;
 use upwell_core::{DependencyDescriptor, TypeDescriptor};
 
 use super::FromContainer;
-use crate::descriptors::{BoxedComponent, Component, ComponentConstructionContext, Injectable};
+use crate::descriptors::{BoxedComponent, Component, ComponentConstructionContext};
 use crate::error::Error;
 
 /// What a factory function may return: the component itself, or a `Result` of it.
@@ -104,7 +104,7 @@ macro_rules! impl_factory {
             ) -> crate::Result<BoxedComponent> {
                 $( let $ty = <$ty as FromContainer>::from_container_at(cx, $index).await?; )*
 
-                into_boxed((self)($($ty,)*).await)
+                into_boxed(cx, (self)($($ty,)*).await)
             }
         }
 
@@ -126,7 +126,7 @@ macro_rules! impl_factory {
                     let $ty = $ty?;
                 )*
 
-                into_boxed((self)($($ty,)*)).map(Some)
+                into_boxed(cx, (self)($($ty,)*)).map(Some)
             }
         }
     };
@@ -142,14 +142,17 @@ impl_factory!(T1 0, T2 1, T3 2, T4 3, T5 4, T6 5);
 impl_factory!(T1 0, T2 1, T3 2, T4 3, T5 4, T6 5, T7 6);
 impl_factory!(T1 0, T2 1, T3 2, T4 3, T5 4, T6 5, T7 6, T8 7);
 
-/// Unwraps a factory's output and boxes its component's stored handle.
-fn into_boxed<Out: FactoryOutput>(output: Out) -> crate::Result<BoxedComponent> {
+/// Unwraps a factory's output and boxes its component's handle as `cx`'s scope stores it.
+fn into_boxed<Out: FactoryOutput>(
+    cx: &ComponentConstructionContext,
+    output: Out,
+) -> crate::Result<BoxedComponent> {
     let component = output.into_component()?;
     let handle = <Out::Component as Component>::into_handle(component);
 
     Ok(BoxedComponent {
         ty: TypeDescriptor::of::<Out::Component>(<Out::Component as Component>::NAME),
-        value: Box::new(Injectable::into_stored(handle)),
+        value: Box::new(cx.stored(handle)),
     })
 }
 
