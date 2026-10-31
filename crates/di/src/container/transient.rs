@@ -32,7 +32,7 @@ async fn construct_transient_boxed(
 
     let externals = parent
         .as_ref()
-        .map(|p| p.resolvers().clone())
+        .map(|p| p.inherited_resolvers())
         .unwrap_or_default();
 
     let mut cx = ComponentConstructionContext::with_store(
@@ -62,7 +62,7 @@ pub(crate) async fn construct_planned_transient(
     let factory = plan.factory;
     let externals = parent
         .as_ref()
-        .map(|parent| parent.resolvers().clone())
+        .map(|parent| parent.inherited_resolvers())
         .unwrap_or_default();
     let mut cx = ComponentConstructionContext::with_store(
         Transient::KEY,
@@ -101,7 +101,7 @@ pub(crate) async fn construct_fresh_boxed(
             .container_for_scope(descriptor.scope)
             .ok_or(Error::MissingComponent(descriptor.name))?
     };
-    let externals = target_scope.resolvers().clone();
+    let externals = target_scope.inherited_resolvers();
     let slot = owner.slot.clone();
     let mut cx = ComponentConstructionContext::new_with_slot(
         descriptor.scope,

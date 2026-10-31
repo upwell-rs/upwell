@@ -6,6 +6,8 @@
 //! application message opens a [`WebsocketMessage`] child below that connection.
 
 use upwell_app::{ScopeBoundary, ScopeParent, ScopeTopology};
+#[cfg(feature = "ws")]
+use upwell_core::ScopeGenerations;
 use upwell_core::{Scope, ScopeId};
 
 /// One inbound HTTP request.
@@ -30,6 +32,7 @@ impl Scope for WebsocketConnection {
     const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "upwell/axum-websocket-connection");
     const RANK: u8 = 200;
     const NAME: &'static str = "WebsocketConnection";
+    const GENERATIONS: ScopeGenerations = ScopeGenerations::Durable;
 }
 
 #[cfg(feature = "ws")]

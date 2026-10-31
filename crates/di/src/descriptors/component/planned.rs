@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use upwell_core::Cardinality;
 
+use super::context::BuildStore;
 use super::store::SlotStore;
 use super::{ComponentConstructionContext, Injectable, ScopeStore, from_boxed};
 use crate::layout::{DepRef, PlannedDependency, ProvidedRef, SlotIdx, SlotLayout, TransientPlan};
@@ -37,11 +38,15 @@ impl<H> Planned<H> {
 }
 
 impl ComponentConstructionContext {
-    /// Builds this scope into a dense store laid out by `layout`.
+    /// Builds this scope into a dense store laid out by `layout`, shared with mid-build
+    /// transients only when a factory of the scope captures it.
     pub(crate) fn use_layout(&mut self, layout: Arc<SlotLayout>) {
         let store = ScopeStore::Slots(SlotStore::new(Arc::clone(&layout)));
 
-        self.store = Some(Arc::new(RwLock::new(store)));
+        self.store = match layout.captures() {
+            true => BuildStore::Shared(Arc::new(RwLock::new(store))),
+            false => BuildStore::Owned(store),
+        };
         self.layout = Some(layout);
     }
 

@@ -207,6 +207,29 @@ impl AppRuntime {
         self.view().id()
     }
 
+    /// The runtime generation an open scope runs on: the one it opened under or, for a scope
+    /// opened under another, its parent's. `None` for a scope this runtime did not open.
+    pub fn scope_generation(&self, scope: &ScopeContainer) -> Option<RuntimeGenerationId> {
+        let generation = scope.generation_lease::<RuntimeGeneration>()?;
+
+        self.transitions
+            .owns(&generation)
+            .then(|| RuntimeView::from_generation(generation).id())
+    }
+
+    /// How many runtime generations committed after the one an open scope runs on.
+    ///
+    /// A scope keeps its generation for its whole life, and a scope opened under it inherits
+    /// that generation, so a call on an old connection runs on the connection's generation.
+    /// A protocol reads this for a
+    /// [`Durable`](upwell_core::ScopeGenerations::Durable) scope to drain or reconnect it
+    /// once it has fallen behind. `None` for a scope this runtime did not open.
+    pub fn generations_behind(&self, scope: &ScopeContainer) -> Option<u64> {
+        let opened = self.scope_generation(scope)?;
+
+        Some(self.generation().get().saturating_sub(opened.get()))
+    }
+
     /// The generations that committed transitions displaced but whose roots are still
     /// alive, oldest first.
     ///

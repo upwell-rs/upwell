@@ -388,3 +388,25 @@ fn plugin_relations_and_owner_qualified_facets_project_without_dropped_endpoints
             && relationship.to == "plugin:test/relation-plugin/tooling/router"
     }));
 }
+
+#[test]
+fn scopes_project_their_generation_policy() {
+    let prepared = App::<DiagnosticFailureProtocol>::builder("scope-generations")
+        .config_source(ConfigManager::<Toml>::empty())
+        .prepare()
+        .expect("application prepares");
+    let document = prepared
+        .tooling_document()
+        .expect("prepared state projects");
+    let generations = |scope: upwell_core::ScopeId| {
+        document
+            .resources
+            .iter()
+            .find(|resource| resource.id == format!("scope:{}", scope.as_str()))
+            .and_then(|resource| resource.labels.get("generations"))
+            .map(String::as_str)
+    };
+
+    assert_eq!(generations(DIAGNOSTIC_CONSUMER_SCOPE_ID), Some("pinned"));
+    assert_eq!(generations(DIAGNOSTIC_DEPENDENCY_SCOPE_ID), Some("durable"));
+}

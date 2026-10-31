@@ -47,6 +47,22 @@ pub(crate) enum DepRef {
     Unplanned,
 }
 
+impl DepRef {
+    /// Whether resolving this source builds a transient, which reads the requesting scope's
+    /// in-progress store.
+    pub(crate) fn builds_transient(&self) -> bool {
+        match self {
+            Self::Transient(_) => true,
+            Self::Many(provided) => provided.iter().any(|entry| entry.source.builds_transient()),
+            Self::Root(_)
+            | Self::Ancestor { .. }
+            | Self::Local(_)
+            | Self::Absent
+            | Self::Unplanned => false,
+        }
+    }
+}
+
 /// One provider of a collection or keyed dependency.
 #[derive(Clone, Debug)]
 pub(crate) struct ProvidedRef {

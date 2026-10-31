@@ -21,6 +21,7 @@ impl Scope for DiagnosticDependencyScope {
     const ID: upwell_core::ScopeId = DIAGNOSTIC_DEPENDENCY_SCOPE_ID;
     const RANK: u8 = 2;
     const NAME: &'static str = "Diagnostic Dependency";
+    const GENERATIONS: upwell_core::ScopeGenerations = upwell_core::ScopeGenerations::Durable;
 }
 
 pub(super) struct DiagnosticConsumer;

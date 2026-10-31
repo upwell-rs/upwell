@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use upwell_config::{ConfigManager, ConfigReloader};
-use upwell_core::{ResolverSet, Scope, ScopeId, TypeDescriptor};
+use upwell_core::{ResolverSet, Scope, ScopeGenerations, ScopeId, TypeDescriptor};
 use upwell_di::{BoxedComponent, EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
@@ -26,6 +26,7 @@ impl Scope for Session {
     const ID: ScopeId = SESSION_ID;
     const RANK: u8 = 100;
     const NAME: &'static str = "Session";
+    const GENERATIONS: ScopeGenerations = ScopeGenerations::Durable;
 }
 
 impl Scope for Request {

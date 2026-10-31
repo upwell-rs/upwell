@@ -7,7 +7,7 @@
 //! and an explicit root-to-connection-to-request topology.
 
 use upwell_app::{ScopeBoundary, ScopeParent, ScopeTopology};
-use upwell_core::{Scope, ScopeId};
+use upwell_core::{Scope, ScopeGenerations, ScopeId};
 
 /// A per-connection scope: a live session between the daemon and one remote peer.
 /// Outlives the requests multiplexed over it, so it ranks above [`Request`].
@@ -20,6 +20,7 @@ impl Scope for Connection {
     const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "upwell/rpc-connection");
     const RANK: u8 = 200;
     const NAME: &'static str = "Connection";
+    const GENERATIONS: ScopeGenerations = ScopeGenerations::Durable;
 }
 
 impl Scope for Request {

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::super::{Injectable, ProviderDescriptor};
 use super::{BoxedComponent, from_boxed};
 use crate::error::Error;
-use crate::layout::{ProviderSlot, SlotLayout, SlotRef};
+use crate::layout::{ProviderSlot, SlotIdx, SlotLayout, SlotRef};
 
 /// One built slot: the concrete instance and its provider aliases, in the order of the
 /// slot's planned providers.
@@ -45,6 +45,20 @@ impl SlotStore {
                 component: component.ty.name,
                 scope: self.layout.scope().name(),
             })?;
+
+        self.insert_at(slot, component);
+
+        Ok(())
+    }
+
+    /// Stores an instance a slot's own factory built, at that slot.
+    pub(crate) fn insert_at(&mut self, slot: SlotIdx, component: BoxedComponent) {
+        debug_assert_eq!(
+            self.layout.slot_of(component.ty.type_id),
+            Some(slot),
+            "a factory built another component than its slot holds"
+        );
+
         let providers = self
             .layout
             .spec(slot)
@@ -57,8 +71,6 @@ impl SlotStore {
             component,
             providers,
         });
-
-        Ok(())
     }
 
     /// The value at `at`, if its slot is built.

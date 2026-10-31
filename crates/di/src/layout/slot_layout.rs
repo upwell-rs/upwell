@@ -62,6 +62,7 @@ pub struct SlotLayout {
     pub(super) by_type: HashMap<TypeId, SlotIdx>,
     pub(super) by_trait: HashMap<TypeId, Box<[ProviderSlot]>>,
     pub(super) constructs: bool,
+    pub(super) captures: bool,
 }
 
 impl SlotLayout {
@@ -84,6 +85,13 @@ impl SlotLayout {
     /// so an opening with no seeds needs no store.
     pub fn constructs(&self) -> bool {
         self.constructs
+    }
+
+    /// Whether a factory of this scope captures the scope under construction: a lazy,
+    /// deferred, fresh or dynamic edge, or a transient built against its in-progress store.
+    /// A scope that captures nothing is built without a shared store or resolver slot.
+    pub(crate) fn captures(&self) -> bool {
+        self.captures
     }
 
     /// The scope's components in construction order, seeds first.

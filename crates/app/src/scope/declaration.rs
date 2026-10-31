@@ -77,6 +77,12 @@ impl ScopeBoundary {
         self.scope.rank()
     }
 
+    /// Returns how an open instance relates to later runtime generations, captured from the
+    /// scope type.
+    pub const fn generations(&self) -> upwell_core::ScopeGenerations {
+        self.scope.generations()
+    }
+
     /// Returns every parent this boundary may be opened under, in declaration order.
     pub const fn parents(&self) -> &'static [ScopeParent] {
         self.parents
@@ -94,6 +100,7 @@ impl fmt::Debug for ScopeBoundary {
             .field("id", &self.id())
             .field("name", &self.name())
             .field("rank", &self.rank())
+            .field("generations", &self.generations())
             .field("parents", &self.parents)
             .finish()
     }

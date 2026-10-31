@@ -37,21 +37,27 @@ impl SlotLayout {
             can_reach: &can_reach,
         };
         let mut dependencies = Vec::with_capacity(layout.slots.len());
+        let mut captures = false;
 
         for spec in layout.slots.iter() {
             let planned = match spec.factory {
                 Some(factory) => {
+                    captures |= (factory.dependencies)().iter().any(captures_scope);
+
                     planner.factory_dependencies(&spec.component, factory, &mut Vec::new())?
                 }
                 None => Box::default(),
             };
 
+            captures |= planned.iter().any(|edge| edge.source.builds_transient());
             dependencies.push(planned);
         }
 
         for (spec, planned) in layout.slots.iter_mut().zip(dependencies) {
             spec.dependencies = planned;
         }
+
+        layout.captures = captures;
 
         Ok(layout)
     }
@@ -117,6 +123,7 @@ impl SlotLayout {
             by_type,
             by_trait,
             constructs,
+            captures: false,
         })
     }
 }
@@ -140,6 +147,13 @@ fn slot_spec(
 /// and fresh edges resolve through their own handles, so they keep the dynamic path.
 fn is_planned(dependency: &DependencyDescriptor) -> bool {
     !dependency.config && !dependency.dynamic && dependency.resolution == ResolutionMode::Eager
+}
+
+/// Whether an edge hands its scope to a handle or to on-demand construction: a lazy,
+/// deferred or fresh edge captures the scope, and a dynamic one may build a transient
+/// against it. Config edges read only resolvers.
+fn captures_scope(dependency: &DependencyDescriptor) -> bool {
+    !dependency.config && (dependency.dynamic || dependency.resolution != ResolutionMode::Eager)
 }
 
 /// Resolves the dependency edges of one scope's factories against its own slots and the
