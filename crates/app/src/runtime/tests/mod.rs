@@ -114,10 +114,22 @@ async fn prepared_generation(
 async fn build_runtime(
     seed_destinations: HashMap<TypeId, SeedDestination>,
 ) -> (AppRuntime, Arc<ScopeRegistry>) {
+    build_runtime_with_entries(seed_destinations, &[]).await
+}
+
+/// A runtime over the test topology whose application registered `entries`.
+async fn build_runtime_with_entries(
+    seed_destinations: HashMap<TypeId, SeedDestination>,
+    entries: &[crate::EntryDescriptor],
+) -> (AppRuntime, Arc<ScopeRegistry>) {
     let (generation, registry) =
         prepared_generation(RuntimeGenerationId::INITIAL, seed_destinations).await;
+    let topology = ScopeTopology::new(&BOUNDARIES)
+        .prepare()
+        .expect("test topology prepares");
+    let entries = crate::EntryTable::new(entries, &topology).expect("test entries prepare");
     let reloader = ConfigReloader::new(ConfigManager::empty(), Vec::new());
-    let runtime = AppRuntime::new(Arc::from("test"), generation, reloader);
+    let runtime = AppRuntime::new(Arc::from("test"), generation, reloader, Arc::new(entries));
 
     (runtime, registry)
 }
@@ -144,5 +156,6 @@ fn expect_app_error<T>(result: crate::Result<T>, message: &str) -> Error {
     }
 }
 
+mod opener;
 mod release;
 mod scopes;

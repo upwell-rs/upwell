@@ -82,6 +82,7 @@ fn runtime_view(
         Arc::from("transition-test"),
         generation,
         ConfigReloader::new(ConfigManager::empty(), Vec::new()),
+        Arc::default(),
     )
     .view()
 }

@@ -161,7 +161,7 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             scope_orders,
             scope_layouts,
             seed_destinations,
-            entries: _,
+            entries,
             resolvers,
         } = self;
 
@@ -201,7 +201,7 @@ impl<D: ProtocolDefinition> PreparedApp<D> {
             effective_graph,
             condition,
         );
-        let runtime = AppRuntime::new(Arc::from(name.as_str()), generation, reloader);
+        let runtime = AppRuntime::new(Arc::from(name.as_str()), generation, reloader, entries);
 
         runtime_reloader.attach(&runtime);
 

@@ -313,6 +313,25 @@ let scope = opener
 - The ad hoc `open_scope_*` API, with its per-call validation, becomes framework-internal once the
   protocols move over, in line with the access rule above.
 
+Status (#346, #353 HTTP): `AppRuntime::opener::<S>()` returns the `ScopeOpener<S>`, and
+`ScopeOpener::entry(key)` resolves an entry once. `builder()` takes `.under(&parent)` (typed by
+`OpensUnder<P>`, with `Singleton` standing for the root) and `.seed(value)`, then
+`.open(&entry)` or `.open_default()`. The per-call path checks the parent topology and seeds
+only in debug builds; a seed without a slot still fails in release, when it is stored. Params
+on `builder` arrive with `#[scope]` (#405), and `.open(&entry)` uses the scope's layout until
+entries carry plans (#348). Axum's HTTP requests open through it: a hand-written layer keeps
+the opener in reach of the request's task, and the scope opens on the first `Inject` or
+`ScopeHandle` extraction (`ScopeHandle::of` for middleware holding the whole request), so a
+request that injects nothing opens no scope. `RequestMeta` is seeded from the request head
+when the scope opens. The request timeout is a hand-written layer too, so neither allocates a
+boxed `from_fn` future. RPC and WebSocket still use the ad hoc API, which stays public until
+they move.
+
+A request scope opened under an app-chosen parent, such as a per-user `Session` scope the
+app caches and reuses across requests, fits this design: the parent is picked when the scope
+opens (`.under(&session)`), never by re-parenting an open scope. It needs app-declared
+parents for protocol scopes, so it follows #405.
+
 ### Request data in protocol scopes
 
 Protocol scopes keep request data in three tiers, so scope params stay cheap and non-secret:
