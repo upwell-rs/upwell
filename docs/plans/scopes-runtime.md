@@ -343,7 +343,7 @@ trait, closed over their local dependencies (planned and unplanned edges alike).
 builds only those slots. Every slot is a once-cell, so a slot an opening left out is built on
 demand by `ScopeContainer::resolve`, `resolve_qualified` and `extract` (which `Inject` and `Lazy`
 go through): the slot and the local slots it reads, after ancestor slots it reads, once per scope
-instance under a per-container lock, on the instance's pinned generation. Synchronous reads
+instance, each in its own async once-cell, on the instance's pinned generation. Synchronous reads
 (`ScopeContainer::get`, `ComponentSource`, `RpcCallContext::component`) see only built slots.
 HTTP routes find their entry by method and matched path, RPC calls by method path, WebSocket
 messages by destination (`WsConnectionScope::open_message`); anything without an entry builds
