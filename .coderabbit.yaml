@@ -24,8 +24,9 @@ reviews:
         - A blank line after every block statement (if, for, match, while, loop), including before a return.
         - Variables declared at the top of their scope, grouped, then a blank line before the logic.
         - The return or trailing expression at the bottom, isolated by a blank line. Exempt: a function
-          or closure body of one or two lines, such as a lone expression or one binding followed by
-          the expression. Do not flag those.
+          or closure body of one or two statements, that is a lone expression or one statement followed
+          by the trailing expression, however many lines rustfmt wraps them over. Do not flag those, and
+          never ask for a blank line at the start or end of a block (rustfmt removes it).
         - No `//` comments in bodies, fields, or macro output. Allowed: SAFETY: notes, reasons for ignoring
           an error, and fn-level bug or odd-behavior notes.
         - Every struct, enum, and trait has a brief /// doc.
