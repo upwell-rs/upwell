@@ -168,23 +168,30 @@ _ci-test-extended archive workspace:
         --profile ci-extended \
         --filterset 'all() - ({{ critical_filter }})'
 
-bench *targets:
+# Criterion keeps reports and saved baselines in `benchmarks/criterion` (override with
+# `CRITERION_HOME`), outside `target/`, so `cargo clean` keeps the baselines. Arguments after
+
+# `--` go to Criterion: `just bench http_upwell -- --save-baseline before`.
+bench *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    targets=({{ targets }})
+    export CRITERION_HOME="${CRITERION_HOME:-{{ justfile_directory() }}/benchmarks/criterion}"
+    targets=()
+    criterion=()
+    forwarding=false
 
-    if [[ ${#targets[@]} -eq 0 ]]; then
-        cargo bench --manifest-path benchmarks/Cargo.toml --locked
-    else
-        args=()
+    for arg in {{ args }}; do
+        if [[ "$forwarding" == true ]]; then
+            criterion+=("$arg")
+        elif [[ "$arg" == "--" ]]; then
+            forwarding=true
+        else
+            targets+=(--bench "$arg")
+        fi
+    done
 
-        for target in "${targets[@]}"; do
-            args+=(--bench "$target")
-        done
-
-        cargo bench --manifest-path benchmarks/Cargo.toml --locked "${args[@]}"
-    fi
+    cargo bench --manifest-path benchmarks/Cargo.toml --locked "${targets[@]}" -- "${criterion[@]}"
 
 bench-lock:
     cargo metadata --manifest-path benchmarks/Cargo.toml --format-version 1 > /dev/null
