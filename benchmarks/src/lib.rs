@@ -17,6 +17,8 @@
 //! - [`reload`] — file-backed applications over those graphs for measuring whole reload
 //!   transitions.
 //! - [`http`] — in-process raw axum and Upwell routers for measuring per-request cost.
+//! - [`frameworks`] — the raw axum, summer-rs and Upwell comparison harness, in process and over
+//!   loopback TCP.
 //! - [`rpc`] — RPC routers and an RPC application for measuring per-call cost.
 //! - [`ws`] — an axum application for measuring per-message WebSocket scope cost.
 
@@ -24,6 +26,7 @@ pub mod alloc;
 pub mod cases;
 pub mod di;
 pub mod fan_in;
+pub mod frameworks;
 pub mod graph;
 pub mod http;
 pub mod measure;
