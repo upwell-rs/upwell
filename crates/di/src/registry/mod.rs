@@ -194,19 +194,22 @@ impl ComponentRegistry {
     /// Rejects an eager component of the root or the transient scope: neither opens scope
     /// instances, so there is no opening to build it on.
     fn validate_construction(components: &[ComponentDescriptor]) -> crate::Result<()> {
-        let misplaced = components.iter().find(|component| {
-            component.construction.is_eager()
-                && (component.scope.is_transient() || component.scope.id() == Singleton::ID)
-        });
+        for component in components.iter().filter(|c| c.construction.is_eager()) {
+            if component.scope.is_transient() || component.scope.id() == Singleton::ID {
+                return Err(Error::EagerOutsideScope {
+                    component_id: component.id.to_string(),
+                    scope: component.scope.name(),
+                });
+            }
 
-        match misplaced {
-            Some(component) => Err(Error::EagerOutsideScope {
-                component_id: component.id.to_string(),
-                scope: component.scope.name(),
-            }),
-
-            None => Ok(()),
+            if component.effective_factory()?.is_none() {
+                return Err(Error::EagerWithoutFactory {
+                    component_id: component.id.to_string(),
+                });
+            }
         }
+
+        Ok(())
     }
 
     /// Validates and topologically orders all providers independently per trait.

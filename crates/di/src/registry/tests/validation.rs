@@ -100,6 +100,33 @@ fn resolved_components_preserve_registration_order_through_manual_override() {
 }
 
 #[test]
+fn validate_rejects_eager_components_without_a_factory() {
+    let eager = ComponentDescriptor {
+        construction: crate::ScopedConstruction::Eager,
+        ..ComponentDescriptor::manual(
+            "seeded",
+            "Seeded",
+            TypeDescriptor::of::<u16>("Seeded"),
+            Request::KEY,
+        )
+    };
+    let registry = ComponentRegistry {
+        components: vec![eager],
+        ..Default::default()
+    };
+
+    let error = registry.validate();
+
+    assert!(
+        matches!(
+            error,
+            Err(Error::EagerWithoutFactory { component_id }) if component_id == "seeded"
+        ),
+        "a factory-less eager component is rejected"
+    );
+}
+
+#[test]
 fn validate_rejects_eager_components_outside_scopes_below_the_root() {
     for scope in [Singleton::KEY, crate::Transient::KEY] {
         let eager = ComponentDescriptor {

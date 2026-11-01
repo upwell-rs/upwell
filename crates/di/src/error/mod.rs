@@ -116,6 +116,13 @@ pub enum Error {
         scope: &'static str,
     },
 
+    /// An eager component has no factory, so a scope's opening cannot build it.
+    #[error("component '{component_id}' is eager but has no factory to build it with")]
+    EagerWithoutFactory {
+        /// Stable component identity.
+        component_id: String,
+    },
+
     #[error(
         "dependency '{dependency}' of component '{component_id}' resolves to '{target}' in scope '{scope}', which is not open on every chain of the consumer"
     )]
