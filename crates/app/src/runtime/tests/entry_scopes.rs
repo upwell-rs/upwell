@@ -27,7 +27,7 @@ async fn open_for(
         builder.seed(Visitor(*seed))
     });
 
-    builder.open_when_needed(&entry).await
+    builder.open_when_needed(Some(&entry)).await
 }
 
 #[tokio::test]

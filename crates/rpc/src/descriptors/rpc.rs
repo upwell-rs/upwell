@@ -48,11 +48,12 @@ pub struct ParameterDescriptor {
 /// Context passed to an RPC handler on invocation.
 ///
 /// Carries the raw postcard-encoded payload bytes and the call's **request
-/// scope**, layered request → connection → singleton, so `component::<T>()` and the
-/// `Inject<H>` extractor resolve singleton-, connection-, and request-scoped components
-/// uniformly through it. A call whose method's entry plans nothing opens its request scope
-/// only when something resolves from it. Handler extractors (e.g. `Payload<T>`) deserialize
-/// from `payload`.
+/// scope**, layered request → connection → singleton, so the `Inject<H>` extractor resolves
+/// singleton-, connection-, and request-scoped components uniformly through it, building them
+/// on demand. `component::<T>()` never builds: it returns only components already built, so a
+/// connection-scoped component is `None` until a call injects it. A call whose method's entry
+/// plans nothing opens its request scope only when something resolves from it. Handler
+/// extractors (e.g. `Payload<T>`) deserialize from `payload`.
 ///
 /// For streaming calls, `requests` holds the inbound item stream (taken once by
 /// the `Streaming<T>` extractor) and `cancel` fires when the peer cancels the

@@ -262,27 +262,30 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         self.open_with(Builds::Nothing).await
     }
 
-    /// Opens the instance to run `entry` as [`open`](Self::open) does, unless the entry's plan
-    /// builds nothing: then the container opens the first time something resolves from the
-    /// returned scope, with this builder's seeds. Until then, reads that never build see only
-    /// the scopes it opens under, not the seeds.
+    /// Opens the instance to run `entry` as [`open`](Self::open) does, or without an entry as
+    /// [`open_default`](Self::open_default) does, unless the entry's plan builds nothing: then
+    /// the container opens the first time something resolves from the returned scope, with
+    /// this builder's seeds. Until then, reads that never build see only the scopes it opens
+    /// under, not the seeds.
     ///
     /// # Errors
     ///
-    /// As [`open`](Self::open). Seeds and components are checked when the container opens.
-    pub async fn open_when_needed(self, entry: &ScopeEntry<S>) -> crate::Result<EntryScope<S>> {
+    /// As [`open`](Self::open). Seeds and components of an entry that plans nothing are
+    /// checked when the container opens.
+    pub async fn open_when_needed(
+        self,
+        entry: Option<&ScopeEntry<S>>,
+    ) -> crate::Result<EntryScope<S>> {
         let (view, parent) = self.target()?;
-        let plans_nothing = view
-            .scope_plan()
-            .layouts
-            .entry(entry.id)
-            .is_some_and(EntryPlan::is_empty);
+        let builds = match entry {
+            Some(entry) if plans_nothing(&view, entry) => {
+                return Ok(EntryScope::deferred(view, parent, entry.id, self.seeds));
+            }
 
-        if plans_nothing {
-            return Ok(EntryScope::deferred(view, parent, entry.id, self.seeds));
-        }
-
-        let container = open_in(view, S::ID, parent, Builds::Entry(entry.id), self.seeds).await?;
+            Some(entry) => Builds::Entry(entry.id),
+            None => Builds::Everything,
+        };
+        let container = open_in(view, S::ID, parent, builds, self.seeds).await?;
 
         Ok(EntryScope::from_container(container))
     }
@@ -321,6 +324,14 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
 
         Ok((view, parent))
     }
+}
+
+/// Whether the plan `view` prepared for `entry` builds nothing.
+fn plans_nothing<S: Scope>(view: &RuntimeView, entry: &ScopeEntry<S>) -> bool {
+    view.scope_plan()
+        .layouts
+        .entry(entry.id)
+        .is_some_and(EntryPlan::is_empty)
 }
 
 /// Builds an instance of `scope` under `parent` from the layout `view` prepared for it, with

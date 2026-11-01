@@ -164,7 +164,9 @@ pub type StompAuthFuture = Pin<
 ///
 /// The constant input is the [`StompConnect`] frame the authenticator must inspect; the
 /// connection's [`ScopeContainer`] is handed in too, so an implementation can resolve dependencies
-/// from DI. Where an implementation gets its dependencies is its own choice:
+/// from DI. The connection scope builds its components on demand, so resolve them with
+/// `extract` or `resolve`: `get` returns only components already built. Where an implementation
+/// gets its dependencies is its own choice:
 ///
 /// - **From parameters** — an async closure/fn whose arguments after `StompConnect` are injected
 ///   from the connection scope (anything a constructor parameter can be — `Arc<T>`, `Dep<T>`, a

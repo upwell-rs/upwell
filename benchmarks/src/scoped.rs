@@ -318,15 +318,10 @@ where
         }
 
         let builder = self.per_call.builder().under(&self.connection);
-        let opened = match self.entries.get(route) {
-            Some(entry) => builder.open_when_needed(entry).await,
-            None => builder
-                .open_default()
-                .await
-                .map(|scope| EntryScope::from_container(scope.into_container())),
-        };
-
-        opened.expect("benchmark per-call scope opens")
+        builder
+            .open_when_needed(self.entries.get(route))
+            .await
+            .expect("benchmark per-call scope opens")
     }
 }
 

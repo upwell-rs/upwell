@@ -18,8 +18,7 @@ use tokio_util::sync::CancellationToken;
 use tower::{Service, ServiceExt};
 use tracing::{debug, error, info, instrument, warn};
 use upwell_app::{
-    AppRuntime, EntryScope, OpenScope, ProtocolRuntime, ScopeEntry, ScopeOpener, Serve,
-    ShutdownSignal,
+    AppRuntime, OpenScope, ProtocolRuntime, ScopeEntry, ScopeOpener, Serve, ShutdownSignal,
 };
 use upwell_transport::{
     CallResult, Connection, Error as TransportError, PeerInfo, PredefinedCode, Respond,
@@ -481,15 +480,7 @@ async fn drive_call<R>(
     R: Respond + RespondStream + Send + 'static,
 {
     let builder = scopes.calls.builder().under(&connection_scope);
-    let opening = async {
-        match scopes.entries.get(path.as_str()) {
-            Some(entry) => builder.open_when_needed(entry).await,
-            None => builder
-                .open_default()
-                .await
-                .map(|scope| EntryScope::from_container(scope.into_container())),
-        }
-    };
+    let opening = builder.open_when_needed(scopes.entries.get(path.as_str()));
     let request_scope = match AssertUnwindSafe(opening).catch_unwind().await {
         Ok(Ok(scope)) => scope,
 
