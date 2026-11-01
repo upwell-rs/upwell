@@ -38,10 +38,10 @@ require_root() {
 
 # Holds off other `add` and `seed` runs, so a refresh never replaces the seed during a clone.
 lock_seed() {
-    local waited=0
+    local waited=0 error
 
-    until mkdir "$seed.lock" 2> /dev/null; do
-        [[ -d "$seed.lock" ]] || fail "cannot create $seed.lock; is the drive writable?"
+    until error="$(LC_ALL=C mkdir "$seed.lock" 2>&1)"; do
+        [[ "$error" == *"File exists"* ]] || fail "cannot create $seed.lock: $error"
         (( waited < 300 )) || fail "$seed.lock held for 5 minutes; if nothing is using it, remove it"
 
         sleep 1
@@ -130,6 +130,7 @@ remove() {
         [[ -z "$ignored" ]] || fail "$slice holds ignored local files, pass --force to delete them: $ignored"
     fi
 
+    lock_seed
     git -C "$repo" worktree unlock "$path"
 
     if ! git -C "$repo" worktree remove ${force:+"$force"} "$path"; then
@@ -138,6 +139,7 @@ remove() {
     fi
 
     git -C "$repo" worktree prune
+    unlock_seed
     echo "worktree: removed $path"
 }
 
