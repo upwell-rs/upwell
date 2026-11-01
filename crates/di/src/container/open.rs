@@ -140,7 +140,10 @@ impl ScopeContainer {
             slot,
         );
 
-        cx.use_layout(Arc::clone(layout));
+        cx.use_layout(
+            Arc::clone(layout),
+            plan.and_then(EntryPlan::declares).cloned(),
+        );
         cx.store_handles(HandleStorage::Fixed);
 
         for seed in seeds {

@@ -1,39 +1,32 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use super::model::{ConfigSettings, DirSettings, ManagerSource, ManagerValue};
+use super::model::{AppAssembly, ConfigSettings, DirSettings, ManagerSource, ManagerValue};
 use crate::{di, paths::Paths};
 
-/// Expands a builder using paths already resolved by a named host.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn expand_with_paths(
-    name: &syn::Expr,
-    protocol: &syn::Type,
-    services: &[syn::Type],
-    components: &[syn::Expr],
-    configs: &[super::model::ConfigEntry],
-    config_manager: &Option<ManagerSource<ConfigSettings>>,
-    directories_manager: &Option<ManagerSource<DirSettings>>,
-    middleware: &[syn::Expr],
-    guards: &[syn::Expr],
-    error_handler: &Option<syn::Expr>,
-    paths: &Paths,
-) -> TokenStream {
-    let config_tys = configs.iter().map(|entry| &entry.ty);
-    let config_paths = configs.iter().map(|entry| &entry.path);
+/// Expands the builder `assembly` declares, using paths already resolved by a named host.
+pub(super) fn expand_with_paths(assembly: &AppAssembly, paths: &Paths) -> TokenStream {
+    let name = &assembly.name.value;
+    let protocol = &assembly.protocol.value;
+    let components = &assembly.components;
+    let middleware = &assembly.middleware;
+    let guards = &assembly.guards;
+    let config_tys = assembly.configs.iter().map(|entry| &entry.ty);
+    let config_paths = assembly.configs.iter().map(|entry| &entry.path);
     let app_ty = paths.core("App");
-    let assertion = expand_service_assertion(services, paths);
+    let assertion = expand_service_assertion(&assembly.services, paths);
     let (directories_binding, directories_call, directories_available) =
-        match expand_directories(directories_manager, paths) {
+        match expand_directories(&assembly.directories_manager, paths) {
             Ok(expansion) => expansion,
             Err(error) => return error,
         };
     let (config_binding, config_call) =
-        match expand_config(config_manager, directories_available, paths) {
+        match expand_config(&assembly.config_manager, directories_available, paths) {
             Ok(expansion) => expansion,
             Err(error) => return error,
         };
-    let error_handler = error_handler.iter();
+    let deny_unplanned = assembly.deny_unplanned.then(|| quote!(.deny_unplanned()));
+    let error_handler = assembly.error_handler.iter();
 
     quote! {
         {
@@ -44,6 +37,7 @@ pub(super) fn expand_with_paths(
 
             #app_ty::<#protocol>::builder(#name)
                 .auto_discover()
+                #deny_unplanned
                 #(.with_component(#components))*
                 #(.config::<#config_tys>(#config_paths))*
                 #config_call

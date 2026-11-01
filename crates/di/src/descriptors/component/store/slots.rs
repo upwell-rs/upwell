@@ -21,11 +21,13 @@ struct SlotValue {
 /// open scope allocates only its values. Each slot is set once: in `values` while the scope
 /// opens, or in `later` when a slot its opening did not build is built on demand. The second
 /// set is allocated by the first such build, so a scope whose opening built everything it
-/// uses reads plain values.
+/// uses reads plain values. `declares`, when set, lists the only slots that may be built on
+/// demand.
 pub(crate) struct SlotStore {
     layout: Arc<SlotLayout>,
     values: Box<[Option<SlotValue>]>,
     later: OnceLock<Box<Later>>,
+    declares: Option<Arc<[bool]>>,
 }
 
 /// The slots of an open scope built on demand. Each cell is initialized by one build, which
@@ -35,13 +37,14 @@ struct Later {
 }
 
 impl SlotStore {
-    pub(crate) fn new(layout: Arc<SlotLayout>) -> Self {
+    pub(crate) fn new(layout: Arc<SlotLayout>, declares: Option<Arc<[bool]>>) -> Self {
         let values = layout.slots().iter().map(|_| None).collect();
 
         Self {
             layout,
             values,
             later: OnceLock::new(),
+            declares,
         }
     }
 
@@ -105,7 +108,8 @@ impl SlotStore {
     /// Builds `slot` in the open scope with `build`, unless it holds its instance already.
     ///
     /// Concurrent calls for the same slot run one build and wait for it. The output is checked
-    /// as [`insert_at`](Self::insert_at) checks it.
+    /// as [`insert_at`](Self::insert_at) checks it. A slot the store does not declare is
+    /// rejected before it is built.
     pub(crate) async fn build_later(
         &self,
         slot: SlotIdx,
@@ -113,6 +117,17 @@ impl SlotStore {
     ) -> crate::Result<()> {
         if self.values[slot.index()].is_some() {
             return Ok(());
+        }
+
+        if self
+            .declares
+            .as_ref()
+            .is_some_and(|declares| !declares[slot.index()])
+        {
+            return Err(Error::UndeclaredConstruction {
+                component: self.layout.spec(slot).component.name,
+                scope: self.layout.scope().name(),
+            });
         }
 
         self.later().values[slot.index()]

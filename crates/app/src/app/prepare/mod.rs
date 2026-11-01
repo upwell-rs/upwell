@@ -258,7 +258,13 @@ fn plan_effective_graph(
     registry.validate_effective_with_scope_topology(resolved, selection, topology)?;
     crate::entry::validate_targets(registry, selection, topology)?;
 
-    let scopes = ScopePlan::partition(resolved, selection, topology, &registry.entries)?;
+    let scopes = ScopePlan::partition(
+        resolved,
+        selection,
+        topology,
+        &registry.entries,
+        registry.unplanned,
+    )?;
 
     Ok((graph, scopes))
 }

@@ -90,7 +90,7 @@ fn a_slot_rejects_an_instance_of_another_component() {
     let layout = fixture
         .inner(&selection, &[fixture.handler])
         .expect("the inner scope plans");
-    let mut store = ScopeStore::Slots(SlotStore::new(Arc::new(layout)));
+    let mut store = ScopeStore::Slots(SlotStore::new(Arc::new(layout), None));
     let built = BoxedComponent {
         ty: TypeDescriptor::of::<Consumer>("Consumer"),
         value: Box::new(()),

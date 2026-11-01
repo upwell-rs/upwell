@@ -138,6 +138,17 @@ pub enum Error {
         scope: &'static str,
     },
 
+    /// A scope opened for an entry under `UnplannedConstruction::Deny` was asked to build,
+    /// on demand, a component the entry does not declare.
+    #[error(
+        "component '{component}' was resolved in scope '{scope}' without being declared by the \
+         entry the scope was opened for"
+    )]
+    UndeclaredConstruction {
+        component: &'static str,
+        scope: &'static str,
+    },
+
     /// A scope was opened with a seed for a component one of its factories builds.
     #[error(
         "scope '{scope}' was opened with a seed for component '{component}', which its factory builds"

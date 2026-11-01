@@ -176,6 +176,7 @@ impl AppAssembly {
         let mut middleware = Vec::new();
         let mut guards = Vec::new();
         let mut error_handler = None;
+        let mut deny_unplanned = false;
         let mut plugins = Vec::new();
         let mut upwell = None;
         let mut phases = AppPhases::default();
@@ -218,6 +219,7 @@ impl AppAssembly {
                 "middleware" => middleware = bracketed_list(input)?,
                 "guards" => guards = bracketed_list(input)?,
                 "error_handler" => error_handler = Some(input.parse()?),
+                "deny_unplanned" => deny_unplanned = input.parse::<LitBool>()?.value,
                 "plugins" => plugins = parse_plugins(input)?,
                 "upwell" => upwell = Some(input.parse()?),
                 "cli" => cli_policy = super::policy::parse(input)?,
@@ -229,8 +231,9 @@ impl AppAssembly {
                         format!(
                             "unknown `app!` key `{other}`, expected `name`, `protocol`, \
                              `services`, `components`, `configs`, `managers`, `middleware`, \
-                             `guards`, `error_handler`, `plugins`, `cli`, `args`, `commands`, \
-                             `upwell`, `setup`, `configure`, `before_build`, `after_build`, or `serve`"
+                             `guards`, `error_handler`, `deny_unplanned`, `plugins`, `cli`, \
+                             `args`, `commands`, `upwell`, `setup`, `configure`, `before_build`, \
+                             `after_build`, or `serve`"
                         ),
                     ));
                 }
@@ -260,6 +263,7 @@ impl AppAssembly {
             middleware,
             guards,
             error_handler,
+            deny_unplanned,
             plugins,
             upwell,
             phases,

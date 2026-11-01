@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::test_support::{component, test_component};
-use crate::{FromContainer, dispatch_factory, factory_dependencies};
+use crate::{FromContainer, UnplannedConstruction, dispatch_factory, factory_dependencies};
 
 /// Builds counted so far, per component.
 static LEAVES: AtomicUsize = AtomicUsize::new(0);
@@ -101,10 +101,19 @@ async fn open_under(
 /// The plan of an entry injecting `targets` into `layout`, whose components select no
 /// providers.
 fn entry_plan(layout: &crate::SlotLayout, targets: &[DependencyDescriptor]) -> crate::EntryPlan {
+    entry_plan_under(layout, targets, UnplannedConstruction::Allow)
+}
+
+/// As [`entry_plan`], under the `unplanned` construction policy.
+fn entry_plan_under(
+    layout: &crate::SlotLayout,
+    targets: &[DependencyDescriptor],
+    unplanned: UnplannedConstruction,
+) -> crate::EntryPlan {
     let selection = crate::registry::ProviderSelectionModel::new(&[], Vec::new(), HashMap::new())
         .expect("an empty selection model validates");
 
-    layout.plan_entry(targets, &selection, |_, _| true)
+    layout.plan_entry(targets, &selection, |_, _| true, unplanned)
 }
 
 fn builds() -> [usize; 3] {
@@ -276,5 +285,6 @@ async fn a_child_builds_the_parent_slots_its_planned_factories_read() {
     ));
 }
 
+mod declared;
 mod deferred;
 mod providers;

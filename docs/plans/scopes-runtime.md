@@ -354,7 +354,16 @@ resolves it, its seed must be supplied when its scope opens, or that resolution 
 resolution of one value builds only the component it names or the provider runtime selection
 picks; a collection or keyed map builds every provider. Each on-demand slot is its own async once-cell, so
 a factory built on demand may itself resolve another left-out slot of its scope. Tooling labels
-each entry with the components it `builds`. `deny_unplanned` strict mode is not implemented.
+each entry with the components it `builds`.
+
+Status (#349, strict mode and deferred cycles): `AppBuilder::deny_unplanned()` (or
+`deny_unplanned: true` in `app!`) sets `UnplannedConstruction::Deny` on the registry. Each
+entry plan then also records the slots the entry declares: the ones it builds and the ones its
+lazy and deferred targets reach. A scope opened for that entry fails with
+`UndeclaredConstruction` when something builds an undeclared slot on demand. Scopes opened
+without an entry (connection scopes, `open_default`) still build on demand. The slots one
+on-demand resolution builds form a group whose deferred dependencies are hydrated once the
+whole group is built, so a deferred cycle left out of an opening is built as a unit.
 
 Status (#353, empty plans and connection scopes): `ScopeBuilder::open_when_needed(Some(&entry))`
 returns an `EntryScope<S>`. When the entry's plan builds nothing it allocates no container:

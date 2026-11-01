@@ -35,8 +35,14 @@ fn duplicate_qualifiers_across_scopes_plan_the_runtime_visible_provider() {
         &shared_provider_dependency(),
         |consumer, dependency| topology().is_reachable(&consumer, &dependency),
     );
-    let plan = ScopePlan::partition(&descriptors, &selection, &topology(), &[])
-        .expect("cross-scope duplicate qualifier plans");
+    let plan = ScopePlan::partition(
+        &descriptors,
+        &selection,
+        &topology(),
+        &[],
+        UnplannedConstruction::Allow,
+    )
+    .expect("cross-scope duplicate qualifier plans");
 
     assert!(matches!(
         selected.as_slice(),
@@ -102,8 +108,14 @@ fn reordered_transient_selection_plans_its_eager_dependencies() {
         &reordered_provider_dependency(),
         |consumer, dependency| consumer == dependency,
     );
-    let plan = ScopePlan::partition(&descriptors, &selection, &topology(), &[])
-        .expect("selected transient dependency plans");
+    let plan = ScopePlan::partition(
+        &descriptors,
+        &selection,
+        &topology(),
+        &[],
+        UnplannedConstruction::Allow,
+    )
+    .expect("selected transient dependency plans");
     let order = plan
         .singletons
         .iter()

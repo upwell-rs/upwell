@@ -141,6 +141,7 @@ async fn resolving_one_provider_builds_only_the_selected_one() {
         &[<Arc<dyn Probe> as FromContainer>::dependency()],
         &selection,
         |_, _| true,
+        UnplannedConstruction::Allow,
     );
     let planned = open_under(root().await, Arc::clone(&registry), &layout, Some(&plan))
         .await

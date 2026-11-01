@@ -6,7 +6,7 @@ use std::sync::Arc;
 use upwell_core::{Scope, ScopeId, Singleton, Transient};
 use upwell_di::{
     ComponentDescriptor, EffectiveGraph, EntryPlan, ProviderSelectionModel, SlotLayout,
-    topological_sort,
+    UnplannedConstruction, topological_sort,
 };
 
 use super::PreparedScopeTopology;
@@ -35,19 +35,24 @@ pub(crate) struct ScopeLayouts {
 
 impl ScopeLayouts {
     /// Plans every entry of `entries` against the scope layouts `by_scope`, selecting
-    /// providers as `selection` does over `topology`. An entry into the root scope has no plan.
+    /// providers as `selection` does over `topology`, under the `unplanned` construction
+    /// policy. An entry into the root scope has no plan.
     pub(crate) fn new(
         by_scope: HashMap<ScopeId, Arc<SlotLayout>>,
         entries: &[EntryDescriptor],
+        unplanned: UnplannedConstruction,
         selection: &ProviderSelectionModel,
         topology: &PreparedScopeTopology,
     ) -> Self {
         let entries = crate::entry::in_table_order(entries)
             .map(|entry| {
                 by_scope.get(&entry.scope.id()).map(|layout| {
-                    layout.plan_entry(&(entry.targets)(), selection, |consumer, dependency| {
-                        topology.is_reachable(&consumer, &dependency)
-                    })
+                    layout.plan_entry(
+                        &(entry.targets)(),
+                        selection,
+                        |consumer, dependency| topology.is_reachable(&consumer, &dependency),
+                        unplanned,
+                    )
                 })
             })
             .collect();
@@ -84,18 +89,21 @@ struct DescriptorPartitions {
 }
 
 impl ScopePlan {
-    /// Partitions resolved descriptors and computes each boundary's local factory order.
+    /// Partitions resolved descriptors, computes each boundary's local factory order and
+    /// plans `entries` under the `unplanned` construction policy.
     pub(crate) fn partition(
         resolved: &[ComponentDescriptor],
         selection: &ProviderSelectionModel,
         topology: &PreparedScopeTopology,
         entries: &[EntryDescriptor],
+        unplanned: UnplannedConstruction,
     ) -> crate::Result<Self> {
         let partitions = DescriptorPartitions::classify(resolved, topology)?;
         let orders = partitions.orders(topology, selection)?;
         let layouts = ScopeLayouts::new(
             partitions.layouts(&orders, topology, selection)?,
             entries,
+            unplanned,
             selection,
             topology,
         );
