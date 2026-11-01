@@ -81,7 +81,7 @@ test-critical:
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest run \
         --workspace \
         --all-features \
@@ -94,7 +94,7 @@ test-extended:
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest run \
         --workspace \
         --all-features \
@@ -113,7 +113,7 @@ test-config:
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest show-config version --profile ci-critical
     cargo nextest show-config version --profile ci-extended
     cargo nextest show-config test-groups \
@@ -132,7 +132,7 @@ test-archive archive:
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest archive \
         --workspace \
         --all-features \
@@ -150,7 +150,7 @@ _ci-test-critical archive workspace:
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest run \
         --archive-file '{{ archive }}' \
         --workspace-remap '{{ workspace }}' \
@@ -162,7 +162,7 @@ _ci-test-extended archive workspace:
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest run \
         --archive-file '{{ archive }}' \
         --workspace-remap '{{ workspace }}' \
