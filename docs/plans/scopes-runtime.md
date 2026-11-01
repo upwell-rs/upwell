@@ -356,7 +356,7 @@ picks; a collection or keyed map builds every provider. Each on-demand slot is i
 a factory built on demand may itself resolve another left-out slot of its scope. Tooling labels
 each entry with the components it `builds`. `deny_unplanned` strict mode is not implemented.
 
-Status (#353, empty plans and connection scopes): `ScopeBuilder::open_when_needed(&entry)`
+Status (#353, empty plans and connection scopes): `ScopeBuilder::open_when_needed(Some(&entry))`
 returns an `EntryScope<S>`. When the entry's plan builds nothing it allocates no container:
 reads that never build go to the parent, so they do not see the builder's seeds yet, and the
 container opens with the seeds the first time something resolves from it, on the generation the

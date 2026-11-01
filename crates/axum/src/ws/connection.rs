@@ -56,13 +56,9 @@ impl WsConnectionScope {
         destination: &str,
         builder: ScopeBuilder<'_, WebsocketMessage, WebsocketConnection>,
     ) -> upwell_app::Result<EntryScope<WebsocketMessage>> {
-        match self.entries.get(destination) {
-            Some(entry) => builder.open_when_needed(entry).await,
-            None => builder
-                .open_default()
-                .await
-                .map(|scope| EntryScope::from_container(scope.into_container())),
-        }
+        builder
+            .open_when_needed(self.entries.get(destination))
+            .await
     }
 }
 
