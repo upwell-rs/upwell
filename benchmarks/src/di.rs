@@ -21,7 +21,7 @@ use std::sync::Arc;
 use upwell_core::{ResolverSet, Scope, ScopeKey, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentDescriptor, ComponentRegistry, Injectable, Live,
-    ProviderDescriptor, ScopeContainer, ScopeRegistry,
+    ProviderDescriptor, ScopeContainer, ScopeRegistry, SlotLayout,
 };
 
 /// The heap payload a [`Payloaded`] component carries.
@@ -306,6 +306,81 @@ pub async fn build_with_providers(entries: &[Entry], count: usize) -> Arc<ScopeC
         .expect("provider root builds")
 }
 
+/// Builds a chain of `layers` scopes, each opened from its slot layout and seeding one component,
+/// whose root holds the primary `dyn Svc` provider, so extracting `Arc<dyn Svc>` from the deepest
+/// scope reads the provider its layout selected when the chain was planned.
+pub async fn build_trait_chain(entries: &[Entry], layers: usize) -> Arc<ScopeContainer> {
+    assert!(layers >= 1 && layers <= LAYER_SCOPES.len(), "1..=8 layers");
+
+    let components: Vec<ComponentDescriptor> = (0..layers)
+        .map(|layer| ComponentDescriptor {
+            scope: LAYER_SCOPES[layer],
+            ..entries[layer].desc
+        })
+        .collect();
+    let providers = vec![entries[0].provider.primary()];
+    let graph = ComponentRegistry {
+        components: components.clone(),
+        providers: providers.clone(),
+    };
+    let selection = graph
+        .provider_selection_model(&components)
+        .expect("benchmark provider selection validates");
+    let provider_order = graph
+        .provider_order(&components)
+        .expect("benchmark provider ordering validates");
+    let registry = Arc::new(
+        ScopeRegistry::new(
+            HashMap::new(),
+            components
+                .iter()
+                .map(|component| (component.ty.type_id, *component))
+                .collect(),
+            providers,
+            provider_order,
+        )
+        .expect("trait scope registry validates"),
+    );
+    let mut container = ScopeContainer::build_root(
+        &[],
+        vec![(entries[0].make)()],
+        ResolverSet::new(),
+        Arc::clone(&registry),
+    )
+    .await
+    .expect("trait root builds");
+    let mut ancestors = HashMap::new();
+
+    for layer in 1..layers {
+        let scope = LAYER_SCOPES[layer];
+        let layout = Arc::new(
+            SlotLayout::plan(
+                scope,
+                &components[layer..=layer],
+                &[],
+                &ancestors,
+                &selection,
+                |_, _| true,
+            )
+            .expect("trait layer plans"),
+        );
+
+        container = ScopeContainer::open_planned(
+            container,
+            Arc::clone(&registry),
+            &layout,
+            None,
+            vec![(entries[layer].make)()],
+            Arc::new(()),
+        )
+        .await
+        .expect("trait layer opens");
+        ancestors.insert(scope.id(), layout);
+    }
+
+    container
+}
+
 /// Resolves a root-scoped component through `container` — from the deepest scope this walks the
 /// entire parent chain. Returns whether it resolved, for the bench to black-box.
 pub fn resolve_root(container: &ScopeContainer) -> bool {
@@ -332,4 +407,9 @@ pub async fn extract_collection(container: &Arc<ScopeContainer>) -> usize {
         .await
         .map(|all| all.len())
         .unwrap_or(0)
+}
+
+/// Extracts the primary `Arc<dyn Svc>` provider, the trait-target path a handler parameter takes.
+pub async fn extract_trait(container: &Arc<ScopeContainer>) -> bool {
+    container.extract::<Arc<dyn Svc>>().await.is_ok()
 }
