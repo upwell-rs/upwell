@@ -120,6 +120,8 @@ remove() {
 
     [[ -d "$path" ]] || fail "$path does not exist; is the drive connected?"
 
+    lock_seed
+
     if [[ "$force" != "--force" ]]; then
         unpushed="$(git -C "$path" log --oneline HEAD --not --remotes | wc -l | tr -d ' ')"
 
@@ -130,7 +132,6 @@ remove() {
         [[ -z "$ignored" ]] || fail "$slice holds ignored local files, pass --force to delete them: $ignored"
     fi
 
-    lock_seed
     git -C "$repo" worktree unlock "$path"
 
     if ! git -C "$repo" worktree remove ${force:+"$force"} "$path"; then
