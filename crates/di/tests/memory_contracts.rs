@@ -319,8 +319,6 @@ fn di_memory_contracts() {
         "ScopeContainer::get allocated on the resolution hot path"
     );
 
-    // Request-time extraction of a built component allocates nothing across many calls, and
-    // every call succeeds.
     let (extracted, extract_delta) = measure(|| {
         block_on(async {
             let mut extracted = 0usize;
