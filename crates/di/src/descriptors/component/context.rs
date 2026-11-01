@@ -47,6 +47,9 @@ pub struct ComponentConstructionContext {
     change: Option<crate::ComponentChange>,
     /// How the handles built here are stored.
     storage: HandleStorage,
+    /// The slot deferred dependencies register with instead of this scope's, when a group of
+    /// slots built on demand hydrates them once every slot of the group is built.
+    hydrates: Option<crate::container::ScopeResolverSlot>,
 }
 
 /// How a construction context stores the handles its factories build.
@@ -122,6 +125,7 @@ impl ComponentConstructionContext {
             previous: None,
             change: None,
             storage: HandleStorage::Swappable,
+            hydrates: None,
         }
     }
 
@@ -150,6 +154,7 @@ impl ComponentConstructionContext {
             previous: None,
             change: None,
             storage: HandleStorage::Swappable,
+            hydrates: None,
         }
     }
 
@@ -262,13 +267,25 @@ impl ComponentConstructionContext {
         crate::Fresh::capture(self.resolver_slot(), qualifier)
     }
 
-    /// Registers a weak deferred target for hydration after this scope finishes construction.
+    /// Registers a weak deferred target for hydration after this scope finishes construction,
+    /// or after the group of on-demand builds this context runs in.
     #[doc(hidden)]
     pub fn deferred<T>(&self, qualifier: Option<&'static str>) -> crate::Result<crate::Deferred<T>>
     where
         T: ?Sized + Send + Sync + 'static,
     {
-        crate::Deferred::capture(self.resolver_slot(), qualifier)
+        let slot = match &self.hydrates {
+            Some(group) => group.clone(),
+            None => self.resolver_slot(),
+        };
+
+        crate::Deferred::capture(slot, qualifier)
+    }
+
+    /// Registers the deferred dependencies this context captures with `group`, which
+    /// hydrates them once every slot built on demand with it is built.
+    pub(crate) fn hydrate_with(&mut self, group: crate::container::ScopeResolverSlot) {
+        self.hydrates = Some(group);
     }
 
     /// Captures this construction scope for qualified lazy trait resolution.

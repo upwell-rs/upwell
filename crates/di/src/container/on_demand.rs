@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tracing::debug;
 use upwell_core::{Cardinality, ResolutionMode, ScopeId, ScopeKey};
 
-use super::ScopeContainer;
+use super::{ScopeContainer, ScopeResolverSlot};
 use crate::descriptors::component::{ComponentConstructionContext, HandleStorage, Running};
 use crate::descriptors::{BoxedComponent, ComponentFactoryDescriptor};
 use crate::layout::{DepRef, EagerSelection, PlannedDependency, SlotIdx, SlotLayout};
@@ -178,10 +178,30 @@ impl ScopeContainer {
 
     /// Builds the slots in `needed` that are still empty, in layout order, so each reads
     /// dependencies built before it.
+    ///
+    /// The slots form one group: deferred dependencies their factories capture are hydrated
+    /// once all of them are built, so a deferred cycle left out of the opening is built as a
+    /// unit. When a build fails, hydrating the slots built before it is still attempted and the
+    /// build's error is returned.
     async fn build_missing(
         self: &Arc<Self>,
         layout: &SlotLayout,
         needed: &[bool],
+    ) -> crate::Result<()> {
+        let group = ScopeResolverSlot::default();
+        let built = self.build_group(layout, needed, &group).await;
+        let hydrated = group.attach(self);
+
+        built.and(hydrated)
+    }
+
+    /// Builds the slots in `needed` that are still empty, registering their deferred
+    /// dependencies with `group`.
+    async fn build_group(
+        self: &Arc<Self>,
+        layout: &SlotLayout,
+        needed: &[bool],
+        group: &ScopeResolverSlot,
     ) -> crate::Result<()> {
         let store = self
             .store
@@ -201,19 +221,24 @@ impl ScopeContainer {
 
             Self::ensure_ancestor_sources(self.parent.as_ref(), &spec.dependencies).await?;
             store
-                .build_later(slot, self.build_slot(slot, spec.component.name, factory))
+                .build_later(
+                    slot,
+                    self.build_slot(slot, spec.component.name, factory, group.clone()),
+                )
                 .await?;
         }
 
         Ok(())
     }
 
-    /// Runs the factory of `slot` against this open scope.
+    /// Runs the factory of `slot` against this open scope, hydrating its deferred
+    /// dependencies with `group`.
     async fn build_slot(
         self: &Arc<Self>,
         slot: SlotIdx,
         component: &'static str,
         factory: &ComponentFactoryDescriptor,
+        group: ScopeResolverSlot,
     ) -> crate::Result<BoxedComponent> {
         debug!(
             target: "upwell::di",
@@ -233,6 +258,7 @@ impl ScopeContainer {
         cx.use_opened(Arc::clone(self));
         cx.store_handles(HandleStorage::Fixed);
         cx.set_running(Running::Slot(slot));
+        cx.hydrate_with(group);
 
         factory.build(&mut cx).await
     }
