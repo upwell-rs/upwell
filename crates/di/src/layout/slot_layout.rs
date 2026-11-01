@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use upwell_core::ScopeKey;
 
-use super::{PlannedDependency, SlotRef};
+use super::{PlannedDependency, SelectedSource, SelectedSources, SlotRef};
 use crate::descriptors::{ComponentDescriptor, ComponentFactoryDescriptor, ProviderDescriptor};
 
 /// The position of one component in a scope's slot layout.
@@ -54,9 +54,10 @@ pub(crate) struct ProviderSlot {
 ///
 /// Slots are in one topological order, seeds first. Every eager dependency edge of every
 /// factory is resolved to its source once, so construction never selects providers. The
-/// type and trait indexes serve dynamic lookups and are built once with the layout, as is
-/// the eager set: the slots of [`ScopedConstruction::Eager`] components and their
-/// dependencies in this scope, which every opening builds.
+/// type and trait indexes serve dynamic lookups and are built once with the layout, as are
+/// the sources single-value trait dependencies select from the scope and the eager set: the
+/// slots of [`ScopedConstruction::Eager`] components and their dependencies in this scope,
+/// which every opening builds.
 ///
 /// [`ScopedConstruction::Eager`]: crate::ScopedConstruction::Eager
 #[derive(Debug)]
@@ -66,6 +67,7 @@ pub struct SlotLayout {
     pub(super) eager: Box<[bool]>,
     pub(super) by_type: HashMap<TypeId, SlotIdx>,
     pub(super) by_trait: HashMap<TypeId, Box<[ProviderSlot]>>,
+    pub(super) selected: SelectedSources,
     pub(super) constructs: bool,
     pub(super) captures: bool,
 }
@@ -134,6 +136,16 @@ impl SlotLayout {
 
     pub(crate) fn slot_of(&self, type_id: TypeId) -> Option<SlotIdx> {
         self.by_type.get(&type_id).copied()
+    }
+
+    /// The source a single-value dependency on trait `target` with `qualifier` selects from
+    /// this scope, when it is a planned, non-transient instance.
+    pub(crate) fn selected(
+        &self,
+        target: TypeId,
+        qualifier: Option<&str>,
+    ) -> Option<&SelectedSource> {
+        self.selected.get(target, qualifier)
     }
 
     /// The provider aliases of `trait_id` in this scope, in provider order.

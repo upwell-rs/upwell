@@ -170,6 +170,11 @@ impl ProviderSelectionModel {
         self.by_trait.get(&trait_id).map_or(&[], Vec::as_slice)
     }
 
+    /// Every trait at least one provider provides.
+    pub(crate) fn traits(&self) -> impl Iterator<Item = TypeId> + '_ {
+        self.by_trait.keys().copied()
+    }
+
     pub(crate) fn providers_for_concrete(&self, concrete: TypeId) -> &[ProviderDescriptor] {
         self.by_concrete.get(&concrete).map_or(&[], Vec::as_slice)
     }

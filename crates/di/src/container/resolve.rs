@@ -8,7 +8,7 @@ use upwell_core::{ResolutionMode, Scope, ScopeKey, Transient};
 use super::{ScopeContainer, construct_transient, construct_transient_provider};
 use crate::descriptors::component::{ComponentConstructionContext, SharedStore, from_boxed};
 use crate::descriptors::{Component, Injectable, ProviderDescriptor};
-use crate::layout::{RootTarget, SlotLayout, SlotRef};
+use crate::layout::{DepRef, RootTarget, SlotLayout, SlotRef};
 
 impl ScopeContainer {
     /// Returns the registered component of type `T` as its handle (`Arc<T>` by
@@ -22,6 +22,10 @@ impl ScopeContainer {
     /// `Transient` — constructs a fresh instance.
     pub async fn resolve<H: Injectable>(self: &Arc<Self>) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
+
+        if let Some(handle) = self.selected_built::<H>(target, None) {
+            return Ok(Some(handle));
+        }
 
         if let Some(provider) = self.registry.selected_runtime_provider(
             target,
@@ -72,6 +76,11 @@ impl ScopeContainer {
         qualifier: &str,
     ) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
+
+        if let Some(handle) = self.selected_built::<H>(target, Some(qualifier)) {
+            return Ok(Some(handle));
+        }
+
         let Some(provider) = self.registry.selected_runtime_provider(
             target,
             Some(qualifier),
@@ -114,7 +123,9 @@ impl ScopeContainer {
     /// `Injectable` subset that [`resolve`](Self::resolve) covers.
     ///
     /// A single component already built in this scope or the scopes it opens under is read
-    /// directly, without selecting providers or creating a construction context.
+    /// directly, without selecting providers or creating a construction context. A trait
+    /// is read from the provider its scope's layout selected when the generation was
+    /// prepared.
     pub async fn extract<H: crate::construct::FromContainer>(self: &Arc<Self>) -> crate::Result<H> {
         if let Some(value) = H::read_built(self) {
             return Ok(value);
@@ -150,9 +161,9 @@ impl ScopeContainer {
         H::from_container(&cx).await
     }
 
-    /// The component of type `H::Target` built in this scope or the scopes it opens under,
-    /// found by its concrete type alone. `None` when the type is also provided as a trait,
-    /// since runtime selection then decides which instance it resolves to.
+    /// The component of type `H::Target` built in this scope or the scopes it opens under.
+    /// A type nothing provides as a trait is found by its concrete type alone; one that is
+    /// provided as a trait is read through [`selected_built`](Self::selected_built).
     pub(crate) fn built_component<H: Injectable>(&self) -> Option<H> {
         let type_id = TypeId::of::<H::Target>();
         let mut current = self;
@@ -163,7 +174,7 @@ impl ScopeContainer {
             .providers_for_trait(type_id)
             .is_empty()
         {
-            return None;
+            return self.selected_built::<H>(type_id, None);
         }
 
         loop {
@@ -172,6 +183,56 @@ impl ScopeContainer {
             }
 
             current = current.parent.as_deref()?;
+        }
+    }
+
+    /// The built provider of trait `target`, selected by `qualifier`, that runtime selection
+    /// picks from this scope, read from the source this scope's layout selected for it.
+    ///
+    /// `None` sends the caller down runtime selection: when this scope was not opened from a
+    /// layout, the layout selected no planned non-transient source, a scope on this chain
+    /// shadows the selected provider, the source is not readable on this chain (an
+    /// enclosing scope opened without that layout), or the instance is not built yet.
+    ///
+    /// Like planned edges, this relies on a provider's instance living only in the store of
+    /// its component's scope, so the source holds the instance selection would read, and on
+    /// a scope being opened with the registry of the selection its layout was planned from.
+    pub(crate) fn selected_built<H: Injectable>(
+        &self,
+        target: TypeId,
+        qualifier: Option<&str>,
+    ) -> Option<H> {
+        let layout = self.store.slots()?.layout();
+        let selected = layout.selected(target, qualifier)?;
+
+        if selected
+            .shadowed_by
+            .iter()
+            .any(|scope| self.can_access(*scope))
+        {
+            return None;
+        }
+
+        match &selected.source {
+            DepRef::Local(at) => self.planned::<H>(layout, *at),
+            source => self.read_enclosing::<H>(source),
+        }
+    }
+
+    /// The handle a planned source outside a scope's own slots resolves to, read from this
+    /// scope's chain: an enclosing scope's slot when that scope was opened from the planned
+    /// layout, or the root's singleton. `None` for any other source.
+    pub(crate) fn read_enclosing<H: Injectable>(&self, source: &DepRef) -> Option<H> {
+        match source {
+            DepRef::Ancestor { layout, at } => {
+                self.ancestor(layout.scope())?.planned::<H>(layout, *at)
+            }
+            DepRef::Root(target) => self.root_container().root_target::<H>(target),
+            DepRef::Local(_)
+            | DepRef::Transient(_)
+            | DepRef::Many(_)
+            | DepRef::Absent
+            | DepRef::Unplanned => None,
         }
     }
 

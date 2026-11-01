@@ -432,9 +432,30 @@ Status (#354, extract fast path): `ScopeContainer::extract` first tries
 when `T` is already built in the scope chain and nothing provides `T` as a trait, the value is
 read by its concrete type, with no provider selection and no construction context. Reading an
 `Arc<T>` this way allocates nothing (a memory contract asserts this); a by-value handle may
-still allocate if its `Injectable::from_stored` does. Still open: reading trait targets and collections without
-runtime selection (a per-layout table of the selected sources), and handing planned handler
-parameters their pre-resolved `DepRef`s.
+still allocate if its `Injectable::from_stored` does.
+
+Single-value trait targets (`Arc<dyn Trait>`, `Dep<dyn Trait>`, `Option<Arc<dyn Trait>>`,
+unqualified or by qualifier through `resolve_qualified`) read through a per-layout table,
+`SelectedSources`, planned once with the layout. It maps each trait to the source runtime
+selection picks from that scope, as a `DepRef::Local`, `Ancestor` or `Root`. `extract`, `resolve`
+and `resolve_qualified` read it first and fall back to selection when the table cannot answer:
+
+- no entry: no provider is selected (none visible, or ambiguous), the selected provider is
+  transient, or no planned slot holds it;
+- the source is not readable on this chain: the enclosing scope is absent, or was opened without
+  that layout;
+- the slot is not built yet, or the scope itself was opened without a layout (the root, or a scope
+  that constructs nothing and has no seeds).
+
+A layout plans with the scopes on *every* chain its scope opens in, but runtime selection sees the
+chain it actually opened in. A scope opened under the root or a session therefore plans without
+the session, yet selects the session's provider when opened under one. Each entry lists those
+shadowing scopes (`shadowed_by`: unreachable at planning, holding a matching provider, tried
+before the selected one), and a chain holding one falls back.
+
+Still open: collections and keyed maps still select per call, as do trait targets in the two
+layout-less cases above, and planned handler parameters do not yet take their pre-resolved
+`DepRef`s.
 
 Status (#359, planning at scale): entries are planned once per signature: the scope plus
 the sorted set of target descriptors (type, qualifier, cardinality, resolution, observation,

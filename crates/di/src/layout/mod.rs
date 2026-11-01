@@ -9,6 +9,7 @@ mod dep_ref;
 mod entry_plan;
 mod planner;
 mod replan;
+mod selected;
 mod slot_layout;
 #[cfg(test)]
 mod tests;
@@ -18,5 +19,6 @@ pub(crate) use dep_ref::{
 };
 pub(crate) use entry_plan::EagerSelection;
 pub use entry_plan::{EntryPlan, UnplannedConstruction};
+pub(crate) use selected::{SelectedSource, SelectedSources};
 pub use slot_layout::SlotLayout;
 pub(crate) use slot_layout::{ProviderSlot, SlotIdx, SlotSpec};
