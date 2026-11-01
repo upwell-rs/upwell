@@ -120,6 +120,14 @@ impl ScopeContainer {
             return Ok(value);
         }
 
+        self.extract_selected::<H>().await
+    }
+
+    /// Extracts `H` through runtime provider selection and a construction context, building
+    /// what it resolves to where its scope's opening left it out.
+    async fn extract_selected<H: crate::construct::FromContainer>(
+        self: &Arc<Self>,
+    ) -> crate::Result<H> {
         let dependency = H::dependency();
 
         if !dependency.config && dependency.resolution == ResolutionMode::Eager {
