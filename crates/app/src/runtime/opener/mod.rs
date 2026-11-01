@@ -285,6 +285,7 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
             Some(entry) => Builds::Entry(entry.id),
             None => Builds::Everything,
         };
+
         let container = open_in(view, S::ID, parent, builds, self.seeds).await?;
 
         Ok(EntryScope::from_container(container))
