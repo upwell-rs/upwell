@@ -35,6 +35,25 @@ fn layouts_planned_from_the_same_components_plan_entries_alike() {
 }
 
 #[test]
+fn a_layout_with_another_eager_set_plans_entries_differently() {
+    let fixture = Fixture::new();
+    let selection = fixture.selection(&[]);
+    let eager_handler = ComponentDescriptor {
+        construction: crate::ScopedConstruction::Eager,
+        ..fixture.handler
+    };
+
+    let on_demand = fixture
+        .inner(&selection, &[fixture.handler, fixture.consumer])
+        .expect("the inner scope plans");
+    let eager = fixture
+        .inner(&selection, &[eager_handler, fixture.consumer])
+        .expect("the inner scope plans with an eager handler");
+
+    assert!(!on_demand.plans_entries_like(&eager));
+}
+
+#[test]
 fn entry_reads_hold_every_component_target_sorted_once() {
     let fixture = Fixture::new();
     let selection = fixture.selection(&[]);

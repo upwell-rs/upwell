@@ -19,10 +19,11 @@ impl SlotLayout {
     /// agrees on the types a plan reads.
     ///
     /// Both layouts must hold the same component types at the same slots, with the same
-    /// provider aliases and dependency edges of the same shape. Edges into the root,
+    /// eager set, provider aliases and dependency edges of the same shape. Edges into the root,
     /// ancestors and transients may differ, since no entry plan follows them.
     pub fn plans_entries_like(&self, other: &SlotLayout) -> bool {
         self.scope.id() == other.scope.id()
+            && self.eager == other.eager
             && self.slots.len() == other.slots.len()
             && self
                 .slots
