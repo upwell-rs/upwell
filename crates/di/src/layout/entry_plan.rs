@@ -93,8 +93,8 @@ impl SlotLayout {
     /// target builds the slots it resolves to here, with their dependencies in this scope, as
     /// [`for_each_selected_slot`](Self::for_each_selected_slot) picks them. `can_reach` is the
     /// scope reachability `selection` was validated with. Under
-    /// [`UnplannedConstruction::Deny`], the plan also declares every slot holding a lazy
-    /// target, with its dependencies.
+    /// [`UnplannedConstruction::Deny`], the plan also declares the slots a lazy target resolves
+    /// to, picked as for any other target, with their dependencies.
     pub fn plan_entry(
         &self,
         targets: &[DependencyDescriptor],
@@ -127,7 +127,8 @@ impl SlotLayout {
         EntryPlan { builds, declares }
     }
 
-    /// The slots `builds` holds and those every lazy target of `targets` reaches here.
+    /// The slots `builds` holds and those the lazy targets of `targets` resolve to here, with
+    /// their dependencies.
     fn declared(
         &self,
         selector: &EagerSelection<'_>,
@@ -141,9 +142,13 @@ impl SlotLayout {
                 continue;
             }
 
-            self.for_each_target_slot(target.ty.type_id, |slot| {
-                self.include(selector, slot, &mut declares);
-            });
+            self.for_each_selected_slot(
+                selector,
+                target.ty.type_id,
+                target.qualifier,
+                target.cardinality,
+                |slot| self.include(selector, slot, &mut declares),
+            );
         }
 
         declares.into()
