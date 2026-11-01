@@ -52,7 +52,7 @@ add() {
     require_root
     [[ -e "$path" ]] && fail "$path already exists"
 
-    git -C "$repo" fetch --quiet origin
+    git -C "$repo" fetch --quiet origin || echo "worktree: fetch failed; using local refs" >&2
 
     if git -C "$repo" rev-parse --verify --quiet "origin/$base" > /dev/null; then
         start="origin/$base"
@@ -76,10 +76,24 @@ add() {
     echo "worktree: $path on $branch from $start"
 }
 
+# The ignored files of the worktree at `$1` that `add` didn't create: anything but `target/` and an
+# unedited copy of `.env`.
+local_ignored_files() {
+    local entry
+
+    git -C "$1" status --porcelain --ignored | sed -n 's/^!! //p' | while read -r entry; do
+        case "$entry" in
+            target/) ;;
+            .env) cmp -s "$1/.env" "$repo/.env" || echo "$entry" ;;
+            *) echo "$entry" ;;
+        esac
+    done
+}
+
 remove() {
     local slice="$1" force="${2:-}"
     local path="$worktrees/$slice"
-    local unpushed
+    local unpushed ignored
 
     [[ -d "$path" ]] || fail "$path does not exist; is the drive connected?"
 
@@ -87,6 +101,10 @@ remove() {
         unpushed="$(git -C "$path" log --oneline HEAD --not --remotes | wc -l | tr -d ' ')"
 
         [[ "$unpushed" == "0" ]] || fail "$slice has $unpushed unpushed commits; push them or pass --force"
+
+        ignored="$(local_ignored_files "$path")"
+
+        [[ -z "$ignored" ]] || fail "$slice holds ignored local files, pass --force to delete them: $ignored"
     fi
 
     git -C "$repo" worktree unlock "$path"

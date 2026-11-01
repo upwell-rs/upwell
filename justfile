@@ -196,8 +196,9 @@ bench *args:
 
 # Parallel worktrees: `just worktree add <slice> <branch> <base>`, `remove <slice> [--force]`,
 # `seed <slice>`, `list`. See scripts/worktree.sh.
+[positional-arguments]
 worktree *args:
-    scripts/worktree.sh {{ args }}
+    scripts/worktree.sh "$@"
 
 bench-lock:
     cargo metadata --manifest-path benchmarks/Cargo.toml --format-version 1 > /dev/null
