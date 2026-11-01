@@ -51,6 +51,7 @@ impl AxumMiddleware for ReadAudit {
     }
 }
 
+/// Routes reading [`Audit`] through [`ReadAudit`], declared by one handler and not the other.
 #[controller(path = "/audit")]
 struct AuditController;
 
