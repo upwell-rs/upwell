@@ -6,7 +6,8 @@
 //! properties proven here:
 //!
 //! - resolving a component (`get`) allocates nothing — it is an `Arc` bump and a map walk;
-//! - request-time extraction (`extract`) leaks nothing — everything it allocates is freed;
+//! - request-time extraction (`extract`) of a built component allocates nothing, so it leaks
+//!   nothing either;
 //! - a built graph's retained footprint is bounded per component and is fully reclaimed on drop.
 //!
 //! Allocation tracking is scoped to the measured test thread, so concurrent test-runner activity
@@ -318,7 +319,8 @@ fn di_memory_contracts() {
         "ScopeContainer::get allocated on the resolution hot path"
     );
 
-    // Request-time extraction leaks nothing across many calls, and every call succeeds.
+    // Request-time extraction of a built component allocates nothing across many calls, and
+    // every call succeeds.
     let (extracted, extract_delta) = measure(|| {
         block_on(async {
             let mut extracted = 0usize;
@@ -336,6 +338,10 @@ fn di_memory_contracts() {
     assert_eq!(
         extracted, 10_000,
         "extraction regressed during the measurement"
+    );
+    assert_eq!(
+        extract_delta.allocations, 0,
+        "ScopeContainer::extract allocated reading a built component"
     );
     assert_eq!(
         extract_delta.net_live, 0,

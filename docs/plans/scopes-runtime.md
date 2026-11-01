@@ -375,6 +375,14 @@ this way, so a method or handler injecting nothing scoped opens no scope. RPC an
 connection scopes open with `open_on_demand()`, which builds only their seeds; every
 connection-scoped component is built the first time something resolves it.
 
+Status (#354, extract fast path): `ScopeContainer::extract` first tries
+`FromContainer::read_built`. For `Arc<T>`, `Dep<T>`, by-value handles and `Option<Arc<T>>`,
+when `T` is already built in the scope chain and nothing provides `T` as a trait, the value is
+read by its concrete type: no provider selection, no construction context, no allocation (a
+memory contract asserts this). Still open: reading trait targets and collections without
+runtime selection (a per-layout table of the selected sources), and handing planned handler
+parameters their pre-resolved `DepRef`s.
+
 A request scope opened under an app-chosen parent, such as a per-user `Session` scope the
 app caches and reuses across requests, fits this design: the parent is picked when the scope
 opens (`.under(&session)`), never by re-parenting an open scope. It needs app-declared
