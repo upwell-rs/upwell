@@ -1,8 +1,9 @@
 //! Pure planning work split across scoped threads once it is large enough to pay for them.
 
 /// The amount of planning work, in unique entry plans or components, from which planning
-/// runs on more than one thread.
-const PARALLEL_THRESHOLD: usize = 256;
+/// runs on more than one thread. Measured with the `entry_planning` bench: threads save 6-10%
+/// from about 5 000 components, nothing at 2 000, and cost 15% at 1 000 plans on a small graph.
+const PARALLEL_THRESHOLD: usize = 2_048;
 
 /// How generation planning splits independent, pure work across threads.
 ///

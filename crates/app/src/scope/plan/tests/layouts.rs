@@ -21,6 +21,7 @@ struct ChildPlanned;
 /// A root provider of [`Planned`] a candidate turns on.
 struct RootPlanned;
 
+/// The trait a child and a root provider implement, which entries inject.
 trait Planned: Send + Sync {}
 
 fn lazy<T: ?Sized + 'static>(name: &'static str, ty: &'static str) -> DependencyDescriptor {
@@ -153,6 +154,21 @@ fn shared<'a>(plan: &'a ScopePlan, key: &'static str) -> &'a Arc<EntryPlan> {
         .expect("the entry has a plan")
 }
 
+/// Plans `descriptors` from the active plan `base`, made with `base_selection`.
+fn carry_over(
+    base: &ScopePlan,
+    base_selection: &ProviderSelectionModel,
+    descriptors: &[ComponentDescriptor],
+    selection: &ProviderSelectionModel,
+) -> ScopePlan {
+    let base = PlanBase {
+        layouts: &base.layouts,
+        selection: base_selection,
+    };
+
+    plan(descriptors, selection, Parallelism::available(), Some(base))
+}
+
 #[test]
 fn entries_with_one_signature_share_one_plan() {
     let (descriptors, selection) = generation(&[], Vec::new());
@@ -229,14 +245,11 @@ fn a_selection_change_replans_only_the_entries_reading_it() {
     );
     let base = plan(&descriptors, &selection, Parallelism::available(), None);
 
-    let candidate = plan(
+    let candidate = carry_over(
+        &base,
+        &selection,
         &candidate_descriptors,
         &candidate_selection,
-        Parallelism::available(),
-        Some(PlanBase {
-            layouts: &base.layouts,
-            selection: &selection,
-        }),
     );
 
     for key in [
@@ -267,14 +280,11 @@ fn a_changed_layout_replans_every_entry_of_its_scope() {
     let (candidate_descriptors, candidate_selection) = generation(&[late], Vec::new());
     let base = plan(&descriptors, &selection, Parallelism::available(), None);
 
-    let candidate = plan(
+    let candidate = carry_over(
+        &base,
+        &selection,
         &candidate_descriptors,
         &candidate_selection,
-        Parallelism::available(),
-        Some(PlanBase {
-            layouts: &base.layouts,
-            selection: &selection,
-        }),
     );
 
     assert!(
