@@ -40,6 +40,7 @@ impl SlotLayout {
         };
         let mut dependencies = Vec::with_capacity(layout.slots.len());
         let mut captures = false;
+        let selected = planner.selected_sources();
 
         for spec in layout.slots.iter() {
             let planned = match spec.factory {
@@ -54,8 +55,6 @@ impl SlotLayout {
             captures |= planned.iter().any(|edge| edge.source.builds_transient());
             dependencies.push(planned);
         }
-
-        let selected = planner.selected_sources();
 
         for (spec, planned) in layout.slots.iter_mut().zip(dependencies) {
             spec.dependencies = planned;

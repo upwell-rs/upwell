@@ -15,6 +15,7 @@
 //! (root + children), each holding `width` components; resolving a root component from the deepest
 //! scope therefore walks the whole parent chain — the worst case the resolver hits in practice.
 
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -269,6 +270,26 @@ pub async fn build_graph(entries: &[Entry], width: usize, layers: usize) -> Arc<
     container
 }
 
+/// The registry of `components`, each stored in its own scope, with `providers` in `provider_order`.
+fn provider_registry(
+    components: &[ComponentDescriptor],
+    providers: Vec<ProviderDescriptor>,
+    provider_order: HashMap<TypeId, HashMap<TypeId, usize>>,
+) -> Arc<ScopeRegistry> {
+    Arc::new(
+        ScopeRegistry::new(
+            HashMap::new(),
+            components
+                .iter()
+                .map(|component| (component.ty.type_id, *component))
+                .collect(),
+            providers,
+            provider_order,
+        )
+        .expect("provider scope registry validates"),
+    )
+}
+
 /// Builds a single root scope seeding `count` components, each registered as a `dyn Svc` provider,
 /// so a `Vec<Arc<dyn Svc>>` collection resolves all of them.
 ///
@@ -286,18 +307,7 @@ pub async fn build_with_providers(entries: &[Entry], count: usize) -> Arc<ScopeC
     }
     .provider_order(&components)
     .expect("benchmark provider ordering validates");
-    let registry = Arc::new(
-        ScopeRegistry::new(
-            HashMap::new(),
-            components
-                .iter()
-                .map(|component| (component.ty.type_id, *component))
-                .collect(),
-            providers,
-            provider_order,
-        )
-        .expect("provider scope registry validates"),
-    );
+    let registry = provider_registry(&components, providers, provider_order);
 
     let seeds: Vec<BoxedComponent> = slice.iter().map(|entry| (entry.make)()).collect();
 
@@ -329,18 +339,7 @@ pub async fn build_trait_chain(entries: &[Entry], layers: usize) -> Arc<ScopeCon
     let provider_order = graph
         .provider_order(&components)
         .expect("benchmark provider ordering validates");
-    let registry = Arc::new(
-        ScopeRegistry::new(
-            HashMap::new(),
-            components
-                .iter()
-                .map(|component| (component.ty.type_id, *component))
-                .collect(),
-            providers,
-            provider_order,
-        )
-        .expect("trait scope registry validates"),
-    );
+    let registry = provider_registry(&components, providers, provider_order);
     let mut container = ScopeContainer::build_root(
         &[],
         vec![(entries[0].make)()],
