@@ -68,9 +68,11 @@ impl AuditController {
 async fn router(unplanned: UnplannedConstruction) -> Router {
     let builder = upwell::App::<upwell::axum::Axum>::builder("test-strict").auto_discover();
     let builder = match unplanned {
+        UnplannedConstruction::Allow => builder,
         UnplannedConstruction::Deny => builder.deny_unplanned(),
         _ => builder,
     };
+
     let app = builder.build().await.expect("app builds");
 
     app.protocol().router().clone()
