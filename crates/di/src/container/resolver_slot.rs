@@ -68,6 +68,8 @@ impl ScopeResolverSlot {
         }
     }
 
+    /// Attaches `container` and hydrates every deferred dependency registered so far,
+    /// returning the first hydration error after attempting them all.
     pub(crate) fn attach(&self, container: &Arc<ScopeContainer>) -> crate::Result<()> {
         let ScopeResolverSlotState::Pending(state) = &self.state else {
             return Ok(());
@@ -80,11 +82,10 @@ impl ScopeResolverSlot {
             std::mem::take(&mut state.deferred)
         };
 
-        for deferred in deferred {
-            deferred.hydrate(container)?;
-        }
-
-        Ok(())
+        deferred
+            .iter()
+            .map(|deferred| deferred.hydrate(container))
+            .fold(Ok(()), crate::Result::and)
     }
 
     pub(crate) fn resolve(&self) -> crate::Result<Arc<ScopeContainer>> {

@@ -223,7 +223,7 @@ fn deferred_panics_before_scope_hydration() {
         .expect("deferred slot registers");
 
     assert!(deferred.try_get().is_none());
-    assert!(std::panic::catch_unwind(|| deferred.get()).is_err());
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| deferred.get())).is_err());
 }
 
 #[tokio::test]
