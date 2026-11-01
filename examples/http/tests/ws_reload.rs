@@ -29,6 +29,7 @@ static PARKED: Notify = Notify::const_new();
 /// Lets a parked message continue.
 static RELEASE: Notify = Notify::const_new();
 
+/// The config each runtime generation's [`Stamp`] is built from.
 #[config(path = "stamp")]
 #[derive(serde::Deserialize)]
 struct StampCfg {
@@ -71,6 +72,7 @@ struct Stamps {
     connection: u32,
 }
 
+/// The socket whose messages read the stamps of their generation.
 #[controller(ws = JsonWs)]
 struct StampSock;
 
