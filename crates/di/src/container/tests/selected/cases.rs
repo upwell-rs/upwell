@@ -177,7 +177,7 @@ async fn an_unbuilt_provider_is_selected_and_built_then_read() {
     let inner = generation
         .open_inner(
             &generation.root,
-            Some(&EntryPlan::nothing(&generation.inner)),
+            Some(&EntryPlan::on_demand(&generation.inner)),
         )
         .await;
 
