@@ -1,0 +1,5 @@
+error: `eager` requires `scope = ..`: singletons are already built when the application starts
+ --> tests/ui/construction/eager_without_scope.rs:4:13
+  |
+4 | #[component(eager)]
+  |             ^^^^^

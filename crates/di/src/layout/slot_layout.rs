@@ -54,11 +54,16 @@ pub(crate) struct ProviderSlot {
 ///
 /// Slots are in one topological order, seeds first. Every eager dependency edge of every
 /// factory is resolved to its source once, so construction never selects providers. The
-/// type and trait indexes serve dynamic lookups and are built once with the layout.
+/// type and trait indexes serve dynamic lookups and are built once with the layout, as is
+/// the eager set: the slots of [`ScopedConstruction::Eager`] components and their
+/// dependencies in this scope, which every opening builds.
+///
+/// [`ScopedConstruction::Eager`]: crate::ScopedConstruction::Eager
 #[derive(Debug)]
 pub struct SlotLayout {
     pub(super) scope: ScopeKey,
     pub(super) slots: Box<[SlotSpec]>,
+    pub(super) eager: Box<[bool]>,
     pub(super) by_type: HashMap<TypeId, SlotIdx>,
     pub(super) by_trait: HashMap<TypeId, Box<[ProviderSlot]>>,
     pub(super) constructs: bool,
@@ -104,6 +109,21 @@ impl SlotLayout {
         self.slots.iter().map(|spec| &spec.component)
     }
 
+    /// The components every opening of the scope builds because they are eager, in
+    /// construction order. Their dependencies in the scope are built with them. A seed slot
+    /// is never built, so it is never eager.
+    pub fn eager_components(&self) -> impl Iterator<Item = &ComponentDescriptor> {
+        self.slots
+            .iter()
+            .filter(|spec| is_eager(spec))
+            .map(|spec| &spec.component)
+    }
+
+    /// The slots every opening builds: the eager components and their dependencies here.
+    pub(crate) fn eager(&self) -> &[bool] {
+        &self.eager
+    }
+
     pub(crate) fn slots(&self) -> &[SlotSpec] {
         &self.slots
     }
@@ -120,4 +140,9 @@ impl SlotLayout {
     pub(crate) fn providers_of(&self, trait_id: TypeId) -> &[ProviderSlot] {
         self.by_trait.get(&trait_id).map_or(&[], AsRef::as_ref)
     }
+}
+
+/// Whether every opening of the scope builds the factory-backed slot `spec`.
+pub(super) fn is_eager(spec: &SlotSpec) -> bool {
+    spec.factory.is_some() && spec.component.construction.is_eager()
 }

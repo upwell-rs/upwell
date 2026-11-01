@@ -14,7 +14,7 @@ use upwell_core::{Scope, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentFactoryRole, DependencyDescriptor, GenerationSnapshot,
-    Injectable,
+    Injectable, ScopedConstruction,
 };
 use upwell_hooks::no_hooks;
 use upwell_transport::CodecError;
@@ -186,6 +186,7 @@ pub fn topic_bus_descriptor<P: PubSubProtocol>() -> ComponentDescriptor {
         condition: None,
         factories: topic_bus_factories::<P>,
         hooks: no_hooks,
+        construction: ScopedConstruction::OnDemand,
         generation_snapshot: Some(GenerationSnapshot::of::<TopicBus<P>>()),
     }
 }

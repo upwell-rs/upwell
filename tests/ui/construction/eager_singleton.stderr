@@ -1,0 +1,5 @@
+error: `eager` applies only to scopes below the root: a singleton is built when the application starts and a transient on every resolution
+ --> tests/ui/construction/eager_singleton.rs:4:21
+  |
+4 | #[component(scope = upwell::scope::Singleton, eager)]
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^^

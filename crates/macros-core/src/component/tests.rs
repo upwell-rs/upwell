@@ -113,3 +113,32 @@ fn retainable_by_value_component_rejects_live_backed_fields() {
 
     assert!(error.to_string().contains("cannot contain Dep<T>"));
 }
+
+/// The expansion of `struct Example;` under component arguments `args`.
+fn expansion(args: &str) -> String {
+    let args = syn::parse_str::<ComponentArgs<NoExt>>(args).expect("component arguments parse");
+
+    expand(
+        args,
+        syn::parse_quote!(
+            struct Example;
+        ),
+        &Paths::upwell(),
+    )
+    .expect("component expands")
+    .to_string()
+}
+
+#[test]
+fn an_eager_component_carries_its_policy_and_checks_its_scope() {
+    let eager = expansion("scope = Request, eager");
+    let on_demand = expansion("scope = Request");
+
+    assert!(eager.contains("construction : :: upwell :: ScopedConstruction :: Eager"));
+    assert!(
+        eager.contains("IS_TRANSIENT"),
+        "the scope is checked: {eager}"
+    );
+    assert!(on_demand.contains("construction : :: upwell :: ScopedConstruction :: OnDemand"));
+    assert!(!on_demand.contains("IS_TRANSIENT"));
+}

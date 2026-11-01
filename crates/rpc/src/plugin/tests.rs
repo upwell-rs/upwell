@@ -70,6 +70,7 @@ static SENTINEL_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: sentinel_factories,
     hooks: upwell_hooks::no_hooks,
+    construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
 };
 

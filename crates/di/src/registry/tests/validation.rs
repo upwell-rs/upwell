@@ -98,3 +98,32 @@ fn resolved_components_preserve_registration_order_through_manual_override() {
 
     assert_eq!(ids, ["pg_pool_manual", "backup_repo"]);
 }
+
+#[test]
+fn validate_rejects_eager_components_outside_scopes_below_the_root() {
+    for scope in [Singleton::KEY, crate::Transient::KEY] {
+        let eager = ComponentDescriptor {
+            scope,
+            construction: crate::ScopedConstruction::Eager,
+            ..PG_POOL
+        };
+        let registry = ComponentRegistry {
+            components: vec![eager],
+            ..Default::default()
+        };
+
+        let error = registry.validate();
+
+        assert!(
+            matches!(
+                error,
+                Err(Error::EagerOutsideScope {
+                    component_id,
+                    ..
+                }) if component_id == "pg_pool"
+            ),
+            "an eager component of {} is rejected",
+            scope.name()
+        );
+    }
+}

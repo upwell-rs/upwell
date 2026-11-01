@@ -83,6 +83,7 @@ pub(crate) const fn planned(
         condition: None,
         factories,
         hooks: upwell_hooks::no_hooks,
+        construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
     }
 }

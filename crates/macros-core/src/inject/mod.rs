@@ -41,6 +41,7 @@ pub fn field_injection_component(
     registrations_slice: &syn::Ident,
     emit_default_factory: bool,
     condition: &TokenStream,
+    construction: &TokenStream,
     paths: &Paths,
 ) -> TokenStream {
     let self_ident = item.ident.clone();
@@ -246,6 +247,7 @@ pub fn field_injection_component(
                 condition: #condition,
                 factories: <#self_ident as #component_factories>::factories,
                 hooks: <#self_ident as #component_hooks>::hooks,
+                construction: #construction,
                 generation_snapshot: ::core::option::Option::Some(#generation_snapshot::of::<#self_ident>()),
             };
 

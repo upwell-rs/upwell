@@ -5,6 +5,7 @@ use upwell_tooling_schema::{RelationshipKind, ResourceKind};
 use super::super::{
     Projection, contribution_provenance, entry_id, item_location, scope_id, with_source,
 };
+use super::id_list;
 use crate::ProtocolDefinition;
 
 impl<D: ProtocolDefinition> Projection<'_, D> {
@@ -32,13 +33,8 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
             ]);
 
             if let Some(builds) = &entry.builds {
-                let builds = if builds.is_empty() {
-                    String::from("none")
-                } else {
-                    builds.join(", ")
-                };
-
-                labels.insert(String::from("builds"), builds);
+                labels.insert(String::from("builds"), id_list(builds));
+                labels.insert(String::from("plan-size"), builds.len().to_string());
             }
 
             if let Some(owner) = descriptor.owner {

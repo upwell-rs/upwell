@@ -6,6 +6,7 @@ use upwell_core::{
 };
 use upwell_hooks::{HookDescriptor, no_hooks};
 
+mod construction;
 mod context;
 mod factory;
 mod live;
@@ -15,6 +16,7 @@ mod resolve;
 mod snapshot;
 mod store;
 
+pub use construction::ScopedConstruction;
 pub use context::ComponentConstructionContext;
 pub(crate) use context::{ComponentConstructionParts, HandleStorage, SharedStore};
 pub use factory::{
@@ -207,6 +209,10 @@ pub struct ComponentDescriptor {
     /// The component's `{Type}Hooks` slice (its `#[hook]` methods). Empty for a type
     /// that declares none — and for every manually-seeded instance.
     pub hooks: fn() -> &'static [HookDescriptor],
+    /// When an instance of the component's scope builds it: on demand (the default) or on
+    /// every opening of the scope. Only scopes below the root take
+    /// [`ScopedConstruction::Eager`].
+    pub construction: ScopedConstruction,
     /// Hidden typed generation adapter. Set for generated/typed descriptors
     /// ([`of`](Self::of) and macro-generated literals);
     /// `None` for raw [`manual`](Self::manual) descriptors, which are never
@@ -232,6 +238,7 @@ impl ComponentDescriptor {
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
+            construction: ScopedConstruction::OnDemand,
             generation_snapshot: Some(GenerationSnapshot::of::<T>()),
         }
     }
@@ -254,6 +261,7 @@ impl ComponentDescriptor {
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
+            construction: ScopedConstruction::OnDemand,
             generation_snapshot: None,
         }
     }
@@ -293,6 +301,7 @@ impl fmt::Debug for ComponentDescriptor {
             .field("ty", &self.ty)
             .field("scope", &self.scope.name())
             .field("condition", &self.condition)
+            .field("construction", &self.construction)
             .field("dependencies", &self.dependencies())
             .finish_non_exhaustive()
     }

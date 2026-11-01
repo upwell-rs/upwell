@@ -58,6 +58,7 @@ impl SlotLayout {
         }
 
         layout.captures = captures;
+        layout.eager = layout.eager_closure(selection, &can_reach);
 
         Ok(layout)
     }
@@ -116,10 +117,12 @@ impl SlotLayout {
             .collect();
 
         let constructs = slots.iter().any(|spec| spec.factory.is_some());
+        let eager = vec![false; slots.len()].into_boxed_slice();
 
         Ok(Self {
             scope,
             slots: slots.into_boxed_slice(),
+            eager,
             by_type,
             by_trait,
             constructs,

@@ -26,6 +26,7 @@ const COMPONENT_KEYS: &[&str] = &[
     "by_value",
     "retainable",
     "scope",
+    "eager",
     "factory_slice",
     "factory",
     "default_factory",
@@ -84,6 +85,9 @@ fn parse_scope_path(input: ParseStream) -> syn::Result<syn::Path> {
 ///   to be retained;
 /// - `scope = <ScopePath>` — the instance lifetime, named by a [`Scope`] marker type in scope
 ///   (e.g. `Request` from a protocol's prelude, or a custom scope); omitted means singleton;
+/// - `eager` — with a `scope` below the root, build the component on every opening of its
+///   scope rather than on demand; rejected without a `scope` and, at compile time, for a
+///   singleton or transient scope;
 /// - `factory_slice` / `factory` / `default_factory` — factory overrides.
 ///
 /// Any other key is delegated to the extension's [`parse_keyed`](ParseKeyed::parse_keyed)
@@ -108,6 +112,9 @@ pub struct ComponentArgs<Ext: ParseKeyed = NoExt> {
     /// `singleton`/`connection`/`request`/`transient` are accepted as aliases for the
     /// like-named marker types. `None` means the default (singleton).
     pub scope: Option<syn::Path>,
+    /// The `eager` keyword, kept for its span: the component is built on every opening of its
+    /// scope. `None` means on demand.
+    pub eager: Option<Ident>,
     /// Overrides the generated per-type registration slice name (`factory_slice = Ident`).
     ///
     /// Since factories and hooks share one merged `{Type}Registrations` slice on the `linkme`
@@ -154,6 +161,7 @@ impl<Ext: ParseKeyed> Parse for ComponentArgs<Ext> {
                 }
                 "by_value" => args.by_value = true,
                 "retainable" => args.retainable = true,
+                "eager" => args.eager = Some(key),
                 "factory_slice" => {
                     input.parse::<Token![=]>()?;
                     args.factory_slice = Some(input.parse()?);
@@ -222,6 +230,19 @@ impl<Ext: ParseKeyed> Parse for ComponentArgs<Ext> {
             ));
         }
 
+        validate_eager(args.eager.as_ref(), args.scope.as_ref())?;
+
+        if let Some(eager) = &args.eager
+            && args.no_default_factory
+            && args.factory.is_none()
+        {
+            return Err(syn::Error::new_spanned(
+                eager,
+                "`eager` cannot be combined with `default_factory = false`: a manual instance \
+                 is seeded, so an opening has nothing to build",
+            ));
+        }
+
         let mut provided = std::collections::HashSet::new();
 
         for trait_ty in &args.provide {
@@ -246,6 +267,36 @@ impl<Ext: ParseKeyed> Parse for ComponentArgs<Ext> {
 
         Ok(args)
     }
+}
+
+/// Rejects `eager` without a scope below the root. A scope path spelled `Singleton` or
+/// `Transient` is rejected here; any other path is checked against the scope type when the
+/// generated code compiles.
+fn validate_eager(eager: Option<&Ident>, scope: Option<&syn::Path>) -> syn::Result<()> {
+    let Some(eager) = eager else {
+        return Ok(());
+    };
+    let Some(scope) = scope else {
+        return Err(syn::Error::new_spanned(
+            eager,
+            "`eager` requires `scope = ..`: singletons are already built when the application \
+             starts",
+        ));
+    };
+    let last = scope
+        .segments
+        .last()
+        .map(|segment| segment.ident.to_string());
+
+    if matches!(last.as_deref(), Some("Singleton" | "Transient")) {
+        return Err(syn::Error::new_spanned(
+            scope,
+            "`eager` applies only to scopes below the root: a singleton is built when the \
+             application starts and a transient on every resolution",
+        ));
+    }
+
+    Ok(())
 }
 
 fn parse_order_targets(

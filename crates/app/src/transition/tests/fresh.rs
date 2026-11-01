@@ -106,6 +106,7 @@ fn fresh_holder(factories: fn() -> &'static [ComponentFactoryDescriptor]) -> Com
         condition: None,
         factories,
         hooks: upwell_hooks::no_hooks,
+        construction: upwell_di::ScopedConstruction::OnDemand,
         generation_snapshot: None,
     }
 }
@@ -119,6 +120,7 @@ fn transient_seed() -> ComponentDescriptor {
         condition: None,
         factories: transient_seed_factories,
         hooks: upwell_hooks::no_hooks,
+        construction: upwell_di::ScopedConstruction::OnDemand,
         generation_snapshot: None,
     }
 }

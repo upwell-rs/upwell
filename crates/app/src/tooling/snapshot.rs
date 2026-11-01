@@ -7,6 +7,7 @@ use upwell_di::{
     SelectedDependency,
 };
 
+use super::scope_snapshot::ScopeLayoutSnapshot;
 use crate::entry::{EntryDescriptor, EntryTable};
 use crate::scope::{PreparedScopeTopology, ScopeLayouts, SeedDestination};
 
@@ -17,6 +18,7 @@ pub(crate) struct ProjectionSnapshot {
     entries: Vec<EntrySnapshot>,
     root_plan: Vec<ConstructionPlanEntry>,
     scope_plans: HashMap<ScopeId, Vec<ConstructionPlanEntry>>,
+    scope_layouts: HashMap<ScopeId, ScopeLayoutSnapshot>,
 }
 
 impl ProjectionSnapshot {
@@ -84,6 +86,7 @@ impl ProjectionSnapshot {
             entries: Vec::new(),
             root_plan,
             scope_plans,
+            scope_layouts: HashMap::new(),
         })
     }
 
@@ -97,7 +100,8 @@ impl ProjectionSnapshot {
         self
     }
 
-    /// Captures every prepared entry with the selected target of each injected dependency.
+    /// Captures every prepared entry with the selected target of each injected dependency,
+    /// and the construction facts of every scope layout.
     pub(crate) fn with_entries(
         mut self,
         selection: &ProviderSelectionModel,
@@ -121,6 +125,9 @@ impl ProjectionSnapshot {
                 })
                 .collect::<upwell_di::Result<_>>()?;
 
+        self.scope_layouts =
+            ScopeLayoutSnapshot::capture_all(&self.components, &self.entries, layouts);
+
         Ok(self)
     }
 
@@ -138,6 +145,10 @@ impl ProjectionSnapshot {
 
     pub(crate) fn root_plan(&self) -> &[ConstructionPlanEntry] {
         &self.root_plan
+    }
+
+    pub(crate) fn scope_layout(&self, scope: &ScopeId) -> Option<&ScopeLayoutSnapshot> {
+        self.scope_layouts.get(scope)
     }
 
     pub(crate) fn scope_plan(&self, scope: &ScopeId) -> Option<&[ConstructionPlanEntry]> {

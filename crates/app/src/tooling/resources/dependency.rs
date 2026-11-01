@@ -146,7 +146,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
         } else {
             "manual-unseeded"
         };
-        let labels = BTreeMap::from([
+        let mut labels = BTreeMap::from([
             (String::from("component-id"), descriptor.id.to_string()),
             (
                 String::from("rust-type"),
@@ -175,6 +175,13 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
             .plugin_plan()
             .selected_contribution(&id)
             .map(contribution_provenance);
+
+        if descriptor.scope.id() != Singleton::ID && !descriptor.scope.is_transient() {
+            labels.insert(
+                String::from("construction-policy"),
+                descriptor.construction.as_str().to_string(),
+            );
+        }
 
         self.resource(
             &id,
