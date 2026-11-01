@@ -378,8 +378,9 @@ connection-scoped component is built the first time something resolves it.
 Status (#354, extract fast path): `ScopeContainer::extract` first tries
 `FromContainer::read_built`. For `Arc<T>`, `Dep<T>`, by-value handles and `Option<Arc<T>>`,
 when `T` is already built in the scope chain and nothing provides `T` as a trait, the value is
-read by its concrete type: no provider selection, no construction context, no allocation (a
-memory contract asserts this). Still open: reading trait targets and collections without
+read by its concrete type, with no provider selection and no construction context. Reading an
+`Arc<T>` this way allocates nothing (a memory contract asserts this); a by-value handle may
+still allocate if its `Injectable::from_stored` does. Still open: reading trait targets and collections without
 runtime selection (a per-layout table of the selected sources), and handing planned handler
 parameters their pre-resolved `DepRef`s.
 
