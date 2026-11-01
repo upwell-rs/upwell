@@ -22,7 +22,7 @@ use crate::scope::PreparedScopeTopology;
 #[derive(Debug, Default)]
 pub(crate) struct ScopeLayouts {
     by_scope: HashMap<ScopeId, Arc<SlotLayout>>,
-    plans: Box<[SharedPlan]>,
+    plans: Box<[Arc<EntryPlan>]>,
     by_signature: HashMap<EntrySignature, usize>,
     entries: Box<[Option<usize>]>,
     unplanned: UnplannedConstruction,
@@ -46,14 +46,6 @@ pub(crate) struct PlanBase<'a> {
     pub(crate) selection: &'a ProviderSelectionModel,
 }
 
-/// One plan shared by every entry with the same signature, with the types whose provider
-/// selection planning it read.
-#[derive(Debug)]
-struct SharedPlan {
-    plan: Arc<EntryPlan>,
-    reads: Arc<[TypeId]>,
-}
-
 /// What makes two entries plan alike within one generation: their scope and the set of
 /// their targets, each with every attribute planning may read.
 #[derive(Debug, Eq, Hash, PartialEq)]
@@ -64,7 +56,7 @@ struct EntrySignature {
 
 /// One target of an [`EntrySignature`]: its dependency descriptor without the parameter
 /// name and the type's display name.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct TargetSignature {
     type_id: TypeId,
     qualifier: Option<&'static str>,
@@ -81,7 +73,7 @@ struct TargetSignature {
 struct PendingPlan<'a> {
     layout: &'a SlotLayout,
     targets: Vec<DependencyDescriptor>,
-    base: Option<&'a SharedPlan>,
+    base: Option<&'a Arc<EntryPlan>>,
 }
 
 impl ScopeLayouts {
@@ -160,7 +152,7 @@ impl ScopeLayouts {
     pub(crate) fn shared_entry(&self, id: EntryId) -> Option<&Arc<EntryPlan>> {
         let index = (*self.entries.get(id.index())?)?;
 
-        Some(&self.plans[index].plan)
+        Some(&self.plans[index])
     }
 
     /// Carries over each pending plan whose base plan still holds and plans the rest, in
@@ -169,32 +161,27 @@ impl ScopeLayouts {
         pending: &[PendingPlan<'_>],
         planning: &EntryPlanning<'_>,
         base: Option<PlanBase<'_>>,
-    ) -> Box<[SharedPlan]> {
+    ) -> Box<[Arc<EntryPlan>]> {
         let changed = base
             .map(|base| planning.selection.changed_selections(base.selection))
             .unwrap_or_default();
-        let fresh = pending
-            .iter()
-            .filter(|pending| pending.carried(&changed).is_none())
-            .count();
 
         planning
             .parallelism
-            .map(pending, fresh, |pending| match pending.carried(&changed) {
-                Some(carried) => {
-                    debug_assert_eq!(
-                        carried.plan,
-                        pending.fresh(planning).plan,
-                        "a carried-over entry plan must equal the plan made again"
-                    );
+            .map(pending, pending.len(), |pending| {
+                match pending.carried(&changed) {
+                    Some(carried) => {
+                        debug_assert_eq!(
+                            carried.as_ref(),
+                            pending.fresh(planning).as_ref(),
+                            "a carried-over entry plan must equal the plan made again"
+                        );
 
-                    SharedPlan {
-                        plan: Arc::clone(&carried.plan),
-                        reads: Arc::clone(&carried.reads),
+                        Arc::clone(carried)
                     }
-                }
 
-                None => pending.fresh(planning),
+                    None => pending.fresh(planning),
+                }
             })
             .into_boxed_slice()
     }
@@ -232,25 +219,24 @@ impl<'a> PlanBase<'a> {
 
 impl PendingPlan<'_> {
     /// The base plan this signature keeps, unless selection of a type it read changed.
-    fn carried(&self, changed: &HashSet<TypeId>) -> Option<&SharedPlan> {
-        self.base
-            .filter(|base| !base.reads.iter().any(|read| changed.contains(read)))
+    fn carried(&self, changed: &HashSet<TypeId>) -> Option<&Arc<EntryPlan>> {
+        self.base.filter(|base| {
+            !self
+                .layout
+                .entry_reads(base, &self.targets)
+                .iter()
+                .any(|read| changed.contains(read))
+        })
     }
 
     /// Plans this signature against its layout.
-    fn fresh(&self, planning: &EntryPlanning<'_>) -> SharedPlan {
-        let plan = self.layout.plan_entry(
+    fn fresh(&self, planning: &EntryPlanning<'_>) -> Arc<EntryPlan> {
+        Arc::new(self.layout.plan_entry(
             &self.targets,
             planning.selection,
             |consumer, dependency| planning.topology.is_reachable(&consumer, &dependency),
             planning.unplanned,
-        );
-        let reads = self.layout.entry_reads(&plan, &self.targets).into();
-
-        SharedPlan {
-            plan: Arc::new(plan),
-            reads,
-        }
+        ))
     }
 }
 
@@ -259,7 +245,7 @@ impl EntrySignature {
     fn new(scope: ScopeId, targets: &[DependencyDescriptor]) -> Self {
         let mut targets: Vec<TargetSignature> = targets.iter().map(TargetSignature::new).collect();
 
-        targets.sort_unstable_by_key(TargetSignature::order);
+        targets.sort_unstable();
         targets.dedup();
 
         Self {
@@ -281,19 +267,5 @@ impl TargetSignature {
             dynamic: target.dynamic,
             config: target.config,
         }
-    }
-
-    /// A total order over signatures, only to sort them into a canonical set.
-    fn order(&self) -> (TypeId, Option<&'static str>, [u8; 3], [bool; 3]) {
-        (
-            self.type_id,
-            self.qualifier,
-            [
-                self.cardinality as u8,
-                self.resolution as u8,
-                self.observation as u8,
-            ],
-            [self.optional, self.dynamic, self.config],
-        )
     }
 }
