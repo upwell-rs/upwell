@@ -93,6 +93,7 @@ static PROVIDER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: provider_factories,
     hooks: upwell_hooks::no_hooks,
+    construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
 };
 
@@ -104,6 +105,7 @@ static CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     condition: None,
     factories: consumer_factories,
     hooks: upwell_hooks::no_hooks,
+    construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
 };
 

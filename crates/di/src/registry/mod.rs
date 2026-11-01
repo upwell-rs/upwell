@@ -14,7 +14,7 @@ pub use selection::{
     DependencyTarget, ProviderSelectionModel, SelectedDependency,
 };
 
-use upwell_core::{ScopeId, ScopeKey};
+use upwell_core::{Scope, ScopeId, ScopeKey, Singleton};
 
 use crate::descriptors::{COMPONENTS, ComponentDescriptor, PROVIDERS, ProviderDescriptor};
 use crate::error::Error;
@@ -169,6 +169,7 @@ impl ComponentRegistry {
         can_access: impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<()> {
         self.validate_component_ids(components)?;
+        Self::validate_construction(components)?;
         selection::validate_provider_components(components, &self.providers)?;
         self.validate_dependencies_with(components, selection, &can_access)?;
         self.validate_provider_qualifiers(components)?;
@@ -188,6 +189,24 @@ impl ComponentRegistry {
         }
 
         Ok(())
+    }
+
+    /// Rejects an eager component of the root or the transient scope: neither opens scope
+    /// instances, so there is no opening to build it on.
+    fn validate_construction(components: &[ComponentDescriptor]) -> crate::Result<()> {
+        let misplaced = components.iter().find(|component| {
+            component.construction.is_eager()
+                && (component.scope.is_transient() || component.scope.id() == Singleton::ID)
+        });
+
+        match misplaced {
+            Some(component) => Err(Error::EagerOutsideScope {
+                component_id: component.id.to_string(),
+                scope: component.scope.name(),
+            }),
+
+            None => Ok(()),
+        }
     }
 
     /// Validates and topologically orders all providers independently per trait.

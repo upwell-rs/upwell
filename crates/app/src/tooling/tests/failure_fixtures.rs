@@ -100,6 +100,7 @@ pub(super) static DIAGNOSTIC_CONSUMER: ComponentDescriptor = ComponentDescriptor
     condition: None,
     factories: diagnostic_consumer_factories,
     hooks: upwell_hooks::no_hooks,
+    construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
 };
 
@@ -111,6 +112,7 @@ pub(super) static DIAGNOSTIC_DEPENDENCY: ComponentDescriptor = ComponentDescript
     condition: None,
     factories,
     hooks: upwell_hooks::no_hooks,
+    construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
 };
 
@@ -122,6 +124,7 @@ pub(super) static DIAGNOSTIC_PROVIDER_CONSUMER: ComponentDescriptor = ComponentD
     condition: None,
     factories: diagnostic_provider_consumer_factories,
     hooks: upwell_hooks::no_hooks,
+    construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
 };
 
@@ -133,6 +136,7 @@ pub(super) static DIAGNOSTIC_PROVIDER_COMPONENT: ComponentDescriptor = Component
     condition: None,
     factories,
     hooks: upwell_hooks::no_hooks,
+    construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
 };
 

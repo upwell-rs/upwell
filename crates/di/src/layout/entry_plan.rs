@@ -3,13 +3,14 @@ use std::sync::Arc;
 
 use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, ScopeId, ScopeKey};
 
+use super::slot_layout::is_eager;
 use super::{DepRef, SlotIdx, SlotLayout};
 use crate::descriptors::ComponentDescriptor;
 use crate::registry::ProviderSelectionModel;
 use crate::registry::scopes::scope_allows_with;
 
-/// The slots one entry builds when it opens its scope: the slots its targets resolve to and
-/// every slot of the same scope those depend on.
+/// The slots one entry builds when it opens its scope: the layout's eager set, the slots its
+/// targets resolve to, and every slot of the same scope those depend on.
 ///
 /// Planned once per runtime generation from the entry's targets. A slot the plan leaves out
 /// is built on demand, when something resolves it from the open scope. Under
@@ -38,10 +39,11 @@ pub enum UnplannedConstruction {
 }
 
 impl EntryPlan {
-    /// A plan of `layout` that builds nothing, for a scope whose every slot is built on demand.
-    pub fn nothing(layout: &SlotLayout) -> Self {
+    /// A plan of `layout` for a scope opened without an entry, whose slots are built on
+    /// demand: it builds only the layout's eager set.
+    pub fn on_demand(layout: &SlotLayout) -> Self {
         Self {
-            builds: vec![false; layout.len()].into_boxed_slice(),
+            builds: layout.eager().into(),
             declares: None,
         }
     }
@@ -87,7 +89,8 @@ pub(crate) struct EagerSelection<'a> {
 }
 
 impl SlotLayout {
-    /// Plans the slots an entry injecting `targets` builds when it opens this scope.
+    /// Plans the slots an entry injecting `targets` builds when it opens this scope: the
+    /// layout's eager set, and what the targets need.
     ///
     /// A target that a lazy or config handle resolves builds nothing up front. Every other
     /// target builds the slots it resolves to here, with their dependencies in this scope, as
@@ -123,7 +126,7 @@ impl SlotLayout {
         selector: &EagerSelection<'_>,
         targets: &[DependencyDescriptor],
     ) -> Box<[bool]> {
-        let mut builds = vec![false; self.slots.len()].into_boxed_slice();
+        let mut builds = self.eager.clone();
 
         for target in targets.iter().filter(|target| is_built_up_front(target)) {
             self.for_each_selected_slot(
@@ -136,6 +139,29 @@ impl SlotLayout {
         }
 
         builds
+    }
+
+    /// The eager set: the slot of every eager component, with its dependencies here.
+    /// `can_reach` is the scope reachability `selection` was validated with.
+    pub(super) fn eager_closure(
+        &self,
+        selection: &ProviderSelectionModel,
+        can_reach: &impl Fn(ScopeId, ScopeId) -> bool,
+    ) -> Box<[bool]> {
+        let can_access = |consumer, dependency| scope_allows_with(consumer, dependency, can_reach);
+        let selector = EagerSelection {
+            selection,
+            can_access: &can_access,
+        };
+        let mut eager = vec![false; self.slots.len()].into_boxed_slice();
+
+        for (index, spec) in self.slots.iter().enumerate() {
+            if is_eager(spec) {
+                self.include(&selector, SlotIdx::new(index), &mut eager);
+            }
+        }
+
+        eager
     }
 
     /// The slots `builds` holds and those the lazy targets of `targets` resolve to here, with

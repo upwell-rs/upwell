@@ -71,6 +71,19 @@ use proc_macro::TokenStream;
 /// All optional:
 /// - `id` — unique component id. Defaults to the lowercased type name.
 /// - `name` — display name. Defaults to the type name.
+/// - `scope = Path` — the scope an instance lives in, named by its scope type (such as a
+///   protocol's `Request`). Omitted means a singleton. A component of a scope below the root
+///   is built **on demand**: when the opening entry's plan lists it, or when something first
+///   resolves it from the open scope.
+/// - `eager` — with a `scope` below the root, build the component on **every** opening of
+///   its scope instead, whatever the entry injects, together with what it depends on in the
+///   scope. Use it for components whose construction is the intended side effect (an audit
+///   record, a span, a gate); a failing eager constructor fails every opening. `eager`
+///   without a `scope`, with the singleton or transient scope, or with
+///   `default_factory = false` is a compile error. A
+///   protocol that opens a scope only when something injects from it (axum's HTTP request
+///   scope) runs no eager component for a request that opens none: per-request side
+///   effects belong in middleware.
 /// - `factory = path` — register `path` (an async `Factory`) as the constructor
 ///   instead of field injection; its parameters are its dependencies.
 /// - `default_factory = false` — emit no factory (a **manual** instance, provided
@@ -87,6 +100,7 @@ use proc_macro::TokenStream;
 /// #[component(id = "db", name = "Db")]  // explicit
 /// #[component(factory = Db::connect)]   // explicit async factory
 /// #[component(default_factory = false)] // manual, via with_component
+/// #[component(scope = Request, eager)]  // built on every request scope opening
 /// ```
 ///
 /// # What it generates

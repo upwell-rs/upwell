@@ -57,7 +57,7 @@ async fn a_lazy_target_declares_its_slots_for_on_demand_builds() {
 #[tokio::test]
 async fn a_scope_opened_without_an_entry_builds_on_demand_under_either_policy() {
     let layout = layout();
-    let plan = crate::EntryPlan::nothing(&layout);
+    let plan = crate::EntryPlan::on_demand(&layout);
     let on_demand = open(&layout, Some(&plan)).await;
     let everything = open(&layout, None).await;
 

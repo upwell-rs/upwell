@@ -111,6 +111,23 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
         for boundary in self.app.scope_topology().boundaries() {
             let id = scope_id(boundary.id().as_str());
 
+            let mut labels = BTreeMap::from([
+                (String::from("rank"), boundary.rank().to_string()),
+                (String::from("scope-id"), boundary.id().as_str().to_string()),
+                (
+                    String::from("generations"),
+                    boundary.generations().as_str().to_string(),
+                ),
+            ]);
+
+            if let Some(layout) = self.app.tooling_snapshot().scope_layout(&boundary.id()) {
+                labels.insert(String::from("eager"), id_list(&layout.eager));
+
+                if let Some(unreached) = &layout.unreached {
+                    labels.insert(String::from("unreached-by-entries"), id_list(unreached));
+                }
+            }
+
             self.resource(
                 &id,
                 ResourceKind::Scope,
@@ -120,14 +137,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
                     origin: Some(String::from("protocol")),
                     ..Provenance::default()
                 }),
-                BTreeMap::from([
-                    (String::from("rank"), boundary.rank().to_string()),
-                    (String::from("scope-id"), boundary.id().as_str().to_string()),
-                    (
-                        String::from("generations"),
-                        boundary.generations().as_str().to_string(),
-                    ),
-                ]),
+                labels,
             );
 
             for parent in boundary.parents() {
@@ -289,4 +299,13 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
             previous = Some(id);
         }
     }
+}
+
+/// Component IDs as one label value: comma-separated, or `none`.
+fn id_list(ids: &[&str]) -> String {
+    if ids.is_empty() {
+        return String::from("none");
+    }
+
+    ids.join(", ")
 }

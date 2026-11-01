@@ -52,8 +52,8 @@ enum Builds {
     Entry(EntryId),
     /// Every slot of the scope.
     Everything,
-    /// Only the seeds.
-    Nothing,
+    /// Only the seeds and the eager set.
+    Eager,
 }
 
 /// An open instance of scope `S`, usable as a typed parent for [`ScopeBuilder::under`].
@@ -251,22 +251,22 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         self.open_with(Builds::Everything).await
     }
 
-    /// Opens the instance building nothing but its seeds: every other slot is built when
-    /// something resolves it, so the instance costs only what it is used for.
+    /// Opens the instance building only its seeds and its eager components: every other slot
+    /// is built when something resolves it, so the instance costs only what it is used for.
     ///
     /// # Errors
     ///
     /// Fails when the parent belongs to another runtime, or a seed has no slot in the scope or
     /// shares one with another seed.
     pub async fn open_on_demand(self) -> crate::Result<OpenScope<S>> {
-        self.open_with(Builds::Nothing).await
+        self.open_with(Builds::Eager).await
     }
 
     /// Opens the instance to run `entry` as [`open`](Self::open) does, or without an entry as
-    /// [`open_default`](Self::open_default) does, unless the entry's plan builds nothing: then
-    /// the container opens the first time something resolves from the returned scope, with
-    /// this builder's seeds. Until then, reads that never build see only the scopes it opens
-    /// under, not the seeds.
+    /// [`open_default`](Self::open_default) does, unless the entry's plan builds nothing (an
+    /// eager component of the scope makes every plan build it): then the container opens the
+    /// first time something resolves from the returned scope, with this builder's seeds.
+    /// Until then, reads that never build see only the scopes it opens under, not the seeds.
     ///
     /// # Errors
     ///
@@ -348,14 +348,14 @@ async fn open_in(
     let layout = layouts
         .get(&scope)
         .ok_or(crate::Error::UndeclaredScopeOpen { scope })?;
-    let nothing;
+    let on_demand;
     let plan = match builds {
         Builds::Entry(entry) => layouts.entry(entry),
         Builds::Everything => None,
-        Builds::Nothing => {
-            nothing = EntryPlan::nothing(layout);
+        Builds::Eager => {
+            on_demand = EntryPlan::on_demand(layout);
 
-            Some(&nothing)
+            Some(&on_demand)
         }
     };
 

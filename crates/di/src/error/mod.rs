@@ -104,6 +104,18 @@ pub enum Error {
     #[error("dependency cycle: no construction order for components: {0}")]
     DependencyCycle(String),
 
+    /// An eager component lives in the root or the transient scope, which build no scope
+    /// instance it could be built on the opening of.
+    #[error(
+        "component '{component_id}' is eager but lives in scope '{scope}': only scopes below the root build eager components"
+    )]
+    EagerOutsideScope {
+        /// Stable component identity.
+        component_id: String,
+        /// The component's scope.
+        scope: &'static str,
+    },
+
     #[error(
         "dependency '{dependency}' of component '{component_id}' resolves to '{target}' in scope '{scope}', which is not open on every chain of the consumer"
     )]

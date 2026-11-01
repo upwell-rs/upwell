@@ -17,6 +17,7 @@ mod probe;
 mod projection;
 mod relationship;
 mod resources;
+mod scope_snapshot;
 mod snapshot;
 mod source;
 

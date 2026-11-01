@@ -118,6 +118,7 @@ macro_rules! planned_component {
                 condition: None,
                 factories: unbuilt_factories!("static", $deps),
                 hooks: planned_component!(@hooks $($hooks)?),
+                construction: upwell_di::ScopedConstruction::OnDemand,
                 generation_snapshot: None,
             }
         }

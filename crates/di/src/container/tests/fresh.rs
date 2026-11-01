@@ -12,6 +12,7 @@ async fn fresh_target_resolves_from_its_declared_scope_ancestry() {
         condition: None,
         factories: target_provider_factories,
         hooks: upwell_hooks::no_hooks,
+        construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
     };
     let owner_provider = ComponentDescriptor {
@@ -22,6 +23,7 @@ async fn fresh_target_resolves_from_its_declared_scope_ancestry() {
         condition: None,
         factories: owner_provider_factories,
         hooks: upwell_hooks::no_hooks,
+        construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
     };
     let fresh_target = ComponentDescriptor {
@@ -32,6 +34,7 @@ async fn fresh_target_resolves_from_its_declared_scope_ancestry() {
         condition: None,
         factories: fresh_target_factories,
         hooks: upwell_hooks::no_hooks,
+        construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
     };
     let target_seed = ComponentDescriptor::manual(
@@ -152,6 +155,7 @@ async fn fresh_reconstructs_a_transient_against_the_requesting_scope() {
         condition: None,
         factories: || &TRANSIENT_LEAF_FACTORY,
         hooks: upwell_hooks::no_hooks,
+        construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
     };
     let components = [(bound.ty.type_id, bound)].into_iter().collect();

@@ -65,6 +65,12 @@ impl ScopeLayouts {
         self.by_scope.get(scope)
     }
 
+    /// Every scope's slot layout, in no particular order.
+    #[cfg(feature = "tooling")]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&ScopeId, &Arc<SlotLayout>)> {
+        self.by_scope.iter()
+    }
+
     /// The plan of the entry with dense identity `id`.
     pub(crate) fn entry(&self, id: EntryId) -> Option<&EntryPlan> {
         self.entries.get(id.index())?.as_ref()
