@@ -97,7 +97,7 @@ macro_rules! scoped_roster {
 
 /// Every roster descriptor in `scope`, in index order. Leaked to `'static` because the app
 /// builder borrows descriptors for the program's lifetime, which a benchmark can afford.
-fn roster(scope: ScopeKey) -> &'static [ComponentDescriptor] {
+pub fn roster(scope: ScopeKey) -> &'static [ComponentDescriptor] {
     let roster = scoped_roster!(
         scope;
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,

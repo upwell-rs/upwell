@@ -14,6 +14,8 @@
 //! - [`di`] — builders that stand up small/moderate/large DI graphs layered across several scopes,
 //!   using only the public `upwell-di` API.
 //! - [`graph`] — large factory-backed singleton graphs for measuring graph preparation.
+//! - [`planning`] — registries with up to ten thousand entries into one scope, for measuring how
+//!   generation preparation scales with the entries it plans.
 //! - [`reload`] — file-backed applications over those graphs for measuring whole reload
 //!   transitions.
 //! - [`http`] — in-process raw axum and Upwell routers for measuring per-request cost.
@@ -30,6 +32,7 @@ pub mod frameworks;
 pub mod graph;
 pub mod http;
 pub mod measure;
+pub mod planning;
 pub mod reload;
 pub mod rpc;
 pub mod scoped;
