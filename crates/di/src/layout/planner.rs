@@ -7,11 +7,12 @@ use upwell_core::{
 };
 
 use super::{
-    DepRef, PlannedDependency, ProvidedRef, ProviderSlot, RootTarget, SlotIdx, SlotLayout, SlotRef,
-    SlotSpec, TransientPlan,
+    DepRef, EagerSelection, PlannedDependency, ProvidedRef, ProviderSlot, RootTarget,
+    SelectedSources, SlotIdx, SlotLayout, SlotRef, SlotSpec, TransientPlan,
 };
 use crate::descriptors::{ComponentDescriptor, ComponentFactoryDescriptor, ProviderDescriptor};
 use crate::error::Error;
+use crate::registry::scopes::scope_allows_with;
 use crate::registry::{DependencyTarget, ProviderSelectionModel};
 
 impl SlotLayout {
@@ -20,7 +21,8 @@ impl SlotLayout {
     /// `seeded` are the scope's factory-less components and `order` its factory-backed ones
     /// in construction order. `ancestors` holds the already planned layouts of the scopes
     /// open around it, and `can_reach` is the scope reachability validation used, so every
-    /// edge resolves to the source validation selected.
+    /// edge resolves to the source validation selected. The sources single-value trait
+    /// dependencies select from the scope are planned with them.
     pub fn plan(
         scope: ScopeKey,
         seeded: &[ComponentDescriptor],
@@ -53,10 +55,13 @@ impl SlotLayout {
             dependencies.push(planned);
         }
 
+        let selected = planner.selected_sources();
+
         for (spec, planned) in layout.slots.iter_mut().zip(dependencies) {
             spec.dependencies = planned;
         }
 
+        layout.selected = selected;
         layout.captures = captures;
         layout.eager = layout.eager_closure(selection, &can_reach);
 
@@ -125,6 +130,7 @@ impl SlotLayout {
             eager,
             by_type,
             by_trait,
+            selected: SelectedSources::default(),
             constructs,
             captures: false,
         })
@@ -253,6 +259,24 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
                 Some(provider),
             ),
         };
+
+        if component.scope.is_transient() {
+            let plan = self.transient(component, provider, visiting)?;
+
+            return Ok(DepRef::Transient(Arc::new(plan)));
+        }
+
+        self.stored(component, provider)
+            .ok_or_else(|| unplaced_dependency(consumer, dependency, &component))
+    }
+
+    /// The source holding the non-transient `component`, aliased as `provider` when set, as
+    /// seen from the scope being planned. `None` when no planned slot holds it.
+    fn stored(
+        &self,
+        component: ComponentDescriptor,
+        provider: Option<ProviderDescriptor>,
+    ) -> Option<DepRef> {
         let scope = component.scope;
 
         if scope.id() == Singleton::ID {
@@ -261,29 +285,41 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
                 None => RootTarget::Component(component.ty.type_id),
             };
 
-            return Ok(DepRef::Root(root));
+            return Some(DepRef::Root(root));
         }
-
-        if scope.is_transient() {
-            let plan = self.transient(component, provider, visiting)?;
-
-            return Ok(DepRef::Transient(Arc::new(plan)));
-        }
-
-        let unplaced = || unplaced_dependency(consumer, dependency, &component);
 
         if scope.id() == self.layout.scope.id() {
-            let at = slot_ref(self.layout, component, provider.as_ref()).ok_or_else(unplaced)?;
-
-            return Ok(DepRef::Local(at));
+            return Some(DepRef::Local(slot_ref(
+                self.layout,
+                component,
+                provider.as_ref(),
+            )?));
         }
 
-        let layout = self.ancestors.get(&scope.id()).ok_or_else(unplaced)?;
-        let at = slot_ref(layout, component, provider.as_ref()).ok_or_else(unplaced)?;
+        let layout = self.ancestors.get(&scope.id())?;
+        let at = slot_ref(layout, component, provider.as_ref())?;
 
-        Ok(DepRef::Ancestor {
+        Some(DepRef::Ancestor {
             layout: Arc::clone(layout),
             at,
+        })
+    }
+
+    /// The sources single-value trait dependencies select from the scope being planned,
+    /// picked as eager entry targets are.
+    fn selected_sources(&self) -> SelectedSources {
+        let can_access = |consumer, dependency| {
+            scope_allows_with(consumer, dependency, &|from, to| (self.can_reach)(from, to))
+        };
+        let selector = EagerSelection {
+            selection: self.selection,
+            can_access: &can_access,
+        };
+
+        SelectedSources::plan(self.layout.scope, &selector, |provider| {
+            let component = self.selection.component(provider.concrete_ty.type_id)?;
+
+            self.stored(component, Some(*provider))
         })
     }
 
