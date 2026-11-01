@@ -276,4 +276,5 @@ async fn a_child_builds_the_parent_slots_its_planned_factories_read() {
     ));
 }
 
+mod deferred;
 mod providers;

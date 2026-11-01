@@ -104,6 +104,6 @@ where
     }
 
     async fn from_container(cx: &ComponentConstructionContext) -> crate::Result<Self> {
-        Self::capture(cx.resolver_slot(), None)
+        cx.deferred(None)
     }
 }
