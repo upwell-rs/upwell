@@ -11,6 +11,41 @@ use crate::descriptors::component::{ComponentConstructionContext, HandleStorage,
 use crate::descriptors::{BoxedComponent, ComponentFactoryDescriptor};
 use crate::layout::{DepRef, EagerSelection, PlannedDependency, SlotIdx, SlotLayout};
 
+/// The deferred dependencies one group of on-demand builds captures, hydrated against
+/// `container` when the group finishes or, if it is cancelled, when it is dropped.
+struct Hydration<'a> {
+    group: ScopeResolverSlot,
+    container: &'a Arc<ScopeContainer>,
+    finished: bool,
+}
+
+impl<'a> Hydration<'a> {
+    fn new(container: &'a Arc<ScopeContainer>) -> Self {
+        Self {
+            group: ScopeResolverSlot::default(),
+            container,
+            finished: false,
+        }
+    }
+
+    /// Hydrates the group's deferred dependencies once every slot of the group is built.
+    fn finish(&mut self) -> crate::Result<()> {
+        self.finished = true;
+
+        self.group.attach(self.container)
+    }
+}
+
+impl Drop for Hydration<'_> {
+    fn drop(&mut self) {
+        if !self.finished {
+            // A cancelled group reports to no one; a dependency left unhydrated here is read
+            // on first access instead.
+            let _ = self.group.attach(self.container);
+        }
+    }
+}
+
 impl ScopeContainer {
     /// Builds every slot holding `target` (the component itself or every provider of the
     /// trait) in this scope and the scopes it was opened under that their openings left out,
@@ -181,16 +216,16 @@ impl ScopeContainer {
     ///
     /// The slots form one group: deferred dependencies their factories capture are hydrated
     /// once all of them are built, so a deferred cycle left out of the opening is built as a
-    /// unit. When a build fails, hydrating the slots built before it is still attempted and the
-    /// build's error is returned.
+    /// unit. When a build fails or is cancelled, the slots built before it are still hydrated;
+    /// a deferred dependency whose target was left unbuilt reads it on first access once built.
     async fn build_missing(
         self: &Arc<Self>,
         layout: &SlotLayout,
         needed: &[bool],
     ) -> crate::Result<()> {
-        let group = ScopeResolverSlot::default();
-        let built = self.build_group(layout, needed, &group).await;
-        let hydrated = group.attach(self);
+        let mut hydration = Hydration::new(self);
+        let built = self.build_group(layout, needed, &hydration.group).await;
+        let hydrated = hydration.finish();
 
         built.and(hydrated)
     }
