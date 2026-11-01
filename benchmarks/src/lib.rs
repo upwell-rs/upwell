@@ -31,6 +31,7 @@ pub mod fan_in;
 pub mod frameworks;
 pub mod graph;
 pub mod http;
+pub mod large_graph;
 pub mod measure;
 pub mod planning;
 pub mod reload;
