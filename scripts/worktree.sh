@@ -38,8 +38,14 @@ require_root() {
 
 # Holds off other `add` and `seed` runs, so a refresh never replaces the seed during a clone.
 lock_seed() {
+    local waited=0
+
     until mkdir "$seed.lock" 2> /dev/null; do
+        [[ -d "$seed.lock" ]] || fail "cannot create $seed.lock; is the drive writable?"
+        (( waited < 300 )) || fail "$seed.lock held for 5 minutes; if nothing is using it, remove it"
+
         sleep 1
+        waited=$(( waited + 1 ))
     done
 
     trap unlock_seed EXIT
@@ -72,6 +78,7 @@ add() {
         start="origin/$base"
     fi
 
+    lock_seed
     git -C "$repo" worktree add --quiet --no-track -b "$branch" "$path" "$start"
     git -C "$repo" worktree lock --reason "parallel worktree on $root" "$path"
 
@@ -80,8 +87,6 @@ add() {
     fi
 
     (cd "$path" && mise trust --quiet 2> /dev/null) || true
-
-    lock_seed
 
     if [[ -d "$seed" ]]; then
         clone_tree "$seed" "$path/target"
