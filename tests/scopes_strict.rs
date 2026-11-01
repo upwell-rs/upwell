@@ -19,7 +19,7 @@ use upwell::axum::axum::response::{IntoResponse, Response};
 use upwell::axum::prelude::*;
 use upwell::axum::tower::ServiceExt;
 use upwell::axum::{AxumMiddleware, RequestMeta, ScopeHandle};
-use upwell::{component, methods};
+use upwell::{UnplannedConstruction, component, methods};
 
 /// A request-scoped component the declared route injects.
 #[component(scope = HttpRequest)]
@@ -64,12 +64,12 @@ impl AuditController {
     async fn drift(&self) {}
 }
 
-/// The router of an app, denying undeclared on-demand builds when `deny` is set.
-async fn router(deny: bool) -> Router {
+/// The router of an app building undeclared components on demand as `unplanned` allows.
+async fn router(unplanned: UnplannedConstruction) -> Router {
     let builder = upwell::App::<upwell::axum::Axum>::builder("test-strict").auto_discover();
-    let builder = match deny {
-        true => builder.deny_unplanned(),
-        false => builder,
+    let builder = match unplanned {
+        UnplannedConstruction::Deny => builder.deny_unplanned(),
+        _ => builder,
     };
     let app = builder.build().await.expect("app builds");
 
@@ -93,7 +93,7 @@ async fn status(router: &Router, uri: &'static str) -> StatusCode {
 
 #[tokio::test]
 async fn a_strict_app_builds_only_what_a_route_declares() {
-    let router = router(true).await;
+    let router = router(UnplannedConstruction::Deny).await;
 
     let declared = status(&router, "/audit/declared").await;
     let drift = status(&router, "/audit/drift").await;
@@ -108,7 +108,7 @@ async fn a_strict_app_builds_only_what_a_route_declares() {
 
 #[tokio::test]
 async fn other_apps_build_undeclared_components_on_demand() {
-    let router = router(false).await;
+    let router = router(UnplannedConstruction::Allow).await;
 
     let drift = status(&router, "/audit/drift").await;
 
