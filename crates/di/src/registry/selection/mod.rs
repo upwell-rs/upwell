@@ -6,6 +6,7 @@ use upwell_core::{ResolutionMode, ScopeId, ScopeKey};
 use crate::descriptors::{ComponentDescriptor, ProviderDescriptor};
 
 mod dependency;
+mod diff;
 mod fault;
 pub(crate) mod rules;
 mod runtime;

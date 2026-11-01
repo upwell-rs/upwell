@@ -67,6 +67,7 @@ fn selected_types(selected: &[SelectedDependency]) -> Vec<TypeId> {
         .collect()
 }
 
+mod diff;
 mod eager;
 mod fault;
 mod fresh;
