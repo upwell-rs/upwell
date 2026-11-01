@@ -63,20 +63,30 @@ pub fn topology() -> PreparedScopeTopology {
         .expect("the large-graph topology validates")
 }
 
-/// How deep the scope of component `index` is: 0 for the root, 1 for [`Outer`], 2 for [`Inner`].
-const fn depth(index: usize) -> usize {
-    match index % 10 {
-        0..=3 => 0,
-        4..=6 => 1,
-        _ => 2,
-    }
+/// How deeply a component's scope nests, in nesting order.
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+enum Depth {
+    Root,
+    Outer,
+    Inner,
 }
 
-fn scope_at(depth: usize) -> ScopeKey {
-    match depth {
-        0 => Singleton::KEY,
-        1 => Outer::KEY,
-        _ => Inner::KEY,
+impl Depth {
+    /// The depth of the scope of component `index`.
+    const fn of(index: usize) -> Self {
+        match index % 10 {
+            0..=3 => Self::Root,
+            4..=6 => Self::Outer,
+            _ => Self::Inner,
+        }
+    }
+
+    fn scope(self) -> ScopeKey {
+        match self {
+            Self::Root => Singleton::KEY,
+            Self::Outer => Outer::KEY,
+            Self::Inner => Inner::KEY,
+        }
     }
 }
 
@@ -91,13 +101,13 @@ fn types() -> &'static [TypeDescriptor] {
 /// scope can reach, so the edges always form a DAG.
 fn parents(index: usize) -> impl Iterator<Item = usize> {
     let mut parents = [index / 2, index / 3, index.saturating_sub(1)];
+    let mut previous = None;
 
     parents.sort_unstable();
 
-    let mut previous = None;
-
     parents.into_iter().filter(move |parent| {
-        let keep = *parent != index && previous != Some(*parent) && depth(*parent) <= depth(index);
+        let keep =
+            *parent != index && previous != Some(*parent) && Depth::of(*parent) <= Depth::of(index);
 
         previous = Some(*parent);
 
@@ -147,7 +157,7 @@ fn node<const A: usize, const B: usize, const C: usize, const D: usize>() -> Com
             id,
             id,
             TypeDescriptor::of::<Node<A, B, C, D>>(id),
-            scope_at(depth(index)),
+            Depth::of(index).scope(),
         )
     }
 }
@@ -236,7 +246,7 @@ pub fn registry(components: usize, entries: usize) -> AppRegistry {
     let injected: Vec<_> = held
         .iter()
         .enumerate()
-        .filter(|(index, _)| depth(*index) == 2)
+        .filter(|(index, _)| Depth::of(*index) == Depth::Inner)
         .map(|(_, (_, targets))| *targets)
         .collect();
     let entries = (0..entries)
