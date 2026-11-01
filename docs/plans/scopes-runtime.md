@@ -436,6 +436,25 @@ still allocate if its `Injectable::from_stored` does. Still open: reading trait 
 runtime selection (a per-layout table of the selected sources), and handing planned handler
 parameters their pre-resolved `DepRef`s.
 
+Status (#359, planning at scale): entries are planned once per signature: the scope plus
+the sorted set of target descriptors (type, qualifier, cardinality, resolution, observation,
+optionality, dynamic and config flags; parameter names are ignored). Entries with equal
+signatures share one `Arc<EntryPlan>`; `ScopeLayouts::entry(EntryId)` still answers per entry.
+Each plan also records the types whose provider selection it read: its non-config targets and
+the targets of unplanned edges on the slots it builds or declares (`SlotLayout::entry_reads`).
+A reload that changes eligibility plans the candidate from the active generation: a signature
+keeps its plan by reference when the policy is unchanged, its scope's new layout plans entries
+like the old one (`SlotLayout::plans_entries_like`: same slot types, provider aliases and
+local/collection/unplanned edge shapes) and no type it read is in
+`ProviderSelectionModel::changed_selections` (providers, their order, qualifiers, primacy,
+priority or component scope differ). Everything else is planned again; debug builds assert
+that a carried plan equals a fresh one. A reload with unchanged eligibility still shares the
+whole plan. Unique plans, per-boundary construction orders and same-rank layouts run on
+`std::thread::scope` chunks once the work reaches 256 units (plans or components), in input
+order, so results do not depend on the thread count; wasm and single-thread hosts stay
+sequential. The `entry_planning` bench measures candidate preparation over 100 to 10 000
+entries with unique and shared signatures.
+
 A request scope opened under an app-chosen parent, such as a per-user `Session` scope the
 app caches and reuses across requests, fits this design: the parent is picked when the scope
 opens (`.under(&session)`), never by re-parenting an open scope. It needs app-declared
