@@ -116,16 +116,10 @@ impl ComponentConstructionContext {
                     .as_ref()
                     .and_then(|layout| self.read_store(|store| store.planned::<H>(layout, *at))),
             ),
-            DepRef::Ancestor { layout, at } => Planned::found(
+            DepRef::Ancestor { .. } | DepRef::Root(_) => Planned::found(
                 self.parent
                     .as_ref()
-                    .and_then(|parent| parent.ancestor(layout.scope()))
-                    .and_then(|ancestor| ancestor.planned::<H>(layout, *at)),
-            ),
-            DepRef::Root(target) => Planned::found(
-                self.parent
-                    .as_ref()
-                    .and_then(|parent| parent.root_container().root_target::<H>(target)),
+                    .and_then(|parent| parent.read_enclosing::<H>(source)),
             ),
             DepRef::Transient(_) | DepRef::Many(_) | DepRef::Unplanned => Planned::Unavailable,
         }
