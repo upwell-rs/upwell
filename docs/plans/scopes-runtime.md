@@ -372,8 +372,60 @@ container opens with the seeds the first time something resolves from it, on the
 plan was read from. A deferred
 opening that fails stays failed (`DeferredScopeFailed`). RPC calls and WebSocket messages open
 this way, so a method or handler injecting nothing scoped opens no scope. RPC and WebSocket
-connection scopes open with `open_on_demand()`, which builds only their seeds; every
-connection-scoped component is built the first time something resolves it.
+connection scopes open with `open_on_demand()`, which builds only their seeds and eager set;
+every other connection-scoped component is built the first time something resolves it.
+
+Status (#350, construction policy): on demand is the default for every scope below the root,
+and `#[component(scope = S, eager)]` opts a component out of it. `ComponentDescriptor` carries
+the policy as `construction: ScopedConstruction` (`OnDemand` or `Eager`). Each `SlotLayout`
+computes its eager set once, when the generation is prepared: every eager factory-backed slot
+with the local slots it reads, closed over planned and unplanned edges like an entry's
+targets. Every opening builds it: `plan_entry` starts each entry's plan from it (so it is
+declared under `deny_unplanned` too), `EntryPlan::on_demand` (formerly `nothing`, used by
+`open_on_demand` for connection scopes) builds exactly it, and `open_default` builds every
+slot anyway. A plan holding the eager set is never empty, so `open_when_needed` opens such a
+scope at once instead of deferring it. Axum's HTTP request scope still opens only when
+something injects from it, so a request that injects nothing request-scoped runs no eager
+component. The macros reject `eager` without `scope` and with a scope path spelled
+`Singleton` or `Transient` (spanned at the attribute), and a const assertion rejects any other
+path naming the root or transient scope; registry validation rejects a hand-written eager
+descriptor there with `EagerOutsideScope`. Tooling labels each component of a scope below the
+root with its `construction-policy`, each scope with its `eager` set and, when an entry opens
+it, the factory-backed components that no entry and no eager component reaches over selected
+edges of any kind, across scopes (`unreached-by-entries`), and each entry with its
+`plan-size`. `cargo upwell explain` shows these labels. An eager manual component has no
+factory to run, so the macro rejects `eager` with `default_factory = false`, and a hand-written
+factory-less descriptor is simply seeded.
+
+#### Migration: on-demand construction (#348, #349, #350)
+
+Before #348, opening a scope built every component of it, in one topological order. Now an
+opening builds only what its entry needs, and the rest on first use. What changes for an
+application:
+
+- **Failures.** A failing `#[init]` (or factory) of a scoped component fails only the entries
+  that use it, when they open their scope or first resolve it, instead of every opening of the
+  scope. A call or request that never touches it succeeds. Mark the component `eager` to keep
+  the old behaviour of failing every opening.
+- **Ordering.** Components of a scope are no longer all built before the handler runs, and
+  not in one fixed order across the scope: an entry builds its plan up front in layout order,
+  and anything else is built when first resolved, possibly while the handler runs. A
+  constructor must not rely on another component of its scope having been built unless it
+  depends on it.
+- **Side effects.** A constructor that exists for its side effect (an audit record, a span, a
+  permission gate) no longer runs for entries that do not inject it. Mark it `eager`, or move
+  the effect to middleware: per-call side effects belong in middleware (axum
+  `AxumMiddleware`, a `tower::Layer`), which runs for every call whether or not a scope
+  opens. Axum opens the request scope only when something injects from it, so on HTTP an
+  eager request-scoped component runs only for requests that open the scope.
+- **Synchronous reads.** `ScopeContainer::get`, `ComponentSource` and
+  `RpcCallContext::component` see only built slots; resolve through `Inject`, `Lazy` or
+  `ScopeContainer::resolve` to build on demand.
+- **Strict mode.** `deny_unplanned` turns undeclared on-demand builds into
+  `UndeclaredConstruction` errors; eager components are always declared.
+- **Hand-written descriptors.** `ComponentDescriptor` literals need the new `construction`
+  field (`ScopedConstruction::OnDemand` keeps the default); `ComponentDescriptor::of` and
+  `manual` set it.
 
 Status (#354, extract fast path): `ScopeContainer::extract` first tries
 `FromContainer::read_built`. For `Arc<T>`, `Dep<T>`, by-value handles and `Option<Arc<T>>`,
