@@ -8,7 +8,10 @@ use upwell_core::{RuntimeGenerationId, ScopeId};
 use upwell_di::{ComponentDescriptor, EffectiveGraph, ProviderSelectionModel};
 
 use crate::runtime::{RuntimeScopePlan, RuntimeView};
-use crate::scope::{PreparedScopeTopology, ScopeLayouts, ScopePlan, SeedDestination};
+use crate::scope::{
+    EntryPlanning, Parallelism, PlanBase, PreparedScopeTopology, ScopeLayouts, ScopePlan,
+    SeedDestination,
+};
 use crate::{AppConditionEvaluation, AppRegistry};
 
 mod commit;
@@ -50,6 +53,7 @@ impl CandidateGraph {
             registry,
             registry.component_registry(),
             topology,
+            None,
         )
     }
 
@@ -60,6 +64,36 @@ impl CandidateGraph {
         registry: &AppRegistry,
         evaluation: &AppConditionEvaluation,
         topology: &PreparedScopeTopology,
+    ) -> crate::Result<Self> {
+        Self::prepare_evaluation_from(base_generation, registry, evaluation, topology, None)
+    }
+
+    /// Prepares a candidate from `evaluation` for a transition from `base`, carrying over
+    /// each of `base`'s entry plans that selection of the candidate graph leaves valid.
+    pub(crate) fn prepare_from(
+        base: &RuntimeView,
+        evaluation: &AppConditionEvaluation,
+    ) -> crate::Result<Self> {
+        let plan = PlanBase {
+            layouts: base.scope_plan().layouts(),
+            selection: base.effective_graph().provider_selection(),
+        };
+
+        Self::prepare_evaluation_from(
+            base.id(),
+            base.condition().catalog(),
+            evaluation,
+            base.scope_plan().topology(),
+            Some(plan),
+        )
+    }
+
+    fn prepare_evaluation_from(
+        base_generation: RuntimeGenerationId,
+        registry: &AppRegistry,
+        evaluation: &AppConditionEvaluation,
+        topology: &PreparedScopeTopology,
+        base: Option<PlanBase<'_>>,
     ) -> crate::Result<Self> {
         let component_registry = registry.component_registry();
 
@@ -76,6 +110,7 @@ impl CandidateGraph {
             registry,
             evaluation.evaluation().eligible_registry().clone(),
             topology,
+            base,
         )
     }
 
@@ -84,6 +119,7 @@ impl CandidateGraph {
         registry: &AppRegistry,
         component_registry: upwell_di::ComponentRegistry,
         topology: &PreparedScopeTopology,
+        base: Option<PlanBase<'_>>,
     ) -> crate::Result<Self> {
         let components = component_registry.resolved_components()?;
         registry.validate_configs(&components)?;
@@ -97,13 +133,13 @@ impl CandidateGraph {
 
         crate::entry::validate_targets(registry, &selection, topology)?;
 
-        let scopes = ScopePlan::partition(
-            &components,
-            &selection,
+        let planning = EntryPlanning {
+            selection: &selection,
             topology,
-            &registry.entries,
-            registry.unplanned,
-        )?;
+            unplanned: registry.unplanned,
+            parallelism: Parallelism::available(),
+        };
+        let scopes = ScopePlan::partition_from(&components, &registry.entries, &planning, base)?;
 
         Ok(Self::assemble(
             graph,

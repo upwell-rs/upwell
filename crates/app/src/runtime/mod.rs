@@ -110,6 +110,11 @@ impl RuntimeScopePlan {
         }
     }
 
+    /// The scope topology every generation of the runtime plans over.
+    pub(crate) fn topology(&self) -> &Arc<PreparedScopeTopology> {
+        &self.topology
+    }
+
     /// The construction order of each protocol-owned scope, shared with any candidate that
     /// reuses this plan.
     pub(crate) fn orders(&self) -> &Arc<HashMap<ScopeId, Vec<ComponentDescriptor>>> {
