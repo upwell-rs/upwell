@@ -36,6 +36,20 @@ require_root() {
     mkdir -p "$worktrees" 2>/dev/null || fail "cannot create $worktrees; is the drive connected?"
 }
 
+# Holds off other `add` and `seed` runs, so a refresh never replaces the seed during a clone.
+lock_seed() {
+    until mkdir "$seed.lock" 2> /dev/null; do
+        sleep 1
+    done
+
+    trap unlock_seed EXIT
+}
+
+unlock_seed() {
+    rm -rf "$seed.lock"
+    trap - EXIT
+}
+
 clone_tree() {
     if [[ "$(uname -s)" == "Darwin" ]]; then
         cp -cR "$1" "$2"
@@ -67,11 +81,15 @@ add() {
 
     (cd "$path" && mise trust --quiet 2> /dev/null) || true
 
+    lock_seed
+
     if [[ -d "$seed" ]]; then
         clone_tree "$seed" "$path/target"
         git -C "$path" ls-files -z | (cd "$path" && xargs -0 touch)
         echo "worktree: seeded target from $seed"
     fi
+
+    unlock_seed
 
     echo "worktree: $path on $branch from $start"
 }
@@ -109,11 +127,9 @@ remove() {
 
     git -C "$repo" worktree unlock "$path"
 
-    if [[ "$force" == "--force" ]]; then
-        git -C "$repo" worktree remove --force "$path"
-    elif ! git -C "$repo" worktree remove "$path"; then
+    if ! git -C "$repo" worktree remove ${force:+"$force"} "$path"; then
         git -C "$repo" worktree lock --reason "parallel worktree on $root" "$path"
-        fail "$slice has uncommitted changes; commit them or pass --force"
+        fail "could not remove $slice; commit its changes or pass --force"
     fi
 
     git -C "$repo" worktree prune
@@ -126,10 +142,12 @@ refresh_seed() {
 
     [[ -d "$target" ]] || fail "$target does not exist"
 
+    lock_seed
     rm -rf "$next"
     clone_tree "$target" "$next"
     rm -rf "$seed"
     mv "$next" "$seed"
+    unlock_seed
     echo "worktree: seed refreshed from $1"
 }
 
