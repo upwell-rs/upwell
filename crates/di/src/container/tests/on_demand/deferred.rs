@@ -137,3 +137,110 @@ async fn a_cycle_half_built_by_a_cancelled_build_reads_its_other_half_once_built
         "the head reads its deferred tail once the tail is built"
     );
 }
+
+/// Holds a factory until the test releases it, telling the test when the factory started.
+struct Gate {
+    started: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl Gate {
+    const fn new() -> Self {
+        Self {
+            started: tokio::sync::Notify::const_new(),
+            release: tokio::sync::Notify::const_new(),
+        }
+    }
+
+    async fn pass(&self) {
+        self.started.notify_one();
+        self.release.notified().await;
+    }
+}
+
+static SPOKE_GATE: Gate = Gate::new();
+static RIM_GATE: Gate = Gate::new();
+
+/// Half of a cycle, reaching [`Spoke`] once its scope hydrates it.
+struct Hub {
+    spoke: Deferred<Spoke>,
+}
+
+/// The other half of the cycle, built once [`SPOKE_GATE`] releases it.
+struct Spoke {
+    hub: Arc<Hub>,
+}
+
+/// A slot after the cycle that only some resolutions build, held by [`RIM_GATE`].
+struct Rim {
+    _hub: Arc<Hub>,
+}
+
+test_component!(Hub, "hub");
+test_component!(Spoke, "spoke");
+test_component!(Rim, "rim");
+
+async fn hub(spoke: Deferred<Spoke>) -> Hub {
+    Hub { spoke }
+}
+
+async fn spoke(hub: Arc<Hub>) -> Spoke {
+    SPOKE_GATE.pass().await;
+
+    Spoke { hub }
+}
+
+async fn rim(hub: Arc<Hub>) -> Rim {
+    RIM_GATE.pass().await;
+
+    Rim { _hub: hub }
+}
+
+scoped!(hub_descriptor, Hub, "hub", hub);
+scoped!(spoke_descriptor, Spoke, "spoke", spoke);
+scoped!(rim_descriptor, Rim, "rim", rim);
+
+#[tokio::test]
+async fn a_cycle_member_returned_while_another_group_still_builds_reads_its_other_half() {
+    let layout = Arc::new(plan(&[
+        hub_descriptor(),
+        spoke_descriptor(),
+        rim_descriptor(),
+    ]));
+    let scope = open(&layout, Some(&entry_plan(&layout, &[]))).await;
+    let building = tokio::spawn({
+        let scope = Arc::clone(&scope);
+
+        async move { scope.resolve::<Arc<Rim>>().await.map(|rim| rim.is_some()) }
+    });
+
+    SPOKE_GATE.started.notified().await;
+
+    let reading = tokio::spawn({
+        let scope = Arc::clone(&scope);
+
+        async move { scope.resolve::<Arc<Hub>>().await }
+    });
+
+    SPOKE_GATE.release.notify_one();
+    RIM_GATE.started.notified().await;
+
+    let hub = reading
+        .await
+        .expect("the reading task finishes")
+        .expect("the hub resolves")
+        .expect("the hub is built");
+    let spoke = scope.get::<Spoke>().expect("the spoke is built");
+    let read = hub.spoke.try_get();
+
+    RIM_GATE.release.notify_one();
+
+    let built = building.await.expect("the building task finishes");
+
+    assert!(
+        read.is_some_and(|read| Arc::ptr_eq(&read, &spoke)),
+        "the hub reads its spoke before the group that built them hydrates it"
+    );
+    assert!(Arc::ptr_eq(&spoke.hub, &hub));
+    assert!(built.is_ok_and(|built| built));
+}

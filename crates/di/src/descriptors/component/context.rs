@@ -274,12 +274,13 @@ impl ComponentConstructionContext {
     where
         T: ?Sized + Send + Sync + 'static,
     {
-        let slot = match &self.hydrates {
-            Some(group) => group.clone(),
-            None => self.resolver_slot(),
-        };
+        match (&self.hydrates, &self.store) {
+            (Some(group), BuildStore::Opened(container)) => {
+                crate::Deferred::capture_in(group.clone(), qualifier, container)
+            }
 
-        crate::Deferred::capture(slot, qualifier)
+            _ => crate::Deferred::capture(self.resolver_slot(), qualifier),
+        }
     }
 
     /// Registers the deferred dependencies this context captures with `group`, which

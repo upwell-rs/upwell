@@ -46,15 +46,39 @@ where
         scope: ScopeResolverSlot,
         qualifier: Option<&'static str>,
     ) -> crate::Result<Self> {
-        let inner = Arc::new(DeferredInner {
-            qualifier,
-            value: OnceLock::new(),
-            scope: OnceLock::new(),
-        });
+        Self::unhydrated(qualifier).register(scope)
+    }
 
-        scope.register_deferred(Arc::clone(&inner) as Arc<dyn DeferredHydrator>)?;
+    /// Captures a dependency of a slot built on demand in the open scope `opened`, hydrated
+    /// with `group` but read from `opened` as soon as its target is built there, so a
+    /// concurrent resolution returning this slot before `group` finishes still reaches it.
+    pub(crate) fn capture_in(
+        group: ScopeResolverSlot,
+        qualifier: Option<&'static str>,
+        opened: &Arc<ScopeContainer>,
+    ) -> crate::Result<Self> {
+        let deferred = Self::unhydrated(qualifier);
 
-        Ok(Self { inner })
+        // The deferred dependency was just created, so its scope is unset.
+        let _ = deferred.inner.scope.set(Arc::downgrade(opened));
+
+        deferred.register(group)
+    }
+
+    fn unhydrated(qualifier: Option<&'static str>) -> Self {
+        Self {
+            inner: Arc::new(DeferredInner {
+                qualifier,
+                value: OnceLock::new(),
+                scope: OnceLock::new(),
+            }),
+        }
+    }
+
+    fn register(self, scope: ScopeResolverSlot) -> crate::Result<Self> {
+        scope.register_deferred(Arc::clone(&self.inner) as Arc<dyn DeferredHydrator>)?;
+
+        Ok(self)
     }
 
     /// Returns the hydrated target when it is still alive.
