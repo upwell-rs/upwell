@@ -7,6 +7,7 @@ use std::sync::Arc;
 use upwell_core::{Cardinality, DependencyDescriptor, DependencyObservation};
 
 use super::{dependency_of, dependency_of_observed, short_name};
+use crate::ScopeContainer;
 use crate::descriptors::{ComponentConstructionContext, Dep, Injectable};
 use crate::error::Error;
 
@@ -45,6 +46,14 @@ pub trait FromContainer: Sized {
     fn ready_at(_cx: &ComponentConstructionContext, _index: usize) -> Option<crate::Result<Self>> {
         None
     }
+
+    /// Reads this parameter from `scope` when it is a component already built there or in
+    /// the scopes `scope` opens under, without selecting providers or building anything.
+    /// `None` sends the extraction down its general path; parameters that are not a single
+    /// built component always return `None`.
+    fn read_built(_scope: &ScopeContainer) -> Option<Self> {
+        None
+    }
 }
 
 impl<T> FromContainer for Arc<T>
@@ -72,6 +81,10 @@ where
 
     fn ready_at(cx: &ComponentConstructionContext, index: usize) -> Option<crate::Result<Self>> {
         required::<Arc<T>, T>(cx, index)
+    }
+
+    fn read_built(scope: &ScopeContainer) -> Option<Self> {
+        scope.built_component::<Arc<T>>()
     }
 }
 
@@ -104,6 +117,10 @@ where
 
     fn ready_at(cx: &ComponentConstructionContext, index: usize) -> Option<crate::Result<Self>> {
         required::<Dep<T>, T>(cx, index)
+    }
+
+    fn read_built(scope: &ScopeContainer) -> Option<Self> {
+        scope.built_component::<Dep<T>>()
     }
 }
 
@@ -138,6 +155,10 @@ where
     fn ready_at(cx: &ComponentConstructionContext, index: usize) -> Option<crate::Result<Self>> {
         required::<H, H>(cx, index)
     }
+
+    fn read_built(scope: &ScopeContainer) -> Option<Self> {
+        scope.built_component::<H>()
+    }
 }
 
 impl<T> FromContainer for Option<Arc<T>>
@@ -161,6 +182,10 @@ where
 
     fn ready_at(cx: &ComponentConstructionContext, index: usize) -> Option<crate::Result<Self>> {
         cx.dep_ready::<Arc<T>>(index, None).map(Ok)
+    }
+
+    fn read_built(scope: &ScopeContainer) -> Option<Self> {
+        scope.built_component::<Arc<T>>().map(Some)
     }
 }
 
