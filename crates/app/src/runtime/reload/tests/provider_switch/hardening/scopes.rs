@@ -225,3 +225,69 @@ async fn a_slot_built_on_demand_after_a_switch_uses_its_scopes_generation() {
         "a slot built after the switch comes from the generation its call opened under"
     );
 }
+
+#[tokio::test]
+async fn a_switch_replans_only_the_entries_reading_the_switched_provider() {
+    let _guard = lock_test_guard().await;
+    let dir = auth_config_dir("primary");
+    let gate = upwell_core::EntryKey::new("test/plans-gate").expect("valid entry key");
+    let authenticator = upwell_core::EntryKey::new("test/plans-auth").expect("valid entry key");
+    let nothing = upwell_core::EntryKey::new("test/plans-none").expect("valid entry key");
+    let entries = [
+        crate::EntryDescriptor::new::<Call, (Arc<CallGate>,)>(gate),
+        crate::EntryDescriptor::new::<Call, (Arc<dyn Authenticator>,)>(authenticator),
+        crate::EntryDescriptor::new::<Call, ()>(nothing),
+    ];
+
+    reset_faults();
+
+    let app = entries
+        .iter()
+        .fold(
+            auth_builder::<ScopedProtocol>(
+                &config_dir_of(&dir),
+                &PRIMARY_COMPONENT,
+                &GATE_COMPONENT,
+                &[&CALL_GATE_COMPONENT],
+            ),
+            |builder, entry| builder.entry_descriptor(*entry),
+        )
+        .build()
+        .await
+        .expect("the scoped app builds");
+    let runtime = app.runtime();
+    let table = crate::EntryTable::new(&entries, runtime.view().scope_plan().topology())
+        .expect("the test entries validate");
+    let plan_of = |key| {
+        let id = table.id(&key).expect("the entry is registered");
+
+        Arc::clone(
+            runtime
+                .view()
+                .scope_plan()
+                .layouts()
+                .shared_entry(id)
+                .expect("a call entry has a plan"),
+        )
+    };
+    let before = [gate, authenticator, nothing].map(plan_of);
+
+    write_auth_config(&config_dir_of(&dir), "fallback");
+
+    runtime.reload_config().await.expect("the switch commits");
+
+    let after = [gate, authenticator, nothing].map(plan_of);
+
+    assert!(
+        Arc::ptr_eq(&before[0], &after[0]),
+        "the call gate's plan reads no switched selection, so it carries over"
+    );
+    assert!(
+        !Arc::ptr_eq(&before[1], &after[1]),
+        "an entry injecting the switched trait is planned again"
+    );
+    assert!(
+        Arc::ptr_eq(&before[2], &after[2]),
+        "an entry injecting nothing carries its plan over"
+    );
+}
