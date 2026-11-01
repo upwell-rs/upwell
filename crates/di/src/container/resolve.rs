@@ -6,7 +6,7 @@ use std::sync::Arc;
 use upwell_core::{ResolutionMode, Scope, ScopeKey, Transient};
 
 use super::{ScopeContainer, construct_transient, construct_transient_provider};
-use crate::descriptors::component::{ComponentConstructionContext, SharedStore};
+use crate::descriptors::component::{ComponentConstructionContext, SharedStore, from_boxed};
 use crate::descriptors::{Component, Injectable, ProviderDescriptor};
 use crate::layout::{RootTarget, SlotLayout, SlotRef};
 
@@ -112,7 +112,14 @@ impl ScopeContainer {
     /// resolver-sourced type) through the threaded resolvers. A protocol's `Inject` extractor
     /// builds on this, so a handler can inject anything a constructor can — not just the
     /// `Injectable` subset that [`resolve`](Self::resolve) covers.
+    ///
+    /// A single component already built in this scope or the scopes it opens under is read
+    /// directly, without selecting providers or creating a construction context.
     pub async fn extract<H: crate::construct::FromContainer>(self: &Arc<Self>) -> crate::Result<H> {
+        if let Some(value) = H::read_built(self) {
+            return Ok(value);
+        }
+
         let dependency = H::dependency();
 
         if !dependency.config && dependency.resolution == ResolutionMode::Eager {
@@ -133,6 +140,31 @@ impl ScopeContainer {
         );
 
         H::from_container(&cx).await
+    }
+
+    /// The component of type `H::Target` built in this scope or the scopes it opens under,
+    /// found by its concrete type alone. `None` when the type is also provided as a trait,
+    /// since runtime selection then decides which instance it resolves to.
+    pub(crate) fn built_component<H: Injectable>(&self) -> Option<H> {
+        let type_id = TypeId::of::<H::Target>();
+        let mut current = self;
+
+        if !self
+            .registry
+            .selection
+            .providers_for_trait(type_id)
+            .is_empty()
+        {
+            return None;
+        }
+
+        loop {
+            if let Some(component) = current.store.component(type_id) {
+                return from_boxed::<H>(component);
+            }
+
+            current = current.parent.as_deref()?;
+        }
     }
 
     /// Single concrete-or-primary-provider lookup across this scope and its parents.
