@@ -69,6 +69,10 @@ name = "di_graph_preparation"
 harness = false
 
 [[bench]]
+name = "entry_planning"
+harness = false
+
+[[bench]]
 name = "reload_transition"
 harness = false
 
