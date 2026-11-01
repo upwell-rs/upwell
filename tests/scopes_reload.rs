@@ -32,6 +32,7 @@ static PARKED: Notify = Notify::const_new();
 /// Lets a parked call continue.
 static RELEASE: Notify = Notify::const_new();
 
+/// The config each runtime generation's [`Stamp`] is built from.
 #[config(path = "stamp")]
 #[derive(Deserialize)]
 struct StampCfg {
@@ -67,6 +68,7 @@ struct CallStamp {
     stamp: Arc<Stamp>,
 }
 
+/// The service whose calls read the stamps of their generation.
 #[service(id = "reload", version = "0.1")]
 struct ReloadSvc;
 
