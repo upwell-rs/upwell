@@ -107,24 +107,35 @@ impl SlotLayout {
             selection,
             can_access: &can_access,
         };
-        let mut builds = vec![false; self.slots.len()].into_boxed_slice();
-
-        for target in targets.iter().filter(|target| is_built_up_front(target)) {
-            self.for_each_selected_slot(
-                &selector,
-                target.ty.type_id,
-                target.qualifier,
-                target.cardinality,
-                |slot| self.include(&selector, slot, &mut builds),
-            );
-        }
-
+        let builds = self.built_up_front(&selector, targets);
         let declares = match unplanned {
             UnplannedConstruction::Allow => None,
             UnplannedConstruction::Deny => Some(self.declared(&selector, targets, &builds)),
         };
 
         EntryPlan { builds, declares }
+    }
+
+    /// The slots the targets of `targets` that are not lazy resolve to here, with their
+    /// dependencies.
+    fn built_up_front(
+        &self,
+        selector: &EagerSelection<'_>,
+        targets: &[DependencyDescriptor],
+    ) -> Box<[bool]> {
+        let mut builds = vec![false; self.slots.len()].into_boxed_slice();
+
+        for target in targets.iter().filter(|target| is_built_up_front(target)) {
+            self.for_each_selected_slot(
+                selector,
+                target.ty.type_id,
+                target.qualifier,
+                target.cardinality,
+                |slot| self.include(selector, slot, &mut builds),
+            );
+        }
+
+        builds
     }
 
     /// The slots `builds` holds and those the lazy targets of `targets` resolve to here, with
