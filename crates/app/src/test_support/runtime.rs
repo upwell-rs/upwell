@@ -11,7 +11,7 @@ use upwell_di::{
 use upwell_hooks::{HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookManager};
 
 use crate::runtime::AppConditionState;
-use crate::scope::{ScopeLayouts, SeedDestination};
+use crate::scope::{EntryPlanning, Parallelism, ScopeLayouts, SeedDestination};
 use crate::{AppRegistry, EntryDescriptor, PreparedScopeTopology, ScopeTopology};
 
 /// The descriptor the app seeds for its hook manager.
@@ -98,11 +98,12 @@ pub(crate) fn seed_layouts(
         layouts.insert(boundary.id(), Arc::new(layout));
     }
 
-    ScopeLayouts::new(
-        layouts,
-        entries,
-        UnplannedConstruction::Allow,
+    let planning = EntryPlanning {
         selection,
         topology,
-    )
+        unplanned: UnplannedConstruction::Allow,
+        parallelism: Parallelism::available(),
+    };
+
+    ScopeLayouts::plan(layouts, entries, &planning, None)
 }

@@ -5,12 +5,18 @@ use std::sync::Arc;
 
 use upwell_core::{Scope, ScopeId, Singleton, Transient};
 use upwell_di::{
-    ComponentDescriptor, EffectiveGraph, EntryPlan, ProviderSelectionModel, SlotLayout,
-    UnplannedConstruction, topological_sort,
+    ComponentDescriptor, EffectiveGraph, ProviderSelectionModel, SlotLayout, UnplannedConstruction,
+    topological_sort,
 };
 
-use super::PreparedScopeTopology;
-use crate::entry::{EntryDescriptor, EntryId};
+use super::{PreparedScopeTopology, ScopeBoundary};
+use crate::entry::EntryDescriptor;
+
+mod layouts;
+mod parallel;
+
+pub(crate) use layouts::{EntryPlanning, PlanBase, ScopeLayouts};
+pub(crate) use parallel::Parallelism;
 
 /// The validated construction plan for root, transient, and protocol-owned scopes.
 #[derive(Debug)]
@@ -20,61 +26,6 @@ pub(crate) struct ScopePlan {
     pub(crate) orders: HashMap<ScopeId, Vec<ComponentDescriptor>>,
     pub(crate) layouts: ScopeLayouts,
     pub(crate) seed_destinations: HashMap<TypeId, SeedDestination>,
-}
-
-/// The prepared slot layout of every protocol-owned scope, and the plan of every entry
-/// opening one of them.
-///
-/// Entry plans are indexed like the application's [`EntryTable`](crate::EntryTable), whose
-/// entries are fixed while each runtime generation plans them against its own layouts.
-#[derive(Debug, Default)]
-pub(crate) struct ScopeLayouts {
-    by_scope: HashMap<ScopeId, Arc<SlotLayout>>,
-    entries: Box<[Option<EntryPlan>]>,
-}
-
-impl ScopeLayouts {
-    /// Plans every entry of `entries` against the scope layouts `by_scope`, selecting
-    /// providers as `selection` does over `topology`, under the `unplanned` construction
-    /// policy. An entry into the root scope has no plan.
-    pub(crate) fn new(
-        by_scope: HashMap<ScopeId, Arc<SlotLayout>>,
-        entries: &[EntryDescriptor],
-        unplanned: UnplannedConstruction,
-        selection: &ProviderSelectionModel,
-        topology: &PreparedScopeTopology,
-    ) -> Self {
-        let entries = crate::entry::in_table_order(entries)
-            .map(|entry| {
-                by_scope.get(&entry.scope.id()).map(|layout| {
-                    layout.plan_entry(
-                        &(entry.targets)(),
-                        selection,
-                        |consumer, dependency| topology.is_reachable(&consumer, &dependency),
-                        unplanned,
-                    )
-                })
-            })
-            .collect();
-
-        Self { by_scope, entries }
-    }
-
-    /// The slot layout of `scope`.
-    pub(crate) fn get(&self, scope: &ScopeId) -> Option<&Arc<SlotLayout>> {
-        self.by_scope.get(scope)
-    }
-
-    /// Every scope's slot layout, in no particular order.
-    #[cfg(feature = "tooling")]
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&ScopeId, &Arc<SlotLayout>)> {
-        self.by_scope.iter()
-    }
-
-    /// The plan of the entry with dense identity `id`.
-    pub(crate) fn entry(&self, id: EntryId) -> Option<&EntryPlan> {
-        self.entries.get(id.index())?.as_ref()
-    }
 }
 
 /// The declared destination and diagnostic name of a factory-less scoped component.
@@ -104,14 +55,31 @@ impl ScopePlan {
         entries: &[EntryDescriptor],
         unplanned: UnplannedConstruction,
     ) -> crate::Result<Self> {
-        let partitions = DescriptorPartitions::classify(resolved, topology)?;
-        let orders = partitions.orders(topology, selection)?;
-        let layouts = ScopeLayouts::new(
-            partitions.layouts(&orders, topology, selection)?,
-            entries,
-            unplanned,
+        let planning = EntryPlanning {
             selection,
             topology,
+            unplanned,
+            parallelism: Parallelism::available(),
+        };
+
+        Self::partition_from(resolved, entries, &planning, None)
+    }
+
+    /// Partitions resolved descriptors as [`partition`](Self::partition) does, carrying over
+    /// the entry plans of `base` that still hold.
+    pub(crate) fn partition_from(
+        resolved: &[ComponentDescriptor],
+        entries: &[EntryDescriptor],
+        planning: &EntryPlanning<'_>,
+        base: Option<PlanBase<'_>>,
+    ) -> crate::Result<Self> {
+        let partitions = DescriptorPartitions::classify(resolved, planning.topology)?;
+        let orders = partitions.orders(planning)?;
+        let layouts = ScopeLayouts::plan(
+            partitions.layouts(&orders, planning)?,
+            entries,
+            planning,
+            base,
         );
 
         Ok(Self {
@@ -212,72 +180,100 @@ impl DescriptorPartitions {
         Ok(())
     }
 
+    /// Sorts each boundary's factory-backed components into construction order. Boundaries
+    /// are sorted independently, so large topologies sort them in parallel.
     fn orders(
         &self,
-        topology: &PreparedScopeTopology,
-        selection: &ProviderSelectionModel,
+        planning: &EntryPlanning<'_>,
     ) -> crate::Result<HashMap<ScopeId, Vec<ComponentDescriptor>>> {
+        let topology = planning.topology;
         let root = self
             .singletons
             .iter()
             .map(|component| component.ty.type_id)
             .collect();
-        let mut orders = HashMap::new();
-
-        for boundary in topology.boundaries() {
+        let boundaries = topology.boundaries();
+        let work = self.by_scope.values().map(Vec::len).sum();
+        let sorted = planning.parallelism.map(boundaries, work, |boundary| {
             let scope = boundary.id();
             let prebuilt = self.prebuilt(&scope, &root, topology);
             let local = self.by_scope.get(&scope).map_or(&[][..], Vec::as_slice);
-            let order = topological_sort(local, &prebuilt, selection, |consumer, dependency| {
-                topology.is_reachable(&consumer, &dependency)
-            })?
+            let order = topological_sort(
+                local,
+                &prebuilt,
+                planning.selection,
+                |consumer, dependency| topology.is_reachable(&consumer, &dependency),
+            )?
             .into_iter()
             .copied()
             .collect();
 
-            orders.insert(scope, order);
-        }
+            Ok::<_, crate::Error>((scope, order))
+        });
 
-        Ok(orders)
+        sorted.into_iter().collect()
     }
 
     /// Plans each boundary's slot layout from its construction order, parents before
     /// children, so every layout can point into the layouts of the scopes around it.
+    /// Boundaries of one rank never enclose each other, so each rank plans in parallel
+    /// once it holds enough components.
     fn layouts(
         &self,
         orders: &HashMap<ScopeId, Vec<ComponentDescriptor>>,
-        topology: &PreparedScopeTopology,
-        selection: &ProviderSelectionModel,
+        planning: &EntryPlanning<'_>,
     ) -> crate::Result<HashMap<ScopeId, Arc<SlotLayout>>> {
-        let mut boundaries: Vec<_> = topology.boundaries().iter().collect();
+        let mut boundaries: Vec<_> = planning.topology.boundaries().iter().collect();
         let mut layouts = HashMap::with_capacity(boundaries.len());
 
         boundaries.sort_by_key(|boundary| Reverse(boundary.rank()));
 
-        for boundary in boundaries {
-            let scope = boundary.id();
-            let seeded: Vec<ComponentDescriptor> = self
-                .descriptors_by_scope
-                .get(&scope)
-                .into_iter()
-                .flatten()
-                .filter(|component| self.is_seeded(&scope, component))
-                .copied()
-                .collect();
-            let order = orders.get(&scope).map_or(&[][..], Vec::as_slice);
-            let layout = SlotLayout::plan(
-                boundary.scope(),
-                &seeded,
-                order,
-                &layouts,
-                selection,
-                |consumer, dependency| topology.is_reachable(&consumer, &dependency),
-            )?;
+        for rank in boundaries.chunk_by(|left, right| left.rank() == right.rank()) {
+            let work = rank
+                .iter()
+                .filter_map(|boundary| orders.get(&boundary.id()))
+                .map(Vec::len)
+                .sum();
+            let planned = planning.parallelism.map(rank, work, |boundary| {
+                self.layout(boundary, orders, &layouts, planning)
+            });
 
-            layouts.insert(scope, Arc::new(layout));
+            for (boundary, layout) in rank.iter().zip(planned) {
+                layouts.insert(boundary.id(), Arc::new(layout?));
+            }
         }
 
         Ok(layouts)
+    }
+
+    /// Plans `boundary`'s slot layout against the already planned layouts of its ancestors.
+    fn layout(
+        &self,
+        boundary: &ScopeBoundary,
+        orders: &HashMap<ScopeId, Vec<ComponentDescriptor>>,
+        ancestors: &HashMap<ScopeId, Arc<SlotLayout>>,
+        planning: &EntryPlanning<'_>,
+    ) -> crate::Result<SlotLayout> {
+        let scope = boundary.id();
+        let seeded: Vec<ComponentDescriptor> = self
+            .descriptors_by_scope
+            .get(&scope)
+            .into_iter()
+            .flatten()
+            .filter(|component| self.is_seeded(&scope, component))
+            .copied()
+            .collect();
+        let order = orders.get(&scope).map_or(&[][..], Vec::as_slice);
+        let layout = SlotLayout::plan(
+            boundary.scope(),
+            &seeded,
+            order,
+            ancestors,
+            planning.selection,
+            |consumer, dependency| planning.topology.is_reachable(&consumer, &dependency),
+        )?;
+
+        Ok(layout)
     }
 
     fn is_seeded(&self, scope: &ScopeId, component: &ComponentDescriptor) -> bool {
