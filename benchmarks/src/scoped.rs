@@ -317,8 +317,9 @@ where
             return EntryScope::from_container(Arc::clone(self.connection.container()));
         }
 
-        let builder = self.per_call.builder().under(&self.connection);
-        builder
+        self.per_call
+            .builder()
+            .under(&self.connection)
             .open_when_needed(self.entries.get(route))
             .await
             .expect("benchmark per-call scope opens")
