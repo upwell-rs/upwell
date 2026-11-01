@@ -147,10 +147,10 @@ jobs:
       - *cache
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: Install nextest 0.9.140
+      - name: Install nextest 0.9.150
         uses: taiki-e/install-action@v2
         with:
-          tool: nextest@0.9.140
+          tool: nextest@0.9.150
           fallback: none
       - name: Install just
         uses: taiki-e/install-action@v2
@@ -181,10 +181,10 @@ jobs:
       - *cache
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: Install nextest 0.9.140
+      - name: Install nextest 0.9.150
         uses: taiki-e/install-action@v2
         with:
-          tool: nextest@0.9.140
+          tool: nextest@0.9.150
           fallback: none
       - name: Install just
         uses: taiki-e/install-action@v2
@@ -211,10 +211,10 @@ jobs:
       - *checkout
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: Install nextest 0.9.140
+      - name: Install nextest 0.9.150
         uses: taiki-e/install-action@v2
         with:
-          tool: nextest@0.9.140
+          tool: nextest@0.9.150
           fallback: none
       - name: Install just
         uses: taiki-e/install-action@v2
@@ -231,7 +231,7 @@ jobs:
           UPWELL_SKIP_GENERATED_PROJECT_BUILDS: "1"
         shell: bash
         run: |
-          [[ "$(cargo nextest --version)" == "cargo-nextest 0.9.140 "* ]]
+          [[ "$(cargo nextest --version)" == "cargo-nextest 0.9.150 "* ]]
           critical_filter="$(just --evaluate critical_filter)"
           cargo nextest run --archive-file "${{ github.workspace }}/nextest-archive/nextest-linux.tar.zst" --workspace-remap "${{ github.workspace }}" --profile ci-critical --filterset "$critical_filter"
       - name: Validate JUnit report
@@ -255,10 +255,10 @@ jobs:
       - *checkout
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: Install nextest 0.9.140
+      - name: Install nextest 0.9.150
         uses: taiki-e/install-action@v2
         with:
-          tool: nextest@0.9.140
+          tool: nextest@0.9.150
           fallback: none
       - name: Install just
         uses: taiki-e/install-action@v2
@@ -275,7 +275,7 @@ jobs:
           UPWELL_SKIP_GENERATED_PROJECT_BUILDS: "1"
         shell: bash
         run: |
-          [[ "$(cargo nextest --version)" == "cargo-nextest 0.9.140 "* ]]
+          [[ "$(cargo nextest --version)" == "cargo-nextest 0.9.150 "* ]]
           critical_filter="$(just --evaluate critical_filter)"
           cargo nextest run --archive-file "${{ github.workspace }}/nextest-archive/nextest-linux.tar.zst" --workspace-remap "${{ github.workspace }}" --profile ci-extended --filterset "all() - ($critical_filter)"
       - name: Validate JUnit report
@@ -299,10 +299,10 @@ jobs:
       - *checkout
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: Install nextest 0.9.140
+      - name: Install nextest 0.9.150
         uses: taiki-e/install-action@v2
         with:
-          tool: nextest@0.9.140
+          tool: nextest@0.9.150
           fallback: none
       - name: Install just
         uses: taiki-e/install-action@v2
@@ -319,7 +319,7 @@ jobs:
           UPWELL_SKIP_GENERATED_PROJECT_BUILDS: "1"
         shell: bash
         run: |
-          [[ "$(cargo nextest --version)" == "cargo-nextest 0.9.140 "* ]]
+          [[ "$(cargo nextest --version)" == "cargo-nextest 0.9.150 "* ]]
           critical_filter="$(just --evaluate critical_filter)"
           cargo nextest run --archive-file "${{ github.workspace }}/nextest-archive/nextest-windows.tar.zst" --workspace-remap "${{ github.workspace }}" --profile ci-critical --filterset "$critical_filter"
       - name: Validate JUnit report
@@ -343,10 +343,10 @@ jobs:
       - *checkout
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: Install nextest 0.9.140
+      - name: Install nextest 0.9.150
         uses: taiki-e/install-action@v2
         with:
-          tool: nextest@0.9.140
+          tool: nextest@0.9.150
           fallback: none
       - name: Install just
         uses: taiki-e/install-action@v2
@@ -363,7 +363,7 @@ jobs:
           UPWELL_SKIP_GENERATED_PROJECT_BUILDS: "1"
         shell: bash
         run: |
-          [[ "$(cargo nextest --version)" == "cargo-nextest 0.9.140 "* ]]
+          [[ "$(cargo nextest --version)" == "cargo-nextest 0.9.150 "* ]]
           critical_filter="$(just --evaluate critical_filter)"
           cargo nextest run --archive-file "${{ github.workspace }}/nextest-archive/nextest-windows.tar.zst" --workspace-remap "${{ github.workspace }}" --profile ci-extended --filterset "all() - ($critical_filter)"
       - name: Validate JUnit report
