@@ -8,6 +8,7 @@
 mod dep_ref;
 mod entry_plan;
 mod planner;
+mod replan;
 mod slot_layout;
 #[cfg(test)]
 mod tests;
