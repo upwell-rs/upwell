@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::sync::Arc;
 
 use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, ScopeId, ScopeKey};
 
@@ -11,10 +12,29 @@ use crate::registry::scopes::scope_allows_with;
 /// every slot of the same scope those depend on.
 ///
 /// Planned once per runtime generation from the entry's targets. A slot the plan leaves out
-/// is built on demand, when something resolves it from the open scope.
+/// is built on demand, when something resolves it from the open scope. Under
+/// [`UnplannedConstruction::Deny`] the plan also holds the slots the entry declares, so an
+/// on-demand build outside them is reported.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EntryPlan {
     builds: Box<[bool]>,
+    declares: Option<Arc<[bool]>>,
+}
+
+/// Whether a scope opened for an entry may build, on demand, a slot the entry does not
+/// declare.
+///
+/// An entry declares the slots its plan builds and those its lazy targets reach. A scope
+/// opened without an entry builds on demand under either policy.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum UnplannedConstruction {
+    /// Undeclared slots are built on demand.
+    #[default]
+    Allow,
+    /// Building an undeclared slot on demand fails, surfacing drift between the declared
+    /// entries and what the application resolves.
+    Deny,
 }
 
 impl EntryPlan {
@@ -22,12 +42,18 @@ impl EntryPlan {
     pub fn nothing(layout: &SlotLayout) -> Self {
         Self {
             builds: vec![false; layout.len()].into_boxed_slice(),
+            declares: None,
         }
     }
 
     /// Whether opening the scope for this entry builds `slot`.
     pub(crate) fn builds(&self, slot: SlotIdx) -> bool {
         self.builds[slot.index()]
+    }
+
+    /// The slots this entry declares, when its scope may build no other slot on demand.
+    pub(crate) fn declares(&self) -> Option<&Arc<[bool]>> {
+        self.declares.as_ref()
     }
 
     /// The number of slots this entry builds.
@@ -66,12 +92,15 @@ impl SlotLayout {
     /// A target that a lazy or config handle resolves builds nothing up front. Every other
     /// target builds the slots it resolves to here, with their dependencies in this scope, as
     /// [`for_each_selected_slot`](Self::for_each_selected_slot) picks them. `can_reach` is the
-    /// scope reachability `selection` was validated with.
+    /// scope reachability `selection` was validated with. Under
+    /// [`UnplannedConstruction::Deny`], the plan also declares every slot holding a lazy
+    /// target, with its dependencies.
     pub fn plan_entry(
         &self,
         targets: &[DependencyDescriptor],
         selection: &ProviderSelectionModel,
         can_reach: impl Fn(ScopeId, ScopeId) -> bool,
+        unplanned: UnplannedConstruction,
     ) -> EntryPlan {
         let can_access = |consumer, dependency| scope_allows_with(consumer, dependency, &can_reach);
         let selector = EagerSelection {
@@ -80,11 +109,7 @@ impl SlotLayout {
         };
         let mut builds = vec![false; self.slots.len()].into_boxed_slice();
 
-        for target in targets {
-            if target.config || target.resolution != ResolutionMode::Eager {
-                continue;
-            }
-
+        for target in targets.iter().filter(|target| is_built_up_front(target)) {
             self.for_each_selected_slot(
                 &selector,
                 target.ty.type_id,
@@ -94,7 +119,34 @@ impl SlotLayout {
             );
         }
 
-        EntryPlan { builds }
+        let declares = match unplanned {
+            UnplannedConstruction::Allow => None,
+            UnplannedConstruction::Deny => Some(self.declared(&selector, targets, &builds)),
+        };
+
+        EntryPlan { builds, declares }
+    }
+
+    /// The slots `builds` holds and those every lazy target of `targets` reaches here.
+    fn declared(
+        &self,
+        selector: &EagerSelection<'_>,
+        targets: &[DependencyDescriptor],
+        builds: &[bool],
+    ) -> Arc<[bool]> {
+        let mut declares = builds.to_vec();
+
+        for target in targets {
+            if target.config || is_built_up_front(target) {
+                continue;
+            }
+
+            self.for_each_target_slot(target.ty.type_id, |slot| {
+                self.include(selector, slot, &mut declares);
+            });
+        }
+
+        declares.into()
     }
 
     /// Calls `visit` with each slot of this scope that holds `target`: its own slot, or
@@ -210,4 +262,9 @@ impl SlotLayout {
             | DepRef::Unplanned => {}
         }
     }
+}
+
+/// Whether opening a scope for an entry builds what `target` resolves to.
+fn is_built_up_front(target: &DependencyDescriptor) -> bool {
+    !target.config && target.resolution == ResolutionMode::Eager
 }

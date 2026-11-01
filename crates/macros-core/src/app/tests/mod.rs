@@ -208,6 +208,7 @@ fn parses_complete_named_app() {
             middleware: [middleware()],
             guards: [guard()],
             error_handler: error_handler(),
+            deny_unplanned: true,
             plugins: [Plugin, replace SLOT => Replacement, suppress OPTIONAL_SLOT],
             upwell: ::framework,
         }
@@ -1343,3 +1344,5 @@ fn generated_run_recognizes_exact_hidden_probe_contract_before_clap() {
     assert!(output.contains("Self :: __upwell_tooling_probe (target)"));
     assert!(output.contains("__private :: emit_probe_envelope_from_env"));
 }
+
+mod builder;

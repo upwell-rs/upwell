@@ -27,6 +27,7 @@ pub(crate) struct AppAssembly {
     pub(super) middleware: Vec<Expr>,
     pub(super) guards: Vec<Expr>,
     pub(super) error_handler: Option<Expr>,
+    pub(super) deny_unplanned: bool,
     pub(super) plugins: Vec<PluginDirective>,
     pub(super) upwell: Option<Path>,
     pub(super) phases: AppPhases,

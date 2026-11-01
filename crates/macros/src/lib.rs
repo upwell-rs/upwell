@@ -319,6 +319,7 @@ pub fn methods(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// | `middleware` | `[expression, ...]` | Calls the selected protocol builder extension's `middleware` method in order. |
 /// | `guards` | `[expression, ...]` | Calls the selected protocol builder extension's `guard` method in order. |
 /// | `error_handler` | expression | Calls the selected protocol builder extension's `error_handler` method. |
+/// | `deny_unplanned` | `true` or `false` | With `true`, calls `deny_unplanned()`, so a scope opened for an entry fails to build on demand what the entry does not declare. |
 /// | `plugins` | `[Type, replace SLOT => Type, suppress SLOT, ...]` | Resolves parser-visible static plugins and protocol-default slots before bootstrap. |
 /// | `cli` | reserved-slot block | Customizes framework-owned Clap arguments and the generated serve command. |
 /// | `args` | `{ field: Type, ... }` | Flattens application-owned global `clap::Args` groups. |

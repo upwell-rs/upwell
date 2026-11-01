@@ -6,7 +6,7 @@ use std::sync::Arc;
 use upwell_core::{Scope, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, ComponentDescriptor, ConditionFactSnapshot, Injectable, ProviderSelectionModel,
-    SlotLayout,
+    SlotLayout, UnplannedConstruction,
 };
 use upwell_hooks::{HOOK_MANAGER_ID, HOOK_MANAGER_NAME, HookManager};
 
@@ -98,5 +98,11 @@ pub(crate) fn seed_layouts(
         layouts.insert(boundary.id(), Arc::new(layout));
     }
 
-    ScopeLayouts::new(layouts, entries, selection, topology)
+    ScopeLayouts::new(
+        layouts,
+        entries,
+        UnplannedConstruction::Allow,
+        selection,
+        topology,
+    )
 }

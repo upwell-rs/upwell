@@ -6,7 +6,7 @@ use upwell_config::{CONFIG_BINDINGS, ConditionFactSource, ConfigBinding};
 use upwell_core::DependencyDescriptor;
 use upwell_di::{
     COMPONENTS, Component, ComponentDescriptor, ComponentRegistry, PROVIDERS, ProviderDescriptor,
-    ProviderSelectionModel,
+    ProviderSelectionModel, UnplannedConstruction,
 };
 
 use crate::entry::{ENTRIES, EntryDescriptor};
@@ -39,6 +39,9 @@ pub struct AppRegistry {
     pub condition_facts: Vec<ConditionFactSource>,
     /// Entry points, from protocols, plugins and explicit builder registrations.
     pub entries: Vec<EntryDescriptor>,
+    /// Whether a scope opened for an entry may build, on demand, what the entry does not
+    /// declare.
+    pub unplanned: UnplannedConstruction,
 }
 
 impl AppRegistry {
@@ -73,6 +76,7 @@ impl AppRegistry {
             config_bindings,
             condition_facts: Vec::new(),
             entries,
+            unplanned: UnplannedConstruction::default(),
         }
     }
 

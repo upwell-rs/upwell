@@ -2,7 +2,10 @@ use upwell_config::{
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigManager, ConfigProperties,
 };
 use upwell_core::{Descriptor, EntryKey, Scope, Singleton as SingletonScope, TypeDescriptor};
-use upwell_di::{BoxedComponent, Component, ComponentDescriptor, Injectable, ProviderDescriptor};
+use upwell_di::{
+    BoxedComponent, Component, ComponentDescriptor, Injectable, ProviderDescriptor,
+    UnplannedConstruction,
+};
 use upwell_dirs::DirectoriesManager;
 
 use super::App;
@@ -195,6 +198,19 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
     /// cannot be resolved from `S`.
     pub fn scope_entry<S: Scope, T: EntryTargets>(self, key: EntryKey) -> Self {
         self.entry_descriptor(EntryDescriptor::new::<S, T>(key))
+    }
+
+    /// Fails resolutions that build, on demand, a component the entry their scope was opened
+    /// for does not declare, to surface drift between declared entries and what the
+    /// application resolves, for example in tests.
+    ///
+    /// An entry declares what it injects, including what its lazy and deferred parameters
+    /// reach. Scopes opened without an entry, such as connection scopes, build on demand as
+    /// usual.
+    pub fn deny_unplanned(mut self) -> Self {
+        self.registry.unplanned = UnplannedConstruction::Deny;
+
+        self
     }
 
     /// Registers the entry `E` declares, such as the marker type an `#[entry]` function

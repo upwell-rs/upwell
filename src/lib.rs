@@ -53,11 +53,11 @@ pub use upwell_di::{
     Previous, Provided, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
     ReadyComponentFactory, ReadyFactory, ReasonKind, Registration, RegistryFor, ReplacementFactory,
     RootResolver, ScopeContainer, ScopeRegistry, ServiceComponent, StaleGraphCandidate,
-    TransitionPlan, TransitionReason, UpwellDescriptor, ValidatedConditionEvaluation, Wired,
-    Wiring, dependency_of, dependency_of_observed, dispatch_factory, dispatch_hot_update,
-    dispatch_ready_factory, dispatch_replacement, dispatch_transition, erase_provider, factories,
-    factory_dependencies, from_boxed, hot_update_dependencies, provider_live_cell,
-    replacement_dependencies, topological_sort,
+    TransitionPlan, TransitionReason, UnplannedConstruction, UpwellDescriptor,
+    ValidatedConditionEvaluation, Wired, Wiring, dependency_of, dependency_of_observed,
+    dispatch_factory, dispatch_hot_update, dispatch_ready_factory, dispatch_replacement,
+    dispatch_transition, erase_provider, factories, factory_dependencies, from_boxed,
+    hot_update_dependencies, provider_live_cell, replacement_dependencies, topological_sort,
 };
 /// The DI layer's own error/result, exposed under distinct names so macro-generated
 /// **factory** code can name them without colliding with another layer's `Error`/`Result`.

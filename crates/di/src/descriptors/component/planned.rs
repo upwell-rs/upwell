@@ -39,9 +39,10 @@ impl<H> Planned<H> {
 
 impl ComponentConstructionContext {
     /// Builds this scope into a dense store laid out by `layout`, shared with mid-build
-    /// transients only when a factory of the scope captures it.
-    pub(crate) fn use_layout(&mut self, layout: Arc<SlotLayout>) {
-        let store = ScopeStore::Slots(SlotStore::new(Arc::clone(&layout)));
+    /// transients only when a factory of the scope captures it. With `declares`, the open
+    /// scope builds on demand only the slots it lists.
+    pub(crate) fn use_layout(&mut self, layout: Arc<SlotLayout>, declares: Option<Arc<[bool]>>) {
+        let store = ScopeStore::Slots(SlotStore::new(Arc::clone(&layout), declares));
 
         self.store = match layout.captures() {
             true => BuildStore::Shared(Arc::new(RwLock::new(store))),
