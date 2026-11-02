@@ -47,21 +47,6 @@ pub(crate) enum DepRef {
     Unplanned,
 }
 
-impl DepRef {
-    /// Whether resolving this source builds a transient that captures the requesting scope.
-    pub(crate) fn captures_scope(&self) -> bool {
-        match self {
-            Self::Transient(plan) => plan.captures,
-            Self::Many(provided) => provided.iter().any(|entry| entry.source.captures_scope()),
-            Self::Root(_)
-            | Self::Ancestor { .. }
-            | Self::Local(_)
-            | Self::Absent
-            | Self::Unplanned => false,
-        }
-    }
-}
-
 /// One provider of a collection or keyed dependency.
 #[derive(Clone, Debug)]
 pub(crate) struct ProvidedRef {
@@ -72,15 +57,14 @@ pub(crate) struct ProvidedRef {
 /// A transient's construction recipe with its own planned dependencies.
 ///
 /// Validation lets a transient depend only on singletons and other transients, so a plan
-/// never refers to the slots of the scope that requests it. `captures` is whether the
-/// transient, or one it builds through its plan, declares a lazy, deferred, fresh or dynamic
-/// edge, which hands it the requesting scope's resolver slot.
+/// never refers to the slots of the scope that requests it. A transient built from it
+/// captures the requesting scope through that scope's own resolver slot, or one the scope
+/// adopts, whether or not the capture is declared.
 #[derive(Debug)]
 pub(crate) struct TransientPlan {
     pub(crate) factory: &'static ComponentFactoryDescriptor,
     pub(crate) provider: Option<ProviderDescriptor>,
     pub(crate) dependencies: Box<[PlannedDependency]>,
-    pub(crate) captures: bool,
 }
 
 /// One dependency edge of a factory, at its declared position, and the source it resolves

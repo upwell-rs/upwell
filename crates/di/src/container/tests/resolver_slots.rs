@@ -134,77 +134,18 @@ fn construct_holds_two(
     })
 }
 
-fn yielding_descriptor() -> ComponentDescriptor {
-    fn factories() -> &'static [ComponentFactoryDescriptor] {
-        const {
-            &[ComponentFactoryDescriptor {
-                id: "yielding",
-                construct: construct_yielding,
-                construct_ready: None,
-                dependencies: crate::test_support::no_dependencies,
-                role: ComponentFactoryRole::Explicit,
-            }]
-        }
-    }
-
-    let mut descriptor = component::<Yielding>("yielding", factories);
-
-    descriptor.scope = Transient::KEY;
-
-    descriptor
-}
-
-fn holds_two_descriptor() -> ComponentDescriptor {
-    fn factories() -> &'static [ComponentFactoryDescriptor] {
-        const {
-            &[ComponentFactoryDescriptor {
-                id: "holds-two",
-                construct: construct_holds_two,
-                construct_ready: None,
-                dependencies: || factory_dependencies(holds_two),
-                role: ComponentFactoryRole::Explicit,
-            }]
-        }
-    }
-
-    let mut descriptor = component::<HoldsTwo>("holds-two", factories);
-
-    descriptor.scope = TestScope::KEY;
-
-    descriptor
-}
-
-fn hidden_descriptor() -> ComponentDescriptor {
-    fn factories() -> &'static [ComponentFactoryDescriptor] {
-        const {
-            &[ComponentFactoryDescriptor {
-                id: "hidden-lazy-made",
-                construct: construct_hidden,
-                construct_ready: None,
-                dependencies: crate::test_support::no_dependencies,
-                role: ComponentFactoryRole::Explicit,
-            }]
-        }
-    }
-
-    let mut descriptor = component::<HiddenLazyMade>("hidden-lazy-made", factories);
-
-    descriptor.scope = Transient::KEY;
-
-    descriptor
-}
-
-/// Declares descriptor function `$name` of component `$ty` in `$scope`, built by `$factory`.
+/// Declares descriptor function `$name` of component `$ty` in `$scope`, built by `$factory`,
+/// or by `construct` declaring `dependencies` for a hand-written factory.
 macro_rules! described {
-    ($name:ident, $ty:ty, $id:literal, $scope:expr, $factory:ident) => {
+    ($name:ident, $ty:ty, $id:literal, $scope:expr, construct: $construct:expr, dependencies: $dependencies:expr) => {
         fn $name() -> ComponentDescriptor {
             fn factories() -> &'static [ComponentFactoryDescriptor] {
                 const {
                     &[ComponentFactoryDescriptor {
                         id: $id,
-                        construct: |cx| dispatch_factory($factory, cx),
+                        construct: $construct,
                         construct_ready: None,
-                        dependencies: || factory_dependencies($factory),
+                        dependencies: $dependencies,
                         role: ComponentFactoryRole::Explicit,
                     }]
                 }
@@ -217,8 +158,42 @@ macro_rules! described {
             descriptor
         }
     };
+    ($name:ident, $ty:ty, $id:literal, $scope:expr, $factory:ident) => {
+        described!(
+            $name,
+            $ty,
+            $id,
+            $scope,
+            construct: |cx| dispatch_factory($factory, cx),
+            dependencies: || factory_dependencies($factory)
+        );
+    };
 }
 
+described!(
+    yielding_descriptor,
+    Yielding,
+    "yielding",
+    Transient::KEY,
+    construct: construct_yielding,
+    dependencies: crate::test_support::no_dependencies
+);
+described!(
+    holds_two_descriptor,
+    HoldsTwo,
+    "holds-two",
+    TestScope::KEY,
+    construct: construct_holds_two,
+    dependencies: || factory_dependencies(holds_two)
+);
+described!(
+    hidden_descriptor,
+    HiddenLazyMade,
+    "hidden-lazy-made",
+    Transient::KEY,
+    construct: construct_hidden,
+    dependencies: crate::test_support::no_dependencies
+);
 described!(made_descriptor, Made, "made", Transient::KEY, made);
 described!(
     uses_descriptor,

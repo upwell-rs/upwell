@@ -197,13 +197,6 @@ fn is_planned(dependency: &DependencyDescriptor) -> bool {
     !dependency.config && !dependency.dynamic && dependency.resolution == ResolutionMode::Eager
 }
 
-/// Whether an edge hands its scope to a handle or to on-demand construction: a lazy,
-/// deferred or fresh edge captures the scope, and a dynamic one may build a transient
-/// against it. Config edges read only resolvers.
-fn captures_scope(dependency: &DependencyDescriptor) -> bool {
-    !dependency.config && (dependency.dynamic || dependency.resolution != ResolutionMode::Eager)
-}
-
 /// Whether resolving an edge may build a transient against the scope's in-progress store: a
 /// dynamic edge is selected while the scope is built. Lazy, deferred and fresh edges read the
 /// built scope later, and config edges read only resolvers.
@@ -398,14 +391,11 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
         visiting.pop();
 
         let dependencies = dependencies?;
-        let captures = (factory.dependencies)().iter().any(captures_scope)
-            || dependencies.iter().any(|edge| edge.source.captures_scope());
 
         Ok(TransientPlan {
             factory,
             provider,
             dependencies,
-            captures,
         })
     }
 }
