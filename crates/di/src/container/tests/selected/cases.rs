@@ -270,3 +270,19 @@ async fn provider_order_picks_between_providers_sharing_a_qualifier() {
 
     assert_eq!(read_selected(&inner, Some("shared")), Some("inner-spare"));
 }
+
+#[tokio::test]
+async fn a_scope_holding_no_components_reads_through_its_layout() {
+    let generation = Generation::of(
+        &[RootGreeter::descriptor()],
+        vec![RootGreeter::provider()],
+        Reach::EveryChain,
+    )
+    .await;
+
+    let inner = generation.open_inner(&generation.root, None).await;
+
+    assert!(generation.inner.is_empty(), "the inner scope holds nothing");
+    assert_eq!(read_selected(&inner, None), Some("root"));
+    assert_eq!(extracted(&inner).await, "root");
+}

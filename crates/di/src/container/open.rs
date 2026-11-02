@@ -119,6 +119,9 @@ impl ScopeContainer {
     ///
     /// With an entry `plan`, only the slots it lists are built; the others are built on
     /// demand when something resolves them from the open scope.
+    ///
+    /// A scope holding no components keeps its layout too, which allocates nothing for an empty
+    /// one, so trait targets resolved from it still read the sources the layout selected.
     #[doc(hidden)]
     pub async fn open_planned<T: Any + Send + Sync>(
         parent: Arc<ScopeContainer>,
@@ -134,17 +137,12 @@ impl ScopeContainer {
         validate_seeds(layout, &seeds)?;
 
         if !layout.constructs() && seeds.is_empty() {
-            let store = match layout.is_empty() {
-                true => ScopeStore::default(),
-                false => ScopeStore::Slots(SlotStore::new(Arc::clone(layout), None)),
-            };
-
             return Ok(Self::empty(
                 scope,
                 parent,
                 registry,
                 generation_lease,
-                store,
+                ScopeStore::Slots(SlotStore::new(Arc::clone(layout), None)),
             ));
         }
 
