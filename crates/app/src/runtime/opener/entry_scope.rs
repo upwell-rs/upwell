@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::OnceCell;
 use upwell_core::Scope;
-use upwell_di::{BoxedComponent, Component, FromContainer, ScopeContainer};
+use upwell_di::{BoxedComponent, Component, EntryPlan, FromContainer, ScopeContainer};
 
 use super::{Builds, open_in};
 use crate::entry::EntryId;
@@ -27,10 +27,14 @@ pub struct EntryScope<S: Scope> {
 
 /// Whether an [`EntryScope`]'s container opened with it or waits for its first resolution.
 ///
-/// An open instance is only its container; the deferred state, once-cell included, lives
-/// behind its own box so it costs nothing when the container opens at once.
+/// An open instance is its container and the plan of the entry it opened for, if any; the
+/// deferred state, once-cell included, lives behind its own box so it costs nothing when the
+/// container opens at once.
 enum State {
-    Open(Arc<ScopeContainer>),
+    Open {
+        container: Arc<ScopeContainer>,
+        plan: Option<Arc<EntryPlan>>,
+    },
     Deferred(Box<Deferred>),
 }
 
@@ -46,8 +50,13 @@ struct Deferred {
 impl<S: Scope> EntryScope<S> {
     /// An instance whose container is already open.
     pub fn from_container(container: Arc<ScopeContainer>) -> Self {
+        Self::opened(container, None)
+    }
+
+    /// An instance whose container opened at once for an entry planned as `plan`.
+    pub(super) fn opened(container: Arc<ScopeContainer>, plan: Option<Arc<EntryPlan>>) -> Self {
         Self {
-            state: State::Open(container),
+            state: State::Open { container, plan },
             scope: PhantomData,
         }
     }
@@ -73,7 +82,7 @@ impl<S: Scope> EntryScope<S> {
     /// Whether the instance's container is open.
     pub fn is_open(&self) -> bool {
         match &self.state {
-            State::Open(_) => true,
+            State::Open { .. } => true,
             State::Deferred(deferred) => deferred.container.initialized(),
         }
     }
@@ -84,7 +93,7 @@ impl<S: Scope> EntryScope<S> {
     /// under, not the builder's seeds.
     pub fn current(&self) -> &Arc<ScopeContainer> {
         match &self.state {
-            State::Open(container) => container,
+            State::Open { container, .. } => container,
             State::Deferred(deferred) => deferred.container.get().unwrap_or(&deferred.parent),
         }
     }
@@ -103,7 +112,7 @@ impl<S: Scope> EntryScope<S> {
     /// Fails when the deferred container fails to open, now or on an earlier call.
     pub async fn container(&self) -> crate::Result<&Arc<ScopeContainer>> {
         match &self.state {
-            State::Open(container) => Ok(container),
+            State::Open { container, .. } => Ok(container),
             State::Deferred(deferred) => deferred.open::<S>().await,
         }
     }
@@ -114,9 +123,31 @@ impl<S: Scope> EntryScope<S> {
     ///
     /// Fails when the container fails to open or `H` fails to resolve.
     pub async fn extract<H: FromContainer>(&self) -> crate::Result<H> {
+        if let Some(value) = self.read_planned::<H>() {
+            return Ok(value);
+        }
+
         let container = self.container().await?;
 
-        container.extract::<H>().await.map_err(crate::Error::from)
+        container
+            .extract_planned::<H>(self.plan())
+            .await
+            .map_err(crate::Error::from)
+    }
+
+    /// The plan of the entry the instance opened for, when it opened for one.
+    pub fn plan(&self) -> Option<&EntryPlan> {
+        match &self.state {
+            State::Open { plan, .. } => plan.as_deref(),
+            State::Deferred(deferred) => deferred.view.scope_plan().layouts.entry(deferred.entry),
+        }
+    }
+
+    /// `H` read from the source the entry's plan pre-resolved for it, when it is one of the
+    /// entry's targets and is built. Opens nothing: before the container opens, only targets
+    /// outside the instance's own scope are read.
+    pub fn read_planned<H: FromContainer>(&self) -> Option<H> {
+        H::read_planned(self.current(), self.plan()?)
     }
 }
 

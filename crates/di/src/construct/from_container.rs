@@ -7,9 +7,9 @@ use std::sync::Arc;
 use upwell_core::{Cardinality, DependencyDescriptor, DependencyObservation};
 
 use super::{dependency_of, dependency_of_observed, short_name};
-use crate::ScopeContainer;
 use crate::descriptors::{ComponentConstructionContext, Dep, Injectable};
 use crate::error::Error;
+use crate::{EntryPlan, ScopeContainer};
 
 /// A single factory parameter, resolvable from the construction context, that
 /// reports the dependency edge it represents.
@@ -55,6 +55,14 @@ pub trait FromContainer: Sized {
     fn read_built(_scope: &ScopeContainer) -> Option<Self> {
         None
     }
+
+    /// Reads this parameter from `scope` through the source `plan` pre-resolved for it, when
+    /// it is one of the plan's targets and is built, without looking anything up by type.
+    /// `None` sends the extraction down [`read_built`](Self::read_built) and its general
+    /// path; parameters resolved through their own handle always return `None`.
+    fn read_planned(_scope: &ScopeContainer, _plan: &EntryPlan) -> Option<Self> {
+        None
+    }
 }
 
 impl<T> FromContainer for Arc<T>
@@ -86,6 +94,10 @@ where
 
     fn read_built(scope: &ScopeContainer) -> Option<Self> {
         scope.built_component::<Arc<T>>()
+    }
+
+    fn read_planned(scope: &ScopeContainer, plan: &EntryPlan) -> Option<Self> {
+        scope.planned_one::<Arc<T>>(plan)?
     }
 }
 
@@ -122,6 +134,10 @@ where
 
     fn read_built(scope: &ScopeContainer) -> Option<Self> {
         scope.built_component::<Dep<T>>()
+    }
+
+    fn read_planned(scope: &ScopeContainer, plan: &EntryPlan) -> Option<Self> {
+        scope.planned_one::<Dep<T>>(plan)?
     }
 }
 
@@ -160,6 +176,10 @@ where
     fn read_built(scope: &ScopeContainer) -> Option<Self> {
         scope.built_component::<H>()
     }
+
+    fn read_planned(scope: &ScopeContainer, plan: &EntryPlan) -> Option<Self> {
+        scope.planned_one::<H>(plan)?
+    }
 }
 
 impl<T> FromContainer for Option<Arc<T>>
@@ -187,6 +207,10 @@ where
 
     fn read_built(scope: &ScopeContainer) -> Option<Self> {
         scope.built_component::<Arc<T>>().map(Some)
+    }
+
+    fn read_planned(scope: &ScopeContainer, plan: &EntryPlan) -> Option<Self> {
+        scope.planned_one::<Arc<T>>(plan)
     }
 }
 
@@ -216,6 +240,10 @@ where
     fn read_built(scope: &ScopeContainer) -> Option<Self> {
         scope.built_collection::<Arc<T>>()
     }
+
+    fn read_planned(scope: &ScopeContainer, plan: &EntryPlan) -> Option<Self> {
+        scope.planned_collection::<Arc<T>>(plan)
+    }
 }
 
 impl<T> FromContainer for HashMap<String, Arc<T>>
@@ -243,6 +271,10 @@ where
 
     fn read_built(scope: &ScopeContainer) -> Option<Self> {
         scope.built_keyed::<Arc<T>>()
+    }
+
+    fn read_planned(scope: &ScopeContainer, plan: &EntryPlan) -> Option<Self> {
+        scope.planned_keyed::<Arc<T>>(plan)
     }
 }
 

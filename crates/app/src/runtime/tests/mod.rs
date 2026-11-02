@@ -8,7 +8,9 @@ use upwell_di::{EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
 use super::*;
-use crate::test_support::{empty_condition, seed_hook_manager, seed_layouts};
+use crate::test_support::{
+    empty_condition, hook_manager_descriptor, seed_hook_manager, seed_layouts,
+};
 use crate::{Error, OpensUnder, ScopeBoundary, ScopeParent, ScopeTopology};
 
 const SESSION_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/session");
@@ -102,8 +104,8 @@ fn visitor_destination() -> HashMap<TypeId, SeedDestination> {
     )])
 }
 
-/// A fresh empty generation over the test topology, prepared against `base` with the plans of
-/// `entries`, plus the scope registry its root was built from.
+/// A fresh generation over the test topology holding only the hook manager, prepared against
+/// `base` with the plans of `entries`, plus the scope registry its root was built from.
 async fn prepared_generation(
     base: RuntimeGenerationId,
     seed_destinations: HashMap<TypeId, SeedDestination>,
@@ -125,8 +127,12 @@ async fn prepared_generation(
         .prepare()
         .expect("test topology prepares");
     let topology = Arc::new(topology);
-    let graph = EffectiveGraph::build(base, &upwell_di::ComponentRegistry::default(), |_, _| true)
-        .expect("empty graph validates");
+    let components = upwell_di::ComponentRegistry {
+        components: vec![hook_manager_descriptor()],
+        providers: Vec::new(),
+    };
+    let graph = EffectiveGraph::build(base, &components, |_, _| true)
+        .expect("the hook manager's graph validates");
     let layouts = seed_layouts(
         &topology,
         &seed_destinations,

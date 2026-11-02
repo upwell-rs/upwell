@@ -133,10 +133,11 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
             Some(entry) => Builds::Entry(entry.id),
             None => Builds::Everything,
         };
-
+        let plan =
+            entry.and_then(|entry| view.scope_plan().layouts.shared_entry(entry.id).cloned());
         let container = open_in(view, S::ID, parent, builds, self.seeds).await?;
 
-        Ok(EntryScope::from_container(container))
+        Ok(EntryScope::opened(container, plan))
     }
 
     /// Opens the instance as `opening` says, adding the seed of type `T` from `source` only when

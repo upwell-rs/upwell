@@ -4,11 +4,13 @@ use super::*;
 use crate::{EntryDescriptor, EntryScope, Opening};
 
 /// A runtime whose session scope has a `Visitor` seed slot, an entry injecting nothing
-/// (`test/ping`) and an entry injecting the visitor (`test/greet`).
+/// (`test/ping`), an entry injecting the visitor (`test/greet`) and an entry injecting the root's
+/// hook manager (`test/hooks`).
 async fn runtime() -> AppRuntime {
     let entries = [
         EntryDescriptor::new::<Session, ()>(key("test/ping")),
         EntryDescriptor::new::<Session, (Visitor,)>(key("test/greet")),
+        EntryDescriptor::new::<Session, (HookManager,)>(key("test/hooks")),
     ];
     let (runtime, _) = build_runtime_with_entries(visitor_destination(), &entries).await;
 
@@ -53,6 +55,30 @@ async fn an_entry_planning_nothing_opens_its_scope_when_first_resolved() {
     assert!(session.is_open());
     assert_eq!(session.current().scope(), Session::KEY);
     assert_eq!(visitor, Visitor(3));
+}
+
+#[tokio::test]
+async fn a_singleton_target_is_read_without_opening_a_deferred_scope() {
+    let runtime = runtime().await;
+
+    let session = open_for(&runtime, "test/hooks", &[])
+        .await
+        .expect("an entry injecting only a singleton defers its scope");
+
+    assert!(
+        session.read_planned::<HookManager>().is_some(),
+        "the plan pre-resolved the singleton"
+    );
+
+    session
+        .extract::<HookManager>()
+        .await
+        .expect("the singleton extracts");
+
+    assert!(
+        !session.is_open(),
+        "reading a planned singleton opened the deferred scope"
+    );
 }
 
 #[tokio::test]
