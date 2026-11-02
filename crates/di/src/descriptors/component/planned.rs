@@ -208,7 +208,7 @@ impl ComponentConstructionContext {
         .await?;
 
         if let Some(captured) = captured {
-            self.adopt_captured(captured);
+            self.adopt_captured(captured)?;
         }
 
         let handle = match &plan.provider {
