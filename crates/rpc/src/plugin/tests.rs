@@ -39,10 +39,10 @@ fn construct_sentinel(
     Box::pin(async {
         FACTORY_CALLS.fetch_add(1, Ordering::SeqCst);
 
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<SentinelComponent>(SentinelComponent::NAME),
-            value: Box::new(Injectable::into_stored(Arc::new(SentinelComponent))),
-        })
+        Ok(BoxedComponent::stored(
+            TypeDescriptor::of::<SentinelComponent>(SentinelComponent::NAME),
+            Injectable::into_stored(Arc::new(SentinelComponent)),
+        ))
     })
 }
 

@@ -156,10 +156,10 @@ fn construct_topic_bus<P: PubSubProtocol>(
     _: &mut ComponentConstructionContext,
 ) -> std::pin::Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
     Box::pin(async {
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<TopicBus<P>>(std::any::type_name::<TopicBus<P>>()),
-            value: Box::new(Injectable::into_stored(TopicBus::<P>::new())),
-        })
+        Ok(BoxedComponent::stored(
+            TypeDescriptor::of::<TopicBus<P>>(std::any::type_name::<TopicBus<P>>()),
+            Injectable::into_stored(TopicBus::<P>::new()),
+        ))
     })
 }
 

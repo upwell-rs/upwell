@@ -29,7 +29,7 @@ pub use provider::{ProviderDescriptor, ProviderOrder, ProviderOrderDirection};
 pub use snapshot::GenerationSnapshot;
 pub(crate) use store::ScopeStore;
 pub(crate) use store::SlotStore;
-pub use store::{BoxedComponent, from_boxed};
+pub use store::{BoxedComponent, StoredValue, from_boxed};
 
 /// Metadata trait for types registerable as components.
 ///
@@ -65,7 +65,7 @@ pub trait ServiceComponent: Component {
 /// is keyed under; cloning a handle happens on every resolution, so it must be
 /// cheap.
 ///
-/// A scope does not box the handle directly — it boxes [`Stored`](Self::Stored),
+/// A scope does not store the handle directly — it stores [`Stored`](Self::Stored),
 /// the *slot* a handle is derived from. For `Arc<T>` and `Dep<T>` the slot is a
 /// shared [`Live<T>`]: an `Arc<T>` snapshots it (one fixed instance), a `Dep<T>`
 /// clones it (so a later swap is observed), and both find the *same* slot because
@@ -78,7 +78,7 @@ pub trait Injectable: Clone + Send + Sync + 'static {
     /// object (`dyn Trait + Send + Sync`) can key its providers.
     type Target: ?Sized + 'static;
 
-    /// The value actually held in a scope's box for this handle. `Arc<T>` and
+    /// The value actually held in a scope's storage for this handle. `Arc<T>` and
     /// `Dep<T>` both store a `Live<T>`, so they alias one slot; by-value handles store
     /// themselves.
     ///

@@ -49,7 +49,8 @@ pub use descriptors::{
     LiveRebind, LiveRef, PROVIDERS, Provided, ProviderDescriptor, ProviderMappingId, ProviderOf,
     ProviderOrder, ProviderOrderDirection, ReadyComponentFactory, Registration, RegistryFor,
     ResolutionMode, Scope, ScopeId, ScopeKey, ScopedConstruction, ServiceComponent, Singleton,
-    Transient, TypeDescriptor, UpwellDescriptor, Wired, Wiring, erase_provider, provider_live_cell,
+    StoredValue, Transient, TypeDescriptor, UpwellDescriptor, Wired, Wiring, erase_provider,
+    provider_live_cell,
 };
 pub use error::{
     DeferredTransientDependency, Error, InvalidFreshDependency, ProviderComponentMissing,

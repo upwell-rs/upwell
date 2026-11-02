@@ -41,10 +41,10 @@ fn construct_transient_seed(
     _: &mut ComponentConstructionContext,
 ) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
     Box::pin(async {
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<TransientSeed>("TransientSeed"),
-            value: Box::new(Injectable::into_stored(TransientSeed)),
-        })
+        Ok(BoxedComponent::stored(
+            TypeDescriptor::of::<TransientSeed>("TransientSeed"),
+            Injectable::into_stored(TransientSeed),
+        ))
     })
 }
 
@@ -54,12 +54,10 @@ fn construct_fresh_holder(
     Box::pin(async {
         let fresh = <Fresh<TransientSeed> as FromContainer>::from_container(cx).await?;
 
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<FreshHolder>("FreshHolder"),
-            value: Box::new(Injectable::into_stored(std::sync::Arc::new(FreshHolder {
-                fresh,
-            }))),
-        })
+        Ok(BoxedComponent::stored(
+            TypeDescriptor::of::<FreshHolder>("FreshHolder"),
+            Injectable::into_stored(std::sync::Arc::new(FreshHolder { fresh })),
+        ))
     })
 }
 

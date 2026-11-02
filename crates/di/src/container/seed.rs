@@ -48,10 +48,10 @@ impl ScopeContainer {
 
         store.seed_later(
             slot,
-            BoxedComponent {
-                ty: TypeDescriptor::of::<T>(std::any::type_name::<T>()),
-                value: Box::new(source()),
-            },
+            BoxedComponent::stored(
+                TypeDescriptor::of::<T>(std::any::type_name::<T>()),
+                source(),
+            ),
         )
     }
 

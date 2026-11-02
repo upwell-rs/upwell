@@ -84,10 +84,7 @@ macro_rules! impl_replacement_factory {
                 let component = output.into_component()?;
                 let handle = C::into_handle(component);
 
-                Ok(BoxedComponent {
-                    ty: TypeDescriptor::of::<C>(C::NAME),
-                    value: ::std::boxed::Box::new(Injectable::into_stored(handle)),
-                })
+                Ok(BoxedComponent::stored(TypeDescriptor::of::<C>(C::NAME), Injectable::into_stored(handle)))
             }
         }
     };

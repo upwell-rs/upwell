@@ -346,10 +346,10 @@ impl ProviderDescriptor {
 impl BoxedComponent {
     /// Boxes a constructed component in its storage handle, as factories return it.
     pub fn new<T: Component>(component: T) -> Self {
-        Self {
-            ty: TypeDescriptor::of::<T>(T::NAME),
-            value: Box::new(Injectable::into_stored(T::into_handle(component))),
-        }
+        Self::stored(
+            TypeDescriptor::of::<T>(T::NAME),
+            Injectable::into_stored(T::into_handle(component)),
+        )
     }
 }
 
@@ -373,10 +373,10 @@ where
         .expect("the container erases only the concrete box the provider's own descriptor built");
     let erased: Arc<P> = T::upcast(live.snapshot());
 
-    BoxedComponent {
-        ty: TypeDescriptor::of::<P>(type_name::<P>()),
-        value: Box::new(live.with_value(erased)),
-    }
+    BoxedComponent::stored(
+        TypeDescriptor::of::<P>(type_name::<P>()),
+        live.with_value(erased),
+    )
 }
 
 /// The live cell an erased trait slot for `P` holds: the

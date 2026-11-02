@@ -120,10 +120,10 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             SingletonScope::KEY,
         ));
 
-        self.instances.push(BoxedComponent {
-            ty: TypeDescriptor::of::<T>(T::NAME),
-            value: Box::new(Injectable::into_stored(value.into_handle())),
-        });
+        self.instances.push(BoxedComponent::stored(
+            TypeDescriptor::of::<T>(T::NAME),
+            Injectable::into_stored(value.into_handle()),
+        ));
 
         self
     }
