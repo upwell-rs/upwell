@@ -70,7 +70,7 @@ pub struct SlotLayout {
     pub(super) by_trait: HashMap<TypeId, Box<[ProviderSlot]>>,
     pub(super) selected: SelectedSources,
     pub(super) constructs: bool,
-    pub(super) captures: bool,
+    pub(super) shares_store: bool,
 }
 
 impl SlotLayout {
@@ -95,16 +95,15 @@ impl SlotLayout {
         self.constructs
     }
 
-    /// Whether a factory of this scope declares an edge that captures the scope under
-    /// construction: a lazy, deferred, fresh or dynamic edge, or a transient built against its
-    /// in-progress store.
+    /// Whether a factory of this scope, or a transient one plans, declares a dynamic edge,
+    /// which may build a transient against the scope's in-progress store.
     ///
-    /// A scope that plans no capture is built into a store its context owns, with a resolver
-    /// slot created only if a factory captures the scope anyway. A transient resolved there
-    /// for an edge its factory did not declare sees none of the scope's in-progress
-    /// instances, just as undeclared edges are not ordered.
-    pub(crate) fn captures(&self) -> bool {
-        self.captures
+    /// Any other scope is built into a store its construction context owns, so its planned
+    /// reads take no lock. A planned transient never reads the requesting scope's slots, and a
+    /// transient resolved there for an edge its factory did not declare sees none of the
+    /// scope's in-progress instances, just as undeclared edges are not ordered.
+    pub(crate) fn shares_store(&self) -> bool {
+        self.shares_store
     }
 
     /// The scope's components in construction order, seeds first.

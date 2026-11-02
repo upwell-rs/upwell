@@ -6,7 +6,7 @@ use std::sync::Arc;
 use upwell_core::{ResolutionMode, Scope, ScopeKey, Transient};
 
 use super::{ScopeContainer, construct_transient, construct_transient_provider};
-use crate::descriptors::component::{ComponentConstructionContext, SharedStore, from_boxed};
+use crate::descriptors::component::{ComponentConstructionContext, from_boxed};
 use crate::descriptors::{Component, Injectable, ProviderDescriptor};
 use crate::layout::{DepRef, RootTarget, SlotLayout, SlotRef};
 
@@ -43,7 +43,7 @@ impl ScopeContainer {
                     &self.registry,
                     Some(Arc::clone(self)),
                     self.slot.clone(),
-                    SharedStore::default(),
+                    None,
                     provider,
                 )
                 .await;
@@ -64,7 +64,7 @@ impl ScopeContainer {
             &self.registry,
             Some(Arc::clone(self)),
             self.slot.clone(),
-            SharedStore::default(),
+            None,
         )
         .await
     }
@@ -100,7 +100,7 @@ impl ScopeContainer {
                 &self.registry,
                 Some(Arc::clone(self)),
                 self.slot.clone(),
-                SharedStore::default(),
+                None,
                 provider,
             )
             .await;
