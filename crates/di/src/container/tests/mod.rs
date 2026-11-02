@@ -246,5 +246,6 @@ mod fresh;
 mod on_demand;
 mod providers;
 mod ready;
+mod resolver_slots;
 mod selected;
 mod storage;

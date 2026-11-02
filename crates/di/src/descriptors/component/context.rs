@@ -73,8 +73,8 @@ pub(super) enum BuildStore {
     /// Nothing stored yet, as in a request-time extraction context.
     #[default]
     Empty,
-    /// Owned by the context, for a scope none of whose factories captures it, so no
-    /// transient reads it while it is built.
+    /// Owned by the context, for a scope whose layout plans no dynamic edge, so no
+    /// transient reads it while it is built and planned reads take no lock.
     Owned(ScopeStore),
     /// Shared with the transients built while the scope is in progress.
     Shared(SharedStore),
@@ -132,18 +132,18 @@ impl ComponentConstructionContext {
     /// Creates a context over an existing store, used when a transient is
     /// constructed while another scope is still building: its dependencies must
     /// resolve from the components already built in that scope, not just the
-    /// frozen parent chain.
+    /// frozen parent chain. Without a store, the transient reads only the chain.
     pub(crate) fn with_store(
         scope: ScopeKey,
         parent: Option<Arc<crate::container::ScopeContainer>>,
         registry: Arc<crate::container::ScopeRegistry>,
         resolvers: ResolverSet,
         slot: crate::container::ScopeResolverSlot,
-        store: SharedStore,
+        store: Option<SharedStore>,
     ) -> Self {
         Self {
             scope,
-            store: BuildStore::Shared(store),
+            store: store.map_or(BuildStore::Empty, BuildStore::Shared),
             parent,
             registry,
             resolvers,
@@ -218,16 +218,14 @@ impl ComponentConstructionContext {
     }
 
     /// The shared handle to this context's store, for transient construction. A
-    /// context that has stored nothing hands out a fresh empty store: a transient
-    /// only reads it while it is built, so it observes the same empty state. An owned
-    /// store belongs to a scope whose layout plans no transient, so a transient built
-    /// against it dynamically sees an empty store as well.
-    pub(crate) fn store_handle(&self) -> SharedStore {
+    /// context that has stored nothing hands out none: a transient only reads it while it
+    /// is built, so it observes the same empty state. An owned store belongs to a scope
+    /// whose layout plans no dynamic edge, so a transient built against it sees none of it
+    /// either.
+    pub(crate) fn store_handle(&self) -> Option<SharedStore> {
         match &self.store {
-            BuildStore::Shared(store) => Arc::clone(store),
-            BuildStore::Empty | BuildStore::Owned(_) | BuildStore::Opened(_) => {
-                SharedStore::default()
-            }
+            BuildStore::Shared(store) => Some(Arc::clone(store)),
+            BuildStore::Empty | BuildStore::Owned(_) | BuildStore::Opened(_) => None,
         }
     }
 

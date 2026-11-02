@@ -110,7 +110,9 @@ impl ScopeContainer {
     ///
     /// Seeds fill the layout's factory-less slots, then each factory-backed slot is
     /// built in layout order, resolving its dependencies through the edges the layout
-    /// planned. The layout must belong to the generation of `registry`. A seed slot left
+    /// planned. The scope gets a pending resolver slot only when a factory captures it
+    /// through a lazy, deferred or fresh handle; otherwise its slot is attached when it
+    /// freezes. The layout must belong to the generation of `registry`. A seed slot left
     /// empty fails only when a dependency resolves it, as with a scope opened from a plain
     /// construction order. A seed without a factory-less slot in the layout, or a second seed
     /// for the same slot, fails the opening.
@@ -146,16 +148,12 @@ impl ScopeContainer {
             ));
         }
 
-        let slot = match layout.captures() {
-            true => ScopeResolverSlot::default(),
-            false => ScopeResolverSlot::detached(),
-        };
         let mut cx = ComponentConstructionContext::new_with_slot(
             scope,
             Some(Arc::clone(&parent)),
             Arc::clone(&registry),
             parent.inherited_resolvers(),
-            slot,
+            ScopeResolverSlot::detached(),
         );
 
         cx.use_layout(

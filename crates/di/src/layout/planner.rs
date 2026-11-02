@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -37,31 +38,30 @@ impl SlotLayout {
             ancestors,
             selection,
             can_reach: &can_reach,
+            dynamic: Cell::new(false),
         };
         let mut dependencies = Vec::with_capacity(layout.slots.len());
-        let mut captures = false;
         let selected = planner.selected_sources();
 
         for spec in layout.slots.iter() {
             let planned = match spec.factory {
                 Some(factory) => {
-                    captures |= (factory.dependencies)().iter().any(captures_scope);
-
                     planner.factory_dependencies(&spec.component, factory, &mut Vec::new())?
                 }
                 None => Box::default(),
             };
 
-            captures |= planned.iter().any(|edge| edge.source.builds_transient());
             dependencies.push(planned);
         }
+
+        let shares_store = planner.dynamic.get();
 
         for (spec, planned) in layout.slots.iter_mut().zip(dependencies) {
             spec.dependencies = planned;
         }
 
         layout.selected = selected;
-        layout.captures = captures;
+        layout.shares_store = shares_store;
         layout.eager = layout.eager_closure(selection, &can_reach);
         layout.read = layout.slots_factories_read();
 
@@ -153,7 +153,7 @@ impl SlotLayout {
             by_trait,
             selected: SelectedSources::default(),
             constructs,
-            captures: false,
+            shares_store: false,
         })
     }
 }
@@ -205,13 +205,22 @@ fn captures_scope(dependency: &DependencyDescriptor) -> bool {
     !dependency.config && (dependency.dynamic || dependency.resolution != ResolutionMode::Eager)
 }
 
+/// Whether resolving an edge may build a transient against the scope's in-progress store: a
+/// dynamic edge is selected while the scope is built. Lazy, deferred and fresh edges read the
+/// built scope later, and config edges read only resolvers.
+fn reads_in_progress(dependency: &DependencyDescriptor) -> bool {
+    !dependency.config && dependency.dynamic
+}
+
 /// Resolves the dependency edges of one scope's factories against its own slots and the
-/// layouts of the scopes open around it.
+/// layouts of the scopes open around it. `dynamic` records whether a factory planned so far,
+/// a transient's included, declares an edge [`reads_in_progress`].
 struct Planner<'a, R> {
     layout: &'a SlotLayout,
     ancestors: &'a HashMap<ScopeId, Arc<SlotLayout>>,
     selection: &'a ProviderSelectionModel,
     can_reach: &'a R,
+    dynamic: Cell<bool>,
 }
 
 impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
@@ -228,6 +237,10 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
         let mut planned = Vec::with_capacity(dependencies.len());
 
         for dependency in dependencies {
+            if reads_in_progress(&dependency) {
+                self.dynamic.set(true);
+            }
+
             let source = if is_planned(&dependency) {
                 self.source(consumer, &dependency, visiting)?
             } else {
@@ -385,10 +398,15 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
 
         visiting.pop();
 
+        let dependencies = dependencies?;
+        let captures = (factory.dependencies)().iter().any(captures_scope)
+            || dependencies.iter().any(|edge| edge.source.captures_scope());
+
         Ok(TransientPlan {
             factory,
             provider,
-            dependencies: dependencies?,
+            dependencies,
+            captures,
         })
     }
 }
