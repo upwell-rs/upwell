@@ -42,14 +42,17 @@ impl ScopeStore {
         &self,
         provider: &ProviderDescriptor,
     ) -> Option<H> {
-        from_boxed::<H>(self.provider_value(provider)?)
+        match self {
+            Self::Keyed(store) => from_boxed::<H>(store.provider_value(provider)?),
+            Self::Slots(store) => store.resolve_provider::<H>(provider),
+        }
     }
 
     /// The handle stored at a planned slot. `None` unless this store was opened from
     /// `layout` and the slot is built.
     pub(crate) fn planned<H: Injectable>(&self, layout: &SlotLayout, at: SlotRef) -> Option<H> {
         match self {
-            Self::Slots(store) if store.uses(layout) => from_boxed::<H>(store.value(at)?),
+            Self::Slots(store) if store.uses(layout) => store.read::<H>(at),
             Self::Slots(_) | Self::Keyed(_) => None,
         }
     }
@@ -96,9 +99,8 @@ impl ScopeStore {
         }
     }
 
-    /// Aliases a built concrete instance under one trait it provides. A slot store
-    /// aliases every planned provider when the instance is inserted, so this is a no-op
-    /// for it.
+    /// Aliases a built concrete instance under one trait it provides. A slot store erases
+    /// an alias when it is read, so this is a no-op for it.
     pub(crate) fn register_provider(&mut self, provider: &ProviderDescriptor, ordinal: usize) {
         if let Self::Keyed(store) = self {
             store.register_provider(provider, ordinal);
@@ -116,10 +118,12 @@ impl ScopeStore {
         }
     }
 
+    /// The stored alias of one exact provider. A slot store keeps no aliases: its instances
+    /// are fixed, so no transition republishes one.
     pub(crate) fn provider_value(&self, provider: &ProviderDescriptor) -> Option<&BoxedComponent> {
         match self {
             Self::Keyed(store) => store.provider_value(provider),
-            Self::Slots(store) => store.provider_value(provider),
+            Self::Slots(_) => None,
         }
     }
 
@@ -131,12 +135,12 @@ impl ScopeStore {
         }
     }
 
-    /// The number of provider aliases held.
+    /// The number of provider aliases held. A slot store holds none.
     #[cfg(test)]
     pub(crate) fn provider_count(&self) -> usize {
         match self {
             Self::Keyed(store) => store.provider_count(),
-            Self::Slots(store) => store.provider_count(),
+            Self::Slots(_) => 0,
         }
     }
 }

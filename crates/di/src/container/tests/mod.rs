@@ -239,6 +239,7 @@ fn plan(order: &[ComponentDescriptor]) -> crate::SlotLayout {
     .expect("the scope plans")
 }
 
+mod aliases;
 mod children;
 mod drop_guard;
 mod fresh;

@@ -1,7 +1,9 @@
+mod alloc;
 mod capture;
 mod component;
 mod descriptors;
 
+pub(crate) use alloc::measure;
 pub(crate) use capture::capture_events;
 pub(crate) use component::test_component;
 pub(crate) use descriptors::{

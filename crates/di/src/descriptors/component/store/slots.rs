@@ -8,13 +8,6 @@ use super::{BoxedComponent, from_boxed};
 use crate::error::Error;
 use crate::layout::{ProviderSlot, SlotIdx, SlotLayout, SlotRef};
 
-/// One built slot: the concrete instance and its provider aliases, in the order of the
-/// slot's planned providers.
-struct SlotValue {
-    component: BoxedComponent,
-    providers: Box<[BoxedComponent]>,
-}
-
 /// The instances of a scope opened from a prepared [`SlotLayout`], stored densely by slot.
 ///
 /// The layout's type and trait indexes are shared by every instance of the scope, so an
@@ -23,9 +16,13 @@ struct SlotValue {
 /// set is allocated by the first such build, so a scope whose opening built everything it
 /// uses reads plain values. `declares`, when set, lists the only slots that may be built on
 /// demand.
+///
+/// A slot holds only its concrete instance. A read through one of its provider aliases erases
+/// the instance under that trait with the provider's [`erase`](ProviderDescriptor::erase), so
+/// an alias nothing reads costs nothing, and a fixed instance needs no shared alias cell.
 pub(crate) struct SlotStore {
     layout: Arc<SlotLayout>,
-    values: Box<[Option<SlotValue>]>,
+    values: Box<[Option<BoxedComponent>]>,
     later: OnceLock<Box<Later>>,
     declares: Option<Arc<[bool]>>,
 }
@@ -33,7 +30,7 @@ pub(crate) struct SlotStore {
 /// The slots of an open scope built on demand. Each cell is initialized by one build, which
 /// concurrent requests for the same slot wait on, while other slots build independently.
 struct Later {
-    values: Box<[tokio::sync::OnceCell<SlotValue>]>,
+    values: Box<[tokio::sync::OnceCell<BoxedComponent>]>,
 }
 
 impl SlotStore {
@@ -63,7 +60,7 @@ impl SlotStore {
         self.built(slot).is_some()
     }
 
-    fn built(&self, slot: SlotIdx) -> Option<&SlotValue> {
+    fn built(&self, slot: SlotIdx) -> Option<&BoxedComponent> {
         let index = slot.index();
 
         match &self.values[index] {
@@ -72,8 +69,7 @@ impl SlotStore {
         }
     }
 
-    /// Stores a built or seeded instance in its slot and aliases it under every trait the
-    /// slot provides.
+    /// Stores a built or seeded instance in its slot.
     pub(crate) fn insert(&mut self, component: BoxedComponent) -> crate::Result<()> {
         let slot = self
             .layout
@@ -88,9 +84,8 @@ impl SlotStore {
 
     /// Stores an instance a slot's own factory built while the scope opens, at that slot.
     ///
-    /// A factory returning another component than its slot holds is rejected before the
-    /// instance is aliased under the slot's providers, and so is a second instance for a
-    /// slot that already holds one.
+    /// A factory returning another component than its slot holds is rejected, and so is a
+    /// second instance for a slot that already holds one.
     pub(crate) fn insert_at(
         &mut self,
         slot: SlotIdx,
@@ -100,7 +95,7 @@ impl SlotStore {
             return Err(self.built_twice(slot));
         }
 
-        self.values[slot.index()] = Some(self.slot_value(slot, component)?);
+        self.values[slot.index()] = Some(self.checked(slot, component)?);
 
         Ok(())
     }
@@ -131,14 +126,14 @@ impl SlotStore {
         }
 
         self.later().values[slot.index()]
-            .get_or_try_init(|| async { self.slot_value(slot, build.await?) })
+            .get_or_try_init(|| async { self.checked(slot, build.await?) })
             .await?;
 
         Ok(())
     }
 
-    /// The stored value of `component`, aliased under every trait `slot` provides.
-    fn slot_value(&self, slot: SlotIdx, component: BoxedComponent) -> crate::Result<SlotValue> {
+    /// `component`, once it is known to be the instance `slot` holds.
+    fn checked(&self, slot: SlotIdx, component: BoxedComponent) -> crate::Result<BoxedComponent> {
         let spec = self.layout.spec(slot);
 
         if spec.component.ty.type_id != component.ty.type_id {
@@ -148,16 +143,7 @@ impl SlotStore {
             });
         }
 
-        let providers = spec
-            .providers
-            .iter()
-            .map(|provider| (provider.erase)(&component))
-            .collect();
-
-        Ok(SlotValue {
-            component,
-            providers,
-        })
+        Ok(component)
     }
 
     fn later(&self) -> &Later {
@@ -179,21 +165,23 @@ impl SlotStore {
         }
     }
 
-    /// The value at `at`, if its slot is built.
-    pub(crate) fn value(&self, at: SlotRef) -> Option<&BoxedComponent> {
+    /// The handle at `at`, if its slot is built, erased under the alias `at` names.
+    pub(crate) fn read<H: Injectable>(&self, at: SlotRef) -> Option<H> {
         let built = self.built(at.slot)?;
 
         match at.alias {
-            Some(alias) => built.providers.get(alias),
-            None => Some(&built.component),
+            Some(alias) => {
+                let provider = self.layout.spec(at.slot).providers.get(alias)?;
+
+                from_boxed::<H>(&(provider.erase)(built))
+            }
+
+            None => from_boxed::<H>(built),
         }
     }
 
     pub(crate) fn component(&self, type_id: TypeId) -> Option<&BoxedComponent> {
-        self.value(SlotRef {
-            slot: self.layout.slot_of(type_id)?,
-            alias: None,
-        })
+        self.built(self.layout.slot_of(type_id)?)
     }
 
     /// Single concrete-or-primary-provider lookup over the built slots. `None` if absent
@@ -210,7 +198,7 @@ impl SlotStore {
             provider.descriptor.primary
         })?;
 
-        from_boxed::<H>(self.value(chosen.at)?)
+        self.read::<H>(chosen.at)
     }
 
     /// Qualifier-selected single provider over the built slots.
@@ -219,11 +207,14 @@ impl SlotStore {
         let mut built = self.built_providers(type_id);
         let chosen = built.find(|provider| provider.descriptor.qualifier == qualifier)?;
 
-        from_boxed::<H>(self.value(chosen.at)?)
+        self.read::<H>(chosen.at)
     }
 
-    /// The erased value of one exact provider descriptor.
-    pub(crate) fn provider_value(&self, provider: &ProviderDescriptor) -> Option<&BoxedComponent> {
+    /// The handle of one exact provider descriptor.
+    pub(crate) fn resolve_provider<H: Injectable>(
+        &self,
+        provider: &ProviderDescriptor,
+    ) -> Option<H> {
         let chosen = self
             .layout
             .providers_of(provider.trait_ty.type_id)
@@ -233,21 +224,13 @@ impl SlotStore {
                     && candidate.descriptor.qualifier == provider.qualifier
             })?;
 
-        self.value(chosen.at)
+        self.read::<H>(chosen.at)
     }
 
     pub(crate) fn component_count(&self) -> usize {
         (0..self.values.len())
             .filter(|index| self.is_built(SlotIdx::new(*index)))
             .count()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn provider_count(&self) -> usize {
-        (0..self.values.len())
-            .filter_map(|index| self.built(SlotIdx::new(index)))
-            .map(|built| built.providers.len())
-            .sum()
     }
 
     fn built_providers(&self, trait_id: TypeId) -> impl Iterator<Item = &ProviderSlot> {
