@@ -27,9 +27,22 @@ struct HoldsLazyMade {
     made: Arc<LazyMade>,
 }
 
+/// A transient capturing the requesting scope through a lazy handle its factory does not
+/// declare.
+struct HiddenLazyMade {
+    uses: Lazy<Arc<UsesMade>>,
+}
+
+/// A scoped component reading [`HiddenLazyMade`] through a planned transient edge.
+struct HoldsHidden {
+    made: Arc<HiddenLazyMade>,
+}
+
 test_component!(Made, "made");
 test_component!(LazyMade, "lazy-made");
 test_component!(HoldsLazyMade, "holds-lazy-made");
+test_component!(HiddenLazyMade, "hidden-lazy-made");
+test_component!(HoldsHidden, "holds-hidden");
 test_component!(UsesMade, "uses-made");
 test_component!(LazyUser, "lazy-user");
 
@@ -51,6 +64,43 @@ async fn holds_lazy_made(made: Arc<LazyMade>) -> HoldsLazyMade {
 
 async fn lazy_user(uses: Lazy<Arc<UsesMade>>) -> LazyUser {
     LazyUser { uses }
+}
+
+async fn holds_hidden(made: Arc<HiddenLazyMade>) -> HoldsHidden {
+    HoldsHidden { made }
+}
+
+fn construct_hidden(
+    cx: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async move {
+        let uses = <Lazy<Arc<UsesMade>> as crate::FromContainer>::from_container(cx).await?;
+
+        Ok(boxed_component(
+            "HiddenLazyMade",
+            Arc::new(HiddenLazyMade { uses }),
+        ))
+    })
+}
+
+fn hidden_descriptor() -> ComponentDescriptor {
+    fn factories() -> &'static [ComponentFactoryDescriptor] {
+        const {
+            &[ComponentFactoryDescriptor {
+                id: "hidden-lazy-made",
+                construct: construct_hidden,
+                construct_ready: None,
+                dependencies: crate::test_support::no_dependencies,
+                role: ComponentFactoryRole::Explicit,
+            }]
+        }
+    }
+
+    let mut descriptor = component::<HiddenLazyMade>("hidden-lazy-made", factories);
+
+    descriptor.scope = Transient::KEY;
+
+    descriptor
 }
 
 /// Declares descriptor function `$name` of component `$ty` in `$scope`, built by `$factory`.
@@ -107,10 +157,21 @@ described!(
     TestScope::KEY,
     holds_lazy_made
 );
+described!(
+    holds_hidden_descriptor,
+    HoldsHidden,
+    "holds-hidden",
+    TestScope::KEY,
+    holds_hidden
+);
 
-/// Opens a `TestScope` building `order`, with [`Made`] registered as a transient.
+/// Opens a `TestScope` building `order`, with the transients above registered.
 async fn open(order: &[ComponentDescriptor]) -> (Arc<ScopeContainer>, bool) {
-    let transients = [made_descriptor(), lazy_made_descriptor()];
+    let transients = [
+        made_descriptor(),
+        lazy_made_descriptor(),
+        hidden_descriptor(),
+    ];
     let mut known = transients.to_vec();
 
     known.extend_from_slice(order);
@@ -205,4 +266,24 @@ async fn a_planned_transient_capturing_its_requesting_scope_gets_its_resolver_sl
         .get_or_create()
         .await
         .expect("the transient's lazy handle resolves from the requesting scope");
+}
+
+#[tokio::test]
+async fn a_planned_transient_capturing_its_scope_without_declaring_it_still_resolves() {
+    let (scope, _) = open(&[uses_descriptor(), holds_hidden_descriptor()]).await;
+    let holder = scope
+        .get::<HoldsHidden>()
+        .expect("the scope built the holder");
+
+    assert!(
+        matches!(scope.slot.state, ScopeResolverSlotState::Pending(_)),
+        "the scope adopted the slot the transient captured"
+    );
+
+    holder
+        .made
+        .uses
+        .get_or_create()
+        .await
+        .expect("the undeclared capture resolves from the requesting scope");
 }

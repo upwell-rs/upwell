@@ -198,18 +198,19 @@ impl ComponentConstructionContext {
         &self,
         plan: &Arc<TransientPlan>,
     ) -> crate::Result<Option<H>> {
-        let slot = match plan.captures {
-            true => self.resolver_slot(),
-            false => crate::container::ScopeResolverSlot::detached(),
-        };
-        let boxed = crate::container::construct_planned_transient(
+        let (boxed, captured) = crate::container::construct_planned_transient(
             &self.registry,
             self.parent.clone(),
-            slot,
+            self.inherited_slot(),
             self.store_handle(),
             Arc::clone(plan),
         )
         .await?;
+
+        if let Some(captured) = captured {
+            self.adopt_captured(captured);
+        }
+
         let handle = match &plan.provider {
             Some(provider) => from_boxed::<H>(&(provider.erase)(&boxed)),
             None => from_boxed::<H>(&boxed),
