@@ -184,3 +184,25 @@ fn a_layout_shares_its_store_only_through_dynamic_edges() {
         "a dynamic edge may build a transient against the in-progress store"
     );
 }
+
+#[test]
+fn a_planned_transient_with_a_dynamic_edge_shares_its_requesting_store() {
+    let mut fixture = Fixture::new();
+
+    fixture.fresh = scoped_component!(Fresh, "fresh", Transient::KEY, || {
+        vec![DependencyDescriptor {
+            dynamic: true,
+            ..eager::<Shared>("Shared", Cardinality::One)
+        }]
+    });
+
+    let selection = fixture.selection(&[]);
+    let layout = fixture
+        .inner(&selection, &[fixture.handler, fixture.consumer])
+        .expect("the scope consuming the dynamic transient plans");
+
+    assert!(
+        layout.shares_store(),
+        "a transient's dynamic edge may build against the requesting scope's in-progress store"
+    );
+}
