@@ -6,7 +6,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 
 use arc_swap::{ArcSwap, Guard};
 
@@ -32,10 +32,12 @@ enum Slot<T: ?Sized> {
     Fixed(Arc<T>),
 }
 
-/// The cell behind a swappable [`Live<T>`], and whether a transition has republished it.
+/// The cell behind a swappable [`Live<T>`], whether a transition has republished it, and the
+/// root slot it was created for, if any.
 struct SwapCell<T: ?Sized> {
     current: ArcSwap<Arc<T>>,
     rebound: AtomicBool,
+    root: Option<Weak<RootSlot<T>>>,
 }
 
 /// A root's slot: the instance the root holds, and the swappable cell `Dep<T>` handles share,
@@ -44,25 +46,42 @@ struct SwapCell<T: ?Sized> {
 /// A retained consumer's `Dep<T>` shares the cell of the root that built it, so a later
 /// transition republishes the cell of a root it displaced. Reads through that root's storage
 /// then keep returning the root's own instance, so the displaced generation, and the scopes
-/// still open on it, never see a later generation's instance. The root holds the instance, so
-/// it is released with the root, not with the consumer holding the cell.
+/// still open on it, never see a later generation's instance. That is the instance the cell
+/// held when the transition rebound it, so a `Dep::replace` made before it stays visible. The
+/// root holds both instances and the cell only refers back to the root, so they are released
+/// with the root, not with the consumer holding the cell.
 struct RootSlot<T: ?Sized> {
     instance: Arc<T>,
+    rebound_instance: OnceLock<Arc<T>>,
     cell: OnceLock<Arc<SwapCell<T>>>,
 }
 
 impl<T: ?Sized> RootSlot<T> {
-    fn cell(&self) -> &Arc<SwapCell<T>> {
+    fn cell(self: &Arc<Self>) -> &Arc<SwapCell<T>> {
         self.cell
-            .get_or_init(|| SwapCell::new(Arc::clone(&self.instance)))
+            .get_or_init(|| SwapCell::rooted(Arc::clone(&self.instance), Arc::downgrade(self)))
+    }
+
+    /// The instance reads through this root return once its cell is rebound.
+    fn own_instance(&self) -> Arc<T> {
+        Arc::clone(self.rebound_instance.get().unwrap_or(&self.instance))
     }
 }
 
 impl<T: ?Sized> SwapCell<T> {
     fn new(value: Arc<T>) -> Arc<Self> {
+        Self::with_root(value, None)
+    }
+
+    fn rooted(value: Arc<T>, root: Weak<RootSlot<T>>) -> Arc<Self> {
+        Self::with_root(value, Some(root))
+    }
+
+    fn with_root(value: Arc<T>, root: Option<Weak<RootSlot<T>>>) -> Arc<Self> {
         Arc::new(Self {
             current: ArcSwap::new(Arc::new(value)),
             rebound: AtomicBool::new(false),
+            root,
         })
     }
 }
@@ -134,6 +153,7 @@ impl<T: ?Sized + Send + Sync + 'static> Live<T> {
         Self {
             inner: Slot::Rooted(Arc::new(RootSlot {
                 instance: value,
+                rebound_instance: OnceLock::new(),
                 cell: OnceLock::new(),
             })),
         }
@@ -162,9 +182,17 @@ impl<T: ?Sized + Send + Sync + 'static> Live<T> {
     }
 
     /// Publishes a later generation's instance into a cell a transition rebinds, so the root
-    /// slot over it keeps reading its own instance from then on.
+    /// slot over it keeps reading the instance the cell held until then.
+    ///
+    /// The root keeps that instance before the flag is set, so a read that sees the flag also
+    /// sees it.
     fn rebind(&self, value: Arc<T>) {
         if let Some(cell) = self.swap_cell() {
+            if let Some(root) = cell.root.as_ref().and_then(Weak::upgrade) {
+                root.rebound_instance
+                    .get_or_init(|| cell.current.load_full().as_ref().clone());
+            }
+
             cell.rebound.store(true, Ordering::SeqCst);
         }
 
@@ -193,7 +221,7 @@ impl<T: ?Sized + Send + Sync + 'static> Live<T> {
                 let current = cell.current.load_full().as_ref().clone();
 
                 match cell.rebound.load(Ordering::SeqCst) {
-                    true => Arc::clone(&slot.instance),
+                    true => slot.own_instance(),
                     false => current,
                 }
             }
