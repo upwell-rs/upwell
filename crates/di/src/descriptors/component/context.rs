@@ -217,6 +217,35 @@ impl ComponentConstructionContext {
         }
     }
 
+    /// The slot a transient built for this scope captures through, without allocating one:
+    /// this scope's own, or the pending slot a factory already created for this detached
+    /// scope. A transient handed a detached slot creates its own when it captures, and this
+    /// scope adopts it through [`adopt_captured`](Self::adopt_captured).
+    pub(crate) fn inherited_slot(&self) -> crate::container::ScopeResolverSlot {
+        match self.slot.is_detached() {
+            true => self
+                .captured
+                .get()
+                .cloned()
+                .unwrap_or_else(crate::container::ScopeResolverSlot::detached),
+            false => self.slot.clone(),
+        }
+    }
+
+    /// Keeps the pending slot a transient created when it captured this detached scope, so
+    /// the container built from this context attaches it.
+    ///
+    /// A failed `set` is ignored: the transient was only handed a detached slot while this
+    /// context had none, and construction is sequential, so nothing set one meanwhile.
+    pub(crate) fn adopt_captured(&self, slot: crate::container::ScopeResolverSlot) {
+        let _ = self.captured.set(slot);
+    }
+
+    /// The pending slot a factory created when it captured this detached scope, if any.
+    pub(crate) fn take_captured(&mut self) -> Option<crate::container::ScopeResolverSlot> {
+        self.captured.take()
+    }
+
     /// The shared handle to this context's store, for transient construction. A
     /// context that has stored nothing hands out none: a transient only reads it while it
     /// is built, so it observes the same empty state. An owned store belongs to a scope
