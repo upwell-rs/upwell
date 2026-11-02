@@ -104,6 +104,48 @@ fn a_root_slot_follows_a_replace_until_a_transition_rebinds_it() {
     assert_eq!(*<Arc<u32> as Injectable>::from_stored(&root), 9);
 }
 
+/// A root slot holding `7`, replaced with `9` through a consumer's `Dep`, then rebound to `8`.
+fn replaced_then_rebound_root() -> (Live<u32>, Dep<u32>, Arc<u32>) {
+    let root = <Arc<u32> as Injectable>::into_stored(Arc::new(7));
+    let consumer = <Dep<u32> as Injectable>::from_stored(&root);
+    let replaced = Arc::new(9_u32);
+    let held = <Arc<u32> as Injectable>::live_cell(&root).expect("a root slot has a cell");
+    let next = LiveCell::of(&Live::new(Arc::new(8_u32)));
+
+    consumer.replace(Arc::clone(&replaced));
+    held.rebind_to(&next)
+        .expect("both cells hold the same type")
+        .commit();
+
+    (root, consumer, replaced)
+}
+
+#[test]
+fn a_rebound_root_keeps_the_instance_a_replace_left_in_its_cell() {
+    let (root, consumer, replaced) = replaced_then_rebound_root();
+
+    assert!(
+        Arc::ptr_eq(&<Arc<u32> as Injectable>::from_stored(&root), &replaced),
+        "the displaced root reads what its cell held when it was rebound"
+    );
+    assert_eq!(*consumer.get(), 8, "the consumer's Dep follows the rebind");
+}
+
+#[test]
+fn a_rebound_root_releases_a_replaced_instance_with_the_root() {
+    let (root, consumer, replaced) = replaced_then_rebound_root();
+    let released = Arc::downgrade(&replaced);
+
+    drop(replaced);
+    drop(root);
+
+    assert!(
+        released.upgrade().is_none(),
+        "the consumer's cell does not keep the replaced instance alive"
+    );
+    assert_eq!(*consumer.get(), 8);
+}
+
 #[test]
 fn a_rebound_root_releases_its_instance_with_the_root() {
     let (root, consumer, built) = rebound_root();
