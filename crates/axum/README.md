@@ -23,10 +23,10 @@ WebSocket connection components use `WebsocketUpgradeMeta` for the upgrade reque
 
 A request opens its `HttpRequest` scope the first time something injects from it, so a route that
 injects nothing pays for no scope. An eager component (`#[component(scope = HttpRequest, eager)]`)
-changes that: it runs for every routed request, after global middleware and before controller
-and path middleware. So a request global middleware rejects usually runs no eager component (it
-does if that middleware injected from the scope first), and a request no route matches (a 404)
-runs none. RPC differs here: it opens a call's scope before its middleware runs.
+changes that: it runs for every routed request before any middleware, as RPC opens a call's
+scope before its middleware. So it also runs for a request global middleware rejects, and reads
+the request head as the client sent it, before middleware rewrites it. A request no route
+matches (a 404) runs none.
 
 `RequestMeta` copies the request's method, URI and headers, so it is captured only when something
 reads it, once per request: when the scope opens if the route reads it (directly or through a

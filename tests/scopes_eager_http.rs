@@ -2,8 +2,8 @@
 
 //! End-to-end tests for eager request-scoped components over HTTP.
 //!
-//! An eager component runs for every routed request that global middleware lets through, whether
-//! or not the route injects anything. Each test registers what it needs by hand, so an eager
+//! An eager component runs for every routed request before global middleware, as an RPC call's
+//! scope opens before its middleware, whether or not the route injects anything. Each test registers what it needs by hand, so an eager
 //! component of one test does not reach the routes of another.
 
 use std::sync::Arc;
@@ -62,9 +62,10 @@ impl TenantSpan {
             .headers
             .get("x-tenant")
             .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
+            .unwrap_or("unset")
+            .to_owned();
 
-        *TENANT.lock().expect("the tenant lock is healthy") = tenant;
+        *TENANT.lock().expect("the tenant lock is healthy") = Some(tenant);
 
         Self {}
     }
@@ -181,12 +182,13 @@ async fn a_failing_eager_component_fails_a_route_injecting_nothing() {
 }
 
 #[tokio::test]
-async fn global_middleware_that_answers_keeps_the_eager_component_from_running() {
+async fn an_eager_component_runs_before_global_middleware_answers() {
     let router = router(app().layer(axum_middleware::from_fn(reject))).await;
 
     assert_eq!(
         spans_built(&router, "/eager/none").await,
-        (0, StatusCode::UNAUTHORIZED)
+        (1, StatusCode::UNAUTHORIZED),
+        "the scope opens before middleware, as an RPC call's does"
     );
 }
 
@@ -208,7 +210,7 @@ async fn global_middleware_that_injects_opens_the_one_scope_of_the_request() {
 }
 
 #[tokio::test]
-async fn an_eager_component_reads_the_head_global_middleware_left() {
+async fn an_eager_component_reads_the_head_before_global_middleware_rewrites_it() {
     let router = router(
         app()
             .component::<TenantSpan>()
@@ -222,6 +224,7 @@ async fn an_eager_component_reads_the_head_global_middleware_left() {
             .lock()
             .expect("the tenant lock is healthy")
             .as_deref(),
-        Some("acme")
+        Some("unset"),
+        "the eager component ran before middleware set the header"
     );
 }

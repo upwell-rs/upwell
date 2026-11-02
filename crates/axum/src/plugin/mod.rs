@@ -279,10 +279,6 @@ impl PreparedProtocol for PreparedAxum {
 
         let requests = runtime.opener::<HttpRequestScope>()?;
 
-        if requests.builds_eagerly() {
-            router = router.layer(axum::middleware::from_fn(open_eager_scope));
-        }
-
         // Global middleware, first-registered outermost (mirroring the RPC protocol's own
         // convention): `axum::Router::layer` stacks last-applied-outermost, so folding in
         // reverse registration order makes the first-registered applier the outermost one.
@@ -290,6 +286,10 @@ impl PreparedProtocol for PreparedAxum {
         // of user middleware — raw or DI-backed — can `Inject` request-scoped state.
         for applier in self.middleware.into_iter().rev() {
             router = applier(runtime, router);
+        }
+
+        if requests.builds_eagerly() {
+            router = router.layer(axum::middleware::from_fn(open_eager_scope));
         }
 
         // Protocol-wide limits are real router policy, not passive configuration. The body limit

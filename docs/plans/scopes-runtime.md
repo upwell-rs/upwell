@@ -446,10 +446,10 @@ application:
 - **Side effects.** A constructor that exists for its side effect (an audit record, a span, a
   permission gate) no longer runs for entries that do not inject it. Mark it `eager`, or move
   the effect to middleware (axum `AxumMiddleware`, a `tower::Layer`). On HTTP an eager
-  request-scoped component runs for every routed request that global middleware lets through,
-  after that middleware, and also for one global middleware answers if it injected first. A
-  request no route matches runs none. For an effect on every request, rejected or unmatched
-  ones included, use global middleware.
+  request-scoped component runs for every routed request before any middleware, as on RPC,
+  so it runs for requests middleware rejects and reads the head as the client sent it. A
+  request no route matches runs none. For an effect on every request, unmatched ones included,
+  use global middleware.
 - **Synchronous reads.** `ScopeContainer::get`, `ComponentSource` and
   `RpcCallContext::component` see only built slots; resolve through `Inject`, `Lazy` or
   `ScopeContainer::resolve` to build on demand.
