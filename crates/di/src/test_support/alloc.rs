@@ -37,28 +37,34 @@ fn record_allocation(allocations: u64, net_live: i64) {
 /// Forwards to the system allocator, recording what the measured thread allocates.
 struct TrackingAllocator;
 
+// SAFETY: every method forwards its arguments unchanged to `System`, so the contract the caller
+// upholds is the one `System` requires. Recording only updates thread-local counters.
 unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         record_allocation(1, layout.size() as i64);
 
+        // SAFETY: the caller's arguments, forwarded unchanged.
         unsafe { System.alloc(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         record_allocation(0, -(layout.size() as i64));
 
+        // SAFETY: the caller's arguments, forwarded unchanged.
         unsafe { System.dealloc(ptr, layout) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         record_allocation(1, layout.size() as i64);
 
+        // SAFETY: the caller's arguments, forwarded unchanged.
         unsafe { System.alloc_zeroed(layout) }
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         record_allocation(1, new_size as i64 - layout.size() as i64);
 
+        // SAFETY: the caller's arguments, forwarded unchanged.
         unsafe { System.realloc(ptr, layout, new_size) }
     }
 }

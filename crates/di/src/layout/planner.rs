@@ -54,14 +54,13 @@ impl SlotLayout {
             dependencies.push(planned);
         }
 
-        let shares_store = planner.dynamic.get();
+        layout.shares_store = planner.dynamic.get();
 
         for (spec, planned) in layout.slots.iter_mut().zip(dependencies) {
             spec.dependencies = planned;
         }
 
         layout.selected = selected;
-        layout.shares_store = shares_store;
         layout.eager = layout.eager_closure(selection, &can_reach);
         layout.read = layout.slots_factories_read();
 
