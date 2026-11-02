@@ -10,6 +10,7 @@ use crate::test_support::{component, test_component};
 use crate::{SlotLayout, dispatch_factory, factory_dependencies};
 
 mod cases;
+mod collections;
 
 /// The trait every fixture provider provides.
 trait Greeter: Send + Sync {

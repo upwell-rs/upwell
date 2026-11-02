@@ -47,10 +47,11 @@ pub trait FromContainer: Sized {
         None
     }
 
-    /// Reads this parameter from `scope` when it is a component already built there or in
-    /// the scopes `scope` opens under, without selecting providers or building anything.
-    /// `None` sends the extraction down its general path; parameters that are not a single
-    /// built component always return `None`.
+    /// Reads this parameter from `scope` when what it resolves to is already built there or in
+    /// the scopes `scope` opens under, without selecting providers or building anything: one
+    /// component, or the providers a collection or keyed map gathers. `None` sends the
+    /// extraction down its general path; parameters resolved through their own handle always
+    /// return `None`.
     fn read_built(_scope: &ScopeContainer) -> Option<Self> {
         None
     }
@@ -211,6 +212,10 @@ where
     fn ready_at(cx: &ComponentConstructionContext, index: usize) -> Option<crate::Result<Self>> {
         cx.dep_all_ready::<Arc<T>>(index).map(Ok)
     }
+
+    fn read_built(scope: &ScopeContainer) -> Option<Self> {
+        scope.built_collection::<Arc<T>>()
+    }
 }
 
 impl<T> FromContainer for HashMap<String, Arc<T>>
@@ -234,6 +239,10 @@ where
 
     fn ready_at(cx: &ComponentConstructionContext, index: usize) -> Option<crate::Result<Self>> {
         cx.dep_keyed_ready::<Arc<T>>(index).map(Ok)
+    }
+
+    fn read_built(scope: &ScopeContainer) -> Option<Self> {
+        scope.built_keyed::<Arc<T>>()
     }
 }
 
