@@ -19,7 +19,7 @@ struct LazyUser {
 
 /// A transient capturing the requesting scope through a lazy handle.
 struct LazyMade {
-    uses: Lazy<Arc<UsesMade>>,
+    made: Lazy<Arc<Made>>,
 }
 
 /// A scoped component reading [`LazyMade`] through a planned transient edge.
@@ -30,7 +30,7 @@ struct HoldsLazyMade {
 /// A transient capturing the requesting scope through a lazy handle its factory does not
 /// declare.
 struct HiddenLazyMade {
-    uses: Lazy<Arc<UsesMade>>,
+    made: Lazy<Arc<Made>>,
 }
 
 /// A scoped component reading [`HiddenLazyMade`] through a planned transient edge.
@@ -54,8 +54,8 @@ async fn uses_made(made: Arc<Made>) -> UsesMade {
     UsesMade { _made: made }
 }
 
-async fn lazy_made(uses: Lazy<Arc<UsesMade>>) -> LazyMade {
-    LazyMade { uses }
+async fn lazy_made(made: Lazy<Arc<Made>>) -> LazyMade {
+    LazyMade { made }
 }
 
 async fn holds_lazy_made(made: Arc<LazyMade>) -> HoldsLazyMade {
@@ -74,11 +74,11 @@ fn construct_hidden(
     cx: &mut ComponentConstructionContext,
 ) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + '_>> {
     Box::pin(async move {
-        let uses = <Lazy<Arc<UsesMade>> as crate::FromContainer>::from_container(cx).await?;
+        let made = <Lazy<Arc<Made>> as crate::FromContainer>::from_container(cx).await?;
 
         Ok(boxed_component(
             "HiddenLazyMade",
-            Arc::new(HiddenLazyMade { uses }),
+            Arc::new(HiddenLazyMade { made }),
         ))
     })
 }
@@ -172,9 +172,7 @@ async fn open(order: &[ComponentDescriptor]) -> (Arc<ScopeContainer>, bool) {
         lazy_made_descriptor(),
         hidden_descriptor(),
     ];
-    let mut known = transients.to_vec();
-
-    known.extend_from_slice(order);
+    let known = [transients.as_slice(), order].concat();
 
     let selection = Arc::new(
         crate::registry::ProviderSelectionModel::new(&known, Vec::new(), HashMap::new())
@@ -260,9 +258,14 @@ async fn a_planned_transient_capturing_its_requesting_scope_gets_its_resolver_sl
         .get::<HoldsLazyMade>()
         .expect("the scope built the holder");
 
+    assert!(
+        matches!(scope.slot.state, ScopeResolverSlotState::Pending(_)),
+        "the transient's lazy handle captured a pending resolver slot"
+    );
+
     holder
         .made
-        .uses
+        .made
         .get_or_create()
         .await
         .expect("the transient's lazy handle resolves from the requesting scope");
@@ -282,7 +285,7 @@ async fn a_planned_transient_capturing_its_scope_without_declaring_it_still_reso
 
     holder
         .made
-        .uses
+        .made
         .get_or_create()
         .await
         .expect("the undeclared capture resolves from the requesting scope");
