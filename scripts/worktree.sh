@@ -68,8 +68,21 @@ clone_tree() {
 rollback_add() {
     git -C "$repo" worktree unlock "$adding_path" 2> /dev/null || true
     git -C "$repo" worktree remove --force "$adding_path" 2> /dev/null || true
-    git -C "$repo" branch --quiet -D "$adding_branch" 2> /dev/null || true
+
+    if [[ -e "$adding_path" ]]; then
+        echo "worktree: could not remove $adding_path; delete it, then run: git worktree prune && git branch -D $adding_branch" >&2
+    else
+        git -C "$repo" branch --quiet -D "$adding_branch" 2> /dev/null || true
+    fi
+
     unlock_seed
+}
+
+# Puts back a seed that an interrupted or failed refresh moved aside.
+recover_seed() {
+    if [[ -d "$seed.previous" && ! -d "$seed" ]]; then
+        mv "$seed.previous" "$seed"
+    fi
 }
 
 add() {
@@ -78,7 +91,6 @@ add() {
     local start="$base"
 
     require_root
-    [[ -e "$path" ]] && fail "$path already exists"
 
     git -C "$repo" fetch --quiet origin || echo "worktree: fetch failed; using local refs" >&2
 
@@ -87,10 +99,15 @@ add() {
     fi
 
     lock_seed
-    git -C "$repo" worktree add --quiet --no-track -b "$branch" "$path" "$start"
+    recover_seed
+
+    [[ -e "$path" ]] && fail "$path already exists"
+    git -C "$repo" show-ref --verify --quiet "refs/heads/$branch" && fail "branch $branch already exists"
+
     adding_path="$path"
     adding_branch="$branch"
     trap rollback_add EXIT
+    git -C "$repo" worktree add --quiet --no-track -b "$branch" "$path" "$start"
     git -C "$repo" worktree lock --reason "parallel worktree on $root" "$path"
 
     if [[ -f "$repo/.env" ]]; then
@@ -163,6 +180,7 @@ refresh_seed() {
     [[ -d "$target" ]] || fail "$target does not exist"
 
     lock_seed
+    recover_seed
     rm -rf "$next" "$previous"
     clone_tree "$target" "$next"
 
@@ -170,7 +188,11 @@ refresh_seed() {
         mv "$seed" "$previous"
     fi
 
-    mv "$next" "$seed"
+    if ! mv "$next" "$seed"; then
+        recover_seed
+        fail "could not publish the new seed; kept the previous one"
+    fi
+
     rm -rf "$previous"
     unlock_seed
     echo "worktree: seed refreshed from $1"
