@@ -6,8 +6,12 @@ use super::*;
 use crate::test_support::{component, measure, test_component};
 use crate::{dispatch_factory, erase_provider, factory_dependencies};
 
-/// Provider aliases erased so far, across every provider of this test's process.
-static ERASED: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// Provider aliases erased so far on this thread. Each test opens and reads its scopes
+    /// on its own thread (`block_on`, or a current-thread runtime), so tests running in
+    /// parallel in one process never see each other's counts.
+    static ERASED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// A trait two scoped components provide.
 trait Named: Send + Sync {
@@ -107,7 +111,7 @@ where
     T: crate::Component + crate::ProviderOf<dyn Named>,
     T::Handle: Injectable<Stored = crate::Live<T>>,
 {
-    ERASED.fetch_add(1, Ordering::SeqCst);
+    ERASED.set(ERASED.get() + 1);
 
     erase_provider::<T, dyn Named>(concrete)
 }
@@ -184,11 +188,7 @@ fn opening_a_scope_erases_no_alias_and_allocates_none() {
         block_on(open(Arc::clone(&parent), &plain, &plain_registry));
     });
 
-    assert_eq!(
-        ERASED.load(Ordering::SeqCst),
-        0,
-        "nothing read an alias of the opened scope"
-    );
+    assert_eq!(ERASED.get(), 0, "nothing read an alias of the opened scope");
     assert_eq!(
         with_aliases.allocations, without_aliases.allocations,
         "a provider nothing reads adds no allocation to opening its scope"
@@ -204,11 +204,7 @@ async fn a_planned_edge_erases_only_the_alias_it_reads() {
     let reader = scope.get::<Reader>().expect("the scope built the reader");
 
     assert_eq!(reader.named.name(), "first");
-    assert_eq!(
-        ERASED.load(Ordering::SeqCst),
-        1,
-        "only the alias the edge reads was erased"
-    );
+    assert_eq!(ERASED.get(), 1, "only the alias the edge reads was erased");
 }
 
 #[tokio::test]
