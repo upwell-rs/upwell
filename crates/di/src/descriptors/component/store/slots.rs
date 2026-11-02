@@ -137,6 +137,16 @@ impl SlotStore {
         Ok(())
     }
 
+    /// Fills the seed slot `slot` of the open scope with `component`, unless it holds a value.
+    pub(crate) fn seed_later(&self, slot: SlotIdx, component: BoxedComponent) -> crate::Result<()> {
+        let value = self.slot_value(slot, component)?;
+
+        // A value set between the caller's check and here came from the same request head.
+        let _ = self.later().values[slot.index()].set(value);
+
+        Ok(())
+    }
+
     /// The stored value of `component`, aliased under every trait `slot` provides.
     fn slot_value(&self, slot: SlotIdx, component: BoxedComponent) -> crate::Result<SlotValue> {
         let spec = self.layout.spec(slot);

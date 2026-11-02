@@ -157,6 +157,8 @@ fn scopes_report_their_eager_set_and_what_no_entry_reaches() {
     );
     assert_eq!(label(entry, "builds"), Some("request_data"));
     assert_eq!(label(entry, "plan-size"), Some("1"));
+    assert_eq!(label(entry, "reads-seeds"), Some("none"));
+    assert_eq!(label(request, "seeds"), Some("none"));
     assert_eq!(label(eager, "construction-policy"), Some("eager"));
     assert_eq!(label(idle, "construction-policy"), Some("on-demand"));
     document.validate().expect("the document validates");

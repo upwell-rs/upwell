@@ -113,15 +113,17 @@ impl ProjectionSnapshot {
             entries
                 .iter()
                 .map(|(id, entry)| {
-                    let builds = layouts.get(&entry.scope.id()).zip(layouts.entry(id)).map(
-                        |(layout, plan)| {
-                            plan.components(layout)
+                    let plan = layouts.get(&entry.scope.id()).zip(layouts.entry(id)).map(
+                        |(layout, plan)| EntryPlanFacts {
+                            builds: plan
+                                .components(layout)
                                 .map(|component| component.id)
-                                .collect()
+                                .collect(),
+                            reads_seeds: plan.seeds_read(layout).map(|seed| seed.id).collect(),
                         },
                     );
 
-                    EntrySnapshot::capture(selection, topology, *entry, builds)
+                    EntrySnapshot::capture(selection, topology, *entry, plan)
                 })
                 .collect::<upwell_di::Result<_>>()?;
 
@@ -318,9 +320,18 @@ impl DependencySnapshot {
 pub(crate) struct EntrySnapshot {
     pub(crate) descriptor: EntryDescriptor,
     pub(crate) targets: Vec<DependencySnapshot>,
-    /// The IDs of the components the entry builds when it opens its scope, in construction
-    /// order. `None` for an entry into the root scope, which opens nothing.
-    pub(crate) builds: Option<Vec<&'static str>>,
+    /// What the entry's plan does when it opens its scope. `None` for an entry into the root
+    /// scope, which opens nothing.
+    pub(crate) plan: Option<EntryPlanFacts>,
+}
+
+/// What one prepared entry's plan does when it opens its scope.
+#[derive(Clone)]
+pub(crate) struct EntryPlanFacts {
+    /// The IDs of the components it builds, in construction order.
+    pub(crate) builds: Vec<&'static str>,
+    /// The IDs of the seeds it reads, directly or through what it builds or lazily reaches.
+    pub(crate) reads_seeds: Vec<&'static str>,
 }
 
 impl EntrySnapshot {
@@ -331,7 +342,7 @@ impl EntrySnapshot {
         selection: &ProviderSelectionModel,
         topology: &PreparedScopeTopology,
         descriptor: EntryDescriptor,
-        builds: Option<Vec<&'static str>>,
+        plan: Option<EntryPlanFacts>,
     ) -> upwell_di::Result<Self> {
         let key = descriptor.key.as_str();
         let consumer = ComponentDescriptor::manual(
@@ -347,7 +358,7 @@ impl EntrySnapshot {
                 .into_iter()
                 .map(|target| DependencySnapshot::capture(selection, topology, consumer, target))
                 .collect::<upwell_di::Result<_>>()?,
-            builds,
+            plan,
         })
     }
 }

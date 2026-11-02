@@ -1,10 +1,10 @@
-//! Native HTTP request data, seeded into every request scope.
+//! Native HTTP request data, a seed of the request scope captured when something reads it.
 //!
 //! Mirrors how the RPC protocol seeds `PeerInfo` into its connection scope: a factory-less,
-//! by-value [`ComponentDescriptor`] whose instance is supplied at scope-open time rather than
+//! by-value [`ComponentDescriptor`] whose instance is supplied by the protocol rather than
 //! constructed, so a request-scoped component (or a handler, via [`Inject`](crate::Inject))
 //! can depend on the request's method, URI, headers, and cookies without axum's own
-//! extractors ever entering the DI graph.
+//! extractors ever entering the DI graph. `crate::request_scope` describes when it is captured.
 
 use std::collections::HashMap;
 
@@ -74,9 +74,9 @@ impl upwell_di::Provided<RequestMeta> for upwell_di::Wiring {}
 
 /// The framework-provided request-scoped injectable for the incoming request's native data.
 ///
-/// Seeded into every request scope with the actual [`RequestMeta`], so a request-scoped
+/// Filled with the actual [`RequestMeta`] when something reads it, so a request-scoped
 /// component can depend on it directly (e.g. to read a bearer token or a session cookie in
-/// its constructor).
+/// its constructor) and a request that reads it from nowhere copies no headers.
 pub(crate) static REQUEST_META_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::manual(
     "__upwell_request_meta",
     "RequestMeta",

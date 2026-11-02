@@ -15,6 +15,8 @@ use crate::scope::ScopeLayouts;
 pub(crate) struct ScopeLayoutSnapshot {
     /// The IDs of the eager components every opening builds, in construction order.
     pub(crate) eager: Vec<&'static str>,
+    /// The IDs of the scope's seeds, which whoever opens the scope fills, in layout order.
+    pub(crate) seeds: Vec<&'static str>,
     /// The IDs of the factory-backed components nothing reaches from an entry, directly or
     /// through other components of any scope, eager or lazy, in construction order. `None`
     /// when no entry opens the scope, so every component waits for an on-demand resolution.
@@ -46,7 +48,16 @@ impl ScopeLayoutSnapshot {
                     .map(|component| component.id)
                     .collect();
 
-                (*scope, Self { eager, unreached })
+                let seeds = layout.seeds().map(|seed| seed.id).collect();
+
+                (
+                    *scope,
+                    Self {
+                        eager,
+                        seeds,
+                        unreached,
+                    },
+                )
             })
             .collect()
     }

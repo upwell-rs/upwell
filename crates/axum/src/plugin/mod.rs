@@ -307,9 +307,9 @@ impl PreparedProtocol for PreparedAxum {
         }
 
         // The bridge: every request runs with the request-scope opener in reach, and its scope
-        // opens on the first injection, seeded with `RequestMeta` (method/URI/headers/cookies)
-        // so request-scoped components can depend on the native request without axum's own
-        // extractors entering the DI graph. A request that injects nothing opens no scope, unless
+        // opens on the first injection. `RequestMeta` (method/URI/headers/cookies) is captured
+        // when something reads it, so request-scoped components can depend on the native request
+        // without axum's own extractors entering the DI graph. A request that injects nothing opens no scope, unless
         // the scope has eager components.
         let routes = entries::route_entries_by_path(
             &self.controllers,

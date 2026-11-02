@@ -63,8 +63,28 @@ impl SlotLayout {
         layout.selected = selected;
         layout.captures = captures;
         layout.eager = layout.eager_closure(selection, &can_reach);
+        layout.read = layout.slots_factories_read();
 
         Ok(layout)
+    }
+
+    /// The slots of this scope a factory of it depends on, through an edge of any kind.
+    fn slots_factories_read(&self) -> Box<[bool]> {
+        let mut read = vec![false; self.slots.len()].into_boxed_slice();
+
+        for dependency in self.slots.iter().flat_map(|spec| spec.dependencies.iter()) {
+            match &dependency.source {
+                DepRef::Unplanned => {
+                    self.for_each_target_slot(dependency.target, |slot| {
+                        read[slot.index()] = true;
+                    });
+                }
+
+                source => mark_local_sources(source, &mut read),
+            }
+        }
+
+        read
     }
 
     /// Lays out the slots, seeds first, and builds the type and trait indexes.
@@ -122,17 +142,38 @@ impl SlotLayout {
 
         let constructs = slots.iter().any(|spec| spec.factory.is_some());
         let eager = vec![false; slots.len()].into_boxed_slice();
+        let read = eager.clone();
 
         Ok(Self {
             scope,
             slots: slots.into_boxed_slice(),
             eager,
+            read,
             by_type,
             by_trait,
             selected: SelectedSources::default(),
             constructs,
             captures: false,
         })
+    }
+}
+
+/// Marks in `read` the slots of this scope `source` reads.
+fn mark_local_sources(source: &DepRef, read: &mut [bool]) {
+    match source {
+        DepRef::Local(at) => read[at.slot.index()] = true,
+
+        DepRef::Many(provided) => {
+            for entry in provided.iter() {
+                mark_local_sources(&entry.source, read);
+            }
+        }
+
+        DepRef::Root(_)
+        | DepRef::Ancestor { .. }
+        | DepRef::Transient(_)
+        | DepRef::Absent
+        | DepRef::Unplanned => {}
     }
 }
 

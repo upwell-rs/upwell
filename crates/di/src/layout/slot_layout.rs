@@ -65,6 +65,7 @@ pub struct SlotLayout {
     pub(super) scope: ScopeKey,
     pub(super) slots: Box<[SlotSpec]>,
     pub(super) eager: Box<[bool]>,
+    pub(super) read: Box<[bool]>,
     pub(super) by_type: HashMap<TypeId, SlotIdx>,
     pub(super) by_trait: HashMap<TypeId, Box<[ProviderSlot]>>,
     pub(super) selected: SelectedSources,
@@ -119,6 +120,28 @@ impl SlotLayout {
             .iter()
             .filter(|spec| is_eager(spec))
             .map(|spec| &spec.component)
+    }
+
+    /// The scope's seeds: its factory-less components, filled by whoever opens the scope.
+    pub fn seeds(&self) -> impl Iterator<Item = &ComponentDescriptor> {
+        self.slots
+            .iter()
+            .filter(|spec| spec.factory.is_none())
+            .map(|spec| &spec.component)
+    }
+
+    /// Whether a factory of this scope depends on the seed of type `seed`, through an edge of
+    /// any kind, so an opening that builds every slot reads it.
+    pub fn factories_read_seed(&self, seed: TypeId) -> bool {
+        self.slot_of(seed)
+            .is_some_and(|slot| self.read[slot.index()])
+    }
+
+    /// Whether the eager set depends on the seed of type `seed`, so an opening that builds only
+    /// the eager set reads it.
+    pub fn eager_set_reads_seed(&self, seed: TypeId) -> bool {
+        self.slot_of(seed)
+            .is_some_and(|slot| self.eager[slot.index()])
     }
 
     /// The slots every opening builds: the eager components and their dependencies here.
