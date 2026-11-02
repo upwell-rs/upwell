@@ -135,6 +135,7 @@ filter = '''
   | binary_id(=upwell::scopes_on_demand)
   | binary_id(=upwell::scopes_strict)
   | binary_id(=upwell::scopes_eager)
+  | binary_id(=upwell::scopes_eager_http)
   | binary_id(=upwell::scopes_reload)
   | binary_id(=upwell::status_codes)
   | binary_id(=upwell::config_reload)

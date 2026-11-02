@@ -9,6 +9,11 @@
 //! A request to a controller route opens its scope with the route's entry plan, which builds
 //! only what the route injects; anything else is built when something resolves it. Other
 //! requests build every slot of the scope.
+//!
+//! The exception is a scope with eager components, which must run for every routed request.
+//! [`open_eager_scope`] then opens the scope once global middleware has run, if nothing has yet,
+//! so the eager components see the same request head a first injection there would. A request
+//! no route matches, or one global middleware answers, still opens no scope on its own.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,6 +22,8 @@ use std::task::{Context, Poll};
 use axum::extract::{MatchedPath, Request};
 use axum::http::request::Parts;
 use axum::http::{Extensions, Method};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use tokio::task::futures::TaskLocalFuture;
 use tower::{Layer, Service};
 use upwell_app::{ScopeEntry, ScopeOpener};
@@ -42,6 +49,15 @@ pub(crate) struct RequestScopes {
 /// The entry of each controller route, by method and the path the router matches it under.
 #[derive(Default)]
 pub(crate) struct RouteEntries(HashMap<Method, HashMap<Box<str>, ScopeEntry<HttpRequest>>>);
+
+/// What opening a request's scope builds when no route entry says.
+#[derive(Clone, Copy)]
+enum WithoutEntry {
+    /// Every slot of the scope.
+    Everything,
+    /// Only the eager set; the rest is built when something resolves it.
+    Eager,
+}
 
 /// Makes [`RequestScopes`] reachable for each request it serves.
 #[derive(Clone)]
@@ -134,7 +150,7 @@ pub(crate) async fn of_parts(parts: &mut Parts) -> Result<Arc<ScopeContainer>, I
         parts.headers.clone(),
     );
 
-    open(meta, &mut parts.extensions).await
+    open(meta, &mut parts.extensions, WithoutEntry::Everything).await
 }
 
 /// The scope of `request`, opened on first use.
@@ -151,7 +167,38 @@ pub(crate) async fn of_request(
         request.headers().clone(),
     );
 
-    open(meta, request.extensions_mut()).await
+    open(meta, request.extensions_mut(), WithoutEntry::Everything).await
+}
+
+/// Middleware opening a routed request's scope, unless something has already. Without an entry it builds only the eager set, so a route that
+/// injects nothing does not pay for the rest of the scope.
+///
+/// The protocol installs it only when the application registers an eager request-scoped
+/// component, so other applications do not pay for the layer.
+pub(crate) async fn open_eager_scope(mut request: Request, next: Next) -> Response {
+    if let Err(rejection) = open_routed(&mut request).await {
+        return rejection.into_response();
+    }
+
+    next.run(request).await
+}
+
+async fn open_routed(request: &mut Request) -> Result<(), InjectRejection> {
+    let routed = request.extensions().get::<MatchedPath>().is_some();
+
+    if !routed || opened(request.extensions()).is_some() {
+        return Ok(());
+    }
+
+    let meta = RequestMeta::from_parts(
+        request.method().clone(),
+        request.uri().clone(),
+        request.headers().clone(),
+    );
+
+    open(meta, request.extensions_mut(), WithoutEntry::Eager).await?;
+
+    Ok(())
 }
 
 fn opened(extensions: &Extensions) -> Option<Arc<ScopeContainer>> {
@@ -167,6 +214,7 @@ fn opened(extensions: &Extensions) -> Option<Arc<ScopeContainer>> {
 async fn open(
     meta: RequestMeta,
     extensions: &mut Extensions,
+    without_entry: WithoutEntry,
 ) -> Result<Arc<ScopeContainer>, InjectRejection> {
     let scopes = REQUEST_SCOPES
         .try_with(Arc::clone)
@@ -175,9 +223,10 @@ async fn open(
         .get::<MatchedPath>()
         .and_then(|path| scopes.routes.get(&meta.method, path.as_str()));
     let builder = scopes.opener.builder().seed(meta);
-    let opened = match entry {
-        Some(entry) => builder.open(entry).await,
-        None => builder.open_default().await,
+    let opened = match (entry, without_entry) {
+        (Some(entry), _) => builder.open(entry).await,
+        (None, WithoutEntry::Everything) => builder.open_default().await,
+        (None, WithoutEntry::Eager) => builder.open_on_demand().await,
     };
     let scope = opened
         .map_err(|error| InjectRejection::ScopeFailed(error.to_string()))?

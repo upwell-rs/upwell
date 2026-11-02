@@ -149,6 +149,17 @@ impl<S: Scope> ScopeOpener<S> {
         })
     }
 
+    /// Whether every opening of the scope builds an eager component. A condition cannot apply
+    /// to a scoped component, so a reload does not change the answer.
+    pub fn builds_eagerly(&self) -> bool {
+        self.runtime
+            .view()
+            .scope_plan()
+            .layouts
+            .get(&S::ID)
+            .is_some_and(|layout| layout.eager_components().next().is_some())
+    }
+
     /// Starts an instance under the application root; [`ScopeBuilder::under`] picks another
     /// parent.
     pub fn builder(&self) -> ScopeBuilder<'_, S> {
