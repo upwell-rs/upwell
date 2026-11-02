@@ -52,13 +52,16 @@ async fn construct_transient_boxed(
 /// Constructs a transient from its prepared plan, resolving its dependencies through the
 /// plan's edges. Like on-demand construction, it is built in a throwaway context over the
 /// requesting scope's parent and in-progress store.
+///
+/// Also returns the pending slot the transient created when it captured a requesting scope
+/// handed in detached, which that scope has to adopt so its built container attaches it.
 pub(crate) async fn construct_planned_transient(
     registry: &Arc<ScopeRegistry>,
     parent: Option<Arc<ScopeContainer>>,
     slot: ScopeResolverSlot,
     store: Option<SharedStore>,
     plan: Arc<TransientPlan>,
-) -> crate::Result<BoxedComponent> {
+) -> crate::Result<(BoxedComponent, Option<ScopeResolverSlot>)> {
     let factory = plan.factory;
     let externals = parent
         .as_ref()
@@ -75,7 +78,9 @@ pub(crate) async fn construct_planned_transient(
 
     cx.set_running(Running::Transient(plan));
 
-    factory.build(&mut cx).await
+    let boxed = factory.build(&mut cx).await?;
+
+    Ok((boxed, cx.take_captured()))
 }
 
 pub(crate) async fn construct_fresh_boxed(
