@@ -112,6 +112,31 @@ async fn same_protocol_can_mount_at_distinct_paths_with_one_di_registration() {
     assert_eq!(paths, ["/ws/one", "/ws/two"]);
 }
 
+#[tokio::test]
+async fn a_request_that_is_not_an_upgrade_is_rejected_before_admission() {
+    use tower::ServiceExt as _;
+
+    let app = crate::App::builder("plain-get-ws-test")
+        .register_ws::<MultiEndpointProtocol>("/ws/plain")
+        .build()
+        .await
+        .expect("the protocol mounts");
+    let request = axum::http::Request::builder()
+        .uri("/ws/plain")
+        .body(axum::body::Body::empty())
+        .expect("the request is valid");
+
+    let response = app
+        .protocol()
+        .router()
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the router is infallible");
+
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+}
+
 #[test]
 fn duplicate_mount_path_returns_typed_prepare_error() {
     let result = crate::App::builder("duplicate-ws-path-test")

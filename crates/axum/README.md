@@ -8,8 +8,8 @@ Part of the [Upwell](../../README.md) framework — the HTTP protocol layer over
 
 `upwell-axum` provides the `Axum -> PreparedAxum -> AxumRuntime` protocol states and builds a real [`axum::Router`] from
 `#[controller]` components and serves them over HTTP. It bridges the framework's dependency
-injection into axum via the [`Inject`] extractor — a per-request scope layer threads an
-`Arc<ScopeContainer>` through the request extensions, and `Inject<T>` resolves components from it, so
+injection into axum via the [`Inject`] extractor — a per-request scope layer opens the request's
+`ScopeContainer` on first use and keeps it for the request, and `Inject<T>` resolves components from it, so
 route handlers freely mix native axum extractors with DI. The bridge is deliberately thin and
 one-directional: nothing in `upwell-di` or `upwell-core` knows axum exists.
 
@@ -23,8 +23,21 @@ WebSocket connection components use `WebsocketUpgradeMeta` for the upgrade reque
 
 A request opens its `HttpRequest` scope the first time something injects from it, so a route that
 injects nothing pays for no scope. An eager component (`#[component(scope = HttpRequest, eager)]`)
-changes that: it runs for every routed request, after global middleware. A request no route matches,
-or one global middleware answers before injecting, runs none.
+changes that: it runs for every routed request, after global middleware and before controller
+and path middleware. So a request global middleware rejects usually runs no eager component (it
+does if that middleware injected from the scope first), and a request no route matches (a 404)
+runs none. RPC differs here: it opens a call's scope before its middleware runs.
+
+`RequestMeta` copies the request's method, URI and headers, so it is captured only when something
+reads it, once per request: when the scope opens if the route reads it (directly or through a
+component it builds or reaches lazily), otherwise at the first `Inject` that reads it. A route
+that never reads it copies no headers. Each reader of one request sees the same capture, so a
+read the route declares sees the head as it was when the scope opened, while a read only
+middleware makes sees it as it was at that read. `ScopeHandle` is the exception: a handle can
+resolve anything later, after axum has consumed the head, so handing one out (`ScopeHandle` as
+an extractor or `ScopeHandle::of`) costs one header-map clone even if nothing reads
+`RequestMeta`. Prefer `Inject<T>` where the type is known. `ScopeHandle` is not a request
+extension: reach the scope through the extractor or `ScopeHandle::of`.
 
 Beyond plain REST it owns the HTTP-side extras that mirror the RPC protocol for the web: WebSocket
 controllers ([`WebsocketController`], `#[controller(ws = ..)]`), a STOMP 1.2 pub/sub [`Broker`] with

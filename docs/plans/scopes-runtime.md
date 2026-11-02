@@ -177,8 +177,8 @@ from the active container without a declared dependency stays non-public.
   nothing, and tooling shows each scope's parameter fields from `#[scope]`.
 - `CustomerSync { .. }.enter(future)` runs a future inside just the params context, without an
   app, so code that calls `current()` can be unit-tested.
-- The name "scope handle" is avoided while axum's `ScopeHandle` (an `Arc<ScopeContainer>` in
-  request extensions) exists; the value is plain `Arc<S>`.
+- The name "scope handle" is avoided while axum's `ScopeHandle` (an `Arc<ScopeContainer>` for
+  dynamic access to a request's scope) exists; the value is plain `Arc<S>`.
 
 ### Generation policy is part of the scope type
 
@@ -321,12 +321,42 @@ Status (#346, #353 HTTP): `AppRuntime::opener::<S>()` returns the `ScopeOpener<S
 `.open(&entry)` or `.open_default()`. The per-call path checks the parent topology only in
 debug builds; a seed without a slot, or a second seed for the same slot, fails the opening in
 every build. Params on `builder` arrive with `#[scope]` (#405), and `.open(&entry)` builds
-what the entry's plan lists (#348, below). Axum's HTTP requests open through it: a hand-written layer keeps
-the opener in reach of the request's task, and the scope opens on the first `Inject` or
-`ScopeHandle` extraction (`ScopeHandle::of` for middleware holding the whole request), so a
-request that injects nothing opens no scope. `RequestMeta` is seeded from the request head
-when the scope opens. The request timeout is a hand-written layer too, so neither allocates a
-boxed `from_fn` future.
+what the entry's plan lists (#348, below). Axum's HTTP requests open through it: a hand-written
+layer keeps the opener in reach of the request's task, and the scope opens on the first `Inject`
+or `ScopeHandle` extraction (`ScopeHandle::of` for middleware holding the whole request), so a
+request that injects nothing opens no scope. The request timeout is a hand-written layer too, so
+neither allocates a boxed `from_fn` future.
+
+Status (#347, request-bound seeds): `RequestMeta` is no longer copied into every request scope.
+Axum owns the request head and consumes it before a handler's body runs, so the seed cannot be
+derived on read; instead it is captured at most once per request, at the first of:
+
+1. The scope's opening, when that opening reads it: the route's entry plan injects it, builds a
+   component that depends on it, or reaches one lazily (`EntryPlan::reads_seed`); without an
+   entry, when a factory of the scope (or of the eager set, for `open_on_demand`) depends on it.
+   `ScopeBuilder::open_with_bound_seed` takes the seed as a closure and calls it only then.
+2. An `Inject` of something the route does not declare that reads it
+   (`ScopeContainer::extract_seeding`). It sees the head as it is at that point, so it includes
+   rewrites middleware made after the scope opened. Before #347 it saw the head at the opening;
+   this is the one reader whose values can differ.
+3. Handing out a `ScopeHandle`, because a handle can resolve anything later, after axum has
+   consumed the head. A handle therefore costs one header-map clone even if nothing reads
+   `RequestMeta`. `ScopeHandle` is no longer a request extension; the open scope is kept in a
+   private extension and reached through the extractor or `ScopeHandle::of`.
+
+Filling a seed is not a construction, so `deny_unplanned` allows an undeclared read of
+`RequestMeta` itself, while building an undeclared component that reads it still fails. Tooling
+labels each scope with its `seeds` and each entry with the seeds it `reads-seeds`. The WebSocket
+upgrade moves the upgrade head into `WebsocketUpgradeMeta` instead of cloning it; the connection
+scope needs it at the upgrade, so it stays an eager seed there. RPC seeds `PeerInfo` only when a
+component depends on it, which already avoids the cost.
+
+A typed seed tuple per scope (`builder(params).seed((a, b))` checked at compile time) is not
+done: a scope's seeds are not one fixed set per scope type. `WebsocketMessage` carries different
+seeds per WebSocket protocol (STOMP seeds headers, session and principal; JSON-WS none), and RPC
+seeds `PeerInfo` only when something depends on it. A per-scope tuple would force every opener to
+supply the union. It fits better with `#[scope]` declarations (#405), where a scope's seed slots
+are declared with the scope.
 
 Status (#353 RPC and WebSocket): the RPC serve loop prepares its connection and call openers once
 per serve, and each call opens `.under(&connection)`. The WebSocket upgrade opens the connection

@@ -1,7 +1,7 @@
 //! Scopes opened for an entry: deferred while the entry's plan builds nothing.
 
 use super::*;
-use crate::{EntryDescriptor, EntryScope};
+use crate::{EntryDescriptor, EntryScope, Opening};
 
 /// A runtime whose session scope has a `Visitor` seed slot, an entry injecting nothing
 /// (`test/ping`) and an entry injecting the visitor (`test/greet`).
@@ -112,4 +112,57 @@ async fn a_deferred_scope_that_failed_to_open_fails_again() {
         Error::DeferredScopeFailed { scope: SESSION_ID }
     ));
     assert!(!session.is_open());
+}
+
+/// Opens a session as `opening` says with a bound visitor seed, and reports whether the opening
+/// asked for the seed.
+async fn open_bound(
+    runtime: &AppRuntime,
+    entry: Option<&'static str>,
+) -> (OpenScope<Session>, bool) {
+    let sessions = runtime.opener::<Session>().expect("session is declared");
+    let entry = entry.map(|entry| sessions.entry(key(entry)).expect("the entry resolves"));
+    let opening = entry.as_ref().map_or(Opening::Everything, Opening::Entry);
+    let mut asked = false;
+    let session = sessions
+        .builder()
+        .open_with_bound_seed(opening, || {
+            asked = true;
+
+            Visitor(5)
+        })
+        .await
+        .expect("the session opens");
+
+    (session, asked)
+}
+
+#[tokio::test]
+async fn an_opening_asks_for_a_bound_seed_only_when_it_reads_it() {
+    let runtime = runtime().await;
+
+    let (greet, greet_asked) = open_bound(&runtime, Some("test/greet")).await;
+    let (ping, ping_asked) = open_bound(&runtime, Some("test/ping")).await;
+    let (_, default_asked) = open_bound(&runtime, None).await;
+
+    assert!(greet_asked, "the entry injects the seed");
+    assert!(!ping_asked, "the entry injects nothing");
+    assert!(!default_asked, "no factory of the scope reads the seed");
+    assert_eq!(
+        greet.container().extract::<Visitor>().await.ok(),
+        Some(Visitor(5))
+    );
+    assert!(
+        ping.container().extract::<Visitor>().await.is_err(),
+        "a seed the opening left out is empty until it is filled"
+    );
+
+    ping.container()
+        .ensure_seed(|| Visitor(6))
+        .expect("the slot is a seed");
+
+    assert_eq!(
+        ping.container().extract::<Visitor>().await.ok(),
+        Some(Visitor(6))
+    );
 }

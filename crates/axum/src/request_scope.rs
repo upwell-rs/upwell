@@ -1,9 +1,10 @@
-//! Opening the HTTP request scope on first use.
+//! Opening the HTTP request scope on first use, and capturing what its seed reads.
 //!
 //! The protocol's router runs every request inside [`RequestScopeLayer`], which only makes the
 //! prepared [`ScopeOpener`] reachable for the request's task. The scope itself opens the first
-//! time something injects from it ([`Inject`](crate::Inject), [`ScopeHandle`]), and is then
-//! kept in the request extensions, so middleware and the handler share one instance. A
+//! time something injects from it ([`Inject`](crate::Inject),
+//! [`ScopeHandle`](crate::ScopeHandle)), and is then kept in a private request extension, so
+//! middleware and the handler share one instance. A
 //! request that injects nothing request-scoped opens no scope.
 //!
 //! A request to a controller route opens its scope with the route's entry plan, which builds
@@ -13,7 +14,29 @@
 //! The exception is a scope with eager components, which must run for every routed request.
 //! [`open_eager_scope`] then opens the scope once global middleware has run, if nothing has yet,
 //! so the eager components see the same request head a first injection there would. A request
-//! no route matches, or one global middleware answers, still opens no scope on its own.
+//! no route matches, or one global middleware answers, still opens no scope on its own. RPC
+//! opens before its middleware instead; the placement is the `router.layer` call for
+//! [`open_eager_scope`] in `PreparedAxum::build`.
+//!
+//! # When [`RequestMeta`] is captured
+//!
+//! Axum owns the request head and consumes it before a handler's body runs, so the seed cannot
+//! be derived from it whenever something happens to read it. Copying it for every request just
+//! in case is the cost this module avoids, so it is captured once per request, at the first
+//! point that has to:
+//!
+//! 1. When the scope opens, if that opening reads it: the route's entry injects it, or builds or
+//!    lazily reaches a component that depends on it; or, with no entry, the opening builds such
+//!    a component. This is what a declared read sees, whatever runs after the scope opens.
+//! 2. At an [`Inject`](crate::Inject) of something that reads it and the route does not declare,
+//!    such as a component only middleware injects. It holds the head as it is at that point, so
+//!    it includes changes middleware made since the scope opened.
+//! 3. When a [`ScopeHandle`](crate::ScopeHandle) is handed out, because a handle can resolve
+//!    anything at any later time. Using a handle therefore costs one capture, whether or not it
+//!    reads the seed.
+//!
+//! Every reader of one request sees the same capture. A request that reaches none of these
+//! copies nothing.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,17 +44,17 @@ use std::task::{Context, Poll};
 
 use axum::extract::{MatchedPath, Request};
 use axum::http::request::Parts;
-use axum::http::{Extensions, Method};
+use axum::http::{Extensions, HeaderMap, Method, Uri};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use tokio::task::futures::TaskLocalFuture;
 use tower::{Layer, Service};
-use upwell_app::{ScopeEntry, ScopeOpener};
+use upwell_app::{Opening, ScopeEntry, ScopeOpener};
 use upwell_config::Cfg;
-use upwell_di::ScopeContainer;
+use upwell_di::{FromContainer, ScopeContainer};
 
 use crate::config::AxumConfig;
-use crate::extract::{InjectRejection, ScopeHandle};
+use crate::extract::InjectRejection;
 use crate::request_meta::RequestMeta;
 use crate::scope::HttpRequest;
 
@@ -49,6 +72,19 @@ pub(crate) struct RequestScopes {
 /// The entry of each controller route, by method and the path the router matches it under.
 #[derive(Default)]
 pub(crate) struct RouteEntries(HashMap<Method, HashMap<Box<str>, ScopeEntry<HttpRequest>>>);
+
+/// The open scope of a request, in its extensions. Private to this module so nothing reads it
+/// without going through a path that captures what a later read of the scope needs.
+#[derive(Clone)]
+struct OpenedScope(Arc<ScopeContainer>);
+
+/// The head of a request, borrowed until something reads [`RequestMeta`].
+#[derive(Clone, Copy)]
+struct Head<'a> {
+    method: &'a Method,
+    uri: &'a Uri,
+    headers: &'a HeaderMap,
+}
 
 /// What opening a request's scope builds when no route entry says.
 #[derive(Clone, Copy)]
@@ -70,6 +106,28 @@ pub(crate) struct RequestScopeLayer {
 pub(crate) struct RequestScopeService<S> {
     inner: S,
     scopes: Arc<RequestScopes>,
+}
+
+impl<'a> Head<'a> {
+    fn of_parts(parts: &'a Parts) -> Self {
+        Self {
+            method: &parts.method,
+            uri: &parts.uri,
+            headers: &parts.headers,
+        }
+    }
+
+    fn of_request(request: &'a Request) -> Self {
+        Self {
+            method: request.method(),
+            uri: request.uri(),
+            headers: request.headers(),
+        }
+    }
+
+    fn capture(self) -> RequestMeta {
+        RequestMeta::from_parts(self.method.clone(), self.uri.clone(), self.headers.clone())
+    }
 }
 
 impl RequestScopeLayer {
@@ -139,100 +197,132 @@ pub(crate) fn config() -> Option<Cfg<AxumConfig>> {
 }
 
 /// The request's scope, opened on first use from the request head in `parts`.
-pub(crate) async fn of_parts(parts: &mut Parts) -> Result<Arc<ScopeContainer>, InjectRejection> {
+async fn of_parts(parts: &mut Parts) -> Result<Arc<ScopeContainer>, InjectRejection> {
     if let Some(scope) = opened(&parts.extensions) {
         return Ok(scope);
     }
 
-    let meta = RequestMeta::from_parts(
-        parts.method.clone(),
-        parts.uri.clone(),
-        parts.headers.clone(),
-    );
+    let matched = parts.extensions.get::<MatchedPath>();
+    let scope = open(Head::of_parts(parts), matched, WithoutEntry::Everything).await?;
 
-    open(meta, &mut parts.extensions, WithoutEntry::Everything).await
+    parts.extensions.insert(OpenedScope(Arc::clone(&scope)));
+
+    Ok(scope)
 }
 
 /// The scope of `request`, opened on first use.
-pub(crate) async fn of_request(
-    request: &mut Request,
-) -> Result<Arc<ScopeContainer>, InjectRejection> {
+async fn of_request(request: &mut Request) -> Result<Arc<ScopeContainer>, InjectRejection> {
     if let Some(scope) = opened(request.extensions()) {
         return Ok(scope);
     }
 
-    let meta = RequestMeta::from_parts(
-        request.method().clone(),
-        request.uri().clone(),
-        request.headers().clone(),
-    );
-
-    open(meta, request.extensions_mut(), WithoutEntry::Everything).await
+    open_request(request, WithoutEntry::Everything).await
 }
 
-/// Middleware opening a routed request's scope, unless something has already. Without an entry it builds only the eager set, so a route that
-/// injects nothing does not pay for the rest of the scope.
+/// Resolves `H` from the request's scope, opened on first use. When `H` reads a [`RequestMeta`]
+/// nothing has captured yet, it is captured here, from the head as `parts` holds it now.
+pub(crate) async fn inject<H: FromContainer>(parts: &mut Parts) -> Result<H, InjectRejection> {
+    let scope = of_parts(parts).await?;
+    let head = Head::of_parts(parts);
+
+    scope
+        .extract_seeding::<H, RequestMeta>(|| head.capture())
+        .await
+        .map_err(|error| InjectRejection::Unresolved(std::any::type_name::<H>(), error.to_string()))
+}
+
+/// The request's scope for its [`ScopeHandle`] extractor. The handle resolves anything at any
+/// time, also after axum has consumed `parts`, so [`RequestMeta`] is captured now.
+///
+/// [`ScopeHandle`]: crate::ScopeHandle
+pub(crate) async fn handle_of_parts(
+    parts: &mut Parts,
+) -> Result<Arc<ScopeContainer>, InjectRejection> {
+    let scope = of_parts(parts).await?;
+
+    capture_into(&scope, Head::of_parts(parts))?;
+
+    Ok(scope)
+}
+
+/// The scope of `request` for [`ScopeHandle::of`](crate::ScopeHandle::of), with [`RequestMeta`]
+/// captured as [`handle_of_parts`] does.
+pub(crate) async fn handle_of_request(
+    request: &mut Request,
+) -> Result<Arc<ScopeContainer>, InjectRejection> {
+    let scope = of_request(request).await?;
+
+    capture_into(&scope, Head::of_request(request))?;
+
+    Ok(scope)
+}
+
+fn capture_into(scope: &ScopeContainer, head: Head<'_>) -> Result<(), InjectRejection> {
+    scope
+        .ensure_seed(|| head.capture())
+        .map_err(|error| InjectRejection::ScopeFailed(error.to_string()))
+}
+
+/// Middleware opening a routed request's scope, unless something has already. Without an entry
+/// it builds only the eager set, so a route that injects nothing does not pay for the rest of
+/// the scope.
 ///
 /// The protocol installs it only when the application registers an eager request-scoped
 /// component, so other applications do not pay for the layer.
 pub(crate) async fn open_eager_scope(mut request: Request, next: Next) -> Response {
-    if let Err(rejection) = open_routed(&mut request).await {
+    let routed = request.extensions().get::<MatchedPath>().is_some();
+
+    if routed
+        && opened(request.extensions()).is_none()
+        && let Err(rejection) = open_request(&mut request, WithoutEntry::Eager).await
+    {
         return rejection.into_response();
     }
 
     next.run(request).await
 }
 
-async fn open_routed(request: &mut Request) -> Result<(), InjectRejection> {
-    let routed = request.extensions().get::<MatchedPath>().is_some();
-
-    if !routed || opened(request.extensions()).is_some() {
-        return Ok(());
-    }
-
-    let meta = RequestMeta::from_parts(
-        request.method().clone(),
-        request.uri().clone(),
-        request.headers().clone(),
-    );
-
-    open(meta, request.extensions_mut(), WithoutEntry::Eager).await?;
-
-    Ok(())
-}
-
 fn opened(extensions: &Extensions) -> Option<Arc<ScopeContainer>> {
     extensions
-        .get::<ScopeHandle>()
-        .map(|ScopeHandle(scope)| Arc::clone(scope))
+        .get::<OpenedScope>()
+        .map(|OpenedScope(scope)| Arc::clone(scope))
 }
 
-/// Opens the request's scope seeded with `meta` and stores it in `extensions`.
-///
-/// The seed reflects the request head when the scope opens, so it carries changes middleware
-/// made before the first injection.
+async fn open_request(
+    request: &mut Request,
+    without_entry: WithoutEntry,
+) -> Result<Arc<ScopeContainer>, InjectRejection> {
+    let matched = request.extensions().get::<MatchedPath>();
+    let scope = open(Head::of_request(request), matched, without_entry).await?;
+
+    request
+        .extensions_mut()
+        .insert(OpenedScope(Arc::clone(&scope)));
+
+    Ok(scope)
+}
+
+/// Opens the request's scope, capturing [`RequestMeta`] from `head` when the opening reads it.
 async fn open(
-    meta: RequestMeta,
-    extensions: &mut Extensions,
+    head: Head<'_>,
+    matched: Option<&MatchedPath>,
     without_entry: WithoutEntry,
 ) -> Result<Arc<ScopeContainer>, InjectRejection> {
     let scopes = REQUEST_SCOPES
         .try_with(Arc::clone)
         .map_err(|_| InjectRejection::MissingScope)?;
-    let entry = extensions
-        .get::<MatchedPath>()
-        .and_then(|path| scopes.routes.get(&meta.method, path.as_str()));
-    let builder = scopes.opener.builder().seed(meta);
-    let opened = match (entry, without_entry) {
-        (Some(entry), _) => builder.open(entry).await,
-        (None, WithoutEntry::Everything) => builder.open_default().await,
-        (None, WithoutEntry::Eager) => builder.open_on_demand().await,
+    let entry = matched.and_then(|path| scopes.routes.get(head.method, path.as_str()));
+    let opening = match (entry, without_entry) {
+        (Some(entry), _) => Opening::Entry(entry),
+        (None, WithoutEntry::Everything) => Opening::Everything,
+        (None, WithoutEntry::Eager) => Opening::OnDemand,
     };
-    let scope = opened
-        .map_err(|error| InjectRejection::ScopeFailed(error.to_string()))?
-        .into_container();
+    let opened = scopes
+        .opener
+        .builder()
+        .open_with_bound_seed(opening, || head.capture())
+        .await
+        .map_err(|error| InjectRejection::ScopeFailed(error.to_string()))?;
 
-    extensions.insert(ScopeHandle(Arc::clone(&scope)));
-
-    Ok(scope)
+    Ok(opened.into_container())
 }

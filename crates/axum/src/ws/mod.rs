@@ -738,6 +738,7 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
     runtime: &AppRuntime,
     options: P::Options,
 ) -> crate::Result<(axum::Router, WebsocketHandler)> {
+    use axum::extract::FromRequestParts as _;
     use axum::extract::ws::WebSocketUpgrade;
     use axum::response::IntoResponse as _;
 
@@ -767,10 +768,7 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
     // The pre-built generic upgrade handler opens this socket's WebsocketConnection scope with
     // upgrade and negotiation metadata, then hands the socket to the protocol that owns the
     // read→decode→dispatch→encode→send loop.
-    let route_handler = move |method: axum::http::Method,
-                              uri: axum::http::Uri,
-                              headers: axum::http::HeaderMap,
-                              ws: WebSocketUpgrade| {
+    let route_handler = move |request: axum::extract::Request| {
         let proto = Arc::clone(&proto);
         let shutdown = shutdown.clone();
         let connections = connections.clone();
@@ -779,6 +777,11 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
         let admission = admission.clone();
 
         async move {
+            let (mut head, _body) = request.into_parts();
+            let ws = match WebSocketUpgrade::from_request_parts(&mut head, &()).await {
+                Ok(ws) => ws,
+                Err(rejection) => return rejection.into_response(),
+            };
             let permit = match admission.try_acquire() {
                 Ok(permit) => permit,
 
@@ -810,7 +813,11 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
                 let _permit = permit;
                 let opening = connections
                     .builder()
-                    .seed(WebsocketUpgradeMeta::from_parts(method, uri, headers))
+                    .seed(WebsocketUpgradeMeta::from_parts(
+                        head.method,
+                        head.uri,
+                        head.headers,
+                    ))
                     .seed(WsConnectionMeta {
                         selected_subprotocol,
                     })

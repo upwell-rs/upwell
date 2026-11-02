@@ -64,8 +64,7 @@ impl SlotLayout {
 
 /// Whether `plan` builds or declares `slot`.
 fn reaches(plan: &EntryPlan, slot: SlotIdx) -> bool {
-    plan.declares()
-        .map_or_else(|| plan.builds(slot), |declares| declares[slot.index()])
+    plan.declared()[slot.index()]
 }
 
 fn specs_plan_alike(left: &SlotSpec, right: &SlotSpec) -> bool {

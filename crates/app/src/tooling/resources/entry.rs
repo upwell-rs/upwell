@@ -32,9 +32,10 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
                 ),
             ]);
 
-            if let Some(builds) = &entry.builds {
-                labels.insert(String::from("builds"), id_list(builds));
-                labels.insert(String::from("plan-size"), builds.len().to_string());
+            if let Some(plan) = &entry.plan {
+                labels.insert(String::from("builds"), id_list(&plan.builds));
+                labels.insert(String::from("plan-size"), plan.builds.len().to_string());
+                labels.insert(String::from("reads-seeds"), id_list(&plan.reads_seeds));
             }
 
             if let Some(owner) = descriptor.owner {

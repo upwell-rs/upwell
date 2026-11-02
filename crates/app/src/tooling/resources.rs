@@ -122,6 +122,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
 
             if let Some(layout) = self.app.tooling_snapshot().scope_layout(&boundary.id()) {
                 labels.insert(String::from("eager"), id_list(&layout.eager));
+                labels.insert(String::from("seeds"), id_list(&layout.seeds));
 
                 if let Some(unreached) = &layout.unreached {
                     labels.insert(String::from("unreached-by-entries"), id_list(unreached));

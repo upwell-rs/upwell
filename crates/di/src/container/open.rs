@@ -9,6 +9,7 @@ use upwell_core::{ResolverSet, Scope, ScopeKey, Singleton};
 use super::{ComponentSource, ScopeContainer, ScopeRegistry, ScopeResolverSlot};
 use crate::descriptors::component::{
     ComponentConstructionContext, ComponentConstructionParts, HandleStorage, Running, ScopeStore,
+    SlotStore,
 };
 use crate::descriptors::{BoxedComponent, ComponentDescriptor};
 use crate::error::Error;
@@ -81,7 +82,13 @@ impl ScopeContainer {
         let generation_lease = parent.generation_lease.clone();
 
         if order.is_empty() && seeds.is_empty() {
-            return Ok(Self::empty(scope, parent, registry, generation_lease));
+            return Ok(Self::empty(
+                scope,
+                parent,
+                registry,
+                generation_lease,
+                ScopeStore::default(),
+            ));
         }
 
         let externals = parent.inherited_resolvers();
@@ -125,7 +132,18 @@ impl ScopeContainer {
         validate_seeds(layout, &seeds)?;
 
         if !layout.constructs() && seeds.is_empty() {
-            return Ok(Self::empty(scope, parent, registry, generation_lease));
+            let store = match layout.is_empty() {
+                true => ScopeStore::default(),
+                false => ScopeStore::Slots(SlotStore::new(Arc::clone(layout), None)),
+            };
+
+            return Ok(Self::empty(
+                scope,
+                parent,
+                registry,
+                generation_lease,
+                store,
+            ));
         }
 
         let slot = match layout.captures() {
@@ -178,18 +196,20 @@ impl ScopeContainer {
         Self::freeze(cx.into_parts(), generation_lease)
     }
 
-    /// A container for a scope that holds no components.
+    /// A container for a scope with nothing built: `store` is empty, or holds only seed slots
+    /// that may be filled later.
     fn empty(
         scope: ScopeKey,
         parent: Arc<ScopeContainer>,
         registry: Arc<ScopeRegistry>,
         generation_lease: GenerationLease,
+        store: ScopeStore,
     ) -> Arc<ScopeContainer> {
         let externals = parent.inherited_resolvers();
 
         Arc::new_cyclic(|container| ScopeContainer {
             scope,
-            store: ScopeStore::default(),
+            store,
             parent: Some(parent),
             registry,
             resolver_base: externals,

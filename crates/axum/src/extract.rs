@@ -2,9 +2,8 @@
 //!
 //! The integration surface between the framework's dependency injection and axum is a
 //! single [`ScopeHandle`] — an `Arc` of the request's
-//! [`ScopeContainer`](upwell_di::ScopeContainer) — carried in the request's
-//! [`Extensions`](axum::http::Extensions). The first [`Inject`] or [`ScopeHandle`] extraction
-//! of a request opens its scope and inserts the handle; later ones read it back out, and
+//! [`ScopeContainer`](upwell_di::ScopeContainer). The first [`Inject`] or [`ScopeHandle`]
+//! extraction of a request opens its scope; later ones reuse it, and
 //! [`Inject`] resolves a component through the scope chain. Native axum extractors (`Json`, `Path`, `Query`, `State`, …)
 //! are untouched and compose with [`Inject`] in the same handler signature.
 
@@ -16,11 +15,16 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use upwell_di::{FromContainer, ScopeContainer};
 
-/// The per-request DI scope, carried in request extensions.
+/// The per-request DI scope, for dynamic access.
 ///
-/// Inserted when a request's scope opens, on its first [`Inject`] or [`ScopeHandle`]
-/// extraction. Middleware holding the whole request reaches it with [`ScopeHandle::of`].
-/// Cloning is cheap — it is an `Arc` bump.
+/// A request's scope opens on its first [`Inject`] or [`ScopeHandle`] extraction. Middleware
+/// holding the whole request reaches it with [`ScopeHandle::of`], and it is not a request
+/// extension of its own. Cloning is cheap — it is an `Arc` bump.
+///
+/// A handle can resolve anything at any later time, including after axum has consumed the
+/// request head, so getting one copies the head into the request's
+/// [`RequestMeta`](crate::RequestMeta) if nothing has yet. Prefer [`Inject`] where the type is
+/// known: it copies the head only when what it injects reads it.
 #[derive(Clone)]
 pub struct ScopeHandle(pub Arc<ScopeContainer>);
 
@@ -31,7 +35,9 @@ impl ScopeHandle {
     ///
     /// As the [`ScopeHandle`] extractor.
     pub async fn of(request: &mut Request) -> Result<Self, InjectRejection> {
-        crate::request_scope::of_request(request).await.map(Self)
+        crate::request_scope::handle_of_request(request)
+            .await
+            .map(Self)
     }
 }
 
@@ -39,7 +45,7 @@ impl<S: Send + Sync> FromRequestParts<S> for ScopeHandle {
     type Rejection = InjectRejection;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        crate::request_scope::of_parts(parts).await.map(Self)
+        crate::request_scope::handle_of_parts(parts).await.map(Self)
     }
 }
 
@@ -112,10 +118,6 @@ where
     type Rejection = InjectRejection;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let scope = crate::request_scope::of_parts(parts).await?;
-
-        scope.extract::<H>().await.map(Inject).map_err(|error| {
-            InjectRejection::Unresolved(std::any::type_name::<H>(), error.to_string())
-        })
+        crate::request_scope::inject::<H>(parts).await.map(Inject)
     }
 }

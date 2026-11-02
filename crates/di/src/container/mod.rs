@@ -16,6 +16,7 @@ mod order;
 mod resolve;
 mod resolver_slot;
 mod scope_registry;
+mod seed;
 mod snapshot;
 mod transient;
 

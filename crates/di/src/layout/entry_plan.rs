@@ -13,13 +13,14 @@ use crate::registry::scopes::scope_allows_with;
 /// targets resolve to, and every slot of the same scope those depend on.
 ///
 /// Planned once per runtime generation from the entry's targets. A slot the plan leaves out
-/// is built on demand, when something resolves it from the open scope. Under
-/// [`UnplannedConstruction::Deny`] the plan also holds the slots the entry declares, so an
-/// on-demand build outside them is reported.
+/// is built on demand, when something resolves it from the open scope. The plan also holds the
+/// slots the entry declares: those it builds and those its lazy targets reach. Under
+/// [`UnplannedConstruction::Deny`] an on-demand build outside them is reported.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EntryPlan {
     builds: Box<[bool]>,
-    declares: Option<Arc<[bool]>>,
+    declared: Arc<[bool]>,
+    unplanned: UnplannedConstruction,
 }
 
 /// Whether a scope opened for an entry may build, on demand, a slot the entry does not
@@ -44,7 +45,8 @@ impl EntryPlan {
     pub fn on_demand(layout: &SlotLayout) -> Self {
         Self {
             builds: layout.eager().into(),
-            declares: None,
+            declared: layout.eager().into(),
+            unplanned: UnplannedConstruction::Allow,
         }
     }
 
@@ -55,7 +57,35 @@ impl EntryPlan {
 
     /// The slots this entry declares, when its scope may build no other slot on demand.
     pub(crate) fn declares(&self) -> Option<&Arc<[bool]>> {
-        self.declares.as_ref()
+        match self.unplanned {
+            UnplannedConstruction::Allow => None,
+            UnplannedConstruction::Deny => Some(&self.declared),
+        }
+    }
+
+    /// The slots this entry builds or its lazy targets reach, under either policy.
+    pub(crate) fn declared(&self) -> &[bool] {
+        &self.declared
+    }
+
+    /// Whether a scope opened for this entry reads the seed of type `seed`: something the entry
+    /// builds or its lazy targets reach depends on it, or the entry injects it. `layout` is the
+    /// layout the plan was made from.
+    pub fn reads_seed(&self, layout: &SlotLayout, seed: TypeId) -> bool {
+        layout
+            .slot_of(seed)
+            .is_some_and(|slot| self.declared[slot.index()])
+    }
+
+    /// The seeds a scope opened for this entry reads, in `layout`'s construction order. `layout`
+    /// is the layout the plan was made from.
+    pub fn seeds_read<'a>(
+        &'a self,
+        layout: &'a SlotLayout,
+    ) -> impl Iterator<Item = &'a ComponentDescriptor> {
+        layout
+            .seeds()
+            .filter(|seed| self.reads_seed(layout, seed.ty.type_id))
     }
 
     /// The number of slots this entry builds.
@@ -95,9 +125,8 @@ impl SlotLayout {
     /// A target that a lazy or config handle resolves builds nothing up front. Every other
     /// target builds the slots it resolves to here, with their dependencies in this scope, as
     /// [`for_each_selected_slot`](Self::for_each_selected_slot) picks them. `can_reach` is the
-    /// scope reachability `selection` was validated with. Under
-    /// [`UnplannedConstruction::Deny`], the plan also declares the slots a lazy target resolves
-    /// to, picked as for any other target, with their dependencies.
+    /// scope reachability `selection` was validated with. The plan also declares the slots a
+    /// lazy target resolves to, picked as for any other target, with their dependencies.
     pub fn plan_entry(
         &self,
         targets: &[DependencyDescriptor],
@@ -111,12 +140,13 @@ impl SlotLayout {
             can_access: &can_access,
         };
         let builds = self.built_up_front(&selector, targets);
-        let declares = match unplanned {
-            UnplannedConstruction::Allow => None,
-            UnplannedConstruction::Deny => Some(self.declared(&selector, targets, &builds)),
-        };
+        let declared = self.declared(&selector, targets, &builds);
 
-        EntryPlan { builds, declares }
+        EntryPlan {
+            builds,
+            declared,
+            unplanned,
+        }
     }
 
     /// The slots the targets of `targets` that are not lazy resolve to here, with their

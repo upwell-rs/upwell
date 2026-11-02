@@ -75,7 +75,7 @@ pub use protocol::{
 pub use registry::{AppConditionEvaluation, AppRegistry};
 pub use runtime::{
     AppConditionState, AppRuntime, ComponentRetired, ComponentRetirement,
-    ComponentTransitionReport, DisplacedGeneration, EntryScope, OpenScope, OpensUnder,
+    ComponentTransitionReport, DisplacedGeneration, EntryScope, OpenScope, Opening, OpensUnder,
     PendingTransition, PhaseTiming, RetirementContext, RetirementReason, RuntimeTransitionReport,
     RuntimeView, ScopeBuilder, ScopeEntry, ScopeOpener, TransitionAborted, TransitionAttemptId,
     TransitionCommitted, TransitionDecision, TransitionFailure, TransitionHookContext,
