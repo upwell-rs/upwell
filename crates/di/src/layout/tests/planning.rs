@@ -142,13 +142,19 @@ fn plan_rejects_a_dependency_held_by_no_scope_on_the_chain() {
 }
 
 #[test]
-fn a_layout_captures_its_scope_only_through_lazy_or_transient_edges() {
+fn a_layout_shares_its_store_only_through_dynamic_edges() {
     let fixture = Fixture::new();
     let lazy = scoped_component!(Elsewhere, "lazy-consumer", Inner::KEY, || vec![lazy::<
         Handler,
     >(
         "Handler"
     )]);
+    let dynamic = scoped_component!(Elsewhere, "dynamic-consumer", Inner::KEY, || {
+        vec![DependencyDescriptor {
+            dynamic: true,
+            ..eager::<Handler>("Handler", Cardinality::One)
+        }]
+    });
     let selection = fixture.selection(&[lazy]);
 
     let eager = fixture
@@ -160,11 +166,21 @@ fn a_layout_captures_its_scope_only_through_lazy_or_transient_edges() {
     let lazy = fixture
         .inner(&selection, &[fixture.handler, lazy])
         .expect("the lazy-consuming scope plans");
+    let dynamic = fixture
+        .inner(&fixture.selection(&[dynamic]), &[fixture.handler, dynamic])
+        .expect("the dynamic-consuming scope plans");
 
-    assert!(!eager.captures(), "eager edges read built slots only");
+    assert!(!eager.shares_store(), "eager edges read built slots only");
     assert!(
-        transient.captures(),
-        "a transient reads the scope's in-progress store"
+        !transient.shares_store(),
+        "a planned transient never reads the requesting scope's slots"
     );
-    assert!(lazy.captures(), "a lazy handle captures the scope");
+    assert!(
+        !lazy.shares_store(),
+        "a lazy handle reads the built scope, not its store"
+    );
+    assert!(
+        dynamic.shares_store(),
+        "a dynamic edge may build a transient against the in-progress store"
+    );
 }

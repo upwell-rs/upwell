@@ -123,7 +123,7 @@ async fn a_factory_capturing_a_scope_its_layout_did_not_plan_for_still_resolves(
 
     let layout = plan(&[held, capturing]);
 
-    assert!(!layout.captures(), "no declared edge captures the scope");
+    assert!(!layout.shares_store(), "no declared edge reads the store");
 
     let scope = ScopeContainer::open_planned(
         root().await,

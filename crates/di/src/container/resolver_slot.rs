@@ -46,7 +46,7 @@ impl ScopeResolverSlot {
         }
     }
 
-    pub(super) fn detached() -> Self {
+    pub(crate) fn detached() -> Self {
         Self {
             state: ScopeResolverSlotState::Detached,
         }

@@ -23,7 +23,7 @@ async fn construct_transient_boxed(
     registry: &Arc<ScopeRegistry>,
     parent: Option<Arc<ScopeContainer>>,
     slot: ScopeResolverSlot,
-    store: SharedStore,
+    store: Option<SharedStore>,
     descriptor: ComponentDescriptor,
 ) -> crate::Result<BoxedComponent> {
     let factory = descriptor
@@ -56,7 +56,7 @@ pub(crate) async fn construct_planned_transient(
     registry: &Arc<ScopeRegistry>,
     parent: Option<Arc<ScopeContainer>>,
     slot: ScopeResolverSlot,
-    store: SharedStore,
+    store: Option<SharedStore>,
     plan: Arc<TransientPlan>,
 ) -> crate::Result<BoxedComponent> {
     let factory = plan.factory;
@@ -118,7 +118,7 @@ pub(crate) async fn construct_transient<H: Injectable>(
     registry: &Arc<ScopeRegistry>,
     parent: Option<Arc<ScopeContainer>>,
     slot: ScopeResolverSlot,
-    store: SharedStore,
+    store: Option<SharedStore>,
 ) -> crate::Result<Option<H>> {
     let target = TypeId::of::<H::Target>();
     let Some(descriptor) = registry.transient(target) else {
@@ -133,7 +133,7 @@ pub(crate) async fn construct_transient_provider<H: Injectable>(
     registry: &Arc<ScopeRegistry>,
     parent: Option<Arc<ScopeContainer>>,
     slot: ScopeResolverSlot,
-    store: SharedStore,
+    store: Option<SharedStore>,
     provider: ProviderDescriptor,
 ) -> crate::Result<Option<H>> {
     let Some(descriptor) = registry.transient(provider.concrete_ty.type_id) else {
