@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::measure;
 
 fn fixed() -> (Arc<u32>, Live<u32>) {
     let value = Arc::new(7);
@@ -116,4 +117,23 @@ fn a_rebound_root_releases_its_instance_with_the_root() {
         "the consumer's cell does not keep the displaced instance alive"
     );
     assert_eq!(*consumer.get(), 8);
+}
+
+#[test]
+fn a_root_slot_allocates_its_cell_only_for_a_dep() {
+    let value = Arc::new(7_u32);
+
+    let (root, stored) = measure(|| <Arc<u32> as Injectable>::into_stored(Arc::clone(&value)));
+    let (_, read) = measure(|| <Arc<u32> as Injectable>::from_stored(&root));
+    let (_, shared) = measure(|| <Dep<u32> as Injectable>::from_stored(&root));
+
+    assert_eq!(
+        stored.allocations, 1,
+        "storing a singleton allocates only its slot"
+    );
+    assert_eq!(read.allocations, 0);
+    assert_eq!(
+        shared.allocations, 2,
+        "the first Dep allocates the shared cell and its swappable instance"
+    );
 }
