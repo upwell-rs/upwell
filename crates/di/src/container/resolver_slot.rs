@@ -27,6 +27,8 @@ pub(super) enum ScopeResolverSlotState {
 pub(super) struct ScopeResolverState {
     container: Weak<ScopeContainer>,
     deferred: Vec<Arc<dyn crate::primitives::DeferredHydrator>>,
+    /// Other pending slots created for the same scope, attached together with this one.
+    followers: Vec<ScopeResolverSlot>,
 }
 
 impl Default for ScopeResolverSlot {
@@ -74,18 +76,51 @@ impl ScopeResolverSlot {
         let ScopeResolverSlotState::Pending(state) = &self.state else {
             return Ok(());
         };
-        let deferred = {
+        let (deferred, followers) = {
             let mut state = state.lock().expect("scope resolver slot poisoned");
 
             state.container = Arc::downgrade(container);
 
-            std::mem::take(&mut state.deferred)
+            (
+                std::mem::take(&mut state.deferred),
+                std::mem::take(&mut state.followers),
+            )
         };
-
-        deferred
+        let hydrated = deferred
             .iter()
             .map(|deferred| deferred.hydrate(container))
-            .fold(Ok(()), crate::Result::and)
+            .fold(Ok(()), crate::Result::and);
+
+        followers
+            .iter()
+            .map(|follower| follower.attach(container))
+            .fold(hydrated, crate::Result::and)
+    }
+
+    /// Attaches `other`, another pending slot created for the same scope, whenever this one
+    /// is attached: at once if it already is, otherwise together with it.
+    pub(crate) fn absorb(&self, other: ScopeResolverSlot) -> crate::Result<()> {
+        let ScopeResolverSlotState::Pending(state) = &self.state else {
+            return match self.resolve() {
+                Ok(container) => other.attach(&container),
+                Err(_) => Ok(()),
+            };
+        };
+        let container = {
+            let mut state = state.lock().expect("scope resolver slot poisoned");
+            let container = state.container.upgrade();
+
+            if container.is_none() {
+                state.followers.push(other.clone());
+            }
+
+            container
+        };
+
+        match container {
+            Some(container) => other.attach(&container),
+            None => Ok(()),
+        }
     }
 
     pub(crate) fn resolve(&self) -> crate::Result<Arc<ScopeContainer>> {

@@ -41,8 +41,22 @@ struct HoldsHidden {
 test_component!(Made, "made");
 test_component!(LazyMade, "lazy-made");
 test_component!(HoldsLazyMade, "holds-lazy-made");
+/// A transient capturing the requesting scope without declaring it, after yielding once, so
+/// two resolutions of it interleave.
+struct Yielding {
+    made: Lazy<Arc<Made>>,
+}
+
+/// A scoped component resolving two [`Yielding`] transients concurrently.
+struct HoldsTwo {
+    first: Arc<Yielding>,
+    second: Arc<Yielding>,
+}
+
 test_component!(HiddenLazyMade, "hidden-lazy-made");
 test_component!(HoldsHidden, "holds-hidden");
+test_component!(Yielding, "yielding");
+test_component!(HoldsTwo, "holds-two");
 test_component!(UsesMade, "uses-made");
 test_component!(LazyUser, "lazy-user");
 
@@ -81,6 +95,83 @@ fn construct_hidden(
             Arc::new(HiddenLazyMade { made }),
         ))
     })
+}
+
+fn construct_yielding(
+    cx: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async move {
+        tokio::task::yield_now().await;
+
+        let made = <Lazy<Arc<Made>> as crate::FromContainer>::from_container(cx).await?;
+
+        Ok(boxed_component("Yielding", Arc::new(Yielding { made })))
+    })
+}
+
+/// The dependency [`HoldsTwo`] declares; its factory resolves it twice at once.
+async fn holds_two(first: Arc<Yielding>) -> HoldsTwo {
+    HoldsTwo {
+        second: Arc::clone(&first),
+        first,
+    }
+}
+
+fn construct_holds_two(
+    cx: &mut ComponentConstructionContext,
+) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + '_>> {
+    Box::pin(async move {
+        let cx = &*cx;
+        let (first, second) =
+            futures::join!(cx.resolve::<Arc<Yielding>>(), cx.resolve::<Arc<Yielding>>());
+        let first = first?.expect("the first transient resolves");
+        let second = second?.expect("the second transient resolves");
+
+        Ok(boxed_component(
+            "HoldsTwo",
+            Arc::new(HoldsTwo { first, second }),
+        ))
+    })
+}
+
+fn yielding_descriptor() -> ComponentDescriptor {
+    fn factories() -> &'static [ComponentFactoryDescriptor] {
+        const {
+            &[ComponentFactoryDescriptor {
+                id: "yielding",
+                construct: construct_yielding,
+                construct_ready: None,
+                dependencies: crate::test_support::no_dependencies,
+                role: ComponentFactoryRole::Explicit,
+            }]
+        }
+    }
+
+    let mut descriptor = component::<Yielding>("yielding", factories);
+
+    descriptor.scope = Transient::KEY;
+
+    descriptor
+}
+
+fn holds_two_descriptor() -> ComponentDescriptor {
+    fn factories() -> &'static [ComponentFactoryDescriptor] {
+        const {
+            &[ComponentFactoryDescriptor {
+                id: "holds-two",
+                construct: construct_holds_two,
+                construct_ready: None,
+                dependencies: || factory_dependencies(holds_two),
+                role: ComponentFactoryRole::Explicit,
+            }]
+        }
+    }
+
+    let mut descriptor = component::<HoldsTwo>("holds-two", factories);
+
+    descriptor.scope = TestScope::KEY;
+
+    descriptor
 }
 
 fn hidden_descriptor() -> ComponentDescriptor {
@@ -171,6 +262,7 @@ async fn open(order: &[ComponentDescriptor]) -> (Arc<ScopeContainer>, bool) {
         made_descriptor(),
         lazy_made_descriptor(),
         hidden_descriptor(),
+        yielding_descriptor(),
     ];
     let known = [transients.as_slice(), order].concat();
 
@@ -289,4 +381,23 @@ async fn a_planned_transient_capturing_its_scope_without_declaring_it_still_reso
         .get_or_create()
         .await
         .expect("the undeclared capture resolves from the requesting scope");
+}
+
+#[tokio::test]
+async fn concurrent_transients_capturing_their_scope_undeclared_all_resolve() {
+    let (scope, _) = open(&[holds_two_descriptor()]).await;
+    let holder = scope.get::<HoldsTwo>().expect("the scope built the holder");
+
+    assert!(
+        !Arc::ptr_eq(&holder.first, &holder.second),
+        "each resolution built its own transient"
+    );
+
+    for yielding in [&holder.first, &holder.second] {
+        yielding
+            .made
+            .get_or_create()
+            .await
+            .expect("every concurrent capture resolves from the requesting scope");
+    }
 }

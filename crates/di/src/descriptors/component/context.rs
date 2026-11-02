@@ -233,12 +233,20 @@ impl ComponentConstructionContext {
     }
 
     /// Keeps the pending slot a transient created when it captured this detached scope, so
-    /// the container built from this context attaches it.
-    ///
-    /// A failed `set` is ignored: the transient was only handed a detached slot while this
-    /// context had none, and construction is sequential, so nothing set one meanwhile.
-    pub(crate) fn adopt_captured(&self, slot: crate::container::ScopeResolverSlot) {
-        let _ = self.captured.set(slot);
+    /// the container built from this context attaches it. Transients a factory resolves
+    /// concurrently can each create one; the slot adopted first absorbs the others, which
+    /// are then attached with it.
+    pub(crate) fn adopt_captured(
+        &self,
+        slot: crate::container::ScopeResolverSlot,
+    ) -> crate::Result<()> {
+        let Err(slot) = self.captured.set(slot) else {
+            return Ok(());
+        };
+
+        self.captured
+            .get()
+            .map_or(Ok(()), |adopted| adopted.absorb(slot))
     }
 
     /// The pending slot a factory created when it captured this detached scope, if any.
