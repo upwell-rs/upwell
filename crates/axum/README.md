@@ -32,7 +32,7 @@ runs none. RPC differs here: it opens a call's scope before its middleware runs.
 reads it, once per request: when the scope opens if the route reads it (directly or through a
 component it builds or reaches lazily), otherwise at the first `Inject` that reads it. A route
 that never reads it copies no headers. Each reader of one request sees the same capture, so a
-read the route declares sees the head as it was when the scope opened, while a read only
+read the route declares sees the head as it was when the scope opened, while a read that only
 middleware makes sees it as it was at that read. `ScopeHandle` is the exception: a handle can
 resolve anything later, after axum has consumed the head, so handing one out (`ScopeHandle` as
 an extractor or `ScopeHandle::of`) costs one header-map clone even if nothing reads

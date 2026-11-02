@@ -95,7 +95,10 @@ enum WithoutEntry {
     Eager,
 }
 
-/// Makes [`RequestScopes`] reachable for each request it serves.
+/// Makes [`RequestScopes`] reachable for each request it serves, so its scope opens on the
+/// first injection and request-scoped components can depend on the native request without
+/// axum's own extractors entering the DI graph. A request that injects nothing opens no scope,
+/// unless the scope has eager components.
 #[derive(Clone)]
 pub(crate) struct RequestScopeLayer {
     scopes: Arc<RequestScopes>,
@@ -268,7 +271,9 @@ fn capture_into(scope: &ScopeContainer, head: Head<'_>) -> Result<(), InjectReje
 /// the scope.
 ///
 /// The protocol installs it only when the application registers an eager request-scoped
-/// component, so other applications do not pay for the layer.
+/// component, so other applications do not pay for the layer. It is applied before the global
+/// middleware, so it runs after all of it: an eager component reads the request head that
+/// middleware left, as a first injection in the handler would.
 pub(crate) async fn open_eager_scope(mut request: Request, next: Next) -> Response {
     let routed = request.extensions().get::<MatchedPath>().is_some();
 
