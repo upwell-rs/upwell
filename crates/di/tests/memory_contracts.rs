@@ -102,12 +102,10 @@ struct Entry {
 }
 
 fn boxed<const N: usize>() -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<C<N>>(<C<N> as Component>::NAME),
-        value: Box::new(Injectable::into_stored(<C<N> as Component>::into_handle(
-            C::<N>::new(),
-        ))),
-    }
+    BoxedComponent::stored(
+        TypeDescriptor::of::<C<N>>(<C<N> as Component>::NAME),
+        Injectable::into_stored(<C<N> as Component>::into_handle(C::<N>::new())),
+    )
 }
 
 fn desc<const N: usize>() -> ComponentDescriptor {

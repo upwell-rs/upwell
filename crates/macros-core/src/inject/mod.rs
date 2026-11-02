@@ -201,12 +201,10 @@ pub fn field_injection_component(
                 cx: &#component_construction_context,
                 instance: #self_ident,
             ) -> #boxed_component {
-                #boxed_component {
-                    ty: #type_descriptor::of::<#self_ident>(#name),
-                    value: ::std::boxed::Box::new(
-                        cx.stored(<#self_ident as #component>::into_handle(instance)),
-                    ),
-                }
+                #boxed_component::stored(
+                    #type_descriptor::of::<#self_ident>(#name),
+                    cx.stored(<#self_ident as #component>::into_handle(instance)),
+                )
             }
 
             fn __upwell_deps() -> ::std::vec::Vec<#dependency_descriptor> {

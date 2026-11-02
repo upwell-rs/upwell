@@ -61,10 +61,10 @@ macro_rules! ready {
                         id: $id,
                         construct,
                         construct_ready: Some(|cx| {
-                            Ok(Some(BoxedComponent {
-                                ty: TypeDescriptor::of::<$ty>($id),
-                                value: Box::new(cx.stored(Arc::new($ty))),
-                            }))
+                            Ok(Some(BoxedComponent::stored(
+                                TypeDescriptor::of::<$ty>($id),
+                                cx.stored(Arc::new($ty)),
+                            )))
                         }),
                         dependencies: no_dependencies,
                         role: ComponentFactoryRole::Explicit,
@@ -235,4 +235,37 @@ async fn dynamic_lookups_see_every_provider_of_an_opened_scope() {
     assert_eq!(names, ["first", "second"]);
     assert_eq!(keyed.len(), 2, "the map holds every qualifier");
     assert_eq!(qualified.name(), "second");
+}
+
+#[test]
+fn an_arc_component_costs_one_allocation_for_its_storage() {
+    let parent = block_on(root());
+    let (one, one_registry) = planned(&[first()], Vec::new());
+    let (two, two_registry) = planned(&[first(), second()], Vec::new());
+
+    let (_, with_one) = measure(|| {
+        block_on(open(Arc::clone(&parent), &one, &one_registry));
+    });
+    let (_, with_two) = measure(|| {
+        block_on(open(Arc::clone(&parent), &two, &two_registry));
+    });
+
+    assert_eq!(
+        with_two.allocations,
+        with_one.allocations + 1,
+        "another instance costs its own `Arc` and nothing around it"
+    );
+}
+
+#[test]
+fn reading_a_provider_alias_allocates_nothing() {
+    let order = [first(), second()];
+    let (layout, registry) = planned(&order, providers());
+    let scope = block_on(async { open(root().await, &layout, &registry).await });
+
+    let (named, delta) =
+        measure(|| scope.selected_built::<Arc<dyn Named>>(TypeId::of::<dyn Named>(), None));
+
+    assert_eq!(named.expect("the primary is built").name(), "first");
+    assert_eq!(delta.allocations, 0, "the alias lives only for the read");
 }

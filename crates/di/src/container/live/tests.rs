@@ -42,10 +42,10 @@ const ENGLISH_PROVIDER: ProviderDescriptor =
     ProviderDescriptor::of::<EnglishGreeter, dyn Greeter>("dyn Greeter");
 
 fn seed<T: Component>(descriptor: &ComponentDescriptor, component: T) -> BoxedComponent {
-    BoxedComponent {
-        ty: descriptor.ty,
-        value: Box::new(Injectable::into_stored(component.into_handle())),
-    }
+    BoxedComponent::stored(
+        descriptor.ty,
+        Injectable::into_stored(component.into_handle()),
+    )
 }
 
 /// Builds a root seeded with one English and one Swedish greeter, mapping only the

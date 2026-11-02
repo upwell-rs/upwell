@@ -30,10 +30,10 @@ fn replacement_fixture() -> (EffectiveGraph, CandidateGraph) {
 }
 
 fn previous_replaceable(label: &'static str) -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<Replaceable>(Replaceable::NAME),
-        value: Box::new(Injectable::into_stored(Arc::new(Replaceable { label }))),
-    }
+    BoxedComponent::stored(
+        TypeDescriptor::of::<Replaceable>(Replaceable::NAME),
+        Injectable::into_stored(Arc::new(Replaceable { label })),
+    )
 }
 
 fn assert_restart(error: Error, expected: RestartReason) {

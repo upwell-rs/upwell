@@ -252,10 +252,10 @@ async fn builder_rejects_an_incomplete_candidate_root() {
 #[tokio::test]
 async fn builder_rejects_a_retained_root_resolver() {
     let descriptor = crate::root_resolver_descriptor();
-    let retained = BoxedComponent {
-        ty: descriptor.ty,
-        value: Box::new(Injectable::into_stored(crate::RootResolver::new())),
-    };
+    let retained = BoxedComponent::stored(
+        descriptor.ty,
+        Injectable::into_stored(crate::RootResolver::new()),
+    );
 
     let result = ScopeContainer::build_candidate_root(
         &[],

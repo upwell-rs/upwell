@@ -111,15 +111,15 @@ pub(super) fn scope_registry(
 }
 
 pub(super) fn seed_retainable(instance: &Arc<Retainable>) -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<Retainable>(Retainable::NAME),
-        value: Box::new(Injectable::into_stored(Arc::clone(instance))),
-    }
+    BoxedComponent::stored(
+        TypeDescriptor::of::<Retainable>(Retainable::NAME),
+        Injectable::into_stored(Arc::clone(instance)),
+    )
 }
 
 pub(super) fn seed_root_resolver() -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<RootResolver>(RootResolver::NAME),
-        value: Box::new(Injectable::into_stored(RootResolver::new())),
-    }
+    BoxedComponent::stored(
+        TypeDescriptor::of::<RootResolver>(RootResolver::NAME),
+        Injectable::into_stored(RootResolver::new()),
+    )
 }

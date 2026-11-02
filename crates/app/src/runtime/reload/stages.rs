@@ -132,10 +132,10 @@ pub(super) async fn construct_candidate(
         .collect();
     let hook_manager = HookManager::new(hooks);
     let mut externals = ResolverSet::new();
-    let overrides = vec![BoxedComponent {
-        ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-        value: Box::new(Injectable::into_stored(hook_manager.clone())),
-    }];
+    let overrides = vec![BoxedComponent::stored(
+        TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
+        Injectable::into_stored(hook_manager.clone()),
+    )];
 
     externals.insert(staged.candidate_store());
 

@@ -50,10 +50,7 @@ impl<const N: usize> Component for CallScoped<N> {
 
 /// Boxes a [`CallScoped`] as `cx`'s scope stores it, like a generated factory.
 fn boxed<const N: usize>(cx: &ComponentConstructionContext) -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<CallScoped<N>>(CallScoped::<N>::NAME),
-        value: Box::new(cx.stored(CallScoped::<N>.into_handle())),
-    }
+    BoxedComponent::stored(TypeDescriptor::of::<CallScoped<N>>(CallScoped::<N>::NAME), cx.stored(CallScoped::<N>.into_handle()))
 }
 
 fn construct<const N: usize>(

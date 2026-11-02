@@ -220,10 +220,10 @@ impl<'a, S: Scope, P: Scope> ScopeBuilder<'a, S, P> {
 
     /// Fills the scope's factory-less slot for `T` with `value`.
     pub fn seed<T: Any + Send + Sync>(mut self, value: T) -> Self {
-        self.seeds.push(BoxedComponent {
-            ty: TypeDescriptor::of::<T>(std::any::type_name::<T>()),
-            value: Box::new(value),
-        });
+        self.seeds.push(BoxedComponent::stored(
+            TypeDescriptor::of::<T>(std::any::type_name::<T>()),
+            value,
+        ));
 
         self
     }

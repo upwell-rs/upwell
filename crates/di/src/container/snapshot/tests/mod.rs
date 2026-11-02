@@ -123,10 +123,7 @@ fn registry(descriptors: &[ComponentDescriptor]) -> Arc<ScopeRegistry> {
 }
 
 fn seed<H: Injectable>(descriptor: &ComponentDescriptor, handle: H) -> BoxedComponent {
-    BoxedComponent {
-        ty: descriptor.ty,
-        value: Box::new(Injectable::into_stored(handle)),
-    }
+    BoxedComponent::stored(descriptor.ty, Injectable::into_stored(handle))
 }
 
 async fn root_with(

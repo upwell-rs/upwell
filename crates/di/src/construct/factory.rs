@@ -150,10 +150,10 @@ fn into_boxed<Out: FactoryOutput>(
     let component = output.into_component()?;
     let handle = <Out::Component as Component>::into_handle(component);
 
-    Ok(BoxedComponent {
-        ty: TypeDescriptor::of::<Out::Component>(<Out::Component as Component>::NAME),
-        value: Box::new(cx.stored(handle)),
-    })
+    Ok(BoxedComponent::stored(
+        TypeDescriptor::of::<Out::Component>(<Out::Component as Component>::NAME),
+        cx.stored(handle),
+    ))
 }
 
 /// The dependency edges of `factory`, recovered from its [`Factory`] impl. The
