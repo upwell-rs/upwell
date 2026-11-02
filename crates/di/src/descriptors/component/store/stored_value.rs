@@ -1,6 +1,7 @@
 //! The type-erased storage of one instance, held inline when it fits.
 
 use std::any::{Any, TypeId};
+use std::cell::UnsafeCell;
 use std::mem::{ManuallyDrop, MaybeUninit, align_of, size_of};
 
 /// Inline room for one stored value, sized for the largest common handle: a `Live<dyn Trait>`,
@@ -24,12 +25,20 @@ enum Repr {
 
 /// A value of the type `ops` describes, held in `bytes`.
 ///
-/// Its `Send` and `Sync` follow from the fields alone, which say nothing about the value:
-/// [`StoredValue::new`] is the only constructor and requires both of the value's type.
+/// The bytes sit in an [`UnsafeCell`], so a value with interior mutability (an atomic, a
+/// `Mutex`) may be written through the `&S` [`downcast_ref`](Self::downcast_ref) returns: plain
+/// bytes would be treated as immutable behind a shared reference.
 struct InlineValue {
-    bytes: InlineBytes,
+    bytes: UnsafeCell<InlineBytes>,
     ops: &'static InlineOps,
 }
+
+// SAFETY: [`StoredValue::new`], the only constructor, requires the value's type to be `Send`.
+unsafe impl Send for InlineValue {}
+
+// SAFETY: [`StoredValue::new`], the only constructor, requires the value's type to be `Sync`,
+// and an `InlineValue` hands out only `&S` through a shared reference.
+unsafe impl Sync for InlineValue {}
 
 /// What an [`InlineValue`] needs to know about the type it erases.
 struct InlineOps {
@@ -91,7 +100,7 @@ impl InlineValue {
         unsafe { bytes.as_mut_ptr().cast::<S>().write(value) };
 
         Self {
-            bytes,
+            bytes: UnsafeCell::new(bytes),
             ops: const {
                 &InlineOps {
                     type_id: TypeId::of::<S>(),
@@ -104,8 +113,7 @@ impl InlineValue {
     fn downcast_ref<S: Any>(&self) -> Option<&S> {
         // SAFETY: equal type ids mean `new` wrote an `S` into `bytes`, and it stays initialized
         // until this value is dropped or taken, both of which consume it.
-        (self.ops.type_id == TypeId::of::<S>())
-            .then(|| unsafe { &*self.bytes.as_ptr().cast::<S>() })
+        (self.ops.type_id == TypeId::of::<S>()).then(|| unsafe { &*self.bytes.get().cast::<S>() })
     }
 
     fn take<S: Any>(self) -> Result<S, Self> {
@@ -117,7 +125,7 @@ impl InlineValue {
 
         // SAFETY: equal type ids mean `new` wrote an `S` into `bytes`. `ManuallyDrop` keeps it
         // from being dropped here as well as read out.
-        Ok(unsafe { this.bytes.as_ptr().cast::<S>().read() })
+        Ok(unsafe { this.bytes.get().cast::<S>().read() })
     }
 }
 
@@ -125,7 +133,7 @@ impl Drop for InlineValue {
     fn drop(&mut self) {
         // SAFETY: `ops` was made for the type `new` wrote into `bytes`, which is initialized
         // and is dropped only here.
-        unsafe { (self.ops.drop)(&raw mut self.bytes) };
+        unsafe { (self.ops.drop)(self.bytes.get_mut()) };
     }
 }
 

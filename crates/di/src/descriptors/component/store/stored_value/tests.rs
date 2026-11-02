@@ -138,3 +138,21 @@ fn live_handles_are_stored_without_allocating() {
     assert!(stored.0.is::<Live<u8>>());
     assert!(stored.1.is::<Live<dyn Any + Send + Sync>>());
 }
+
+#[test]
+fn an_inline_value_with_interior_mutability_is_written_through_a_shared_read() {
+    let stored = StoredValue::new(AtomicUsize::new(1));
+    let counter = stored
+        .downcast_ref::<AtomicUsize>()
+        .expect("the stored value is an AtomicUsize");
+
+    counter.fetch_add(1, Ordering::SeqCst);
+
+    assert_eq!(
+        stored
+            .downcast_ref::<AtomicUsize>()
+            .expect("the stored value is still an AtomicUsize")
+            .load(Ordering::SeqCst),
+        2
+    );
+}
