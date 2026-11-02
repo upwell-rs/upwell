@@ -64,6 +64,14 @@ clone_tree() {
     fi
 }
 
+# Undoes an `add` that failed after registering its worktree, so the slice can be retried.
+rollback_add() {
+    git -C "$repo" worktree unlock "$adding_path" 2> /dev/null || true
+    git -C "$repo" worktree remove --force "$adding_path" 2> /dev/null || true
+    git -C "$repo" branch --quiet -D "$adding_branch" 2> /dev/null || true
+    unlock_seed
+}
+
 add() {
     local slice="$1" branch="$2" base="$3"
     local path="$worktrees/$slice"
@@ -80,6 +88,9 @@ add() {
 
     lock_seed
     git -C "$repo" worktree add --quiet --no-track -b "$branch" "$path" "$start"
+    adding_path="$path"
+    adding_branch="$branch"
+    trap rollback_add EXIT
     git -C "$repo" worktree lock --reason "parallel worktree on $root" "$path"
 
     if [[ -f "$repo/.env" ]]; then
@@ -147,14 +158,20 @@ remove() {
 refresh_seed() {
     local target="$worktrees/$1/target"
     local next="$seed.next"
+    local previous="$seed.previous"
 
     [[ -d "$target" ]] || fail "$target does not exist"
 
     lock_seed
-    rm -rf "$next"
+    rm -rf "$next" "$previous"
     clone_tree "$target" "$next"
-    rm -rf "$seed"
+
+    if [[ -d "$seed" ]]; then
+        mv "$seed" "$previous"
+    fi
+
     mv "$next" "$seed"
+    rm -rf "$previous"
     unlock_seed
     echo "worktree: seed refreshed from $1"
 }
