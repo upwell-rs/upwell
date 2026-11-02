@@ -228,6 +228,25 @@ opens: building them on first use is deferred to #349, together with on-demand r
 the synchronous accessors (`RpcCallContext::component`, `ScopeContainer::get`,
 `ComponentSource`, `Deferred::get`) are settled once for every lazy slot. Dropping the second box
 around fixed `Arc` handles is #425.
+
+Status (#344, container kinds): each `SlotLayout` records a container kind chosen from its scope
+type's `GENERATIONS` when the generation is prepared; no scope ID is consulted. A pinned
+container stores plain values in one block and allocates its on-demand cells on the first
+left-out build; a durable container opens with one block of once-cells that every build fills,
+concurrently per slot, and a failed build is not cached. Opening either with k planned slots
+allocates the container and one slot block, plus what the k factories allocate (an allocation
+test asserts this for k = 1, 4 and 16). Both kinds store fixed handles; a `Rebind` kind would
+add swappable storage there. A displaced generation is released only once every scope of
+either kind open on it has closed.
+
+A root stores each singleton in a rooted slot holding the root's own instance. The cell a
+`Dep<T>` shares is created on the first `Dep<T>` read, and a transition that rebinds it (a
+retained consumer following a provider switch) no longer changes what the displaced root
+answers: scopes still open on that generation keep reading its instance through `Arc<T>`,
+on-demand builds and escaped `Lazy<T>` handles, while `Dep<T>` handles, including ones a
+pinned component holds, follow the live binding. A message opened under an old-generation
+connection runs on the connection's generation. `Cfg<T>` is not pinned yet: it reads the
+committed config in every scope.
 - The enum is `#[non_exhaustive]` so a `Rebind` policy can follow once rebinding exists: rebuilt
   onto each new generation in place, with `Live` storage. A `Rebind` scope may only open under the
   root or other `Rebind` scopes, since a rebound child under a pinned parent would mix generations.

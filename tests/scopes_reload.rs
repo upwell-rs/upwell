@@ -19,8 +19,8 @@ use tokio::sync::Notify;
 use upwell::config::Toml;
 use upwell::daemon::{App, Inject, handlers, service};
 use upwell::{
-    AppRuntime, CallResult, Cfg, ConfigManager, Lazy, MemoryConnectionHandle, component, config,
-    methods,
+    AppRuntime, CallResult, Cfg, ConfigManager, Dep, Lazy, MemoryConnectionHandle, component,
+    config, methods,
 };
 use upwell_config::ResolverChain;
 
@@ -68,6 +68,29 @@ struct CallStamp {
     stamp: Arc<Stamp>,
 }
 
+/// Declares a component in `$scope` injecting live handles: a `Dep` on [`Stamp`] and the
+/// `Cfg` it is built from. The same field types compile under every generation policy.
+macro_rules! live_reader {
+    ($name:ident, $scope:path) => {
+        /// A reader of [`Stamp`] and its config through live handles.
+        #[component(scope = $scope)]
+        struct $name {
+            stamp: Dep<Stamp>,
+            #[config("stamp")]
+            cfg: Cfg<StampCfg>,
+        }
+
+        impl $name {
+            fn values(&self) -> (u32, u32) {
+                (self.stamp.get().value, self.cfg.get().value)
+            }
+        }
+    };
+}
+
+live_reader!(ConnLive, upwell::daemon::Connection);
+live_reader!(CallLive, upwell::daemon::Request);
+
 /// The service whose calls read the stamps of their generation.
 #[service(id = "reload", version = "0.1")]
 struct ReloadSvc;
@@ -87,6 +110,15 @@ impl ReloadSvc {
         Inject(conn): Inject<Arc<ConnStamp>>,
     ) -> upwell::daemon::Result<(u32, u32)> {
         Ok((call.stamp.value, conn.stamp.value))
+    }
+
+    /// What the call's request and connection scopes read through `Dep` and `Cfg` handles.
+    #[rpc]
+    async fn live(
+        Inject(call): Inject<Arc<CallLive>>,
+        Inject(conn): Inject<Arc<ConnLive>>,
+    ) -> upwell::daemon::Result<((u32, u32), (u32, u32))> {
+        Ok((call.values(), conn.values()))
     }
 
     /// Resolves its request stamp, parks until released, then builds the connection stamp.
@@ -153,6 +185,11 @@ async fn commit(runtime: &AppRuntime, dir: &Path, value: u32) {
 
 /// Calls `method` and returns the (request, connection) stamps it read.
 async fn call(conn: &MemoryConnectionHandle, method: &str) -> (u32, u32) {
+    call_as(conn, method).await
+}
+
+/// Calls `method` and decodes its response as `R`.
+async fn call_as<R: serde::de::DeserializeOwned>(conn: &MemoryConnectionHandle, method: &str) -> R {
     let payload = postcard::to_allocvec(&()).expect("unit encodes");
 
     match deadline(method, conn.call(method, payload))
@@ -207,6 +244,30 @@ async fn calls_on_a_connection_opened_before_a_commit_stay_on_its_generation() {
         (2, 2),
         "a new connection opens on the committed one"
     );
+
+    server.shutdown([old, new]).await;
+}
+
+#[tokio::test]
+async fn live_handles_resolve_in_pinned_and_durable_scopes_across_a_commit() {
+    let (server, runtime, dir) = start(1).await;
+    let old = server.connect().await;
+    let opened = call(&old, "ReloadSvc.ping").await;
+
+    commit(&runtime, dir.path(), 2).await;
+
+    let new = server.connect().await;
+    let on_old: ((u32, u32), (u32, u32)) = call_as(&old, "ReloadSvc.live").await;
+    let on_new: ((u32, u32), (u32, u32)) = call_as(&new, "ReloadSvc.live").await;
+
+    assert_eq!(opened, (0, 0));
+    assert_eq!(
+        on_old,
+        ((1, 2), (1, 2)),
+        "a Dep on a restarted singleton keeps the old connection's generation; a Cfg reads \
+         the committed config"
+    );
+    assert_eq!(on_new, ((2, 2), (2, 2)));
 
     server.shutdown([old, new]).await;
 }
