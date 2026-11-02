@@ -105,10 +105,10 @@ pub(super) fn construct(
     Box::pin(async {
         FACTORY_CALLS.fetch_add(1, Ordering::SeqCst);
 
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<ProjectedComponent>(ProjectedComponent::NAME),
-            value: Box::new(Injectable::into_stored(Arc::new(ProjectedComponent))),
-        })
+        Ok(BoxedComponent::stored(
+            TypeDescriptor::of::<ProjectedComponent>(ProjectedComponent::NAME),
+            Injectable::into_stored(Arc::new(ProjectedComponent)),
+        ))
     })
 }
 

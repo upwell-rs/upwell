@@ -10,7 +10,8 @@ pub use component::{
     ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole,
     DeclaredScope, Dep, Dynamic, GenerationSnapshot, Injectable, Live, LiveCell, LiveRebind,
     LiveRef, Provided, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
-    ReadyComponentFactory, Registration, ScopedConstruction, ServiceComponent, Wired, Wiring,
+    ReadyComponentFactory, Registration, ScopedConstruction, ServiceComponent, StoredValue, Wired,
+    Wiring,
 };
 
 pub use upwell_core::{

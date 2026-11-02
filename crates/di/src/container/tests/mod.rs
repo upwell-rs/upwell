@@ -104,10 +104,10 @@ fn dependency<T: ?Sized + 'static>(dynamic: bool) -> DependencyDescriptor {
 }
 
 fn boxed_component<T: Send + Sync + 'static>(name: &'static str, value: Arc<T>) -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<T>(name),
-        value: Box::new(Injectable::into_stored(value)),
-    }
+    BoxedComponent::stored(
+        TypeDescriptor::of::<T>(name),
+        Injectable::into_stored(value),
+    )
 }
 
 fn target_provider_factory(
@@ -180,10 +180,10 @@ fn erase_provider<T: ScopedProvider + 'static>(component: &BoxedComponent) -> Bo
     let concrete = from_boxed::<Arc<T>>(component).expect("provider stored");
     let erased: Arc<dyn ScopedProvider> = concrete;
 
-    BoxedComponent {
-        ty: TypeDescriptor::of::<dyn ScopedProvider>("dyn ScopedProvider"),
-        value: Box::new(Injectable::into_stored(erased)),
-    }
+    BoxedComponent::stored(
+        TypeDescriptor::of::<dyn ScopedProvider>("dyn ScopedProvider"),
+        Injectable::into_stored(erased),
+    )
 }
 
 fn erase_target_provider(component: &BoxedComponent) -> BoxedComponent {

@@ -112,30 +112,15 @@ async fn framework_singletons_snapshot_out_of_a_built_root() {
         root_resolver_descriptor(),
     ];
     let seeds = vec![
-        BoxedComponent {
-            ty: descriptors[0].ty,
-            value: Box::new(shutdown.handle()),
-        },
-        BoxedComponent {
-            ty: descriptors[1].ty,
-            value: Box::new(Injectable::into_stored(reloader.clone())),
-        },
-        BoxedComponent {
-            ty: descriptors[2].ty,
-            value: Box::new(Injectable::into_stored(hooks.clone())),
-        },
-        BoxedComponent {
-            ty: descriptors[3].ty,
-            value: Box::new(dirs.clone()),
-        },
-        BoxedComponent {
-            ty: descriptors[4].ty,
-            value: Box::new(dirs.dir::<ConfigDir>()),
-        },
-        BoxedComponent {
-            ty: descriptors[5].ty,
-            value: Box::new(Injectable::into_stored(RootResolver::new())),
-        },
+        BoxedComponent::stored(descriptors[0].ty, shutdown.handle()),
+        BoxedComponent::stored(descriptors[1].ty, Injectable::into_stored(reloader.clone())),
+        BoxedComponent::stored(descriptors[2].ty, Injectable::into_stored(hooks.clone())),
+        BoxedComponent::stored(descriptors[3].ty, dirs.clone()),
+        BoxedComponent::stored(descriptors[4].ty, dirs.dir::<ConfigDir>()),
+        BoxedComponent::stored(
+            descriptors[5].ty,
+            Injectable::into_stored(RootResolver::new()),
+        ),
     ];
     let components = descriptors
         .iter()

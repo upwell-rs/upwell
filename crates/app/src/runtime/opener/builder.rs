@@ -216,10 +216,7 @@ fn plans_nothing<S: Scope>(view: &RuntimeView, entry: &ScopeEntry<S>) -> bool {
 }
 
 fn boxed_seed<T: Any + Send + Sync>(value: T) -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<T>(std::any::type_name::<T>()),
-        value: Box::new(value),
-    }
+    BoxedComponent::stored(TypeDescriptor::of::<T>(std::any::type_name::<T>()), value)
 }
 
 /// Whether opening an instance of `scope` on `view` with `builds` reads the seed of type `seed`.

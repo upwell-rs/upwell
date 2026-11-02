@@ -147,10 +147,7 @@ async fn raw_manual_singleton_requires_restart() {
     let active = active_view(
         &registry([replaceable(ACTIVE_FACTORIES), user_provided()], []),
         vec![
-            BoxedComponent {
-                ty: TypeDescriptor::of::<u8>("UserProvided"),
-                value: Box::new(8u8),
-            },
+            BoxedComponent::stored(TypeDescriptor::of::<u8>("UserProvided"), 8u8),
             seed_hook_manager(&active_hooks),
         ],
     )
@@ -223,10 +220,7 @@ async fn typed_handle_without_snapshot_contract_requires_distinct_restart() {
     let active = active_view(
         &registry([replaceable(ACTIVE_FACTORIES), unretained()], []),
         vec![
-            BoxedComponent {
-                ty: unretained().ty,
-                value: Box::new(UnretainedByValue),
-            },
+            BoxedComponent::stored(unretained().ty, UnretainedByValue),
             seed_hook_manager(&active_hooks),
         ],
     )

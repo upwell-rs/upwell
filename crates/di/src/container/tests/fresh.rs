@@ -126,10 +126,10 @@ async fn fresh_reconstructs_a_transient_against_the_requesting_scope() {
                 .await?
                 .ok_or(Error::MissingComponent("RootBound"))?;
 
-            Ok(BoxedComponent {
-                ty: TypeDescriptor::of::<TransientLeaf>("TransientLeaf"),
-                value: Box::new(Injectable::into_stored(TransientLeaf { bound })),
-            })
+            Ok(BoxedComponent::stored(
+                TypeDescriptor::of::<TransientLeaf>("TransientLeaf"),
+                Injectable::into_stored(TransientLeaf { bound }),
+            ))
         })
     }
 

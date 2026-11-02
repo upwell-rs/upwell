@@ -47,10 +47,7 @@ async fn empty_child_scope_retains_its_identity() {
 async fn child_scope_with_a_seed_is_built() {
     let root = root().await;
 
-    let seed = BoxedComponent {
-        ty: TypeDescriptor::of::<u8>("u8"),
-        value: Box::new(7u8),
-    };
+    let seed = BoxedComponent::stored(TypeDescriptor::of::<u8>("u8"), 7u8);
 
     let child = ScopeContainer::open_child(
         TestScope::KEY,

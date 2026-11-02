@@ -72,10 +72,10 @@ impl ScopeContainer {
         );
 
         if let Some(descriptor) = registry.component_by_id(ROOT_RESOLVER_ID) {
-            context.insert(BoxedComponent {
-                ty: descriptor.ty,
-                value: Box::new(Injectable::into_stored(RootResolver::new())),
-            })?;
+            context.insert(BoxedComponent::stored(
+                descriptor.ty,
+                Injectable::into_stored(RootResolver::new()),
+            ))?;
             register_candidate_providers(&mut context, &registry, descriptor)?;
         }
 

@@ -26,10 +26,10 @@ pub(crate) fn hook_manager_descriptor() -> ComponentDescriptor {
 
 /// The seeded instance of `hooks`, as a root build expects it.
 pub(crate) fn seed_hook_manager(hooks: &HookManager) -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-        value: Box::new(Injectable::into_stored(hooks.clone())),
-    }
+    BoxedComponent::stored(
+        TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
+        Injectable::into_stored(hooks.clone()),
+    )
 }
 
 /// The condition state of an empty registry with no condition facts.

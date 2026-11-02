@@ -118,10 +118,10 @@ impl<'a> PreBuildContext<'a> {
             TypeDescriptor::of::<T>(T::NAME),
             Singleton::KEY,
         ));
-        self.instances.push(BoxedComponent {
-            ty: TypeDescriptor::of::<T>(T::NAME),
-            value: Box::new(Injectable::into_stored(value.into_handle())),
-        });
+        self.instances.push(BoxedComponent::stored(
+            TypeDescriptor::of::<T>(T::NAME),
+            Injectable::into_stored(value.into_handle()),
+        ));
     }
 
     /// Binds configuration type `T` to `path` before config-store construction.
