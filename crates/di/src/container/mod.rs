@@ -13,6 +13,7 @@ mod live;
 mod on_demand;
 mod open;
 mod order;
+mod params;
 mod resolve;
 mod resolver_slot;
 mod scope_registry;

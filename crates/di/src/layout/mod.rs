@@ -6,6 +6,7 @@
 //! without selecting providers.
 
 mod dep_ref;
+mod entry_params;
 mod entry_plan;
 mod kind;
 mod planner;
@@ -18,6 +19,7 @@ mod tests;
 pub(crate) use dep_ref::{
     DepRef, PlannedDependency, ProvidedRef, RootTarget, SlotRef, TransientPlan,
 };
+pub(crate) use entry_params::EntryParam;
 pub(crate) use entry_plan::EagerSelection;
 pub use entry_plan::{EntryPlan, UnplannedConstruction};
 pub(crate) use kind::ContainerKind;

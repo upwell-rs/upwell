@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, ScopeId, ScopeKey};
 
+use super::entry_params::EntryParam;
 use super::slot_layout::is_eager;
 use super::{DepRef, SlotIdx, SlotLayout};
 use crate::descriptors::ComponentDescriptor;
@@ -16,11 +17,17 @@ use crate::registry::scopes::scope_allows_with;
 /// is built on demand, when something resolves it from the open scope. The plan also holds the
 /// slots the entry declares: those it builds and those its lazy targets reach. Under
 /// [`UnplannedConstruction::Deny`] an on-demand build outside them is reported.
+///
+/// Its parameters pre-resolve the targets it injects to the sources they read, so extracting
+/// a built target with [`ScopeContainer::extract_planned`](crate::ScopeContainer::extract_planned)
+/// selects nothing and looks nothing up by type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EntryPlan {
+    scope: ScopeKey,
     builds: Box<[bool]>,
     declared: Arc<[bool]>,
     unplanned: UnplannedConstruction,
+    params: Box<[EntryParam]>,
 }
 
 /// Whether a scope opened for an entry may build, on demand, a slot the entry does not
@@ -44,10 +51,29 @@ impl EntryPlan {
     /// demand: it builds only the layout's eager set.
     pub fn on_demand(layout: &SlotLayout) -> Self {
         Self {
+            scope: layout.scope(),
             builds: layout.eager().into(),
             declared: layout.eager().into(),
             unplanned: UnplannedConstruction::Allow,
+            params: Box::default(),
         }
+    }
+
+    /// The scope this plan opens.
+    pub(crate) fn scope(&self) -> ScopeKey {
+        self.scope
+    }
+
+    /// The parameter for the target `target` injected with `qualifier` and `cardinality`.
+    pub(crate) fn param(
+        &self,
+        target: TypeId,
+        qualifier: Option<&str>,
+        cardinality: Cardinality,
+    ) -> Option<&EntryParam> {
+        self.params
+            .iter()
+            .find(|param| param.is(target, qualifier, cardinality))
     }
 
     /// Whether opening the scope for this entry builds `slot`.
@@ -126,7 +152,8 @@ impl SlotLayout {
     /// target builds the slots it resolves to here, with their dependencies in this scope, as
     /// [`for_each_selected_slot`](Self::for_each_selected_slot) picks them. `can_reach` is the
     /// scope reachability `selection` was validated with. The plan also declares the slots a
-    /// lazy target resolves to, picked as for any other target, with their dependencies.
+    /// lazy target resolves to, picked as for any other target, with their dependencies, and
+    /// pre-resolves the source each target reads where it can.
     pub fn plan_entry(
         &self,
         targets: &[DependencyDescriptor],
@@ -143,9 +170,11 @@ impl SlotLayout {
         let declared = self.declared(&selector, targets, &builds);
 
         EntryPlan {
+            scope: self.scope,
             builds,
             declared,
             unplanned,
+            params: self.plan_params(targets, selection),
         }
     }
 

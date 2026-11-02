@@ -11,6 +11,7 @@ use crate::{SlotLayout, dispatch_factory, factory_dependencies};
 
 mod cases;
 mod collections;
+mod params;
 
 /// The trait every fixture provider provides.
 trait Greeter: Send + Sync {
@@ -100,10 +101,20 @@ enum Reach {
     Outer,
 }
 
-/// One prepared fixture generation: its registry, the root holding its singletons, and the
-/// layouts of [`Outer`] and [`Inner`].
+/// Whether a component in `consumer` reaches one in `dependency` when [`Inner`]'s layout
+/// reaches as `reach` says.
+fn reaches(reach: Reach, consumer: ScopeId, dependency: ScopeId) -> bool {
+    consumer == dependency
+        || dependency == Singleton::ID
+        || matches!(reach, Reach::Outer) && dependency == Outer::ID
+}
+
+/// One prepared fixture generation: its registry and provider selection, the root holding its
+/// singletons, the layouts of [`Outer`] and [`Inner`], and how far [`Inner`]'s layout reaches.
 struct Generation {
     registry: Arc<ScopeRegistry>,
+    selection: crate::registry::ProviderSelectionModel,
+    reach: Reach,
     root: Arc<ScopeContainer>,
     outer: Arc<SlotLayout>,
     inner: Arc<SlotLayout>,
@@ -125,11 +136,8 @@ impl Generation {
                 .copied()
                 .collect()
         };
-        let can_reach = |consumer: ScopeId, dependency: ScopeId| {
-            consumer == dependency
-                || dependency == Singleton::ID
-                || matches!(reach, Reach::Outer) && dependency == Outer::ID
-        };
+        let can_reach =
+            |consumer: ScopeId, dependency: ScopeId| reaches(reach, consumer, dependency);
         let selection = crate::registry::ProviderSelectionModel::new(
             components,
             providers.clone(),
@@ -177,10 +185,24 @@ impl Generation {
 
         Self {
             registry,
+            selection,
+            reach,
             root,
             outer,
             inner,
         }
+    }
+
+    /// The plan of an entry into [`Inner`] injecting `targets`.
+    fn plan_inner(&self, targets: &[upwell_core::DependencyDescriptor]) -> EntryPlan {
+        let reach = self.reach;
+
+        self.inner.plan_entry(
+            targets,
+            &self.selection,
+            move |consumer, dependency| reaches(reach, consumer, dependency),
+            crate::UnplannedConstruction::Allow,
+        )
     }
 
     /// Prepares `components` with `providers` in declaration order.

@@ -91,7 +91,9 @@ impl FromContext for Peer {
 /// a `Transient`.
 ///
 /// This is how a handler reaches connection- and request-scoped components; the stateful
-/// service singleton itself still arrives through `&self`.
+/// service singleton itself still arrives through `&self`. A target the method's entry
+/// injects is read from the source its plan pre-resolved, and one outside the call's scope,
+/// such as a singleton, is read without opening a call scope the plan left deferred.
 pub struct Inject<H>(pub H);
 
 impl<H> FromContext for Inject<H>
@@ -99,9 +101,19 @@ where
     H: FromContainer,
 {
     async fn from_context(ctx: &RpcCallContext) -> crate::Result<Self> {
-        let scope = ctx.scope().container().await.map_err(Error::from)?;
+        let entry = ctx.scope();
 
-        scope.extract::<H>().await.map(Inject).map_err(Error::from)
+        if let Some(value) = entry.read_planned::<H>() {
+            return Ok(Inject(value));
+        }
+
+        let scope = entry.container().await.map_err(Error::from)?;
+
+        scope
+            .extract_planned::<H>(entry.plan())
+            .await
+            .map(Inject)
+            .map_err(Error::from)
     }
 }
 
@@ -471,49 +483,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use serde::Serializer;
-    use serde::ser::Error as _;
-    use upwell_transport::PredefinedCode;
-
-    use super::*;
-
-    /// A type whose serialization always fails, to exercise the FR-011 fallback.
-    struct Unserializable;
-
-    impl Serialize for Unserializable {
-        fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-            Err(S::Error::custom("intentional serialization failure"))
-        }
-    }
-
-    #[test]
-    fn body_serialization_failure_preserves_code_with_empty_body() {
-        // FR-011: a body that fails to serialize yields the intended code with a
-        // fallback (empty) body rather than dropping the code or panicking.
-        let code = StatusCode::from(PredefinedCode::NotFound);
-        let response = ErrorResponse::with_serialized_body(code, &Unserializable);
-
-        assert_eq!(response.code, code);
-        assert!(response.body.is_empty());
-    }
-
-    #[test]
-    fn serializable_error_uses_blanket_impl() {
-        // A `Serialize` error gets the blanket `ResponseError`: the default
-        // `Internal` code, with the error value itself as the body.
-        #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
-        struct PlainError {
-            reason: String,
-        }
-
-        let error = PlainError {
-            reason: "boom".to_string(),
-        };
-        let response = error.error_response();
-        let decoded: PlainError = postcard::from_bytes(&response.body).expect("decode body");
-
-        assert_eq!(decoded.reason, "boom");
-        assert_eq!(response.code.predefined(), PredefinedCode::Internal);
-    }
-}
+mod tests;
