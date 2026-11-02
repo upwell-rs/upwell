@@ -73,15 +73,7 @@ async fn copied(router: &Router, uri: &str) -> bool {
 
 #[tokio::test]
 async fn only_a_route_reading_the_seed_copies_the_headers() {
-    let app = upwell::App::<Axum>::builder("test-request-seeds")
-        .controller::<SeedController>()
-        .component::<Reader>()
-        .component::<Unrelated>()
-        .layer(from_fn(probe))
-        .build()
-        .await
-        .expect("app builds");
-    let router = app.protocol().router().clone();
+    let router = router(app().controller::<SeedController>().layer(from_fn(probe))).await;
 
     assert!(
         !copied(&router, "/seeds/unrelated").await,

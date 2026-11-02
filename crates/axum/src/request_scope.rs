@@ -322,6 +322,7 @@ async fn open(
         (None, WithoutEntry::Everything) => Opening::Everything,
         (None, WithoutEntry::Eager) => Opening::OnDemand,
     };
+
     let opened = scopes
         .opener
         .builder()

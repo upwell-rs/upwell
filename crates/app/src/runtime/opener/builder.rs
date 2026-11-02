@@ -25,6 +25,7 @@ pub(super) enum Builds {
 
 /// Which slots opening an instance builds at once, for
 /// [`open_with_bound_seed`](ScopeBuilder::open_with_bound_seed).
+#[non_exhaustive]
 pub enum Opening<'e, S: Scope> {
     /// What the entry's plan lists, as [`open`](ScopeBuilder::open) does.
     Entry(&'e ScopeEntry<S>),
