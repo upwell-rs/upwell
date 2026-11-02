@@ -384,9 +384,10 @@ targets. Every opening builds it: `plan_entry` starts each entry's plan from it 
 declared under `deny_unplanned` too), `EntryPlan::on_demand` (formerly `nothing`, used by
 `open_on_demand` for connection scopes) builds exactly it, and `open_default` builds every
 slot anyway. A plan holding the eager set is never empty, so `open_when_needed` opens such a
-scope at once instead of deferring it. Axum's HTTP request scope still opens only when
-something injects from it, so a request that injects nothing request-scoped runs no eager
-component. The macros reject `eager` without `scope` and with a scope path spelled
+scope at once instead of deferring it. Axum's HTTP request scope otherwise opens only when
+something injects from it; when the scope has eager components, a layer inside the global
+middleware opens it for every routed request (#447). An application with no eager request-scoped
+component does not get that layer. The macros reject `eager` without `scope` and with a scope path spelled
 `Singleton` or `Transient` (spanned at the attribute), and a const assertion rejects any other
 path naming the root or transient scope; registry validation rejects a hand-written eager
 descriptor there with `EagerOutsideScope`. Tooling labels each component of a scope below the
@@ -414,10 +415,11 @@ application:
   depends on it.
 - **Side effects.** A constructor that exists for its side effect (an audit record, a span, a
   permission gate) no longer runs for entries that do not inject it. Mark it `eager`, or move
-  the effect to middleware: per-call side effects belong in middleware (axum
-  `AxumMiddleware`, a `tower::Layer`), which runs for every call whether or not a scope
-  opens. Axum opens the request scope only when something injects from it, so on HTTP an
-  eager request-scoped component runs only for requests that open the scope.
+  the effect to middleware (axum `AxumMiddleware`, a `tower::Layer`). On HTTP an eager
+  request-scoped component runs for every routed request that global middleware lets through,
+  after that middleware, and also for one global middleware answers if it injected first. A
+  request no route matches runs none. For an effect on every request, rejected or unmatched
+  ones included, use global middleware.
 - **Synchronous reads.** `ScopeContainer::get`, `ComponentSource` and
   `RpcCallContext::component` see only built slots; resolve through `Inject`, `Lazy` or
   `ScopeContainer::resolve` to build on demand.

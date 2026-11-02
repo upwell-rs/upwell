@@ -21,6 +21,11 @@ for example `#[component(scope = HttpRequest)]` or
 WebSocket connection components use `WebsocketUpgradeMeta` for the upgrade request and
 `WsConnectionMeta` for negotiated connection state.
 
+A request opens its `HttpRequest` scope the first time something injects from it, so a route that
+injects nothing pays for no scope. An eager component (`#[component(scope = HttpRequest, eager)]`)
+changes that: it runs for every routed request, after global middleware. A request no route matches,
+or one global middleware answers before injecting, runs none.
+
 Beyond plain REST it owns the HTTP-side extras that mirror the RPC protocol for the web: WebSocket
 controllers ([`WebsocketController`], `#[controller(ws = ..)]`), a STOMP 1.2 pub/sub [`Broker`] with
 a typed `#[topics]` contract, the `multipart/form-data` extractor, NDJSON/raw stream framing, and a
