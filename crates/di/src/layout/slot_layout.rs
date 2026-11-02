@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use upwell_core::ScopeKey;
 
-use super::{PlannedDependency, SelectedSource, SelectedSources, SlotRef};
+use super::{ContainerKind, PlannedDependency, SelectedSource, SelectedSources, SlotRef};
 use crate::descriptors::{ComponentDescriptor, ComponentFactoryDescriptor, ProviderDescriptor};
 
 /// The position of one component in a scope's slot layout.
@@ -71,6 +71,7 @@ pub struct SlotLayout {
     pub(super) selected: SelectedSources,
     pub(super) constructs: bool,
     pub(super) shares_store: bool,
+    pub(super) kind: ContainerKind,
 }
 
 impl SlotLayout {
@@ -104,6 +105,11 @@ impl SlotLayout {
     /// scope's in-progress instances, just as undeclared edges are not ordered.
     pub(crate) fn shares_store(&self) -> bool {
         self.shares_store
+    }
+
+    /// The container an instance of the scope opens in, chosen by its generation policy.
+    pub(crate) fn kind(&self) -> ContainerKind {
+        self.kind
     }
 
     /// The scope's components in construction order, seeds first.

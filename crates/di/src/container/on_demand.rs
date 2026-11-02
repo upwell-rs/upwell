@@ -258,7 +258,13 @@ impl ScopeContainer {
             store
                 .build_later(
                     slot,
-                    self.build_slot(slot, spec.component.name, factory, group.clone()),
+                    self.build_slot(
+                        slot,
+                        spec.component.name,
+                        factory,
+                        layout.kind().handle_storage(),
+                        group.clone(),
+                    ),
                 )
                 .await?;
         }
@@ -266,13 +272,14 @@ impl ScopeContainer {
         Ok(())
     }
 
-    /// Runs the factory of `slot` against this open scope, hydrating its deferred
-    /// dependencies with `group`.
+    /// Runs the factory of `slot` against this open scope, storing the handle it builds as
+    /// `storage` says and hydrating its deferred dependencies with `group`.
     async fn build_slot(
         self: &Arc<Self>,
         slot: SlotIdx,
         component: &'static str,
         factory: &ComponentFactoryDescriptor,
+        storage: HandleStorage,
         group: ScopeResolverSlot,
     ) -> crate::Result<BoxedComponent> {
         debug!(
@@ -291,7 +298,7 @@ impl ScopeContainer {
         );
 
         cx.use_opened(Arc::clone(self));
-        cx.store_handles(HandleStorage::Fixed);
+        cx.store_handles(storage);
         cx.set_running(Running::Slot(slot));
         cx.hydrate_with(group);
 
