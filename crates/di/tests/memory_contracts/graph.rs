@@ -1,17 +1,4 @@
-//! Deterministic memory contracts for the DI container hot paths.
-//!
-//! These are complexity/leak contracts, not wall-clock benchmarks: they assert allocation counts
-//! and live-byte deltas, which are independent of runner speed and so run on every pull request
-//! (the statistical memory *trend* across graph sizes lives in `benchmarks/di_graph_memory`). The
-//! properties proven here:
-//!
-//! - resolving a component (`get`) allocates nothing — it is an `Arc` bump and a map walk;
-//! - request-time extraction (`extract`) of a built component allocates nothing, so it leaks
-//!   nothing either;
-//! - a built graph's retained footprint is bounded per component and is fully reclaimed on drop.
-//!
-//! Allocation tracking is scoped to the measured test thread, so concurrent test-runner activity
-//! cannot contaminate the results.
+//! The container's footprint and resolution over a layered graph of plain components.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,56 +9,11 @@ use upwell_di::{
     BoxedComponent, Component, ComponentDescriptor, Injectable, ScopeContainer, ScopeRegistry,
 };
 
-#[path = "../src/test_support/alloc.rs"]
-mod alloc;
-
-use alloc::measure;
-
-#[test]
-fn measurement_ignores_allocations_from_other_threads() {
-    use std::hint::{black_box, spin_loop};
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    let start = AtomicBool::new(false);
-    let allocated = AtomicBool::new(false);
-
-    std::thread::scope(|scope| {
-        let worker = scope.spawn(|| {
-            while !start.load(Ordering::Acquire) {
-                spin_loop();
-            }
-
-            let allocation = Box::new([0u8; 64]);
-            black_box(&allocation);
-            allocated.store(true, Ordering::Release);
-
-            allocation
-        });
-
-        let (_, delta) = measure(|| {
-            start.store(true, Ordering::Release);
-            while !allocated.load(Ordering::Acquire) {
-                spin_loop();
-            }
-        });
-
-        let allocation = worker.join().expect("allocation thread succeeds");
-        assert_eq!(allocation.len(), 64, "background allocation was performed");
-        assert_eq!(
-            delta.allocations, 0,
-            "another thread's allocation contaminated the measurement"
-        );
-        assert_eq!(
-            delta.net_live, 0,
-            "another thread's live bytes contaminated the measurement"
-        );
-    });
-}
-
-// --- a small graph fixture -----------------------------------------------------------------------
+use crate::measure;
 
 const PAYLOAD_BYTES: usize = 64;
 
+/// A component distinct per `N`, carrying a heap payload so its footprint is measurable.
 struct C<const N: usize> {
     _payload: Box<[u8; PAYLOAD_BYTES]>,
 }
@@ -95,6 +37,7 @@ impl<const N: usize> Component for C<N> {
     }
 }
 
+/// A roster component's descriptor and how to build its instance.
 #[derive(Clone, Copy)]
 struct Entry {
     desc: ComponentDescriptor,
@@ -130,8 +73,13 @@ fn roster() -> Vec<Entry> {
     )
 }
 
+/// The first scope layer under the root.
 struct Layer1;
+
+/// The second scope layer under the root.
 struct Layer2;
+
+/// The third scope layer under the root.
 struct Layer3;
 
 impl Scope for Layer1 {
@@ -191,8 +139,6 @@ async fn build_graph(entries: &[Entry], width: usize, layers: usize) -> Arc<Scop
 
     container
 }
-
-// --- the contracts -------------------------------------------------------------------------------
 
 /// Generous per-component ceiling for a graph's retained footprint: the 64-byte payload plus the
 /// `Arc`, the `Live` cell, and the map slot the container keeps for it. Well below any figure that

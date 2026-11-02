@@ -508,9 +508,16 @@ the session, yet selects the session's provider when opened under one. Each entr
 shadowing scopes (`shadowed_by`: unreachable at planning, holding a matching provider, tried
 before the selected one), and a chain holding one falls back.
 
-Still open: collections and keyed maps still select per call, as do trait targets in the two
-layout-less cases above, and planned handler parameters do not yet take their pre-resolved
-`DepRef`s.
+Collections and keyed maps (`Vec<Arc<dyn Trait>>`, `HashMap<String, Arc<dyn Trait>>`) read
+through the same table: for each trait it also holds the providers a collection gathers from the
+scope, in provider order, and the provider winning each qualifier of a keyed map, as `Local`,
+`Ancestor` or `Root` sources. Its `shadowed_by` lists every scope the layout cannot reach on
+every chain that holds a provider of the trait, because such a scope adds providers or changes
+winners. It falls back like a single value, and also when any gathered provider is transient.
+Reading allocates only the returned `Vec`, or the map and its keys (memory contracts assert both).
+
+Still open: trait targets in the two layout-less cases above, and planned handler parameters do
+not yet take their pre-resolved `DepRef`s.
 
 Status (#359, planning at scale): entries are planned once per signature: the scope plus
 the sorted set of target descriptors (type, qualifier, cardinality, resolution, observation,

@@ -1,9 +1,11 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 
-use upwell_core::ScopeKey;
+use upwell_core::{Cardinality, ScopeKey};
 
-use super::{ContainerKind, PlannedDependency, SelectedSource, SelectedSources, SlotRef};
+use super::{
+    ContainerKind, PlannedDependency, SelectedMany, SelectedSource, SelectedSources, SlotRef,
+};
 use crate::descriptors::{ComponentDescriptor, ComponentFactoryDescriptor, ProviderDescriptor};
 
 /// The position of one component in a scope's slot layout.
@@ -174,6 +176,16 @@ impl SlotLayout {
         qualifier: Option<&str>,
     ) -> Option<&SelectedSource> {
         self.selected.get(target, qualifier)
+    }
+
+    /// The providers a `cardinality` dependency on trait `target` gathers from this scope, when
+    /// each is a planned, non-transient instance. `None` for a single value.
+    pub(crate) fn selected_many(
+        &self,
+        target: TypeId,
+        cardinality: Cardinality,
+    ) -> Option<&SelectedMany> {
+        self.selected.many(target, cardinality)
     }
 
     /// The provider aliases of `trait_id` in this scope, in provider order.

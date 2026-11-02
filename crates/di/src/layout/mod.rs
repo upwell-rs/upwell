@@ -21,6 +21,6 @@ pub(crate) use dep_ref::{
 pub(crate) use entry_plan::EagerSelection;
 pub use entry_plan::{EntryPlan, UnplannedConstruction};
 pub(crate) use kind::ContainerKind;
-pub(crate) use selected::{SelectedSource, SelectedSources};
+pub(crate) use selected::{SelectedMany, SelectedSource, SelectedSources};
 pub use slot_layout::SlotLayout;
 pub(crate) use slot_layout::{ProviderSlot, SlotIdx, SlotSpec};
