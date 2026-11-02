@@ -92,55 +92,42 @@ fn slot<S: Scope, const N: usize>(seeded: bool) -> ComponentDescriptor {
     descriptor
 }
 
+/// Declares the per-index tables of the sixteen slot types, so every slot and its seed come
+/// from one index list.
+macro_rules! per_slot {
+    ($($n:literal),* $(,)?) => {
+        /// Every slot descriptor of scope `S`, in index order.
+        fn all_slots<S: Scope>(seeded: bool) -> Vec<ComponentDescriptor> {
+            vec![$(slot::<S, $n>(seeded)),*]
+        }
+
+        /// The seed filling each slot, in index order.
+        const SEEDS: &[fn() -> BoxedComponent] = &[$(seed::<$n>),*];
+    };
+}
+
+per_slot!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+
+/// The seed filling `Slot<N>`.
+fn seed<const N: usize>() -> BoxedComponent {
+    BoxedComponent::stored(
+        TypeDescriptor::of::<Slot<N>>(IDS[N]),
+        <Arc<Slot<N>> as Injectable>::into_fixed(Arc::new(Slot::<N>)),
+    )
+}
+
 /// The first `count` slot descriptors of scope `S`.
 fn slots<S: Scope>(count: usize, seeded: bool) -> Vec<ComponentDescriptor> {
-    let all = [
-        slot::<S, 0>(seeded),
-        slot::<S, 1>(seeded),
-        slot::<S, 2>(seeded),
-        slot::<S, 3>(seeded),
-        slot::<S, 4>(seeded),
-        slot::<S, 5>(seeded),
-        slot::<S, 6>(seeded),
-        slot::<S, 7>(seeded),
-        slot::<S, 8>(seeded),
-        slot::<S, 9>(seeded),
-        slot::<S, 10>(seeded),
-        slot::<S, 11>(seeded),
-        slot::<S, 12>(seeded),
-        slot::<S, 13>(seeded),
-        slot::<S, 14>(seeded),
-        slot::<S, 15>(seeded),
-    ];
+    let mut all = all_slots::<S>(seeded);
 
-    all[..count].to_vec()
+    all.truncate(count);
+
+    all
 }
 
 /// The seeds filling every slot of [`slots`]`(count, true)`.
 fn seeds(count: usize) -> Vec<BoxedComponent> {
-    slots::<TestScope>(count, true)
-        .iter()
-        .map(|descriptor| {
-            fn seed<const N: usize>() -> BoxedComponent {
-                BoxedComponent::stored(
-                    TypeDescriptor::of::<Slot<N>>(IDS[N]),
-                    <Arc<Slot<N>> as Injectable>::into_fixed(Arc::new(Slot::<N>)),
-                )
-            }
-
-            let seeds: [fn() -> BoxedComponent; 16] = [
-                seed::<0>, seed::<1>, seed::<2>, seed::<3>, seed::<4>, seed::<5>, seed::<6>,
-                seed::<7>, seed::<8>, seed::<9>, seed::<10>, seed::<11>, seed::<12>, seed::<13>,
-                seed::<14>, seed::<15>,
-            ];
-            let index = IDS
-                .iter()
-                .position(|id| *id == descriptor.id)
-                .expect("every slot has an id");
-
-            seeds[index]()
-        })
-        .collect()
+    SEEDS[..count].iter().map(|seed| seed()).collect()
 }
 
 /// The layout of scope `S` holding `components`, seeds or factory-backed alike.

@@ -200,7 +200,7 @@ pub trait Scope: Send + Sync + 'static {
 
 | Policy | When a generation commits | Container | Typical scopes |
 |---|---|---|---|
-| `Pinned` (default) | Keeps the generation it opened under | One allocation, plain values, no `Live` | HTTP request, RPC call, WebSocket message, user units of work |
+| `Pinned` (default) | Keeps the generation it opened under | The container plus one slot block, plain values, no `Live` | HTTP request, RPC call, WebSocket message, user units of work |
 | `Durable` | Stays on its opening generation and reports how far behind it is | Slots ensured on first use | RPC and WebSocket connections |
 
 - `ScopeKey` carries the policy, like `IS_TRANSIENT`. The topology, planner, containers, tooling and
