@@ -782,6 +782,7 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
                 Ok(ws) => ws,
                 Err(rejection) => return rejection.into_response(),
             };
+
             let permit = match admission.try_acquire() {
                 Ok(permit) => permit,
 
