@@ -243,6 +243,7 @@ mod aliases;
 mod children;
 mod drop_guard;
 mod fresh;
+mod generations;
 mod kinds;
 mod on_demand;
 mod providers;
