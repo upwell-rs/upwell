@@ -14,7 +14,9 @@
 #
 # To avoid full rebuilds, `add` clones $UPWELL_WORKTREE_ROOT/seed copy-on-write when it exists, then
 # touches the tracked files so the workspace crates rebuild while dependencies are reused. That
-# touch is what makes the clone safe. `seed` makes a slice's `target/` the new seed.
+# touch is what makes the clone safe. `seed` makes a slice's `target/` the new seed. A dependency's
+# build-script output can still name the path it was built at; if a build fails on a path from
+# another worktree or target directory, `cargo clean -p <crate>` in the new worktree rebuilds it.
 #
 # Worktrees are locked, because `git worktree prune` would otherwise forget them while the drive
 # is unplugged. The gitignored `.env` is copied so `mise exec -- git` commits with the right identity.
@@ -127,14 +129,14 @@ add() {
     echo "worktree: $path on $branch from $start"
 }
 
-# The ignored files of the worktree at `$1` that `add` didn't create: anything but `target/` and an
-# unedited copy of `.env`.
+# The ignored files of the worktree at `$1` that `add` didn't create: anything but build output
+# (`target/`, `benchmarks/target/`) and an unedited copy of `.env`.
 local_ignored_files() {
     local entry
 
     git -C "$1" status --porcelain --ignored | sed -n 's/^!! //p' | while read -r entry; do
         case "$entry" in
-            target/) ;;
+            target/ | benchmarks/target/) ;;
             .env) cmp -s "$1/.env" "$repo/.env" || echo "$entry" ;;
             *) echo "$entry" ;;
         esac
