@@ -6,42 +6,66 @@ use std::sync::{Arc, OnceLock};
 use super::super::{Injectable, ProviderDescriptor};
 use super::{BoxedComponent, from_boxed};
 use crate::error::Error;
-use crate::layout::{ProviderSlot, SlotIdx, SlotLayout, SlotRef};
+use crate::layout::{ContainerKind, ProviderSlot, SlotIdx, SlotLayout, SlotRef};
 
 /// The instances of a scope opened from a prepared [`SlotLayout`], stored densely by slot.
 ///
 /// The layout's type and trait indexes are shared by every instance of the scope, so an
-/// open scope allocates only its values. Each slot is set once: in `values` while the scope
-/// opens, or in `later` when a slot its opening did not build is built on demand. The second
-/// set is allocated by the first such build, so a scope whose opening built everything it
-/// uses reads plain values. `declares`, when set, lists the only slots that may be built on
-/// demand.
+/// open scope allocates only its values, in one block laid out by the layout's
+/// [`ContainerKind`]. Each slot is set once. `declares`, when set, lists the only slots that
+/// may be built on demand.
 ///
 /// A slot holds only its concrete instance. A read through one of its provider aliases erases
 /// the instance under that trait with the provider's [`erase`](ProviderDescriptor::erase), so
 /// an alias nothing reads costs nothing, and a fixed instance needs no shared alias cell.
 pub(crate) struct SlotStore {
     layout: Arc<SlotLayout>,
-    values: Box<[Option<BoxedComponent>]>,
-    later: OnceLock<Box<Later>>,
+    slots: Slots,
     declares: Option<Arc<[bool]>>,
 }
 
-/// The slots of an open scope built on demand. Each cell is initialized by one build, which
-/// concurrent requests for the same slot wait on, while other slots build independently.
-struct Later {
-    values: Box<[tokio::sync::OnceCell<BoxedComponent>]>,
+/// The slots of a [`SlotStore`], in the layout of its [`ContainerKind`].
+enum Slots {
+    /// Plain values set while the scope opens. A slot its opening did not build is built into
+    /// `later`, allocated by the first such build, so a scope whose opening built everything
+    /// it uses reads plain values.
+    Pinned {
+        values: Box<[Option<BoxedComponent>]>,
+        later: OnceLock<Cells>,
+    },
+    /// One once-cell per slot, allocated when the scope opens: a long-lived scope builds most
+    /// of its slots on first use.
+    Durable(Cells),
 }
+
+/// Slots built after their scope opened. Each cell is initialized by one build, which
+/// concurrent requests for the same slot wait on, while other slots build independently. A
+/// failed build leaves its cell empty.
+type Cells = Box<[tokio::sync::OnceCell<BoxedComponent>]>;
 
 impl SlotStore {
     pub(crate) fn new(layout: Arc<SlotLayout>, declares: Option<Arc<[bool]>>) -> Self {
-        let values = layout.slots().iter().map(|_| None).collect();
+        let slots = match layout.kind() {
+            ContainerKind::Pinned => Slots::Pinned {
+                values: layout.slots().iter().map(|_| None).collect(),
+                later: OnceLock::new(),
+            },
+            ContainerKind::Durable => Slots::Durable(cells(layout.len())),
+        };
 
         Self {
             layout,
-            values,
-            later: OnceLock::new(),
+            slots,
             declares,
+        }
+    }
+
+    /// The container kind this store is laid out for.
+    #[cfg(test)]
+    pub(crate) fn kind(&self) -> ContainerKind {
+        match self.slots {
+            Slots::Pinned { .. } => ContainerKind::Pinned,
+            Slots::Durable(_) => ContainerKind::Durable,
         }
     }
 
@@ -63,9 +87,12 @@ impl SlotStore {
     fn built(&self, slot: SlotIdx) -> Option<&BoxedComponent> {
         let index = slot.index();
 
-        match &self.values[index] {
-            Some(value) => Some(value),
-            None => self.later.get()?.values[index].get(),
+        match &self.slots {
+            Slots::Pinned { values, later } => match &values[index] {
+                Some(value) => Some(value),
+                None => later.get()?[index].get(),
+            },
+            Slots::Durable(cells) => cells[index].get(),
         }
     }
 
@@ -95,7 +122,14 @@ impl SlotStore {
             return Err(self.built_twice(slot));
         }
 
-        self.values[slot.index()] = Some(self.checked(slot, component)?);
+        let value = self.checked(slot, component)?;
+
+        match &mut self.slots {
+            Slots::Pinned { values, .. } => values[slot.index()] = Some(value),
+            Slots::Durable(cells) => {
+                cells[slot.index()] = tokio::sync::OnceCell::new_with(Some(value));
+            }
+        }
 
         Ok(())
     }
@@ -110,7 +144,7 @@ impl SlotStore {
         slot: SlotIdx,
         build: impl Future<Output = crate::Result<BoxedComponent>>,
     ) -> crate::Result<()> {
-        if self.values[slot.index()].is_some() {
+        if self.is_built(slot) {
             return Ok(());
         }
 
@@ -125,7 +159,7 @@ impl SlotStore {
             });
         }
 
-        self.later().values[slot.index()]
+        self.later()[slot.index()]
             .get_or_try_init(|| async { self.checked(slot, build.await?) })
             .await?;
 
@@ -137,7 +171,7 @@ impl SlotStore {
         let value = self.checked(slot, component)?;
 
         // A value set between the caller's check and here came from the same request head.
-        let _ = self.later().values[slot.index()].set(value);
+        let _ = self.later()[slot.index()].set(value);
 
         Ok(())
     }
@@ -156,16 +190,12 @@ impl SlotStore {
         Ok(component)
     }
 
-    fn later(&self) -> &Later {
-        self.later.get_or_init(|| {
-            Box::new(Later {
-                values: self
-                    .values
-                    .iter()
-                    .map(|_| tokio::sync::OnceCell::new())
-                    .collect(),
-            })
-        })
+    /// The cells slots built after the scope opened go in.
+    fn later(&self) -> &Cells {
+        match &self.slots {
+            Slots::Pinned { later, .. } => later.get_or_init(|| cells(self.layout.len())),
+            Slots::Durable(cells) => cells,
+        }
     }
 
     fn built_twice(&self, slot: SlotIdx) -> Error {
@@ -238,7 +268,7 @@ impl SlotStore {
     }
 
     pub(crate) fn component_count(&self) -> usize {
-        (0..self.values.len())
+        (0..self.layout.len())
             .filter(|index| self.is_built(SlotIdx::new(*index)))
             .count()
     }
@@ -249,4 +279,9 @@ impl SlotStore {
             .iter()
             .filter(|provider| self.is_built(provider.at.slot))
     }
+}
+
+/// `len` empty once-cells.
+fn cells(len: usize) -> Cells {
+    (0..len).map(|_| tokio::sync::OnceCell::new()).collect()
 }

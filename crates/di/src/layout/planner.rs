@@ -8,8 +8,8 @@ use upwell_core::{
 };
 
 use super::{
-    DepRef, EagerSelection, PlannedDependency, ProvidedRef, ProviderSlot, RootTarget,
-    SelectedSources, SlotIdx, SlotLayout, SlotRef, SlotSpec, TransientPlan,
+    ContainerKind, DepRef, EagerSelection, PlannedDependency, ProvidedRef, ProviderSlot,
+    RootTarget, SelectedSources, SlotIdx, SlotLayout, SlotRef, SlotSpec, TransientPlan,
 };
 use crate::descriptors::{ComponentDescriptor, ComponentFactoryDescriptor, ProviderDescriptor};
 use crate::error::Error;
@@ -153,6 +153,7 @@ impl SlotLayout {
             selected: SelectedSources::default(),
             constructs,
             shares_store: false,
+            kind: ContainerKind::of(scope),
         })
     }
 }

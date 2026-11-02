@@ -160,7 +160,7 @@ impl ScopeContainer {
             Arc::clone(layout),
             plan.and_then(EntryPlan::declares).cloned(),
         );
-        cx.store_handles(HandleStorage::Fixed);
+        cx.store_handles(layout.kind().handle_storage());
 
         for seed in seeds {
             cx.insert(seed)?;
