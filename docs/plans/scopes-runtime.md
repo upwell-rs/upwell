@@ -499,8 +499,16 @@ and `resolve_qualified` read it first and fall back to selection when the table 
   transient, or no planned slot holds it;
 - the source is not readable on this chain: the enclosing scope is absent, or was opened without
   that layout;
-- the slot is not built yet, or the scope itself was opened without a layout (the root, or a scope
-  that constructs nothing and has no seeds).
+- the slot is not built yet, or the scope itself was opened without a layout (the root, or a
+  scope opened from a plain construction order rather than by an opener).
+
+A scope that holds no components keeps its empty layout when it opens, which allocates nothing,
+so it reads the table too. Before, it opened with an empty by-type store and selected per call.
+That case is on the hot path: the RPC `Request` scope and a JSON-WS `WebsocketMessage` scope
+declare no seed slots, so in an application without per-call components every trait `Inject`
+in a call or message selected at runtime. The root stays layout-less: protocols never extract
+from it per call (every `Inject` and handler parameter extracts from the per-call scope or, for
+a deferred scope, opens it first), so planning a root table would not shorten a request path.
 
 A layout plans with the scopes on *every* chain its scope opens in, but runtime selection sees the
 chain it actually opened in. A scope opened under the root or a session therefore plans without
@@ -516,8 +524,7 @@ every chain that holds a provider of the trait, because such a scope adds provid
 winners. It falls back like a single value, and also when any gathered provider is transient.
 Reading allocates only the returned `Vec`, or the map and its keys (memory contracts assert both).
 
-Still open: trait targets in the two layout-less cases above, and planned handler parameters do
-not yet take their pre-resolved `DepRef`s.
+Still open: planned handler parameters do not yet take their pre-resolved `DepRef`s.
 
 Status (#359, planning at scale): entries are planned once per signature: the scope plus
 the sorted set of target descriptors (type, qualifier, cardinality, resolution, observation,
