@@ -28,6 +28,7 @@ pub mod inject;
 pub mod methods;
 pub mod paths;
 pub mod provide;
+pub mod scope;
 pub mod source;
 
 mod app;
@@ -108,6 +109,19 @@ pub fn entry(attr: TokenStream, item: TokenStream) -> TokenStream {
     let paths = args.paths(Paths::upwell());
 
     run::<ItemFn, _>(item, |item| entry::attribute::expand(args, item, &paths))
+}
+
+/// `#[scope]` expansion entry point.
+pub fn scope(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = match syn::parse2::<scope::ScopeArgs>(attr) {
+        Ok(args) => args,
+
+        Err(e) => return e.into_compile_error(),
+    };
+
+    let paths = args.paths(Paths::upwell());
+
+    run::<ItemStruct, _>(item, |item| scope::expand(args, item, &paths))
 }
 
 /// `#[methods]` expansion entry point — the base impl macro with no extension.

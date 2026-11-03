@@ -1,0 +1,225 @@
+//! `#[scope]` expansion: declares a struct as a scope whose fields are each instance's
+//! parameters.
+//!
+//! The struct is kept unchanged. Beside it the macro emits, from the one `parents` list, the
+//! `Scope` impl, an `OpensUnder<P>` impl and a rank check per parent, and the scope's
+//! `ScopeDeclaration`, carried by the type (so the builder can register it explicitly) and
+//! appended to the `SCOPES` discovery slice. Preparation adds the declaration's boundary to the
+//! protocol's topology and its parameter slot to the registry, so the trait impls and the
+//! topology cannot drift apart. That generated surface is server-only and gated out on wasm.
+
+mod args;
+
+use heck::ToSnakeCase;
+use proc_macro2::TokenStream;
+use quote::{quote, quote_spanned};
+use syn::ext::IdentExt;
+use syn::spanned::Spanned;
+use syn::{Fields, ItemStruct, LitStr};
+
+pub use args::ScopeArgs;
+
+use crate::paths::Paths;
+use args::Generations;
+
+/// The namespace of every scope ID `#[scope]` derives from its type name.
+const DEFAULT_NAMESPACE: &str = "app";
+
+/// Expands `#[scope]` on `item`.
+pub fn expand(args: ScopeArgs, item: ItemStruct, paths: &Paths) -> syn::Result<TokenStream> {
+    reject_generics(&item)?;
+
+    let ident = &item.ident;
+    let id = match &args.id {
+        Some(id) => id.clone(),
+        None => default_id(ident)?,
+    };
+    let name = match &args.name {
+        Some(name) => name.clone(),
+        None => LitStr::new(&ident.unraw().to_string(), ident.span()),
+    };
+    let fields = field_names(&item.fields);
+
+    let scope_trait = paths.core("Scope");
+    let scope_id = paths.core("ScopeId");
+    let namespaced_id = paths.core("namespaced_id");
+    let descriptor_trait = paths.core("Descriptor");
+    let declaration = paths.core("ScopeDeclaration");
+    let scope_parent = paths.core("ScopeParent");
+    let scopes = paths.core("SCOPES");
+    let distributed_slice = paths.core("linkme::distributed_slice");
+    let linkme_crate = paths.core("linkme");
+
+    let rank = rank(&args, paths);
+    let generations = generations(args.generations.as_ref(), paths);
+    let opens_under = opens_under(&args.parents, ident, paths);
+    let rank_checks = rank_checks(&args.parents, ident, paths);
+    let parents = args
+        .parents
+        .iter()
+        .map(|parent| quote_spanned!(parent.span()=> #scope_parent::of::<#parent>()));
+    let source = crate::source::item_source(ident.span(), &ident.unraw().to_string(), paths);
+    let provided = provided(&item.fields, ident, paths);
+
+    let server = crate::gate::native_only(quote! {
+        impl #scope_trait for #ident {
+            const ID: #scope_id = #namespaced_id!(#scope_id, #id);
+            const RANK: u8 = #rank;
+            const NAME: &'static str = #name;
+            #generations
+        }
+
+        #opens_under
+
+        #rank_checks
+
+        impl #descriptor_trait<#declaration> for #ident {
+            const DESCRIPTOR: #declaration = {
+                const PARENTS: &[#scope_parent] = &[#(#parents),*];
+
+                #declaration::new::<#ident>(PARENTS)
+                    .with_fields(&[#(#fields),*])
+                    .declared_at(#source)
+            };
+        }
+
+        const _: () = {
+            #[#distributed_slice(#scopes)]
+            #[linkme(crate = #linkme_crate)]
+            #[allow(unsafe_code)]
+            static __UPWELL_SCOPE: #declaration =
+                <#ident as #descriptor_trait<#declaration>>::DESCRIPTOR;
+        };
+
+        #provided
+    });
+
+    Ok(quote! {
+        #[cfg_attr(target_family = "wasm", allow(dead_code))]
+        #item
+
+        #server
+    })
+}
+
+/// Rejects a generic scope: a scope's identity and rank are constants of one type.
+fn reject_generics(item: &ItemStruct) -> syn::Result<()> {
+    if item.generics.params.is_empty() {
+        return Ok(());
+    }
+
+    Err(syn::Error::new_spanned(
+        &item.generics,
+        "a #[scope] type cannot be generic: its identity, rank and parents are constants of \
+         one type",
+    ))
+}
+
+/// `app/<type name in snake_case>`, spanned at the type name.
+fn default_id(ident: &syn::Ident) -> syn::Result<LitStr> {
+    let name = ident.unraw().to_string();
+    let segment = name.to_snake_case();
+
+    if !crate::entry::is_segment(&segment) {
+        return Err(syn::Error::new_spanned(
+            ident,
+            format!(
+                "`{name}` has no snake_case ASCII form to derive a scope ID from; name the \
+                 scope with `id = \"namespace/name\"`"
+            ),
+        ));
+    }
+
+    Ok(LitStr::new(
+        &format!("{DEFAULT_NAMESPACE}/{segment}"),
+        ident.span(),
+    ))
+}
+
+/// The parameter field names, in declaration order: named fields by name, tuple fields by
+/// position.
+fn field_names(fields: &Fields) -> Vec<LitStr> {
+    fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| match &field.ident {
+            Some(ident) => LitStr::new(&ident.unraw().to_string(), ident.span()),
+            None => LitStr::new(&index.to_string(), field.ty.span()),
+        })
+        .collect()
+}
+
+/// The explicit rank, or one below the lowest-ranked parent.
+fn rank(args: &ScopeArgs, paths: &Paths) -> TokenStream {
+    if let Some(rank) = &args.rank {
+        return quote!(#rank);
+    }
+
+    let scope_trait = paths.core("Scope");
+    let rank_below = paths.core("rank_below");
+    let parents = args
+        .parents
+        .iter()
+        .map(|parent| quote_spanned!(parent.span()=> <#parent as #scope_trait>::RANK));
+
+    quote!(#rank_below(&[#(#parents),*]))
+}
+
+/// The `GENERATIONS` constant, unless the scope keeps the pinned default.
+fn generations(generations: Option<&Generations>, paths: &Paths) -> TokenStream {
+    let ty = paths.core("ScopeGenerations");
+    let value = match generations {
+        None => return quote!(),
+        Some(Generations::Path(path)) => quote!(#path),
+        Some(Generations::Keyword(keyword)) if keyword == "durable" => {
+            quote_spanned!(keyword.span()=> #ty::Durable)
+        }
+        Some(Generations::Keyword(keyword)) => quote_spanned!(keyword.span()=> #ty::Pinned),
+    };
+
+    quote!(const GENERATIONS: #ty = #value;)
+}
+
+/// `impl OpensUnder<P> for S {}` per parent, spanned at the parent.
+fn opens_under(parents: &[syn::Path], ident: &syn::Ident, paths: &Paths) -> TokenStream {
+    let opens_under = paths.core("OpensUnder");
+    let impls = parents
+        .iter()
+        .map(|parent| quote_spanned!(parent.span()=> impl #opens_under<#parent> for #ident {}));
+
+    quote!(#(#impls)*)
+}
+
+/// A const assertion per parent that it outranks the scope, spanned at the parent.
+fn rank_checks(parents: &[syn::Path], ident: &syn::Ident, paths: &Paths) -> TokenStream {
+    let scope_trait = paths.core("Scope");
+    let checks = parents.iter().map(|parent| {
+        let message = format!(
+            "a #[scope] parent must outrank the scope: `{}` does not outrank `{}`",
+            quote!(#parent).to_string().replace(' ', ""),
+            ident.unraw()
+        );
+
+        quote_spanned! {parent.span()=>
+            const _: () = ::core::assert!(
+                <#parent as #scope_trait>::RANK > <#ident as #scope_trait>::RANK,
+                #message
+            );
+        }
+    });
+
+    quote!(#(#checks)*)
+}
+
+/// Under `di-check`, `impl Provided<S> for Wiring {}` for a scope with fields, whose
+/// instances fill their parameter slot with the scope's value.
+fn provided(fields: &Fields, ident: &syn::Ident, paths: &Paths) -> TokenStream {
+    if fields.is_empty() {
+        return quote!();
+    }
+
+    crate::di::provide_impl(ident, paths)
+}
+
+#[cfg(test)]
+mod tests;

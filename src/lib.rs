@@ -23,7 +23,7 @@ pub use upwell_core::*;
 /// `upwell-rpc`, available with the `daemon` feature.
 #[cfg(not(target_family = "wasm"))]
 pub mod scope {
-    pub use upwell_core::scope::{Singleton, Transient};
+    pub use upwell_core::scope::{Root, Singleton, Transient};
 
     #[cfg(feature = "daemon")]
     pub use upwell_rpc::scope::{Connection, Request}; // should not be here, should be in crate::daemon with the rest of the daemon related items
@@ -118,24 +118,26 @@ pub use upwell_app::{
     CompositionDiagnostics, CompositionDirective, CompositionEdge, CompositionPhase,
     CompositionTarget, ContributionId, ContributionProvenance, Contributor, DisplacedGeneration,
     ENTRIES, EarlyPluginCatalog, EarlyPluginPlan, EffectivePluginPlan, EntryDescriptor, EntryError,
-    EntryId, EntryOwner, EntryTable, EntryTargets, ExecutionMode, HostError, IdErrorKind, Initial,
-    InstallationOrigin, InstallationProvenance, InvalidCompositionId, LifecyclePhase, LogFormat,
-    LoggingConfig, PendingTransition, PhaseError, PhaseTiming, Plugin, PluginContribution,
-    PluginContributionKind, PluginContributions, PluginDeclaration, PluginId, PluginPlanError,
-    PluginRelation, PluginResolutionPlan, PluginSlotId, PluginWithOptions, PreBuild,
-    PreBuildContext, PreparedApp, PreparedProtocol, PreparedScopeTopology, ProtocolDefinition,
-    ProtocolId, ProtocolPluginRegistrar, ProtocolRuntime, RelationKind, RelationTarget,
-    ReplacementDecision, ResolvedPlugin, RestartReason, RestartRequired, RetirementContext,
-    RetirementReason, RuntimeReloader, RuntimeTransitionReport, RuntimeView, ScopeBoundary,
-    ScopeParent, ScopeTopology, ScopeTopologyError, Serve, ServerConfig, Setup, ShutdownHandle,
-    ShutdownSignal, SlotPolicy, SpanEvents, SuppressionDecision, TransitionAborted,
-    TransitionAttemptId, TransitionCommitted, TransitionDecision, TransitionFailure,
-    TransitionHookContext, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,
-    TransitionOutcomeContext, TransitionPhase, TransitionProposal, TransitionRejection,
-    TransitionVerdict, ValidationContext, build_host, build_host_context, build_prepared_host,
-    extend_late_plugins, prepare_host, prepare_host_context, prepare_setup_host_context,
-    resolve_early_plugins, resolve_host_dependency, resolve_host_plugin_catalog,
-    retain_host_plugin_catalog, serve_host, setup_host, setup_host_context,
+    EntryId, EntryOwner, EntryScope, EntryTable, EntryTargets, ExecutionMode, HostError,
+    IdErrorKind, Initial, InstallationOrigin, InstallationProvenance, InvalidCompositionId,
+    LifecyclePhase, LogFormat, LoggingConfig, OpenScope, Opening, OpensUnder, PendingTransition,
+    PhaseError, PhaseTiming, Plugin, PluginContribution, PluginContributionKind,
+    PluginContributions, PluginDeclaration, PluginId, PluginPlanError, PluginRelation,
+    PluginResolutionPlan, PluginSlotId, PluginWithOptions, PreBuild, PreBuildContext, PreparedApp,
+    PreparedProtocol, PreparedScopeTopology, ProtocolDefinition, ProtocolId,
+    ProtocolPluginRegistrar, ProtocolRuntime, RelationKind, RelationTarget, ReplacementDecision,
+    ResolvedPlugin, RestartReason, RestartRequired, RetirementContext, RetirementReason,
+    RuntimeReloader, RuntimeTransitionReport, RuntimeView, SCOPES, ScopeBoundary, ScopeBuilder,
+    ScopeDeclaration, ScopeEntry, ScopeOpener, ScopeParent, ScopeTopology, ScopeTopologyError,
+    ScopeWork, Serve, ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents,
+    SuppressionDecision, TransitionAborted, TransitionAttemptId, TransitionCommitted,
+    TransitionDecision, TransitionFailure, TransitionHookContext, TransitionHookOutcome,
+    TransitionHookReport, TransitionOutcome, TransitionOutcomeContext, TransitionPhase,
+    TransitionProposal, TransitionRejection, TransitionVerdict, ValidationContext, build_host,
+    build_host_context, build_prepared_host, extend_late_plugins, prepare_host,
+    prepare_host_context, prepare_setup_host_context, rank_below, resolve_early_plugins,
+    resolve_host_dependency, resolve_host_plugin_catalog, retain_host_plugin_catalog, serve_host,
+    setup_host, setup_host_context,
 };
 
 /// Versioned protocol-neutral developer-tooling schema and prepared-state projection types.
@@ -192,7 +194,7 @@ pub use upwell_transport::{
 // always available; the RPC daemon macros (`service`/`handlers`/`rpc`) live in the `daemon`
 // module behind the `daemon` feature.
 // ---------------------------------------------------------------------------
-pub use upwell_macros::{app, component, config, entry, injectable, methods, when};
+pub use upwell_macros::{app, component, config, entry, injectable, methods, scope, when};
 
 /// Re-exported so macro-generated code can reference the `#[distributed_slice]` attribute
 /// through the facade crate without user crates depending on `linkme` directly. The generated
@@ -432,7 +434,7 @@ pub mod axum {
 pub mod prelude {
     // The macros are built for the host and usable from any target (their generated server code is
     // gated out on wasm); the framework *types* are the daemon-stack surface, compiled out on wasm.
-    pub use crate::{app, component, config, entry, injectable, methods, when};
+    pub use crate::{app, component, config, entry, injectable, methods, scope, when};
 
     #[cfg(not(target_family = "wasm"))]
     pub use crate::{

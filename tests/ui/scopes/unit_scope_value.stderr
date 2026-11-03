@@ -1,0 +1,24 @@
+error[E0277]: no component provides `Unit`
+ --> tests/ui/scopes/unit_scope_value.rs:9:1
+  |
+9 | #[component(scope = Unit)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Provided<Unit>` is not implemented for `Wiring`
+  |
+  = note: add a component for `Unit`, or mark the dependency `Dynamic<Unit>` if it is provided at runtime
+  = help: `Wiring` implements trait `Provided<T>`:
+            Provided<HookManager>
+            Provided<JobScheduler>
+            Provided<PeerInfo>
+            Provided<Publisher<T>>
+            Provided<ReadsUnit>
+            Provided<RequestMeta>
+            Provided<RootResolver>
+            Provided<RuntimeReloader>
+            Provided<ShutdownHandle>
+            Provided<StompHeaders>
+            Provided<StompPrincipal>
+            Provided<StompSession>
+            Provided<TopicBus<P>>
+            Provided<WebsocketUpgradeMeta>
+            Provided<WsConnectionMeta>
+  = note: this error originates in the attribute macro `component` (in Nightly builds, run with -Z macro-backtrace for more info)
