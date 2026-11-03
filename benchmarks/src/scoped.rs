@@ -50,7 +50,10 @@ impl<const N: usize> Component for CallScoped<N> {
 
 /// Boxes a [`CallScoped`] as `cx`'s scope stores it, like a generated factory.
 fn boxed<const N: usize>(cx: &ComponentConstructionContext) -> BoxedComponent {
-    BoxedComponent::stored(TypeDescriptor::of::<CallScoped<N>>(CallScoped::<N>::NAME), cx.stored(CallScoped::<N>.into_handle()))
+    BoxedComponent::stored(
+        TypeDescriptor::of::<CallScoped<N>>(CallScoped::<N>::NAME),
+        cx.stored(CallScoped::<N>.into_handle()),
+    )
 }
 
 fn construct<const N: usize>(
@@ -264,11 +267,17 @@ pub struct ScopedCalls<D: ProtocolDefinition, C: Scope, P: Scope> {
     entries: RouteEntries<P>,
 }
 
+/// A zero-sized protocol scope, whose one value every opening passes to the builder.
+pub trait UnitScope: Scope {
+    /// The scope's only value.
+    const UNIT: Self;
+}
+
 impl<D, C, P> ScopedCalls<D, C, P>
 where
     D: ProtocolDefinition,
-    C: OpensUnder<Singleton>,
-    P: OpensUnder<C>,
+    C: OpensUnder<Singleton> + UnitScope,
+    P: OpensUnder<C> + UnitScope,
 {
     /// Builds `builder` with `roster` in the per-call scope, then opens one connection scope
     /// from the root.
@@ -289,7 +298,7 @@ where
             .runtime()
             .opener::<C>()
             .expect("the connection scope is declared")
-            .builder()
+            .builder(C::UNIT)
             .open_on_demand()
             .await
             .expect("benchmark connection scope opens");
@@ -315,7 +324,7 @@ where
         }
 
         self.per_call
-            .builder()
+            .builder(P::UNIT)
             .under(&self.connection)
             .open_when_needed(self.entries.get(route))
             .await

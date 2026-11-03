@@ -97,7 +97,10 @@ fn boxed<T>() -> BoxedComponent
 where
     T: Component<Handle = Arc<T>> + Default,
 {
-    BoxedComponent::stored(TypeDescriptor::of::<T>(T::NAME), Injectable::into_stored(T::into_handle(T::default())))
+    BoxedComponent::stored(
+        TypeDescriptor::of::<T>(T::NAME),
+        Injectable::into_stored(T::into_handle(T::default())),
+    )
 }
 
 /// A manual (factory-less) descriptor for `T`; the instance is seeded directly.
@@ -123,7 +126,10 @@ where
     let concrete: Arc<T> = live.snapshot();
     let as_trait: Arc<dyn Svc> = concrete;
 
-    BoxedComponent::stored(TypeDescriptor::of::<dyn Svc>("dyn Svc"), Injectable::into_stored(as_trait))
+    BoxedComponent::stored(
+        TypeDescriptor::of::<dyn Svc>("dyn Svc"),
+        Injectable::into_stored(as_trait),
+    )
 }
 
 /// A provider aliasing `T` under `dyn Svc`.
