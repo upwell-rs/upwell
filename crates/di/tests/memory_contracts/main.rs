@@ -8,8 +8,9 @@
 //! - resolving a component (`get`) allocates nothing — it is an `Arc` bump and a map walk;
 //! - request-time extraction (`extract`) of a built component allocates nothing, so it leaks
 //!   nothing either;
-//! - extracting a collection or keyed map of built providers from a scope opened from its layout
-//!   allocates only the value it returns;
+//! - extracting a built trait target from a scope opened from its layout allocates nothing,
+//!   whether it reads the layout's selected source or an entry plan's pre-resolved parameter,
+//!   and a collection or keyed map of built providers allocates only the value it returns;
 //! - a built graph's retained footprint is bounded per component and is fully reclaimed on drop.
 //!
 //! Allocation tracking is scoped to the measured test thread, so concurrent test-runner activity

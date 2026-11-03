@@ -7,8 +7,9 @@ use std::sync::Arc;
 use futures::executor::block_on;
 use upwell_core::{ResolverSet, Scope, ScopeId, Singleton, TypeDescriptor};
 use upwell_di::{
-    BoxedComponent, Component, ComponentDescriptor, ComponentRegistry, FromContainer, Injectable,
-    ProviderDescriptor, ProviderOf, ScopeContainer, ScopeRegistry, SlotLayout,
+    BoxedComponent, Component, ComponentDescriptor, ComponentRegistry, EntryPlan, FromContainer,
+    Injectable, ProviderDescriptor, ProviderOf, ScopeContainer, ScopeRegistry, SlotLayout,
+    UnplannedConstruction,
 };
 
 use crate::alloc::Delta;
@@ -86,12 +87,19 @@ greeter!(RootGreeter, "root");
 greeter!(CallPrimary, "call-primary");
 greeter!(CallSpare, "call-spare");
 
+/// A [`Call`] scope opened from its layout, and the plan of an entry into it injecting
+/// `Arc<dyn Greeter>`.
+struct OpenCall {
+    scope: Arc<ScopeContainer>,
+    plan: EntryPlan,
+}
+
 /// Opens a [`Call`] scope from its layout under a root holding [`RootGreeter`], with
 /// [`CallPrimary`] (the primary provider) and [`CallSpare`] seeded into it.
 ///
 /// Providers are listed in the order the component registry orders them when nothing else
 /// does, by type name, so the scope registry, which keeps the listed order, orders them alike.
-async fn open_call() -> Arc<ScopeContainer> {
+async fn open_call() -> OpenCall {
     let root = [RootGreeter::descriptor(Singleton::KEY)];
     let call = [
         CallPrimary::descriptor(Call::KEY),
@@ -109,6 +117,7 @@ async fn open_call() -> Arc<ScopeContainer> {
     }
     .provider_selection_model(&components)
     .expect("the fixture's providers name its components");
+    let can_reach = |consumer, dependency| consumer == dependency || dependency == Singleton::ID;
     let layout = Arc::new(
         SlotLayout::plan(
             Call::KEY,
@@ -116,9 +125,15 @@ async fn open_call() -> Arc<ScopeContainer> {
             &[],
             &HashMap::new(),
             &selection,
-            |consumer, dependency| consumer == dependency || dependency == Singleton::ID,
+            can_reach,
         )
         .expect("the call scope plans"),
+    );
+    let plan = layout.plan_entry(
+        &[<Arc<dyn Greeter>>::dependency()],
+        &selection,
+        can_reach,
+        UnplannedConstruction::Allow,
     );
     let stored = components
         .iter()
@@ -137,27 +152,32 @@ async fn open_call() -> Arc<ScopeContainer> {
     .await
     .expect("the root builds");
 
-    ScopeContainer::open_planned(
+    let scope = ScopeContainer::open_planned(
         root,
         registry,
         &layout,
-        None,
+        Some(&plan),
         vec![CallPrimary::seed(), CallSpare::seed()],
         Arc::new(()),
     )
     .await
-    .expect("the call scope opens")
+    .expect("the call scope opens");
+
+    OpenCall { scope, plan }
 }
 
-/// What extracting `H` from `scope` `CALLS` times allocates, after checking with `check` that
-/// it extracts what the contract is about, so a contract over a failing extraction cannot pass.
+/// What extracting `H` from `scope` `CALLS` times allocates, through the parameters of `plan`
+/// when one is given, after checking with `check` that it extracts what the contract is about,
+/// so a contract over a failing extraction cannot pass.
 fn extract_repeatedly<H: FromContainer>(
     scope: &Arc<ScopeContainer>,
+    plan: Option<&EntryPlan>,
     check: impl Fn(&H) -> bool,
 ) -> Delta {
     const CALLS: usize = 1_000;
 
-    let extract = || block_on(scope.extract::<H>()).expect("the fixture extracts its targets");
+    let extract =
+        || block_on(scope.extract_planned::<H>(plan)).expect("the fixture extracts its targets");
 
     let first = extract();
 
@@ -182,21 +202,52 @@ fn extract_repeatedly<H: FromContainer>(
 }
 
 #[test]
+fn extracting_a_built_trait_target_allocates_nothing() {
+    let call = block_on(open_call());
+    let is_primary = |greeter: &Arc<dyn Greeter>| greeter.name() == "call-primary";
+
+    assert!(
+        <Arc<dyn Greeter>>::read_planned(&call.scope, &call.plan).is_some(),
+        "the entry's plan pre-resolved its trait target"
+    );
+
+    let single = extract_repeatedly::<Arc<dyn Greeter>>(&call.scope, None, is_primary);
+    let optional = extract_repeatedly::<Option<Arc<dyn Greeter>>>(&call.scope, None, |greeter| {
+        greeter.as_ref().is_some_and(is_primary)
+    });
+    let planned = extract_repeatedly::<Arc<dyn Greeter>>(&call.scope, Some(&call.plan), is_primary);
+
+    assert_eq!(
+        single.allocations, 0,
+        "extracting a built `Arc<dyn Trait>` allocated"
+    );
+    assert_eq!(
+        optional.allocations, 0,
+        "extracting a built `Option<Arc<dyn Trait>>` allocated"
+    );
+    assert_eq!(
+        planned.allocations, 0,
+        "extracting a planned `Arc<dyn Trait>` parameter allocated"
+    );
+}
+
+#[test]
 fn extracting_built_providers_allocates_only_the_returned_value() {
     const CALLS: u64 = 1_000;
     const PROVIDERS: u64 = 3;
 
-    let scope = block_on(open_call());
+    let call = block_on(open_call());
 
-    let collection = extract_repeatedly::<Vec<Arc<dyn Greeter>>>(&scope, |greeters| {
+    let collection = extract_repeatedly::<Vec<Arc<dyn Greeter>>>(&call.scope, None, |greeters| {
         greeters
             .iter()
             .map(|greeter| greeter.name())
             .eq(["call-primary", "call-spare", "root"])
     });
-    let keyed = extract_repeatedly::<HashMap<String, Arc<dyn Greeter>>>(&scope, |greeters| {
-        greeters.len() as u64 == PROVIDERS
-    });
+    let keyed =
+        extract_repeatedly::<HashMap<String, Arc<dyn Greeter>>>(&call.scope, None, |greeters| {
+            greeters.len() as u64 == PROVIDERS
+        });
 
     assert_eq!(
         collection.allocations, CALLS,
