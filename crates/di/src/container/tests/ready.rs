@@ -24,6 +24,7 @@ const fn recipe(construct_ready: Option<ReadyComponentFactory>) -> ComponentFact
         construct_ready,
         dependencies: no_dependencies,
         role: ComponentFactoryRole::Explicit,
+        scope: None,
     }
 }
 

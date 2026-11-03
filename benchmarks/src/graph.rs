@@ -89,6 +89,7 @@ fn factories<const HI: usize, const LO: usize>() -> &'static [ComponentFactoryDe
             construct_ready: None,
             dependencies: dependencies::<HI, LO>,
             role: ComponentFactoryRole::Explicit,
+            scope: None,
         }]
     }
 }

@@ -22,6 +22,7 @@ fn untyped_target() -> ComponentDescriptor {
     ComponentDescriptor {
         construction: upwell_di::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        declared_scope: None,
         ..ComponentDescriptor::of::<UntypedTarget>()
             .with_factories(upwell_di::factories!["untyped-target" => construct])
     }

@@ -73,7 +73,6 @@ impl ProviderSelectionModel {
         can_reach: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<Option<DependencyFault>> {
         let can_access = |consumer, dependency| scope_allows_with(consumer, dependency, &can_reach);
-        let lookup = |type_id| self.component(type_id);
         let is_component = |type_id| self.component(type_id).is_some();
         let consumer = ComponentDescriptor::manual(
             consumer.id,
@@ -82,9 +81,9 @@ impl ProviderSelectionModel {
             consumer.scope,
         );
         let checked = check_dependency(self, &is_component, &consumer, dependency, &can_access)
-            .and_then(|()| check_deferred(self, &lookup, &consumer, dependency, &can_access))
-            .and_then(|()| check_fresh(self, &lookup, &consumer, dependency, &can_access))
-            .and_then(|()| check_scope(self, &lookup, &consumer, dependency, &can_access));
+            .and_then(|()| check_deferred(self, &consumer, dependency, &can_access))
+            .and_then(|()| check_fresh(self, &consumer, dependency, &can_access))
+            .and_then(|()| check_scope(self, &consumer, dependency, &can_access));
 
         match checked {
             Ok(()) => Ok(None),

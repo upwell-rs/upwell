@@ -90,7 +90,8 @@ impl ProviderSelectionModel {
             return Vec::new();
         }
 
-        if let Some(component) = self.component(dependency.ty.type_id)
+        if let Some(component) =
+            self.component_from(dependency.ty.type_id, consumer.scope, can_access)
             && direct_component_is_selectable(component, dependency, consumer.scope, can_access)
         {
             crate::observability::direct_selection(consumer, dependency, component);
@@ -106,7 +107,13 @@ impl ProviderSelectionModel {
         let provider_selections = self.select_dependency(dependency, consumer.scope, can_access);
 
         for selection in &provider_selections {
-            let component = self.components[&selection.provider.concrete_ty.type_id];
+            let Some(component) = self.component_from(
+                selection.provider.concrete_ty.type_id,
+                consumer.scope,
+                can_access,
+            ) else {
+                continue;
+            };
 
             crate::observability::provider_selection(
                 consumer,
@@ -124,7 +131,11 @@ impl ProviderSelectionModel {
                 target: DependencyTarget::Provider(selection.provider),
                 reason: selection.reason,
                 scope: self
-                    .component(selection.provider.concrete_ty.type_id)
+                    .component_from(
+                        selection.provider.concrete_ty.type_id,
+                        consumer.scope,
+                        can_access,
+                    )
                     .map(|component| component.scope.id()),
                 stage: Some(selection.stage),
             })

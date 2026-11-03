@@ -148,6 +148,7 @@ static TARGET_PROVIDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFact
     construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
+    scope: None,
 }];
 static OWNER_PROVIDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
@@ -155,6 +156,7 @@ static OWNER_PROVIDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFacto
     construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
+    scope: None,
 }];
 static FRESH_TARGET_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
@@ -162,6 +164,7 @@ static FRESH_TARGET_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactory
     construct_ready: None,
     dependencies: fresh_target_dependencies,
     role: ComponentFactoryRole::Explicit,
+    scope: None,
 }];
 
 fn target_provider_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -246,6 +249,7 @@ mod fresh;
 mod generations;
 mod kinds;
 mod on_demand;
+mod placements;
 mod providers;
 mod ready;
 mod resolver_slots;

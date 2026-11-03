@@ -54,6 +54,7 @@ macro_rules! scoped {
                         construct_ready: None,
                         dependencies: || factory_dependencies($factory),
                         role: ComponentFactoryRole::Explicit,
+                        scope: None,
                     }]
                 }
             }
@@ -213,6 +214,7 @@ fn eager_descriptor() -> ComponentDescriptor {
                 construct_ready: None,
                 dependencies: no_dependencies,
                 role: ComponentFactoryRole::Explicit,
+                scope: None,
             }]
         }
     }

@@ -150,6 +150,7 @@ macro_rules! __factory_entry {
             construct_ready: ::core::option::Option::None,
             dependencies: || $crate::factory_dependencies($factory),
             role: $crate::ComponentFactoryRole::$role,
+            scope: ::core::option::Option::None,
         }
     };
 }
@@ -164,6 +165,7 @@ macro_rules! __replacement_entry {
             construct_ready: ::core::option::Option::None,
             dependencies: || $crate::replacement_dependencies($factory),
             role: $crate::ComponentFactoryRole::Replacement,
+            scope: ::core::option::Option::None,
         }
     };
 }
@@ -178,6 +180,7 @@ macro_rules! __transition_entry {
             construct_ready: ::core::option::Option::None,
             dependencies: ::std::vec::Vec::new,
             role: $crate::ComponentFactoryRole::Transition,
+            scope: ::core::option::Option::None,
         }
     };
 }
@@ -192,6 +195,7 @@ macro_rules! __hot_update_entry {
             construct_ready: ::core::option::Option::None,
             dependencies: || $crate::hot_update_dependencies($factory),
             role: $crate::ComponentFactoryRole::HotUpdate,
+            scope: ::core::option::Option::None,
         }
     };
 }

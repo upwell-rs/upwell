@@ -299,8 +299,7 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
         let (component, provider) = match target {
             DependencyTarget::Component(component) => (component, None),
             DependencyTarget::Provider(provider) => (
-                self.selection
-                    .component(provider.concrete_ty.type_id)
+                self.placement(provider.concrete_ty.type_id)
                     .ok_or(Error::MissingComponent(provider.concrete_ty.name))?,
                 Some(provider),
             ),
@@ -351,6 +350,16 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
         })
     }
 
+    /// The placement of `type_id` the scope being planned reaches.
+    fn placement(&self, type_id: TypeId) -> Option<ComponentDescriptor> {
+        let can_access = |consumer, dependency| {
+            scope_allows_with(consumer, dependency, &|from, to| (self.can_reach)(from, to))
+        };
+
+        self.selection
+            .component_from(type_id, self.layout.scope, &can_access)
+    }
+
     /// The sources single-value trait dependencies select from the scope being planned,
     /// picked as eager entry targets are.
     fn selected_sources(&self) -> SelectedSources {
@@ -363,7 +372,7 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
         };
 
         SelectedSources::plan(self.layout.scope, &selector, |provider| {
-            let component = self.selection.component(provider.concrete_ty.type_id)?;
+            let component = self.placement(provider.concrete_ty.type_id)?;
 
             self.stored(component, Some(*provider))
         })

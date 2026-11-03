@@ -112,7 +112,7 @@ pub(crate) struct ProviderSelection {
 /// Immutable provider indexes and selection rules shared by validation, planning,
 /// runtime resolution, and tooling projection.
 pub struct ProviderSelectionModel {
-    components: HashMap<TypeId, ComponentDescriptor>,
+    components: HashMap<TypeId, Vec<ComponentDescriptor>>,
     by_trait: HashMap<TypeId, Vec<ProviderDescriptor>>,
     by_concrete: HashMap<TypeId, Vec<ProviderDescriptor>>,
     ordinals: HashMap<TypeId, HashMap<TypeId, usize>>,
@@ -126,10 +126,16 @@ impl ProviderSelectionModel {
     ) -> crate::Result<Self> {
         validate_provider_components(components, &providers)?;
 
-        let components = components
-            .iter()
-            .map(|component| (component.ty.type_id, *component))
-            .collect::<HashMap<_, _>>();
+        let mut placed = HashMap::<TypeId, Vec<ComponentDescriptor>>::new();
+
+        for component in components {
+            placed
+                .entry(component.ty.type_id)
+                .or_default()
+                .push(*component);
+        }
+
+        let components = placed;
         let mut by_trait = HashMap::<TypeId, Vec<ProviderDescriptor>>::new();
         let mut by_concrete = HashMap::<TypeId, Vec<ProviderDescriptor>>::new();
 
@@ -184,12 +190,53 @@ impl ProviderSelectionModel {
         self.ordinals[&provider.trait_ty.type_id][&provider.concrete_ty.type_id]
     }
 
+    /// The component registered for `type_id`: its first placement when it is placed in
+    /// several scopes. Use [`component_from`](Self::component_from) when a consumer scope is
+    /// known.
     pub(crate) fn component(&self, type_id: TypeId) -> Option<ComponentDescriptor> {
-        self.components.get(&type_id).copied()
+        self.components
+            .get(&type_id)
+            .and_then(|placements| placements.first())
+            .copied()
+    }
+
+    /// The placement of `type_id` that `consumer` can access, or the first placement when
+    /// none is accessible, so a violation names a real component.
+    pub(crate) fn component_from(
+        &self,
+        type_id: TypeId,
+        consumer: ScopeKey,
+        can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
+    ) -> Option<ComponentDescriptor> {
+        let placements = self.components.get(&type_id)?;
+
+        placements
+            .iter()
+            .find(|placement| can_access(consumer, placement.scope))
+            .or_else(|| placements.first())
+            .copied()
+    }
+
+    /// Every placement of `type_id`.
+    pub(crate) fn placements(&self, type_id: TypeId) -> &[ComponentDescriptor] {
+        self.components.get(&type_id).map_or(&[], Vec::as_slice)
+    }
+
+    /// The scope of the placement of `type_id` that `consumer` can access, if any.
+    pub(crate) fn accessible_scope(
+        &self,
+        type_id: TypeId,
+        consumer: ScopeKey,
+        can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
+    ) -> Option<ScopeKey> {
+        self.placements(type_id)
+            .iter()
+            .map(|placement| placement.scope)
+            .find(|scope| can_access(consumer, *scope))
     }
 
     pub(crate) fn components(&self) -> impl Iterator<Item = ComponentDescriptor> + '_ {
-        self.components.values().copied()
+        self.components.values().flatten().copied()
     }
 
     pub(crate) fn matching_providers(
@@ -225,7 +272,9 @@ impl ProviderSelectionModel {
             .iter()
             .filter(|provider| provider_matches(provider, qualifier))
             .filter(|provider| self.is_visible(consumer, provider, can_access))
-            .filter_map(|provider| self.component(provider.concrete_ty.type_id))
+            .filter_map(|provider| {
+                self.component_from(provider.concrete_ty.type_id, consumer, can_access)
+            })
             .filter(|component| {
                 resolution != ResolutionMode::Deferred || !component.scope.is_transient()
             })
@@ -247,9 +296,8 @@ impl ProviderSelectionModel {
     }
 
     fn is_transient(&self, provider: &ProviderDescriptor) -> bool {
-        self.components[&provider.concrete_ty.type_id]
-            .scope
-            .is_transient()
+        self.component(provider.concrete_ty.type_id)
+            .is_some_and(|component| component.scope.is_transient())
     }
 
     fn is_visible(
@@ -258,10 +306,8 @@ impl ProviderSelectionModel {
         provider: &ProviderDescriptor,
         can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
     ) -> bool {
-        can_access(
-            consumer,
-            self.components[&provider.concrete_ty.type_id].scope,
-        )
+        self.accessible_scope(provider.concrete_ty.type_id, consumer, can_access)
+            .is_some()
     }
 }
 

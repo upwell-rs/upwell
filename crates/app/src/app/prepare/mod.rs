@@ -139,15 +139,8 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             .map_err(Error::from)?,
         )?;
         let scope_registry = Arc::new(
-            ScopeRegistry::from_selection_model(
-                scopes.transient,
-                resolved
-                    .iter()
-                    .map(|component| (component.ty.type_id, *component))
-                    .collect(),
-                provider_selection,
-            )
-            .map_err(Error::from)?,
+            ScopeRegistry::from_placements(scopes.transient, &resolved, provider_selection)
+                .map_err(Error::from)?,
         );
 
         Ok(PreparedApp {

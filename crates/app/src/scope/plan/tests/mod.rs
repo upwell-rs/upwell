@@ -195,4 +195,5 @@ fn selection_with(
 
 mod layouts;
 mod partition;
+mod placements;
 mod selection;

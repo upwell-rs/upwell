@@ -84,5 +84,6 @@ mod captive;
 mod deferred;
 mod factories;
 mod fresh;
+mod placements;
 mod reachability;
 mod validation;

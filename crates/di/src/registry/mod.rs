@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 mod dependencies;
 pub(crate) mod order;
+pub(crate) mod placements;
 mod resolution;
 pub(crate) mod scopes;
 pub(crate) mod selection;
@@ -65,56 +66,69 @@ impl ComponentRegistry {
         }
     }
 
-    /// Collapses the registered descriptors to one per type. A manually-provided
-    /// instance (an empty-factory descriptor) **overrides** an auto-constructed one
-    /// for the same type. When factoryless descriptors share the same identity, a raw
+    /// Collapses the registered descriptors to one per type and scope. A component that
+    /// builds in several scopes (explicit factories with distinct scopes, or descriptors of
+    /// one type declared in distinct scopes) keeps one placement per scope. Within one scope,
+    /// a manually-provided instance (an empty-factory descriptor) **overrides** an
+    /// auto-constructed one. When factoryless descriptors share the same identity, a raw
     /// non-snapshot-capable descriptor overrides a typed catalog descriptor so active
-    /// seed provenance cannot be upgraded by later candidate metadata. The per-type
+    /// seed provenance cannot be upgraded by later candidate metadata. The per-scope
     /// factory ambiguity check runs here via [`ComponentDescriptor::effective_factory`].
     pub fn resolved_components(&self) -> crate::Result<Vec<ComponentDescriptor>> {
         let mut chosen = Vec::new();
-        let mut positions: HashMap<TypeId, usize> = HashMap::new();
+        let mut positions: HashMap<(TypeId, ScopeId), usize> = HashMap::new();
 
-        for component in &self.components {
-            component.validate_factories()?;
-
-            let type_id = component.ty.type_id;
-            let new_manual = component.effective_factory()?.is_none();
-
-            match positions.get(&type_id).copied() {
-                None => {
-                    positions.insert(type_id, chosen.len());
-                    chosen.push(*component);
-                }
-
-                Some(position) => {
-                    let existing = &chosen[position];
-                    let existing_manual = existing.effective_factory()?.is_none();
-
-                    if new_manual && !existing_manual {
-                        // An override replaces the descriptor at its original position.
-                        // Lifecycle hook ordering must not depend on HashMap iteration.
-                        chosen[position] = *component;
-                    } else if new_manual
-                        && existing_manual
-                        && existing.id == component.id
-                        && existing.is_retainable()
-                        && !component.is_retainable()
-                    {
-                        // A raw pre-built registration has stronger provenance than a
-                        // snapshot-capable factoryless catalog descriptor for the same
-                        // component. Preserve that active-seed policy for later transitions.
-                        chosen[position] = *component;
-                    } else if new_manual == existing_manual && existing.id != component.id {
-                        return Err(Error::DuplicateComponentType(
-                            (component.ty.type_name)().to_string(),
-                        ));
-                    }
-                }
+        for registered in &self.components {
+            for component in registered.expand_placements() {
+                component.validate_factories()?;
+                Self::place(&mut chosen, &mut positions, component)?;
             }
         }
 
+        placements::validate_placement_set(&chosen)?;
+
         Ok(chosen)
+    }
+
+    fn place(
+        chosen: &mut Vec<ComponentDescriptor>,
+        positions: &mut HashMap<(TypeId, ScopeId), usize>,
+        component: ComponentDescriptor,
+    ) -> crate::Result<()> {
+        let key = (component.ty.type_id, component.scope.id());
+        let new_manual = component.effective_factory()?.is_none();
+
+        let Some(position) = positions.get(&key).copied() else {
+            positions.insert(key, chosen.len());
+            chosen.push(component);
+
+            return Ok(());
+        };
+
+        let existing = &chosen[position];
+        let existing_manual = existing.effective_factory()?.is_none();
+
+        if new_manual && !existing_manual {
+            // An override replaces the descriptor at its original position.
+            // Lifecycle hook ordering must not depend on HashMap iteration.
+            chosen[position] = component;
+        } else if new_manual
+            && existing_manual
+            && existing.id == component.id
+            && existing.is_retainable()
+            && !component.is_retainable()
+        {
+            // A raw pre-built registration has stronger provenance than a
+            // snapshot-capable factoryless catalog descriptor for the same
+            // component. Preserve that active-seed policy for later transitions.
+            chosen[position] = component;
+        } else if new_manual == existing_manual && existing.id != component.id {
+            return Err(Error::DuplicateComponentType(
+                (component.ty.type_name)().to_string(),
+            ));
+        }
+
+        Ok(())
     }
 
     /// Validates the component graph using the legacy rank-based scope model.

@@ -1,9 +1,6 @@
 //! Validation of deferred and `Fresh` dependencies, which resolve at use rather than at
 //! construction.
 
-use std::any::TypeId;
-use std::collections::HashMap;
-
 use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, ScopeKey};
 
 use super::ComponentRegistry;
@@ -32,12 +29,9 @@ impl ComponentRegistry {
         model: &selection::ProviderSelectionModel,
         can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<()> {
-        let by_type = index_by_type(components);
-        let lookup = |type_id: TypeId| by_type.get(&type_id).copied();
-
         for consumer in components {
             for dependency in consumer.dependencies() {
-                check_deferred(model, &lookup, consumer, &dependency, can_access)?;
+                check_deferred(model, consumer, &dependency, can_access)?;
             }
         }
 
@@ -61,12 +55,9 @@ impl ComponentRegistry {
         model: &selection::ProviderSelectionModel,
         can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<()> {
-        let by_type = index_by_type(components);
-        let lookup = |type_id: TypeId| by_type.get(&type_id).copied();
-
         for consumer in components {
             for dependency in consumer.dependencies() {
-                check_fresh(model, &lookup, consumer, &dependency, can_access)?;
+                check_fresh(model, consumer, &dependency, can_access)?;
             }
         }
 
@@ -74,19 +65,11 @@ impl ComponentRegistry {
     }
 }
 
-fn index_by_type(components: &[ComponentDescriptor]) -> HashMap<TypeId, ComponentDescriptor> {
-    components
-        .iter()
-        .map(|component| (component.ty.type_id, *component))
-        .collect()
-}
-
 /// Rejects a deferred edge of `consumer` whose selected target is transient, or whose
 /// visible providers include none deferred resolution can select (a tie, or transient
 /// providers only). `lookup` finds a registered component by type.
 pub(super) fn check_deferred(
     model: &selection::ProviderSelectionModel,
-    lookup: &impl Fn(TypeId) -> Option<ComponentDescriptor>,
     consumer: &ComponentDescriptor,
     dependency: &DependencyDescriptor,
     can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
@@ -95,7 +78,7 @@ pub(super) fn check_deferred(
         return Ok(());
     }
 
-    let target = match lookup(dependency.ty.type_id) {
+    let target = match model.component_from(dependency.ty.type_id, consumer.scope, can_access) {
         Some(target) => Some(target),
         None => {
             let selected = model.select_runtime_one(
@@ -107,7 +90,11 @@ pub(super) fn check_deferred(
             );
 
             match selected {
-                Some(selected) => model.component(selected.provider.concrete_ty.type_id),
+                Some(selected) => model.component_from(
+                    selected.provider.concrete_ty.type_id,
+                    consumer.scope,
+                    can_access,
+                ),
                 None if !model.has_visible_provider(
                     dependency.ty.type_id,
                     dependency.qualifier,
@@ -154,7 +141,6 @@ pub(super) fn check_deferred(
 /// component by type.
 pub(super) fn check_fresh(
     model: &selection::ProviderSelectionModel,
-    lookup: &impl Fn(TypeId) -> Option<ComponentDescriptor>,
     consumer: &ComponentDescriptor,
     dependency: &DependencyDescriptor,
     can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
@@ -163,7 +149,7 @@ pub(super) fn check_fresh(
         return Ok(());
     }
 
-    for target in fresh_targets(model, consumer, dependency, lookup, can_access) {
+    for target in fresh_targets(model, consumer, dependency, can_access) {
         // The consumer retains a fresh instance permanently, so the target's own scope
         // must be visible from the consumer's scope — the same lifetime rule an eager edge
         // follows. Collection shapes skip inaccessible providers at runtime, so only
@@ -193,7 +179,7 @@ pub(super) fn check_fresh(
             });
         }
 
-        check_fresh_target_dependencies(model, lookup, consumer, &target, can_access)?;
+        check_fresh_target_dependencies(model, consumer, &target, can_access)?;
     }
 
     Ok(())
@@ -203,7 +189,6 @@ pub(super) fn check_fresh(
 /// access, since the consumer rebuilds the target from its own scope.
 fn check_fresh_target_dependencies(
     model: &selection::ProviderSelectionModel,
-    lookup: &impl Fn(TypeId) -> Option<ComponentDescriptor>,
     consumer: &ComponentDescriptor,
     target: &ComponentDescriptor,
     can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
@@ -213,13 +198,14 @@ fn check_fresh_target_dependencies(
         .into_iter()
         .filter(|edge| edge.resolution == ResolutionMode::Eager && !edge.dynamic && !edge.config)
     {
-        let dependency_scopes = match lookup(target_dependency.ty.type_id) {
-            Some(component) => vec![component.scope],
-            None => selected_dependency_scopes(model, target, &target_dependency, can_access)
-                .into_iter()
-                .map(|(scope, _)| scope)
-                .collect(),
-        };
+        let dependency_scopes =
+            match model.component_from(target_dependency.ty.type_id, consumer.scope, can_access) {
+                Some(component) => vec![component.scope],
+                None => selected_dependency_scopes(model, target, &target_dependency, can_access)
+                    .into_iter()
+                    .map(|(scope, _)| scope)
+                    .collect(),
+            };
         let inaccessible = dependency_scopes
             .iter()
             .find(|scope| !can_access(consumer.scope, **scope));
@@ -249,10 +235,10 @@ fn fresh_targets(
     model: &selection::ProviderSelectionModel,
     consumer: &ComponentDescriptor,
     dependency: &DependencyDescriptor,
-    lookup: &impl Fn(TypeId) -> Option<ComponentDescriptor>,
     can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
 ) -> Vec<ComponentDescriptor> {
-    if let Some(component) = lookup(dependency.ty.type_id) {
+    if let Some(component) = model.component_from(dependency.ty.type_id, consumer.scope, can_access)
+    {
         return vec![component];
     }
 
@@ -277,6 +263,12 @@ fn fresh_targets(
 
     selected
         .into_iter()
-        .filter_map(|selection| model.component(selection.provider.concrete_ty.type_id))
+        .filter_map(|selection| {
+            model.component_from(
+                selection.provider.concrete_ty.type_id,
+                consumer.scope,
+                can_access,
+            )
+        })
         .collect()
 }

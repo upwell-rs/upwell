@@ -154,6 +154,7 @@ pub fn field_injection_component(
                 construct_ready: ::core::option::Option::Some(__upwell_ready_factory),
                 dependencies: __upwell_deps,
                 role: #component_factory_role::Default,
+                scope: ::core::option::Option::None,
             }
         };
         let register_default = register_factory(
@@ -247,6 +248,7 @@ pub fn field_injection_component(
                 hooks: <#self_ident as #component_hooks>::hooks,
                 construction: #construction,
                 generation_snapshot: ::core::option::Option::Some(#generation_snapshot::of::<#self_ident>()),
+                declared_scope: ::core::option::Option::None,
             };
 
         impl #descriptor_trait<#component_descriptor> for #self_ident {
@@ -267,12 +269,16 @@ pub fn field_injection_component(
 ///
 /// `ready` is a synchronous function taking the same parameters, which builds the component
 /// without a future when every parameter is ready to read.
+///
+/// `scope` is the scope marker path the factory builds in; `None` inherits the component's.
 pub fn factory_descriptor(
     id: &TokenStream,
     factory: &TokenStream,
     ready: Option<&TokenStream>,
+    scope: Option<&syn::Path>,
     paths: &Paths,
 ) -> TokenStream {
+    let scope_trait = paths.core("Scope");
     let component_factory_descriptor = paths.core("ComponentFactoryDescriptor");
     let component_factory_role = paths.core("ComponentFactoryRole");
     let dispatch_factory = paths.core("dispatch_factory");
@@ -285,6 +291,14 @@ pub fn factory_descriptor(
         },
         None => quote!(::core::option::Option::None),
     };
+    let scope = match scope {
+        Some(path) => {
+            let key = quote_spanned! {path.span()=> <#path as #scope_trait>::KEY };
+
+            quote!(::core::option::Option::Some(#key))
+        }
+        None => quote!(::core::option::Option::None),
+    };
 
     quote! {
         #component_factory_descriptor {
@@ -293,6 +307,7 @@ pub fn factory_descriptor(
             construct_ready: #construct_ready,
             dependencies: || #factory_dependencies(#factory),
             role: #component_factory_role::Explicit,
+            scope: #scope,
         }
     }
 }
@@ -308,6 +323,7 @@ pub fn explicit_factory(
     let factory = factory_descriptor(
         &quote!(concat!("factory:", stringify!(#factory_path))),
         &quote!(#factory_path),
+        None,
         None,
         paths,
     );

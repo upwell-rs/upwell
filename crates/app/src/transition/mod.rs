@@ -122,6 +122,10 @@ impl CandidateGraph {
         base: Option<PlanBase<'_>>,
     ) -> crate::Result<Self> {
         let components = component_registry.resolved_components()?;
+
+        component_registry.validate_placement_overlap(&components, |outer, inner| {
+            topology.encloses(&outer, &inner)
+        })?;
         registry.validate_configs(&components)?;
 
         let graph = EffectiveGraph::build(

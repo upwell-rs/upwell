@@ -186,19 +186,18 @@ fn unreached(consumer: ScopeKey, selector: &EagerSelection<'_>, target: TypeId) 
     let mut unreached: Vec<ScopeKey> = Vec::new();
 
     for provider in selector.selection.providers_for_trait(target) {
-        let Some(component) = selector.selection.component(provider.concrete_ty.type_id) else {
-            continue;
-        };
-        let scope = component.scope;
+        for component in selector.selection.placements(provider.concrete_ty.type_id) {
+            let scope = component.scope;
 
-        if scope.is_transient()
-            || (selector.can_access)(consumer, scope)
-            || unreached.contains(&scope)
-        {
-            continue;
+            if scope.is_transient()
+                || (selector.can_access)(consumer, scope)
+                || unreached.contains(&scope)
+            {
+                continue;
+            }
+
+            unreached.push(scope);
         }
-
-        unreached.push(scope);
     }
 
     unreached.into_boxed_slice()
@@ -223,10 +222,11 @@ fn select(
             &selector.can_access,
         )?
         .provider;
-    let owner = selector
-        .selection
-        .component(chosen.concrete_ty.type_id)?
-        .scope;
+    let owner = selector.selection.accessible_scope(
+        chosen.concrete_ty.type_id,
+        consumer,
+        &selector.can_access,
+    )?;
 
     if owner.is_transient() {
         return None;
@@ -255,21 +255,20 @@ fn shadowing(
     let mut shadowing: Vec<ScopeKey> = Vec::new();
 
     for provider in selector.selection.providers_for_trait(target) {
-        let Some(component) = selector.selection.component(provider.concrete_ty.type_id) else {
-            continue;
-        };
-        let scope = component.scope;
+        for component in selector.selection.placements(provider.concrete_ty.type_id) {
+            let scope = component.scope;
 
-        if !provider_matches(provider, qualifier)
-            || scope.is_transient()
-            || (scope.rank(), scope.id()) >= selected
-            || (selector.can_access)(consumer, scope)
-            || shadowing.contains(&scope)
-        {
-            continue;
+            if !provider_matches(provider, qualifier)
+                || scope.is_transient()
+                || (scope.rank(), scope.id()) >= selected
+                || (selector.can_access)(consumer, scope)
+                || shadowing.contains(&scope)
+            {
+                continue;
+            }
+
+            shadowing.push(scope);
         }
-
-        shadowing.push(scope);
     }
 
     shadowing.into_boxed_slice()

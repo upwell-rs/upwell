@@ -30,6 +30,7 @@ fn reader_factories() -> &'static [ComponentFactoryDescriptor] {
             construct_ready: None,
             dependencies: || factory_dependencies(reader),
             role: ComponentFactoryRole::Explicit,
+            scope: None,
         }]
     }
 }

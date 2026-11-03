@@ -65,6 +65,7 @@ macro_rules! greeter {
                             construct_ready: None,
                             dependencies: || factory_dependencies(build),
                             role: ComponentFactoryRole::Explicit,
+                            scope: None,
                         }]
                     }
                 }

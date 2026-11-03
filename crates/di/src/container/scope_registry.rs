@@ -18,8 +18,8 @@ pub struct ScopeRegistry {
     /// Transient components keyed by their concrete `TypeId`, for on-demand
     /// construction at resolution time. Transients are never cached.
     transient: HashMap<TypeId, ComponentDescriptor>,
-    factory_backed: HashMap<TypeId, ComponentDescriptor>,
-    by_id: HashMap<&'static str, TypeId>,
+    factory_backed: HashMap<TypeId, Vec<ComponentDescriptor>>,
+    by_id: HashMap<&'static str, ComponentDescriptor>,
     pub(super) selection: Arc<ProviderSelectionModel>,
 }
 
@@ -30,8 +30,9 @@ impl ScopeRegistry {
         providers: Vec<ProviderDescriptor>,
         provider_order: HashMap<TypeId, HashMap<TypeId, usize>>,
     ) -> crate::Result<Self> {
+        let components = components.into_values().collect::<Vec<_>>();
         let selection_components = components
-            .values()
+            .iter()
             .copied()
             .chain(transient.values().copied())
             .collect::<Vec<_>>();
@@ -41,27 +42,45 @@ impl ScopeRegistry {
             provider_order,
         )?);
 
-        Self::from_selection_model(transient, components, selection)
+        Self::from_placements(transient, &components, selection)
     }
 
     /// Creates a runtime registry from the provider model retained by validation
-    /// and construction planning.
+    /// and construction planning, for components that each build in one scope.
     pub fn from_selection_model(
         transient: HashMap<TypeId, ComponentDescriptor>,
         components: HashMap<TypeId, ComponentDescriptor>,
         selection: Arc<ProviderSelectionModel>,
     ) -> crate::Result<Self> {
-        let factory_backed = components
-            .values()
-            .filter(|component| component.effective_factory().ok().flatten().is_some())
-            .map(|component| (component.ty.type_id, *component))
-            .collect();
+        let components = components.into_values().collect::<Vec<_>>();
+
+        Self::from_placements(transient, &components, selection)
+    }
+
+    /// Creates a runtime registry from the provider model retained by validation and
+    /// construction planning. `components` lists every effective component; one placed in
+    /// several scopes appears once per placement.
+    pub fn from_placements(
+        transient: HashMap<TypeId, ComponentDescriptor>,
+        components: &[ComponentDescriptor],
+        selection: Arc<ProviderSelectionModel>,
+    ) -> crate::Result<Self> {
+        let mut factory_backed: HashMap<TypeId, Vec<ComponentDescriptor>> = HashMap::new();
         let by_id = selection
             .components()
-            .map(|component| (component.id, component.ty.type_id))
+            .map(|component| (component.id, component))
             .collect();
 
-        for component in transient.values().chain(components.values()) {
+        for component in components {
+            if component.effective_factory().ok().flatten().is_some() {
+                factory_backed
+                    .entry(component.ty.type_id)
+                    .or_default()
+                    .push(*component);
+            }
+        }
+
+        for component in transient.values().chain(components) {
             if selection.component(component.ty.type_id).is_none() {
                 return Err(Error::MissingComponent(component.name));
             }
@@ -131,8 +150,20 @@ impl ScopeRegistry {
         self.transient.get(&target).copied()
     }
 
-    pub(crate) fn factory_backed(&self, target: TypeId) -> Option<ComponentDescriptor> {
-        self.factory_backed.get(&target).copied()
+    /// The factory-backed placement of `target` whose scope `can_access` reaches, or its
+    /// first placement when none is reachable.
+    pub(crate) fn factory_backed(
+        &self,
+        target: TypeId,
+        can_access: impl Fn(ScopeKey) -> bool,
+    ) -> Option<ComponentDescriptor> {
+        let placements = self.factory_backed.get(&target)?;
+
+        placements
+            .iter()
+            .find(|placement| can_access(placement.scope))
+            .or_else(|| placements.first())
+            .copied()
     }
 
     pub(crate) fn component(&self, target: TypeId) -> Option<ComponentDescriptor> {
@@ -144,8 +175,6 @@ impl ScopeRegistry {
     }
 
     pub(crate) fn component_by_id(&self, id: &str) -> Option<ComponentDescriptor> {
-        self.by_id
-            .get(id)
-            .and_then(|type_id| self.selection.component(*type_id))
+        self.by_id.get(id).copied()
     }
 }

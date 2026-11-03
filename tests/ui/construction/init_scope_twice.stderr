@@ -1,0 +1,5 @@
+error: duplicate `scope` argument
+  --> tests/ui/construction/init_scope_twice.rs:16:27
+   |
+16 |     #[init(scope = Local, scope = Local)]
+   |                           ^^^^^

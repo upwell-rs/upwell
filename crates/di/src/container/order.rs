@@ -196,7 +196,10 @@ impl WaitExpansion<'_> {
         dependency: &upwell_core::DependencyDescriptor,
         waits: &mut HashSet<TypeId>,
     ) {
-        if let Some(component) = self.selection.component(dependency.ty.type_id) {
+        if let Some(component) =
+            self.selection
+                .component_from(dependency.ty.type_id, consumer, self.can_access)
+        {
             if (self.can_access)(consumer, component.scope) {
                 waits.extend(self.provider_waits(component.ty.type_id));
             } else {

@@ -134,6 +134,7 @@ pub(super) static FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactory
     construct_ready: None,
     dependencies,
     role: ComponentFactoryRole::Default,
+    scope: None,
 }];
 
 pub(super) static SNAPSHOT_FACTORIES: [ComponentFactoryDescriptor; 1] =
@@ -143,6 +144,7 @@ pub(super) static SNAPSHOT_FACTORIES: [ComponentFactoryDescriptor; 1] =
         construct_ready: None,
         dependencies: snapshot_dependencies,
         role: ComponentFactoryRole::Default,
+        scope: None,
     }];
 
 pub(super) fn factories() -> &'static [ComponentFactoryDescriptor] {
@@ -266,6 +268,7 @@ pub(super) static CONFIG_CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] =
         construct_ready: None,
         dependencies: exact_config_dependency,
         role: ComponentFactoryRole::Default,
+        scope: None,
     }];
 
 pub(super) fn config_consumer_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -358,6 +361,7 @@ pub(super) static PROVIDER_CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] =
         construct_ready: None,
         dependencies: provider_consumer_dependencies,
         role: ComponentFactoryRole::Default,
+        scope: None,
     }];
 
 pub(super) fn provider_consumer_factories() -> &'static [ComponentFactoryDescriptor] {
