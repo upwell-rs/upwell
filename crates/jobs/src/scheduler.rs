@@ -33,6 +33,7 @@ use std::pin::Pin;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use upwell_core::{DependencyDescriptor, ResolverCtx, ResolverCtxExt, Scope, TypeDescriptor};
+use upwell_di::context::Invocation;
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentFactoryRole, ComponentSource, GenerationSnapshot,
@@ -226,6 +227,30 @@ impl JobScheduler {
         Ok(())
     }
 
+    /// `runner` with each run in an invocation context of its own, holding the root for the run.
+    ///
+    /// A root that was never attached or is already gone has nothing to establish, so the run
+    /// goes ahead without a context, and any lookup it makes fails as outside every context.
+    fn in_run_context(&self, job: Arc<str>, runner: Runner) -> Runner {
+        let root = self.root.clone();
+
+        Arc::new(move |cx| {
+            let runner = Arc::clone(&runner);
+            let context = root.context(Invocation::JobRun {
+                job: Arc::clone(&job),
+            });
+
+            Box::pin(async move {
+                let run = async move { runner(cx).await };
+
+                match context {
+                    Some(context) => context.enter(run).await,
+                    None => run.await,
+                }
+            })
+        })
+    }
+
     /// The shared spawn path: registers an entry, launches its loop, and arranges the job to
     /// remove itself from the registry when its loop ends.
     fn spawn(
@@ -237,6 +262,7 @@ impl JobScheduler {
     ) -> JobHandle {
         let id = JobId::from_raw(self.next_id.fetch_add(1, Ordering::Relaxed));
         let token = self.cancel.child_token();
+        let runner = self.in_run_context(Arc::clone(&metadata.name), runner);
 
         let entry = Arc::new(JobEntry::new(
             id,

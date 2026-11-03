@@ -186,6 +186,11 @@ use stages::{commit_candidate, construct_candidate, evaluate_conditions, plan_tr
 #[cfg(feature = "tooling")]
 pub(crate) use stages::{resolve_staged_transition, staged_condition_snapshot};
 use upwell_config::ReloadCause;
+use upwell_di::context::Invocation;
+
+/// The hook kind a reload transaction's invocation contexts name: its pre-commit phases, which
+/// fire several hook kinds and construct the candidate, share one context on each generation.
+const RELOAD_HOOKS: &str = "reload";
 
 impl AppRuntime {
     /// Re-reads configuration and republishes changed bindings and the derived
@@ -289,8 +294,9 @@ impl AppRuntime {
             self.reloader.generation(),
         );
 
+        let context = base.context(Invocation::Hook { kind: RELOAD_HOOKS });
         let result = active
-            .scope(self.run_reload(transition, &mut recorder))
+            .scope(context.enter(self.run_reload(transition, &mut recorder)))
             .await;
 
         drop(reload_lease);
@@ -391,23 +397,28 @@ impl AppRuntime {
 
         recorder.enter(TransitionPhase::Hooks);
 
-        let hook_reports = staged
-            .run_config_reload_hooks(&hook_manager, |owner| candidate_owners.id(owner))
+        let candidate_context = prepared.context(Invocation::Hook { kind: RELOAD_HOOKS });
+        let hook_reports = candidate_context
+            .clone()
+            .enter(
+                staged.run_config_reload_hooks(&hook_manager, |owner| candidate_owners.id(owner)),
+            )
             .await?;
         let pending = pending.decided(&hook_reports);
 
         recorder.record_hooks(hook_reports);
         recorder.enter(TransitionPhase::Decision);
 
-        fire_gate::<TransitionDecision>(
-            &hook_manager,
-            &candidate_owners,
-            &pending,
-            &staged,
-            &affected,
-            recorder,
-        )
-        .await?;
+        candidate_context
+            .enter(fire_gate::<TransitionDecision>(
+                &hook_manager,
+                &candidate_owners,
+                &pending,
+                &staged,
+                &affected,
+                recorder,
+            ))
+            .await?;
 
         recorder.enter(TransitionPhase::Commit);
 

@@ -20,6 +20,8 @@ use tracing::{debug, error, info, instrument, warn};
 use upwell_app::{
     AppRuntime, OpenScope, ProtocolRuntime, ScopeEntry, ScopeOpener, Serve, ShutdownSignal,
 };
+use upwell_core::Scope;
+use upwell_di::context::{Invocation, bind_opened_scope};
 use upwell_transport::{
     CallResult, Connection, Error as TransportError, PeerInfo, PredefinedCode, Respond,
     RespondStream, ResponseSink, StatusCode, Transport,
@@ -407,10 +409,17 @@ async fn serve_connection<C: Connection>(
                     let connection_scope = connection_scope.clone();
                     let scopes = Arc::clone(&scopes);
                     let peer = peer.clone();
+                    let context = scopes
+                        .calls
+                        .context(Invocation::RpcCall)
+                        .with_pending_scope(
+                            RequestScope::KEY,
+                            Some(Arc::clone(connection_scope.container())),
+                        );
 
                     debug!(target: "upwell::daemon", %path, "dispatching call");
 
-                    tasks.spawn(drive_call(
+                    tasks.spawn(context.enter(drive_call(
                         path,
                         call.payload,
                         call.requests,
@@ -421,7 +430,7 @@ async fn serve_connection<C: Connection>(
                         responder,
                         service,
                         error_handler,
-                    ));
+                    )));
                 }
 
                 Ok(None) => {
@@ -464,6 +473,10 @@ fn observe_call_task(result: Result<(), tokio::task::JoinError>) {
 /// Drives one call to completion on its own task: build its request scope, dispatch,
 /// then pump the outcome into the matching responder — a single reply for unary calls,
 /// or a stream of items terminated by `finish`/`error` for streaming calls.
+///
+/// Runs in the call's invocation context, which waits for the call's scope: the scope binds when
+/// it opens, here for an entry that builds something and on its first resolution otherwise.
+/// Until then, the scope's factories and the global error handler see the connection scope.
 #[allow(clippy::too_many_arguments)]
 async fn drive_call<R>(
     path: String,
@@ -516,6 +529,10 @@ async fn drive_call<R>(
             return;
         }
     };
+
+    if request_scope.is_open() {
+        bind_opened_scope(request_scope.current());
+    }
 
     let ctx = RpcCallContext::new(payload, peer, request_scope, requests, cancel);
     let request = RpcRequest::new(path.clone(), ctx);
