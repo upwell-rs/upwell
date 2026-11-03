@@ -158,6 +158,16 @@ impl ScopeContainer {
         })
     }
 
+    /// The instance this scope opened under, `None` for the root.
+    pub(crate) fn parent(&self) -> Option<&Arc<ScopeContainer>> {
+        self.parent.as_ref()
+    }
+
+    /// The root container at the top of this scope's chain, while it is alive.
+    pub(crate) fn root_handle(&self) -> Option<Arc<ScopeContainer>> {
+        self.root_container().source.container.upgrade()
+    }
+
     pub(crate) fn can_access(&self, scope: ScopeKey) -> bool {
         if scope.is_transient() || self.scope.id() == scope.id() {
             return true;

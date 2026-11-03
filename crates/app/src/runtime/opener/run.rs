@@ -5,6 +5,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use upwell_core::{DependencyDescriptor, Scope};
+use upwell_di::context::Invocation;
 use upwell_di::{EntryPlan, FromContainer, ScopeContainer};
 
 use super::builder::open_planned_in;
@@ -47,6 +48,9 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     /// Opens the instance for `work`, runs it there and returns its output, closing the
     /// instance once the work finishes (anything the work still shares keeps it alive).
     ///
+    /// The work, its targets' resolution included, runs in an invocation context of its own
+    /// whose innermost scope is the instance.
+    ///
     /// `work` is planned like an entry whose targets are its parameters: the instance builds
     /// what they need, and under [`deny_unplanned`](crate::AppBuilder::deny_unplanned) anything
     /// else built on demand fails. The plan is made the first time work with the same
@@ -68,9 +72,13 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     {
         let (view, parent) = self.target()?;
         let plan = run_plan::<S, W, Targets>(&view)?;
+        let context = self.opener.context(Invocation::ScopeRun { scope: S::ID });
         let container = open_planned_in(&view, S::ID, parent, Some(&plan), self.seeds).await?;
 
-        work.call(&container).await
+        context
+            .with_scope(Arc::clone(&container))
+            .enter(work.call(&container))
+            .await
     }
 }
 

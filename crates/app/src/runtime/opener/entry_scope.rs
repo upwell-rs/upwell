@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::OnceCell;
 use upwell_core::Scope;
+use upwell_di::context::{self, InvocationContext};
 use upwell_di::{BoxedComponent, Component, EntryPlan, FromContainer, ScopeContainer};
 
 use super::{Builds, open_in};
@@ -98,6 +99,19 @@ impl<S: Scope> EntryScope<S> {
         }
     }
 
+    /// `context` running in this instance: in its container when it is open, or else waiting
+    /// for it under the scope it opens under, so the deferred opening binds it.
+    #[doc(hidden)]
+    pub fn establish(&self, context: InvocationContext) -> InvocationContext {
+        match &self.state {
+            State::Open { container, .. } => context.with_scope(Arc::clone(container)),
+            State::Deferred(deferred) => match deferred.container.get() {
+                Some(container) => context.with_scope(Arc::clone(container)),
+                None => context.with_pending_scope(S::KEY, Some(Arc::clone(&deferred.parent))),
+            },
+        }
+    }
+
     /// The component of type `T` as its handle, if it is built in the instance or the scopes
     /// it opens under. Never builds or opens anything, so before the container opens it does
     /// not see the builder's seeds.
@@ -162,7 +176,7 @@ impl<S: Scope> EntryScope<S> {
 
 impl Deferred {
     /// The container, opened on the first call with the seeds and on the generation it was
-    /// planned on.
+    /// planned on. The opening binds it into the running invocation context waiting for it.
     async fn open<S: Scope>(&self) -> crate::Result<&Arc<ScopeContainer>> {
         self.container
             .get_or_try_init(|| async {
@@ -173,14 +187,18 @@ impl Deferred {
                     .take()
                     .ok_or(crate::Error::DeferredScopeFailed { scope: S::ID })?;
 
-                open_in(
+                let container = open_in(
                     self.view.clone(),
                     S::ID,
                     Arc::clone(&self.parent),
                     Builds::Entry(self.entry),
                     seeds,
                 )
-                .await
+                .await?;
+
+                context::bind_opened_scope(&container);
+
+                Ok(container)
             })
             .await
     }

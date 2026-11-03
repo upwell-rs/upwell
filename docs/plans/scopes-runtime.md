@@ -41,6 +41,29 @@ runtime generation it pinned, and invocation metadata. `Current<T>` resolves fro
 scope that can own `T`; `Scoped<S, T>` resolves only from scope `S`. Neither caches across
 invocations. A missing context is a typed error, never a panic.
 
+Status (#130, #266): `upwell_di::context::InvocationContext` is that task-local. It holds an
+`Invocation` (a `#[non_exhaustive]` enum: HTTP request, WebSocket connection or message, RPC
+call, job run, hook), the runtime as an opaque `ContextRuntime`, and the innermost scope
+instance, which is the whole chain because containers link to their parents and which pins the
+generation it opened on. A context with no scope resolves the root its runtime supplies:
+`RuntimeView::context` pins the generation it was taken from (hooks and job runs), while
+`ScopeOpener::context` follows the current one until a scope instance joins it. Lookups are
+`pub(crate)` in `upwell-di`; outside every context they fail with `ContextError::OutsideContext`,
+and with no scope instance with `OutsideInvocationScope`. Other crates get `#[doc(hidden)]`
+hooks only: `enter(future)`, `capture()` and `bind_opened_scope`.
+
+- **Lazily opened scopes.** HTTP opens the request scope on first injection, and RPC calls and
+  WebSocket messages whose entry builds nothing open on first resolution. Their context is
+  established first with a *pending* scope: the scope it expects and the parent instance it
+  opens under. Until then the parent is the innermost instance; the opening calls
+  `bind_opened_scope`, which fills a once-cell stored inline in the context. The task-local
+  holds the context by value, so establishing it allocates nothing, unlike a shared per-request
+  cell. Only the dispatching task sees the bind, which is where protocols open these scopes.
+- **Capture and re-entry (for #132, #267).** `capture()` clones the active context (reference
+  counts only) and `enter(future)` runs a future in it on any task. The clone holds its scope
+  instance strongly. A capture taken before a pending scope opened keeps the pending state as
+  captured, so propagation primitives should capture after the scope opens, or open it first.
+
 ## Design
 
 ### Scope identity moves onto the type

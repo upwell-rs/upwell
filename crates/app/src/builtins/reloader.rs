@@ -7,7 +7,8 @@
 
 use std::sync::{Arc, OnceLock};
 
-use upwell_di::{Component, Injectable};
+use upwell_di::context::ContextRuntime;
+use upwell_di::{Component, Injectable, ScopeContainer};
 
 use crate::runtime::{AppRuntime, RuntimeTransitionReport, WeakAppRuntime};
 
@@ -102,3 +103,9 @@ impl Injectable for RuntimeReloader {
 /// Under `di-check`, the reloader is framework-seeded, so it is always provided.
 #[cfg(feature = "di-check")]
 impl upwell_di::Provided<RuntimeReloader> for upwell_di::Wiring {}
+
+impl ContextRuntime for RuntimeReloader {
+    fn root(&self) -> Option<Arc<ScopeContainer>> {
+        Some(self.runtime()?.upgrade()?.root())
+    }
+}
