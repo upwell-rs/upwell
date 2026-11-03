@@ -64,7 +64,8 @@ pub(crate) const fn stores_params<S: Scope>() -> bool {
 /// The rank of a scope opened directly under parents ranked `parents`: one below the
 /// lowest-ranked of them, so it is shorter-lived than each.
 ///
-/// Saturates at zero; the rank check `#[scope]` emits then rejects the declaration.
+/// Saturates at zero, which `#[scope]` rejects with a compile-time check: rank 0 belongs to the
+/// transient scope.
 #[doc(hidden)]
 pub const fn rank_below(parents: &[u8]) -> u8 {
     let mut lowest = u8::MAX;

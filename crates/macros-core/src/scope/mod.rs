@@ -73,6 +73,11 @@ pub fn expand(args: ScopeArgs, item: ItemStruct, paths: &Paths) -> syn::Result<T
 
         #rank_checks
 
+        const _: () = ::core::assert!(
+            <#ident as #scope_trait>::RANK >= 1,
+            "a #[scope] rank must be at least 1: rank 0 belongs to the transient scope"
+        );
+
         impl #descriptor_trait<#declaration> for #ident {
             const DESCRIPTOR: #declaration = {
                 const PARENTS: &[#scope_parent] = &[#(#parents),*];
