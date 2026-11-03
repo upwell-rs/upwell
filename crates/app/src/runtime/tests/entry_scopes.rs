@@ -70,10 +70,16 @@ async fn a_singleton_target_is_read_without_opening_a_deferred_scope() {
         "the plan pre-resolved the singleton"
     );
 
-    session
-        .extract::<HookManager>()
-        .await
-        .expect("the singleton extracts");
+    let extracting = session.extract::<HookManager>();
+    let opening = session.container();
+
+    assert!(
+        std::mem::size_of_val(&extracting) < std::mem::size_of_val(&opening),
+        "extracting holds the scope-opening future inline, growing every handler future"
+    );
+
+    drop(opening);
+    extracting.await.expect("the singleton extracts");
 
     assert!(
         !session.is_open(),

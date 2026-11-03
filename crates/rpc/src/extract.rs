@@ -39,11 +39,13 @@ use upwell_transport::{
     PeerInfo, PredefinedCode, StatusCode, StreamDecode, StreamEncode, StreamEncodeError,
 };
 
+use upwell_app::EntryScope;
 use upwell_di::FromContainer;
 
 use crate::{
     Error,
     descriptors::{RpcCallContext, RpcOutcome, RpcResponse},
+    scope::Request,
 };
 
 /// A value a handler can extract from the call context.
@@ -107,14 +109,22 @@ where
             return Ok(Inject(value));
         }
 
-        let scope = entry.container().await.map_err(Error::from)?;
-
-        scope
-            .extract_planned::<H>(entry.plan())
-            .await
-            .map(Inject)
-            .map_err(Error::from)
+        Box::pin(extract_opening::<H>(entry)).await.map(Inject)
     }
+}
+
+/// Extracts `H` from the call's scope, opening it first if it is deferred.
+///
+/// Boxed by [`Inject`] because opening a scope and selecting providers make a large future:
+/// inline, it would grow every handler future that injects anything, though a planned target
+/// never awaits it.
+async fn extract_opening<H: FromContainer>(entry: &EntryScope<Request>) -> crate::Result<H> {
+    let scope = entry.container().await.map_err(Error::from)?;
+
+    scope
+        .extract_planned::<H>(entry.plan())
+        .await
+        .map_err(Error::from)
 }
 
 /// The call's cancellation token, fired when the peer cancels the call or the

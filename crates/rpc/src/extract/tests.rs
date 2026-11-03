@@ -102,9 +102,16 @@ async fn injecting_a_planned_singleton_leaves_a_deferred_call_scope_unopened() {
         CancellationToken::new(),
     );
 
-    Inject::<Arc<Clock>>::from_context(&ctx)
-        .await
-        .expect("the singleton injects");
+    let injecting = Inject::<Arc<Clock>>::from_context(&ctx);
+    let opening = ctx.scope().container();
+
+    assert!(
+        std::mem::size_of_val(&injecting) < std::mem::size_of_val(&opening),
+        "injecting holds the scope-opening future inline, growing every handler future"
+    );
+
+    drop(opening);
+    injecting.await.expect("the singleton injects");
 
     assert!(
         !ctx.scope().is_open(),

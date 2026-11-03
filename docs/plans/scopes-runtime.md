@@ -543,6 +543,27 @@ Still open: HTTP `Inject` does not read planned parameters yet. Its request scop
 `request_scope.rs`, which keeps the open container in a private request extension; keeping the
 route's `Arc<EntryPlan>` next to it and calling `extract_planned` there is the remaining wiring.
 
+Status (#351, allocation contracts): `upwell-rpc::allocation_contracts` and
+`upwell::allocation_contracts` (both in the critical cohort) measure, per call on one thread,
+the allocations and bytes of an RPC call, an HTTP request, a WebSocket message and a custom scope
+opened through its `ScopeOpener`, and assert that 64 unused components in the call's scope change
+neither what a call injecting nothing nor what a call injecting one component allocates, and that
+an RPC call or WebSocket message injecting a planned singleton opens no scope. The plan-size
+contracts needed a fix: an open scope's in-place slot block was sized to its whole layout,
+128 bytes per slot, so every unused component cost a request that opened its scope 128 bytes.
+Each entry plan now carries `SlotPositions`, the place of each slot its opening fills (the slots
+it builds and the scope's seed slots), and the block holds only those; anything else is built on
+demand into its own cell as before. This applies to pinned containers only: a durable container
+keeps one once-cell per slot whatever its opening's plan, because it builds most slots on first
+use, concurrently, and that block is opened per connection rather than per call. The contract
+that an HTTP route injecting nothing allocates
+no more than raw axum behind the same body limit is written but ignored: the request-scope layer,
+applied as its own `Router::layer`, makes axum re-box every route, which costs 4 allocations and
+about 400 bytes per request (the same as any `Router::layer`, `Identity` included), and one more
+32-byte allocation is not attributed yet. RPC `Inject` and `EntryScope::extract` box the path that
+opens a scope, so a handler future no longer holds that future inline: an RPC call injecting a
+planned component went from 4 432 to 760 bytes.
+
 Status (#359, planning at scale): entries are planned once per signature: the scope plus
 the sorted set of target descriptors (type, qualifier, cardinality, resolution, observation,
 optionality, dynamic and config flags; parameter names are ignored). Entries with equal

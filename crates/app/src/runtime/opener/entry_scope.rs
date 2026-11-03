@@ -127,6 +127,15 @@ impl<S: Scope> EntryScope<S> {
             return Ok(value);
         }
 
+        Box::pin(self.extract_opening::<H>()).await
+    }
+
+    /// Extracts `H`, opening the container first if it is deferred.
+    ///
+    /// Boxed by [`extract`](Self::extract) because opening a scope and selecting providers make
+    /// a large future: inline, it would grow every handler future that extracts anything,
+    /// though a planned target never awaits it.
+    async fn extract_opening<H: FromContainer>(&self) -> crate::Result<H> {
         let container = self.container().await?;
 
         container
