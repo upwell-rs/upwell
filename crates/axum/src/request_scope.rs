@@ -37,6 +37,18 @@
 //!
 //! Every reader of one request sees the same capture. A request that reaches none of these
 //! copies nothing.
+//!
+//! # The invocation context
+//!
+//! [`RequestScopeLayer`] also runs the request, global middleware included, in its
+//! [`InvocationContext`]. The context starts with a pending request scope and no scope
+//! instance, because the scope opens later or not at all; the opening binds its container
+//! into the context, so code that runs after it in the request's task, middleware and the
+//! handler alike, sees the request scope. With eager components the scope opens before global
+//! middleware, so all of it runs in the scope. The context wraps the router's future, and the
+//! router calls a route's layered services when that future is polled, so a layered service's
+//! synchronous `call` runs in it too. It ends with that future, so a response body polled after
+//! it runs outside the context.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,6 +63,8 @@ use tokio::task::futures::TaskLocalFuture;
 use tower::{Layer, Service};
 use upwell_app::{Opening, ScopeEntry, ScopeOpener};
 use upwell_config::Cfg;
+use upwell_core::Scope;
+use upwell_di::context::{Invocation, InvocationContext, bind_opened_scope};
 use upwell_di::{FromContainer, ScopeContainer};
 
 use crate::config::AxumConfig;
@@ -183,14 +197,24 @@ impl<S> Layer<S> for RequestScopeLayer {
 impl<S: Service<Request>> Service<Request> for RequestScopeService<S> {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = TaskLocalFuture<Arc<RequestScopes>, S::Future>;
+    type Future =
+        TaskLocalFuture<Arc<RequestScopes>, TaskLocalFuture<InvocationContext, S::Future>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
-        REQUEST_SCOPES.scope(Arc::clone(&self.scopes), self.inner.call(request))
+        let context = self
+            .scopes
+            .opener
+            .context(Invocation::HttpRequest)
+            .with_pending_scope(HttpRequest::KEY, None);
+
+        REQUEST_SCOPES.scope(
+            Arc::clone(&self.scopes),
+            context.enter(self.inner.call(request)),
+        )
     }
 }
 
@@ -329,6 +353,9 @@ async fn open(
         .open_with_bound_seed(opening, || head.capture())
         .await
         .map_err(|error| InjectRejection::ScopeFailed(error.to_string()))?;
+    let container = opened.into_container();
 
-    Ok(opened.into_container())
+    bind_opened_scope(&container);
+
+    Ok(container)
 }

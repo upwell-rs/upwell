@@ -233,6 +233,27 @@ async fn a_captured_context_reenters_on_another_task_and_plain_spawns_carry_noth
 }
 
 #[tokio::test]
+async fn a_captured_context_reenters_synchronously_on_another_thread() {
+    let chain = chain().await;
+    let captured = context(&chain, Invocation::RpcCall)
+        .with_scope(Arc::clone(&chain.request))
+        .enter(async { InvocationContext::capture().expect("context") })
+        .await;
+    let request = Arc::clone(&chain.request);
+
+    let (inside, after) = std::thread::spawn(move || {
+        let inside = captured.enter_sync(|| Arc::ptr_eq(&innermost().expect("scope"), &request));
+
+        (inside, innermost().err())
+    })
+    .join()
+    .expect("the thread completes");
+
+    assert!(inside);
+    assert_eq!(after, Some(ContextError::OutsideContext));
+}
+
+#[tokio::test]
 async fn a_captured_context_holds_its_scope_instance_strongly() {
     let chain = chain().await;
     let request = child::<Request>(&chain.root).await;

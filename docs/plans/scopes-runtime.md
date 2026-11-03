@@ -64,6 +64,18 @@ hooks only: `enter(future)`, `capture()` and `bind_opened_scope`.
   instance strongly. A capture taken before a pending scope opened keeps the pending state as
   captured, so propagation primitives should capture after the scope opens, or open it first.
 
+Status (#133, HTTP and WebSocket): `RequestScopeLayer`, outside all global middleware, runs each
+request in a context with a pending `HttpRequest` scope. It wraps the router's future, and the
+router calls a route's layered services when that future is polled, so their synchronous `call`
+is covered too. Code running before the scope opens sees the context without a scope;
+global middleware sees the scope from the moment it or anything before it opens it, and from the
+start with eager components. The context ends with the request's future, so a response body
+polled later runs outside it, and the OpenAPI routes, mounted outside the layer, have none.
+A WebSocket protocol's whole `serve` runs in a connection context in the connection scope. Each
+message's handler runs in a nested message context (`WsConnectionScope::message_context`), which
+shows the connection scope until a deferred message scope opens; the socket loop itself never runs
+in a message scope, and an upgraded socket does not inherit the upgrade request's context.
+
 ## Design
 
 ### Scope identity moves onto the type

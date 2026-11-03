@@ -431,3 +431,6 @@ async fn required_subprotocol_is_negotiated_and_seeded() {
 
     server.shutdown().await;
 }
+
+#[cfg(feature = "tungstenite")]
+mod context;
