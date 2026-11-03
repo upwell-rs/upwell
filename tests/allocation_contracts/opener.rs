@@ -124,7 +124,7 @@ impl Runs {
     async fn run(&self, run: Run) -> bool {
         let scope = self
             .opener
-            .builder()
+            .builder(CustomerSync)
             .open(&self.entry)
             .await
             .expect("the run's scope opens");

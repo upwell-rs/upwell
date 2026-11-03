@@ -364,7 +364,7 @@ async fn serve_connection<C: Connection>(
     // extractor regardless, so an otherwise-empty connection scope is skipped. A
     // failed factory closes the connection.
     let peer = conn.peer().clone();
-    let mut builder = scopes.connections.builder();
+    let mut builder = scopes.connections.builder(ConnectionScope);
 
     if needs_peer {
         builder = builder.seed(peer.clone());
@@ -479,7 +479,7 @@ async fn drive_call<R>(
 ) where
     R: Respond + RespondStream + Send + 'static,
 {
-    let builder = scopes.calls.builder().under(&connection_scope);
+    let builder = scopes.calls.builder(RequestScope).under(&connection_scope);
     let opening = builder.open_when_needed(scopes.entries.get(path.as_str()));
     let request_scope = match AssertUnwindSafe(opening).catch_unwind().await {
         Ok(Ok(scope)) => scope,

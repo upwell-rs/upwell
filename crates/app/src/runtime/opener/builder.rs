@@ -5,12 +5,12 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use upwell_core::{Scope, ScopeId, Singleton, TypeDescriptor};
-use upwell_di::{BoxedComponent, EntryPlan, ScopeContainer};
+use upwell_di::{BoxedComponent, EntryPlan, Injectable, ScopeContainer};
 
 use super::{EntryScope, OpenScope, OpensUnder, ScopeEntry, ScopeOpener};
 use crate::entry::EntryId;
 use crate::runtime::RuntimeView;
-use crate::scope::ScopeParent;
+use crate::scope::{ScopeParent, stores_params};
 
 /// The slots opening an instance builds at once; the rest are built on demand.
 #[derive(Clone, Copy, Debug)]
@@ -36,22 +36,29 @@ pub enum Opening<'e, S: Scope> {
     OnDemand,
 }
 
-/// The inputs of one instance of scope `S` opened under a parent of scope `P`.
+/// The inputs of one instance of scope `S` opened under a parent of scope `P`: its value, its
+/// parent and its seeds.
 ///
-/// A stack value: it allocates nothing until a seed is added.
+/// A stack value: it allocates nothing until a seed or a value that is not zero-sized is added.
 #[must_use = "a scope builder does nothing until it is opened"]
 pub struct ScopeBuilder<'a, S: Scope, P: Scope = Singleton> {
     opener: &'a ScopeOpener<S>,
     parent: Option<&'a OpenScope<P>>,
-    seeds: Vec<BoxedComponent>,
+    pub(super) seeds: Vec<BoxedComponent>,
 }
 
 impl<'a, S: Scope> ScopeBuilder<'a, S> {
-    pub(super) fn new(opener: &'a ScopeOpener<S>) -> Self {
+    pub(super) fn new(opener: &'a ScopeOpener<S>, params: S) -> Self {
+        let mut seeds = Vec::new();
+
+        if stores_params::<S>() {
+            seeds.push(params_seed(params));
+        }
+
         Self {
             opener,
             parent: None,
-            seeds: Vec::new(),
+            seeds,
         }
     }
 }
@@ -183,8 +190,8 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     }
 
     /// The generation the instance opens on and the container it opens under.
-    fn target(&self) -> crate::Result<(RuntimeView, Arc<ScopeContainer>)> {
-        let runtime = &self.opener.runtime;
+    pub(super) fn target(&self) -> crate::Result<(RuntimeView, Arc<ScopeContainer>)> {
+        let runtime = self.opener.runtime.get::<S>()?;
         let (view, parent) = match self.parent {
             Some(parent) => (
                 runtime.pinned_view(S::ID, &parent.container)?,
@@ -220,6 +227,15 @@ fn boxed_seed<T: Any + Send + Sync>(value: T) -> BoxedComponent {
     BoxedComponent::stored(TypeDescriptor::of::<T>(std::any::type_name::<T>()), value)
 }
 
+/// The value of an instance of scope `S`, stored in the scope's own slot as the fixed handle
+/// `Arc<S>` reads, since no transition rebinds a scope's value.
+fn params_seed<S: Scope>(params: S) -> BoxedComponent {
+    BoxedComponent::stored(
+        TypeDescriptor::of::<S>(S::NAME),
+        Injectable::into_fixed(Arc::new(params)),
+    )
+}
+
 /// Whether opening an instance of `scope` on `view` with `builds` reads the seed of type `seed`.
 fn reads_seed(view: &RuntimeView, scope: ScopeId, builds: Builds, seed: TypeId) -> bool {
     let layouts = &view.scope_plan().layouts;
@@ -247,19 +263,38 @@ pub(super) async fn open_in(
     seeds: Vec<BoxedComponent>,
 ) -> crate::Result<Arc<ScopeContainer>> {
     let layouts = &view.scope_plan().layouts;
-    let layout = layouts
-        .get(&scope)
-        .ok_or(crate::Error::UndeclaredScopeOpen { scope })?;
     let on_demand;
     let plan = match builds {
         Builds::Entry(entry) => layouts.entry(entry),
         Builds::Everything => None,
         Builds::Eager => {
+            let layout = layouts
+                .get(&scope)
+                .ok_or(crate::Error::UndeclaredScopeOpen { scope })?;
+
             on_demand = EntryPlan::on_demand(layout);
 
             Some(&on_demand)
         }
     };
+
+    open_planned_in(&view, scope, parent, plan, seeds).await
+}
+
+/// Builds an instance of `scope` under `parent` from the layout `view` prepared for it, with
+/// the slots `plan` lists, or every slot without a plan.
+pub(super) async fn open_planned_in(
+    view: &RuntimeView,
+    scope: ScopeId,
+    parent: Arc<ScopeContainer>,
+    plan: Option<&EntryPlan>,
+    seeds: Vec<BoxedComponent>,
+) -> crate::Result<Arc<ScopeContainer>> {
+    let layout = view
+        .scope_plan()
+        .layouts
+        .get(&scope)
+        .ok_or(crate::Error::UndeclaredScopeOpen { scope })?;
 
     ScopeContainer::open_planned(
         parent,

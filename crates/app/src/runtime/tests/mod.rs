@@ -196,7 +196,7 @@ async fn open_session(runtime: &AppRuntime) -> OpenScope<Session> {
     runtime
         .opener::<Session>()
         .expect("session is declared")
-        .builder()
+        .builder(Session)
         .open_default()
         .await
         .expect("session opens")
@@ -211,4 +211,5 @@ fn expect_app_error<T>(result: crate::Result<T>, message: &str) -> Error {
 
 mod entry_scopes;
 mod release;
+mod runs;
 mod scopes;

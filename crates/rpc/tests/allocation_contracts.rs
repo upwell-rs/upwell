@@ -173,7 +173,7 @@ impl Calls {
             .runtime()
             .opener::<Connection>()
             .expect("the connection scope is declared")
-            .builder()
+            .builder(Connection)
             .open_on_demand()
             .await
             .expect("the connection opens");
@@ -222,7 +222,7 @@ impl Calls {
             .expect("every method has an entry");
         let scope = self
             .calls
-            .builder()
+            .builder(Request)
             .under(&self.connection)
             .open_when_needed(Some(entry))
             .await

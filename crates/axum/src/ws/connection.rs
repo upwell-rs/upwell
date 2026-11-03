@@ -40,7 +40,7 @@ impl WsConnectionScope {
 
     /// Starts a message scope under this connection, on the connection's runtime generation.
     pub fn message(&self) -> ScopeBuilder<'_, WebsocketMessage, WebsocketConnection> {
-        self.messages.builder().under(&self.scope)
+        self.messages.builder(WebsocketMessage).under(&self.scope)
     }
 
     /// Opens a message scope `builder` started for a message to `destination`: with the

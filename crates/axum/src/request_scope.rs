@@ -325,7 +325,7 @@ async fn open(
 
     let opened = scopes
         .opener
-        .builder()
+        .builder(HttpRequest)
         .open_with_bound_seed(opening, || head.capture())
         .await
         .map_err(|error| InjectRejection::ScopeFailed(error.to_string()))?;

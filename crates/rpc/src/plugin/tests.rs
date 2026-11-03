@@ -188,7 +188,7 @@ async fn peer_info_seeds_the_connection_scope_a_request_opens_under() {
     let connection = runtime
         .opener::<ConnectionScope>()
         .expect("the connection scope is declared")
-        .builder()
+        .builder(ConnectionScope)
         .seed(peer.clone())
         .open_default()
         .await
@@ -196,7 +196,7 @@ async fn peer_info_seeds_the_connection_scope_a_request_opens_under() {
     let request = runtime
         .opener::<RequestScope>()
         .expect("the request scope is declared")
-        .builder()
+        .builder(RequestScope)
         .under(&connection)
         .open_default()
         .await

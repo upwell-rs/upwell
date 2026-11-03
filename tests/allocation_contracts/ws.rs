@@ -95,7 +95,7 @@ impl Messages {
             .runtime()
             .opener::<WebsocketConnection>()
             .expect("the connection scope is declared")
-            .builder()
+            .builder(WebsocketConnection)
             .open_on_demand()
             .await
             .expect("the connection opens");
@@ -129,7 +129,7 @@ impl Messages {
             .expect("every served handler has an entry");
         let scope = self
             .messages
-            .builder()
+            .builder(WebsocketMessage)
             .under(&self.connection)
             .open_when_needed(Some(entry))
             .await

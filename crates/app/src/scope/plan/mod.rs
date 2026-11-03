@@ -14,6 +14,7 @@ use crate::entry::EntryDescriptor;
 
 mod layouts;
 mod parallel;
+mod runs;
 
 pub(crate) use layouts::{EntryPlanning, PlanBase, ScopeLayouts};
 pub(crate) use parallel::Parallelism;

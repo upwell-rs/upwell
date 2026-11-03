@@ -25,12 +25,12 @@ async fn a_multi_parent_scope_opens_under_each_typed_parent() {
     let session = open_session(&runtime).await;
 
     let under_root = shared
-        .builder()
+        .builder(Shared)
         .open_default()
         .await
         .expect("shared opens under the root");
     let under_session = shared
-        .builder()
+        .builder(Shared)
         .under(&session)
         .open_default()
         .await
@@ -50,7 +50,7 @@ async fn a_parent_from_another_runtime_is_rejected() {
         runtime
             .opener::<Request>()
             .expect("request is declared")
-            .builder()
+            .builder(Request)
             .under(&foreign_session)
             .open_default()
             .await,
@@ -74,7 +74,7 @@ async fn an_opened_scope_takes_its_prepared_metadata() {
     let request = runtime
         .opener::<RequestAlias>()
         .expect("the alias shares the request's identity")
-        .builder()
+        .builder(RequestAlias)
         .under(&session)
         .open_default()
         .await
@@ -128,12 +128,12 @@ async fn an_entry_opens_its_scope_with_the_supplied_seeds() {
         .expect("the session entry resolves");
 
     let unseeded = sessions
-        .builder()
+        .builder(Session)
         .open(&login)
         .await
         .expect("a seed slot no dependency needs may stay empty");
     let seeded = sessions
-        .builder()
+        .builder(Session)
         .seed(Visitor(7))
         .open(&login)
         .await
@@ -167,7 +167,7 @@ async fn a_seed_must_fill_one_declared_slot_of_its_scope() {
 
     let duplicate = expect_app_error(
         sessions
-            .builder()
+            .builder(Session)
             .seed(Visitor(1))
             .seed(Visitor(2))
             .open_default()
@@ -176,7 +176,7 @@ async fn a_seed_must_fill_one_declared_slot_of_its_scope() {
     );
     let elsewhere = expect_app_error(
         requests
-            .builder()
+            .builder(Request)
             .under(&session)
             .seed(Visitor(1))
             .open_default()
@@ -184,7 +184,7 @@ async fn a_seed_must_fill_one_declared_slot_of_its_scope() {
         "a session seed was accepted by a request",
     );
     let unknown = expect_app_error(
-        sessions.builder().seed(Unknown).open_default().await,
+        sessions.builder(Session).seed(Unknown).open_default().await,
         "an unregistered seed was accepted",
     );
 
@@ -210,7 +210,7 @@ async fn a_child_runs_on_its_parent_generation_after_publication() {
 
     let committed = publish_next(&runtime).await;
     let old_request = requests
-        .builder()
+        .builder(Request)
         .under(&old_session)
         .open_default()
         .await
@@ -247,7 +247,7 @@ async fn a_durable_scope_reports_the_generations_it_fell_behind() {
     let request = runtime
         .opener::<Request>()
         .expect("request is declared")
-        .builder()
+        .builder(Request)
         .under(&session)
         .open_default()
         .await

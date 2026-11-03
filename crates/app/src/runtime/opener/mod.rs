@@ -5,6 +5,7 @@
 //! scope's prepared layout and builds the container. The parent's place in the topology is
 //! checked only in debug builds; each seed is checked against the slot it fills.
 
+use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -12,15 +13,19 @@ use upwell_core::{EntryKey, Scope, ScopeId};
 use upwell_di::ScopeContainer;
 
 use super::{AppRuntime, RuntimeGeneration, RuntimeView};
+use crate::builtins::RuntimeReloader;
 use crate::entry::EntryId;
 
 mod builder;
 mod entry_scope;
+mod inject;
+mod run;
 
 use builder::{Builds, open_in};
 
 pub use builder::{Opening, ScopeBuilder};
 pub use entry_scope::EntryScope;
+pub use run::ScopeWork;
 
 /// Declares that scope `Self` may open under scope `P`.
 ///
@@ -31,11 +36,24 @@ pub trait OpensUnder<P: Scope>: Scope {}
 
 /// The prepared opener of scope `S`, shared by protocols and user code.
 ///
-/// Created once with [`AppRuntime::opener`], which checks that `S` is declared. Cloning it
-/// bumps one reference count.
+/// Created once with [`AppRuntime::opener`], which checks that `S` is declared, or injected as
+/// a parameter (an `#[init]` constructor, a job, an entry or [`ScopeBuilder::run`] work).
+/// Injected, it grants permission to open `S`, not to look anything up in it, and holds its
+/// runtime weakly, so a singleton keeping it never keeps the runtime alive. Cloning it is
+/// cheap: an opener made by [`AppRuntime::opener`] bumps one reference count.
 pub struct ScopeOpener<S: Scope> {
-    runtime: Arc<AppRuntime>,
+    runtime: OpenerRuntime,
     scope: PhantomData<fn() -> S>,
+}
+
+/// The runtime a [`ScopeOpener`] opens instances on.
+#[derive(Clone)]
+enum OpenerRuntime {
+    /// Held by the code that prepared the opener, such as a protocol's serve loop.
+    Owned(Arc<AppRuntime>),
+    /// Held weakly by an injected opener through the runtime's own reloader, which is attached
+    /// once the runtime is built: the runtime's components may keep the opener.
+    Injected(RuntimeReloader),
 }
 
 /// An entry that runs in scope `S`, resolved once by [`ScopeOpener::entry`].
@@ -61,14 +79,22 @@ impl AppRuntime {
     /// [`UndeclaredScopeOpen`](crate::Error::UndeclaredScopeOpen) when the active protocol
     /// does not declare `S`.
     pub fn opener<S: Scope>(&self) -> crate::Result<ScopeOpener<S>> {
+        self.declares::<S>()?;
+
+        Ok(ScopeOpener {
+            runtime: OpenerRuntime::Owned(Arc::new(self.clone())),
+            scope: PhantomData,
+        })
+    }
+
+    /// Fails with [`UndeclaredScopeOpen`](crate::Error::UndeclaredScopeOpen) unless the
+    /// topology declares `S`.
+    fn declares<S: Scope>(&self) -> crate::Result<()> {
         if self.scope_topology().boundary(&S::ID).is_none() {
             return Err(crate::Error::UndeclaredScopeOpen { scope: S::ID });
         }
 
-        Ok(ScopeOpener {
-            runtime: Arc::new(self.clone()),
-            scope: PhantomData,
-        })
+        Ok(())
     }
 
     /// The generation a child of `parent` opens under: the one `parent` runs on.
@@ -100,15 +126,39 @@ impl AppRuntime {
     }
 }
 
+impl OpenerRuntime {
+    /// The runtime instances of `S` open on, upgraded for the call when the opener holds it
+    /// weakly. An injected opener checks that the runtime declares `S` here, since it may be
+    /// injected before the runtime exists.
+    fn get<S: Scope>(&self) -> crate::Result<Cow<'_, AppRuntime>> {
+        match self {
+            Self::Owned(runtime) => Ok(Cow::Borrowed(runtime)),
+            Self::Injected(reloader) => {
+                let runtime = reloader
+                    .runtime()
+                    .and_then(|runtime| runtime.upgrade())
+                    .ok_or(crate::Error::RuntimeUnavailable)?;
+
+                runtime.declares::<S>()?;
+
+                Ok(Cow::Owned(runtime))
+            }
+        }
+    }
+}
+
 impl<S: Scope> ScopeOpener<S> {
     /// The entry with stable identity `key`, resolved once for every later opening.
     ///
     /// # Errors
     ///
-    /// [`UnknownEntry`](crate::Error::UnknownEntry) when no entry has `key`, and
-    /// [`EntryScopeMismatch`](crate::Error::EntryScopeMismatch) when it runs in another scope.
+    /// [`UnknownEntry`](crate::Error::UnknownEntry) when no entry has `key`,
+    /// [`EntryScopeMismatch`](crate::Error::EntryScopeMismatch) when it runs in another scope,
+    /// and [`RuntimeUnavailable`](crate::Error::RuntimeUnavailable) when an injected opener
+    /// outlives its runtime.
     pub fn entry(&self, key: EntryKey) -> crate::Result<ScopeEntry<S>> {
-        let entries = &self.runtime.entries;
+        let runtime = self.runtime.get::<S>()?;
+        let entries = &runtime.entries;
         let id = entries.id(&key).ok_or(crate::Error::UnknownEntry { key })?;
         let actual = entries
             .get(id)
@@ -131,27 +181,33 @@ impl<S: Scope> ScopeOpener<S> {
     }
 
     /// Whether every opening of the scope builds an eager component. A condition cannot apply
-    /// to a scoped component, so a reload does not change the answer.
+    /// to a scoped component, so a reload does not change the answer. False once an injected
+    /// opener outlives its runtime.
     pub fn builds_eagerly(&self) -> bool {
-        self.runtime
-            .view()
-            .scope_plan()
-            .layouts
-            .get(&S::ID)
-            .is_some_and(|layout| layout.eager_components().next().is_some())
+        self.runtime.get::<S>().is_ok_and(|runtime| {
+            runtime
+                .view()
+                .scope_plan()
+                .layouts
+                .get(&S::ID)
+                .is_some_and(|layout| layout.eager_components().next().is_some())
+        })
     }
 
-    /// Starts an instance under the application root; [`ScopeBuilder::under`] picks another
-    /// parent.
-    pub fn builder(&self) -> ScopeBuilder<'_, S> {
-        ScopeBuilder::new(self)
+    /// Starts an instance with the value `params` under the application root;
+    /// [`ScopeBuilder::under`] picks another parent.
+    ///
+    /// Components in the instance inject `params` as `Arc<S>`. It is stored once per instance
+    /// in the slot the scope's declaration adds, and a zero-sized scope stores nothing.
+    pub fn builder(&self, params: S) -> ScopeBuilder<'_, S> {
+        ScopeBuilder::new(self, params)
     }
 }
 
 impl<S: Scope> Clone for ScopeOpener<S> {
     fn clone(&self) -> Self {
         Self {
-            runtime: Arc::clone(&self.runtime),
+            runtime: self.runtime.clone(),
             scope: PhantomData,
         }
     }

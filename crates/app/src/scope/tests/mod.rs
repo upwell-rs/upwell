@@ -362,3 +362,16 @@ fn parent_must_have_strictly_greater_lifetime_rank() {
 }
 
 mod dense;
+
+#[test]
+fn a_parent_reference_to_the_root_scope_is_the_root() {
+    assert_eq!(ScopeParent::of::<Singleton>(), ScopeParent::Root);
+    assert_eq!(ScopeParent::of::<upwell_core::Root>(), ScopeParent::Root);
+}
+
+#[test]
+fn a_scope_ranks_below_its_lowest_ranked_parent() {
+    assert_eq!(crate::scope::rank_below(&[u8::MAX]), u8::MAX - 1);
+    assert_eq!(crate::scope::rank_below(&[200, 100, 150]), 99);
+    assert_eq!(crate::scope::rank_below(&[0]), 0);
+}
