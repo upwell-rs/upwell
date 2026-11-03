@@ -38,3 +38,11 @@ impl ScopedProtocol for WsMessages {
         handler(route, self.calls.scope(scope, route).await).await
     }
 }
+
+impl crate::scoped::UnitScope for WebsocketConnection {
+    const UNIT: Self = WebsocketConnection;
+}
+
+impl crate::scoped::UnitScope for WebsocketMessage {
+    const UNIT: Self = WebsocketMessage;
+}

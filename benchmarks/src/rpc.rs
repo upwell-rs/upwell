@@ -119,3 +119,11 @@ impl ScopedProtocol for RpcCalls {
         self.router.dispatch(path, ctx).await.is_ok()
     }
 }
+
+impl crate::scoped::UnitScope for Connection {
+    const UNIT: Self = Connection;
+}
+
+impl crate::scoped::UnitScope for Request {
+    const UNIT: Self = Request;
+}
