@@ -609,7 +609,10 @@ The decisions, and why:
   zero-sized scope gets no slot and stores nothing, so it has no value to inject: `Arc<Unit>` is
   rejected as a missing provider (at preparation, or at compile time under `di-check`). The
   check is `size_of::<S>()`, which also lets hand-written protocol scopes pass their unit value
-  with no extra trait.
+  with no extra trait. `#[scope]` keeps its compile-time view on the same rule: a struct with fields must not
+  be zero-sized (a const assertion rejects, say, `struct Flag { marker: () }`), so the
+  `Provided<S>` it emits under `di-check` always has a slot behind it. A scope without data is a
+  unit struct.
 - **One builder.** `builder` now takes the scope's value; `.under`, `.seed`, `.open(&entry)` and the
   rest are unchanged, and protocols pass their unit scope. The builder's fields are private, so
   options such as log capture can be added without changing its type.

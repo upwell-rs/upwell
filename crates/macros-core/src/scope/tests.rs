@@ -41,7 +41,21 @@ fn a_parameterised_scope_derives_its_identity_and_declares_its_fields() {
     assert!(expanded.contains("impl::upwell::OpensUnder<Root>forCustomerSync{}"));
     assert!(expanded.contains(r#".with_fields(&["customer","region"])"#));
     assert!(expanded.contains("<CustomerSyncas::upwell::Scope>::RANK>=1"));
+    assert!(expanded.contains("::core::mem::size_of::<CustomerSync>()!=0"));
     assert!(!expanded.contains("GENERATIONS"));
+}
+
+#[test]
+fn a_unit_scope_asserts_no_size() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct Unit;
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(!expanded.contains("size_of"));
 }
 
 #[test]

@@ -1,0 +1,8 @@
+error[E0080]: evaluation panicked: a #[scope] with fields must not be zero-sized: its value is stored only when it has a size; declare a scope without data as a unit struct
+ --> tests/ui/scopes/zero_sized_fields.rs:5:13
+  |
+5 |   struct Flag {
+  |  _____________^
+6 | |     marker: (),
+7 | | }
+  | |_^ evaluation of `_` failed here
