@@ -18,7 +18,7 @@ use crate::runtime::RuntimeView;
 ///
 /// Implemented for closures of up to twelve parameters returning a future. The parameters
 /// declare the work's dependencies the way an entry's do, so the work is planned like one.
-pub trait ScopeWork<Targets>: Send {
+pub trait ScopeWork<Targets>: Send + sealed::Sealed<Targets> {
     /// What the work returns.
     type Output;
 
@@ -34,6 +34,13 @@ pub trait ScopeWork<Targets>: Send {
         self,
         scope: &Arc<ScopeContainer>,
     ) -> impl Future<Output = crate::Result<Self::Output>> + Send;
+}
+
+/// Keeps [`ScopeWork`] implemented only for the closures this module covers, so how work is
+/// planned and called can change without breaking downstream implementations.
+mod sealed {
+    /// Implemented only alongside each `ScopeWork` impl in this module.
+    pub trait Sealed<Targets> {}
 }
 
 impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
@@ -87,6 +94,12 @@ fn run_plan<S: Scope, W: ScopeWork<Targets>, Targets>(
 
 macro_rules! scope_work {
     ($($target:ident),*) => {
+        impl<Work, Output, $($target),*> sealed::Sealed<($($target,)*)> for Work
+        where
+            Work: FnOnce($($target),*) -> Output + Send,
+        {
+        }
+
         impl<Work, Output, $($target),*> ScopeWork<($($target,)*)> for Work
         where
             Work: FnOnce($($target),*) -> Output + Send,
