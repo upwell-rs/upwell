@@ -76,6 +76,16 @@ message's handler runs in a nested message context (`WsConnectionScope::message_
 shows the connection scope until a deferred message scope opens; the socket loop itself never runs
 in a message scope, and an upgraded socket does not inherit the upgrade request's context.
 
+Status (#268, RPC, jobs and hooks): each RPC call task runs in a context with a pending call
+scope under its connection, around middleware, handler, response stream and the global error
+handler; the call scope binds when it opens (at once for an entry that builds something, on
+first resolution otherwise), so until then the connection scope is innermost. Each job run
+runs in a `JobRun { job }` context holding the root the scheduler's `RootResolver` reaches, with
+no scope; a scheduler whose root is gone runs the job without a context. Startup and shutdown
+hooks, the reload transaction (proposal on the base, config-reload and decision hooks on the
+candidate root), retirement and the transition outcome observers each run in a `Hook` context
+pinned to the generation they address, with no scope.
+
 ## Design
 
 ### Scope identity moves onto the type

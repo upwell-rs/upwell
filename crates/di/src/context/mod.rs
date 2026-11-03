@@ -187,6 +187,15 @@ impl InvocationContext {
             .is_ok_and(|scope| Arc::ptr_eq(&scope, container))
     }
 
+    /// Whether this context and `other` run in the same innermost scope instance.
+    #[doc(hidden)]
+    pub fn same_scope(&self, other: &Self) -> bool {
+        match (self.scope(), other.scope()) {
+            (Ok(own), Ok(other)) => Arc::ptr_eq(&own, &other),
+            _ => false,
+        }
+    }
+
     /// Whether this context resolves singletons from `root`.
     #[doc(hidden)]
     pub fn resolves_root(&self, root: &Arc<ScopeContainer>) -> bool {

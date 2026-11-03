@@ -208,6 +208,21 @@ async fn a_pending_root_level_scope_has_no_scope_until_it_opens() {
 }
 
 #[tokio::test]
+async fn contexts_compare_by_their_innermost_scope_instance() {
+    let chain = chain().await;
+    let other = child::<Request>(&chain.root).await;
+    let first = context(&chain, Invocation::RpcCall).with_scope(Arc::clone(&chain.request));
+    let second = context(&chain, Invocation::RpcCall).with_scope(Arc::clone(&chain.request));
+    let third = context(&chain, Invocation::RpcCall).with_scope(other);
+    let scopeless = context(&chain, Invocation::RpcCall);
+
+    assert!(first.same_scope(&second));
+    assert!(!first.same_scope(&third));
+    assert!(!first.same_scope(&scopeless));
+    assert!(!scopeless.same_scope(&scopeless));
+}
+
+#[tokio::test]
 async fn a_captured_context_reenters_on_another_task_and_plain_spawns_carry_nothing() {
     let chain = chain().await;
     let entered = context(&chain, Invocation::RpcCall).with_scope(Arc::clone(&chain.request));

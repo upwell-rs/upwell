@@ -39,6 +39,7 @@
 //! [`reload_config`](crate::AppRuntime::reload_config) call fires them whenever it is made.
 
 use upwell_core::DependencyDescriptor;
+use upwell_di::context::Invocation;
 use upwell_hooks::{HookKind, HookParam, HookParticipation};
 
 use super::super::RuntimeView;
@@ -122,7 +123,8 @@ where
     let cx = TransitionOutcomeContext {
         report: report.clone(),
     };
-    let fired = hooks.fire_all::<K>(&cx).await;
+    let context = view.context(Invocation::Hook { kind: K::NAME });
+    let fired = context.enter(hooks.fire_all::<K>(&cx)).await;
     let owners = HookOwners::new(view.resolved_components());
 
     for (component, outcome) in failed_observers(fired.observers, &owners) {

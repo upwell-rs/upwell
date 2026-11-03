@@ -44,6 +44,7 @@ use std::any::TypeId;
 
 use upwell_core::{DependencyDescriptor, RuntimeGenerationId};
 use upwell_di::NodeAction;
+use upwell_di::context::Invocation;
 use upwell_hooks::{HookKind, HookParam, HookParticipation};
 
 use super::super::RuntimeView;
@@ -179,9 +180,14 @@ async fn retire(base: &RuntimeView, owners: &HookOwners, retirement: ComponentRe
         );
     }
 
-    let fired = base
-        .hooks()
-        .fire::<ComponentRetired>(&cx, |hook| Some(hook.component_ty.type_id) == ty)
+    let context = base.context(Invocation::Hook {
+        kind: ComponentRetired::NAME,
+    });
+    let fired = context
+        .enter(
+            base.hooks()
+                .fire::<ComponentRetired>(&cx, |hook| Some(hook.component_ty.type_id) == ty),
+        )
         .await;
 
     for (owner, outcome) in failed_observers(fired.observers, owners) {
