@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: a #[scope] rank must be at least 1: rank 0 belongs to the transient scope
+ --> tests/ui/scopes/derived_rank_zero.rs:7:1
+  |
+7 | #[scope(parents = [Lowest])]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here

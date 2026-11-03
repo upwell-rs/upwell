@@ -40,6 +40,7 @@ fn a_parameterised_scope_derives_its_identity_and_declares_its_fields() {
     assert!(expanded.contains("::upwell::rank_below(&[<Rootas::upwell::Scope>::RANK])"));
     assert!(expanded.contains("impl::upwell::OpensUnder<Root>forCustomerSync{}"));
     assert!(expanded.contains(r#".with_fields(&["customer","region"])"#));
+    assert!(expanded.contains("<CustomerSyncas::upwell::Scope>::RANK>=1"));
     assert!(!expanded.contains("GENERATIONS"));
 }
 
