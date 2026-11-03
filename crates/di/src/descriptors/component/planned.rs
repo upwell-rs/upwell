@@ -8,7 +8,9 @@ use upwell_core::Cardinality;
 use super::context::BuildStore;
 use super::store::SlotStore;
 use super::{ComponentConstructionContext, Injectable, ScopeStore, from_boxed};
-use crate::layout::{DepRef, PlannedDependency, ProvidedRef, SlotIdx, SlotLayout, TransientPlan};
+use crate::layout::{
+    DepRef, EntryPlan, PlannedDependency, ProvidedRef, SlotIdx, SlotLayout, TransientPlan,
+};
 
 /// The factory a construction context is running, whose planned edges its resolutions
 /// read before falling back to dynamic selection.
@@ -39,10 +41,12 @@ impl<H> Planned<H> {
 
 impl ComponentConstructionContext {
     /// Builds this scope into a dense store laid out by `layout`, shared with mid-build
-    /// transients only when [`SlotLayout::shares_store`] says one may read it. With `declares`, the open
-    /// scope builds on demand only the slots it lists.
-    pub(crate) fn use_layout(&mut self, layout: Arc<SlotLayout>, declares: Option<Arc<[bool]>>) {
-        let store = ScopeStore::Slots(SlotStore::new(Arc::clone(&layout), declares));
+    /// transients only when [`SlotLayout::shares_store`] says one may read it. With an entry
+    /// `plan`, the store holds in place only the slots the plan fills, and under
+    /// [`UnplannedConstruction::Deny`](crate::UnplannedConstruction::Deny) the open scope
+    /// builds on demand only the slots the plan declares.
+    pub(crate) fn use_layout(&mut self, layout: Arc<SlotLayout>, plan: Option<&EntryPlan>) {
+        let store = ScopeStore::Slots(SlotStore::new(Arc::clone(&layout), plan));
 
         self.store = match layout.shares_store() {
             true => BuildStore::Shared(Arc::new(RwLock::new(store))),

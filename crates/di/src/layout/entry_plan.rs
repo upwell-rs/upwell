@@ -4,6 +4,7 @@ use std::sync::Arc;
 use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, ScopeId, ScopeKey};
 
 use super::entry_params::EntryParam;
+use super::positions::SlotPositions;
 use super::slot_layout::is_eager;
 use super::{DepRef, SlotIdx, SlotLayout};
 use crate::descriptors::ComponentDescriptor;
@@ -28,6 +29,7 @@ pub struct EntryPlan {
     declared: Arc<[bool]>,
     unplanned: UnplannedConstruction,
     params: Box<[EntryParam]>,
+    positions: Arc<SlotPositions>,
 }
 
 /// Whether a scope opened for an entry may build, on demand, a slot the entry does not
@@ -56,7 +58,13 @@ impl EntryPlan {
             declared: layout.eager().into(),
             unplanned: UnplannedConstruction::Allow,
             params: Box::default(),
+            positions: Arc::new(SlotPositions::of(layout, layout.eager())),
         }
+    }
+
+    /// Where a scope opened for this entry stores the slots it fills in place.
+    pub(crate) fn positions(&self) -> &Arc<SlotPositions> {
+        &self.positions
     }
 
     /// The scope this plan opens.
@@ -171,10 +179,11 @@ impl SlotLayout {
 
         EntryPlan {
             scope: self.scope,
-            builds,
             declared,
             unplanned,
             params: self.plan_params(targets, selection),
+            positions: Arc::new(SlotPositions::of(self, &builds)),
+            builds,
         }
     }
 

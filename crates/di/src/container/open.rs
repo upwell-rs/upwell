@@ -142,7 +142,7 @@ impl ScopeContainer {
                 parent,
                 registry,
                 generation_lease,
-                ScopeStore::Slots(SlotStore::new(Arc::clone(layout), None)),
+                ScopeStore::Slots(SlotStore::new(Arc::clone(layout), plan)),
             ));
         }
 
@@ -154,10 +154,7 @@ impl ScopeContainer {
             ScopeResolverSlot::detached(),
         );
 
-        cx.use_layout(
-            Arc::clone(layout),
-            plan.and_then(EntryPlan::declares).cloned(),
-        );
+        cx.use_layout(Arc::clone(layout), plan);
         cx.store_handles(layout.kind().handle_storage());
 
         for seed in seeds {

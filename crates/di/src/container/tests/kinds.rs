@@ -310,3 +310,69 @@ async fn a_failed_on_demand_build_is_not_kept() {
         "a failed build is not cached"
     );
 }
+
+/// The bytes opening scope `S` with `count` factory-backed slots allocates: every slot built
+/// without a plan, or with a plan that builds none.
+fn opening_bytes<S: Scope>(count: usize, planned: bool) -> u64 {
+    let parent = block_on(root());
+    let lease = Arc::new(());
+    let layout = layout_of::<S>(&slots::<S>(count, false));
+    let plan = planned.then(|| EntryPlan::on_demand(&layout));
+
+    drop(block_on(open_with(
+        &parent,
+        &layout,
+        plan.as_ref(),
+        Vec::new(),
+        &lease,
+    )));
+
+    let (_, delta) = measure(|| {
+        drop(block_on(open_with(
+            &parent,
+            &layout,
+            plan.as_ref(),
+            Vec::new(),
+            &lease,
+        )))
+    });
+
+    delta.bytes
+}
+
+#[test]
+fn a_plan_sizes_a_pinned_block_but_a_durable_scope_keeps_every_cell() {
+    let pinned_small = opening_bytes::<TestScope>(1, true);
+    let pinned_large = opening_bytes::<TestScope>(16, true);
+    let durable_small = opening_bytes::<DurableScope>(1, true);
+    let durable_large = opening_bytes::<DurableScope>(16, true);
+
+    assert_eq!(
+        pinned_large, pinned_small,
+        "a pinned scope's block follows what its plan fills, not its layout"
+    );
+    assert!(
+        durable_large > durable_small,
+        "a durable scope opens one cell per slot, which it builds into on demand"
+    );
+}
+
+#[tokio::test]
+async fn a_durable_scope_opened_with_a_plan_builds_a_left_out_slot_on_demand() {
+    let parent = root().await;
+    let lease = Arc::new(());
+    let layout = layout_of::<DurableScope>(&slots::<DurableScope>(2, false));
+    let plan = EntryPlan::on_demand(&layout);
+
+    let scope = open_with(&parent, &layout, Some(&plan), Vec::new(), &lease).await;
+
+    assert!(scope.get::<Slot<1>>().is_none(), "the plan left it out");
+    assert!(
+        scope
+            .resolve::<Arc<Slot<1>>>()
+            .await
+            .is_ok_and(|built| built.is_some()),
+        "a slot left out of the plan is built into its cell"
+    );
+    assert!(scope.get::<Slot<1>>().is_some());
+}

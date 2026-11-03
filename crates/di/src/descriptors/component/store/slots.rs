@@ -6,7 +6,9 @@ use std::sync::{Arc, OnceLock};
 use super::super::{Injectable, ProviderDescriptor};
 use super::{BoxedComponent, from_boxed};
 use crate::error::Error;
-use crate::layout::{ContainerKind, ProviderSlot, SlotIdx, SlotLayout, SlotRef};
+use crate::layout::{
+    ContainerKind, EntryPlan, ProviderSlot, SlotIdx, SlotLayout, SlotPositions, SlotRef,
+};
 
 /// The instances of a scope opened from a prepared [`SlotLayout`], stored densely by slot.
 ///
@@ -26,15 +28,19 @@ pub(crate) struct SlotStore {
 
 /// The slots of a [`SlotStore`], in the layout of its [`ContainerKind`].
 enum Slots {
-    /// Plain values set while the scope opens. A slot its opening did not build is built into
-    /// `later`, allocated by the first such build, so a scope whose opening built everything
-    /// it uses reads plain values.
+    /// Plain values set while the scope opens. `values` holds only the slots the opening fills,
+    /// at the places its entry plan's `positions` gives them, so its size follows the plan
+    /// rather than the scope's component count; without a plan it holds every slot. Any other
+    /// slot is built into `later`, allocated by the first such build, so a scope whose opening
+    /// built everything it uses reads plain values.
     Pinned {
         values: Box<[Option<BoxedComponent>]>,
+        positions: Option<Arc<SlotPositions>>,
         later: OnceLock<Cells>,
     },
-    /// One once-cell per slot, allocated when the scope opens: a long-lived scope builds most
-    /// of its slots on first use.
+    /// One once-cell per slot, allocated when the scope opens, whatever the opening's plan: a
+    /// long-lived scope builds most of its slots on first use, concurrently, so every slot
+    /// needs its cell, and one such block is opened per connection rather than per call.
     Durable(Cells),
 }
 
@@ -44,19 +50,29 @@ enum Slots {
 type Cells = Box<[tokio::sync::OnceCell<BoxedComponent>]>;
 
 impl SlotStore {
-    pub(crate) fn new(layout: Arc<SlotLayout>, declares: Option<Arc<[bool]>>) -> Self {
+    /// An empty store for an instance opened from `layout` with `plan`, or filling every slot
+    /// without one.
+    pub(crate) fn new(layout: Arc<SlotLayout>, plan: Option<&EntryPlan>) -> Self {
         let slots = match layout.kind() {
-            ContainerKind::Pinned => Slots::Pinned {
-                values: layout.slots().iter().map(|_| None).collect(),
-                later: OnceLock::new(),
-            },
+            ContainerKind::Pinned => {
+                let positions = plan.map(|plan| Arc::clone(plan.positions()));
+                let places = positions
+                    .as_ref()
+                    .map_or(layout.len(), |positions| positions.len());
+
+                Slots::Pinned {
+                    values: (0..places).map(|_| None).collect(),
+                    positions,
+                    later: OnceLock::new(),
+                }
+            }
             ContainerKind::Durable => Slots::Durable(cells(layout.len())),
         };
 
         Self {
             layout,
             slots,
-            declares,
+            declares: plan.and_then(EntryPlan::declares).cloned(),
         }
     }
 
@@ -88,7 +104,11 @@ impl SlotStore {
         let index = slot.index();
 
         match &self.slots {
-            Slots::Pinned { values, later } => match &values[index] {
+            Slots::Pinned {
+                values,
+                positions,
+                later,
+            } => match place(positions.as_deref(), slot).and_then(|at| values[at].as_ref()) {
                 Some(value) => Some(value),
                 None => later.get()?[index].get(),
             },
@@ -123,9 +143,20 @@ impl SlotStore {
         }
 
         let value = self.checked(slot, component)?;
+        let len = self.layout.len();
 
         match &mut self.slots {
-            Slots::Pinned { values, .. } => values[slot.index()] = Some(value),
+            Slots::Pinned {
+                values,
+                positions,
+                later,
+            } => match place(positions.as_deref(), slot) {
+                Some(at) => values[at] = Some(value),
+                None => {
+                    // The check above and exclusive access leave this cell empty.
+                    let _ = later.get_or_init(|| cells(len))[slot.index()].set(value);
+                }
+            },
             Slots::Durable(cells) => {
                 cells[slot.index()] = tokio::sync::OnceCell::new_with(Some(value));
             }
@@ -278,6 +309,15 @@ impl SlotStore {
             .providers_of(trait_id)
             .iter()
             .filter(|provider| self.is_built(provider.at.slot))
+    }
+}
+
+/// The place of `slot` in a pinned store's values: where `positions` puts it, or its own index
+/// in a store holding every slot.
+fn place(positions: Option<&SlotPositions>, slot: SlotIdx) -> Option<usize> {
+    match positions {
+        Some(positions) => positions.place(slot),
+        None => Some(slot.index()),
     }
 }
 
