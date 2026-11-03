@@ -259,6 +259,25 @@ async fn generated_host_resolves_parser_defaults_and_loaded_config() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn after_build_reconciles_each_account_in_its_own_scope_instance() {
+    let _cwd = workspace_cwd();
+    let _environment = TestEnvironment::set(&[
+        ("UPWELL_CONFIG", None),
+        ("UPWELL_PROFILES", None),
+        ("RUST_LOG", None),
+        ("UPWELL_LOG_FORMAT", None),
+        ("NO_COLOR", None),
+        ("CLICOLOR_FORCE", None),
+    ]);
+
+    DaemonApplication::run_with(["homeledger", "database", "migrate", "--dry-run"])
+        .await
+        .expect("after_build reconciles every account before the command runs");
+
+    assert_eq!(crate::lifecycle::take_reconciled_accounts(), 3);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn generated_host_cli_values_override_environment_config_and_defaults() {
     let _cwd = workspace_cwd();
     let config = TestConfig::new("cli", "cli", Some("debug"), Some("compact"), Some(false));

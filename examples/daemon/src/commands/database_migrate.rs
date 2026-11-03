@@ -33,7 +33,13 @@ impl CliCommand<DaemonApplication> for DatabaseMigrateCommand {
             .map(|readiness| readiness.schema_version)
             .unwrap_or(current);
 
+        let reconciled = context
+            .bootstrap()
+            .get::<BuildReadiness>()
+            .map_or(0, |readiness| readiness.reconciled_accounts);
+
         println!("after_build verified schema {verified}");
+        println!("after_build reconciled {reconciled} accounts");
 
         if self.dry_run {
             println!("migration plan: schema {current} -> {}", self.target);

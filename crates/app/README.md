@@ -66,6 +66,37 @@ entry's scope cannot resolve. Reload candidates are checked the same way. The pr
 entries by dense `EntryId` in `PreparedApp::entries`, and `cargo upwell inspect` lists them as
 `entry` resources.
 
+### Application scopes
+
+An application declares its own unit of work with `#[scope]`. The struct's fields are the
+parameters of each instance, and its parent list generates `Scope`, one `OpensUnder<P>` per parent
+and the `ScopeDeclaration` that adds the scope to the protocol's topology:
+
+```rust
+#[scope(parents = [Root])]
+pub struct CustomerSync {
+    customer: CustomerId,
+}
+
+#[component(scope = CustomerSync)]
+struct CustomerClient {
+    sync: Arc<CustomerSync>,
+}
+
+let synced = runtime
+    .opener::<CustomerSync>()?
+    .builder(CustomerSync { customer })
+    .run(|client: Arc<CustomerClient>| async move { client.sync().await })
+    .await?;
+```
+
+Discovery collects every declaration; `AppBuilder::scope::<S>()` registers one explicitly. Inside
+an instance, components inject its value as `Arc<S>`. A unit scope stores nothing, so it has no
+value to inject. `ScopeOpener<S>` is itself injectable as a parameter: of an `#[init]` constructor,
+a job, an entry or `.run` work. Injected, it holds the runtime weakly. `.run` plans its closure like
+an entry whose targets are its parameters, once per parameter types and runtime generation, and
+closes the instance when the work finishes.
+
 ## Internal role
 
 The protocol crates (`upwell-rpc`, `upwell-axum`) build directly on this crate: each provides definition, prepared, and runtime states plus [`Serve`] implementations, and drives requests through the [`AppRuntime`] handle. The `upwell` facade re-exports the whole surface, and named `app!` declarations (in `upwell-macros`) generate lifecycle hosts whose configured builders target the [`AppBuilder`] here.
