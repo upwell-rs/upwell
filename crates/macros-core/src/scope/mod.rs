@@ -216,14 +216,26 @@ fn rank_checks(parents: &[syn::Path], ident: &syn::Ident, paths: &Paths) -> Toke
     quote!(#(#checks)*)
 }
 
-/// Under `di-check`, `impl Provided<S> for Wiring {}` for a scope with fields, whose
-/// instances fill their parameter slot with the scope's value.
+/// For a scope with fields: a const assertion that the scope is not zero-sized, so the
+/// parameter slot its declaration adds (decided by `size_of`) exists exactly when it has fields,
+/// and under `di-check`, `impl Provided<S> for Wiring {}` for that slot. A unit scope gets
+/// neither.
 fn provided(fields: &Fields, ident: &syn::Ident, paths: &Paths) -> TokenStream {
     if fields.is_empty() {
         return quote!();
     }
 
-    crate::di::provide_impl(ident, paths)
+    let provide = crate::di::provide_impl(ident, paths);
+
+    quote_spanned! {fields.span()=>
+        const _: () = ::core::assert!(
+            ::core::mem::size_of::<#ident>() != 0,
+            "a #[scope] with fields must not be zero-sized: its value is stored only when it has a \
+             size; declare a scope without data as a unit struct"
+        );
+
+        #provide
+    }
 }
 
 #[cfg(test)]
