@@ -21,6 +21,14 @@ macro_rules! unbuilt_factories {
         $crate::test_support::unbuilt_factories!($id, $dependencies, Explicit)
     };
     ($id:literal, $dependencies:expr, $role:ident) => {
+        $crate::test_support::unbuilt_factories!(
+            $id,
+            $dependencies,
+            $role,
+            ::core::option::Option::None
+        )
+    };
+    ($id:literal, $dependencies:expr, $role:ident, $scope:expr) => {
         || {
             const {
                 &[$crate::descriptors::ComponentFactoryDescriptor {
@@ -29,6 +37,7 @@ macro_rules! unbuilt_factories {
                     construct_ready: ::core::option::Option::None,
                     dependencies: $dependencies,
                     role: $crate::descriptors::ComponentFactoryRole::$role,
+                    scope: $scope,
                 }]
             }
         }
@@ -49,6 +58,7 @@ pub(crate) const fn unbuilt_recipe(
         construct_ready: None,
         dependencies,
         role,
+        scope: None,
     }
 }
 
@@ -85,6 +95,7 @@ pub(crate) const fn planned(
         hooks: upwell_hooks::no_hooks,
         construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        declared_scope: None,
     }
 }
 

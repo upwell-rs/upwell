@@ -71,3 +71,63 @@ fn a_rejected_marker_keeps_the_stripped_impl_block() {
         "the markers are stripped: {item}"
     );
 }
+
+#[test]
+fn a_scoped_init_registers_its_scope_under_a_name_of_its_own() {
+    let expanded = expansion(syn::parse_quote! {
+        impl Store {
+            #[init(scope = Connection)]
+            fn from_connection() -> Self { Self }
+        }
+    });
+
+    assert!(expanded.contains("__upwell_init_from_connection"));
+    assert!(expanded.contains("< Connection as"));
+    assert!(expanded.contains("Scope > :: KEY"));
+}
+
+#[test]
+fn an_unscoped_init_keeps_the_inherited_scope_and_the_uniqueness_guard() {
+    let expanded = expansion(syn::parse_quote! {
+        impl Store {
+            #[init]
+            fn build() -> Self { Self }
+        }
+    });
+
+    assert!(expanded.contains("async fn init"));
+    assert!(expanded.contains("scope : :: core :: option :: Option :: None"));
+}
+
+#[test]
+fn bound_init_parameters_are_wrapped_and_stripped() {
+    let expanded = expansion(syn::parse_quote! {
+        impl Store {
+            #[init]
+            fn build(#[config("a.b")] cfg: Cfg<Settings>, #[qualifier = "main"] backend: Arc<dyn Backend>) -> Self { Self }
+        }
+    });
+
+    assert!(!expanded.contains("# [config"));
+    assert!(!expanded.contains("# [qualifier"));
+    assert!(expanded.contains("resolve_path"));
+    assert!(expanded.contains("resolve_qualified"));
+}
+
+#[test]
+fn an_unknown_init_argument_is_rejected_at_the_argument() {
+    let error = expand(
+        MethodArgs::<NoExt>::default(),
+        syn::parse_quote! {
+            impl Store {
+                #[init(priority = 1)]
+                fn build() -> Self { Self }
+            }
+        },
+        &Paths::upwell(),
+    )
+    .expect("the diagnostic is emitted beside the item")
+    .to_string();
+
+    assert!(error.contains("unknown `#[init]` argument"));
+}

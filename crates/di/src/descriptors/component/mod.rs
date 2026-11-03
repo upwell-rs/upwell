@@ -10,6 +10,7 @@ mod construction;
 mod context;
 mod factory;
 mod live;
+mod placement;
 mod planned;
 mod provider;
 mod resolve;
@@ -183,7 +184,8 @@ pub trait Wired {}
 ///
 /// `factories` returns the component's `{Type}Factories` slice (the field-injection
 /// default plus any `#[init]`/`factory =` contributions); deps live on each factory,
-/// not here. There is exactly one `ComponentDescriptor` per type.
+/// not here. A component registers one `ComponentDescriptor`; one that builds in several scopes
+/// is expanded into one placement per scope when the registry resolves it.
 ///
 /// `Copy` so the registry can own a flat `Vec<ComponentDescriptor>` holding both
 /// link-time-collected descriptors and ones synthesized at runtime for
@@ -219,6 +221,11 @@ pub struct ComponentDescriptor {
     /// [`without_retention`](Self::without_retention) keeps it for live-cell access only.
     #[doc(hidden)]
     pub generation_snapshot: Option<GenerationSnapshot>,
+    /// Set on one placement of a component that builds in several scopes: the scope the
+    /// component declared, which factories without a scope of their own inherit. `None`
+    /// on every descriptor that has not been expanded into placements.
+    #[doc(hidden)]
+    pub declared_scope: Option<ScopeKey>,
 }
 
 /// The empty factory slice for a manually-provided instance: nothing to construct,
@@ -239,6 +246,7 @@ impl ComponentDescriptor {
             hooks: no_hooks,
             construction: ScopedConstruction::OnDemand,
             generation_snapshot: Some(GenerationSnapshot::of::<T>()),
+            declared_scope: None,
         }
     }
 
@@ -262,6 +270,7 @@ impl ComponentDescriptor {
             hooks: no_hooks,
             construction: ScopedConstruction::OnDemand,
             generation_snapshot: None,
+            declared_scope: None,
         }
     }
 

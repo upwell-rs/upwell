@@ -83,6 +83,22 @@ impl PreparedScopeTopology {
                 .binary_search(dependency)
                 .is_ok()
     }
+
+    /// Returns whether `ancestor` encloses `descendant` on at least one opening chain.
+    ///
+    /// Unlike [`is_reachable`](Self::is_reachable), which asks for an ancestor on every
+    /// chain, this holds when any chain opens `descendant` under `ancestor`. The root
+    /// encloses every declared boundary and nothing encloses the root.
+    pub fn encloses(&self, ancestor: &ScopeId, descendant: &ScopeId) -> bool {
+        let Some(boundary) = self.boundary(descendant) else {
+            return false;
+        };
+
+        boundary.parents().iter().any(|parent| match parent {
+            ScopeParent::Root => *ancestor == Singleton::ID,
+            ScopeParent::Boundary(id) => id == ancestor || self.encloses(ancestor, id),
+        })
+    }
 }
 
 /// The ancestors on every opening chain of each boundary, sorted, indexed like `boundaries`.

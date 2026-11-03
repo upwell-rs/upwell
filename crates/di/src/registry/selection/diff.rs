@@ -45,8 +45,10 @@ impl ProviderSelectionModel {
         for type_id in components {
             let scope = |model: &Self| {
                 model
-                    .component(*type_id)
+                    .placements(*type_id)
+                    .iter()
                     .map(|component| component.scope.id())
+                    .collect::<Vec<_>>()
             };
 
             if scope(self) != scope(other) {

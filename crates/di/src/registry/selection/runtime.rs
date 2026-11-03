@@ -89,9 +89,9 @@ impl ProviderSelectionModel {
         let mut groups = BTreeMap::new();
 
         for provider in providers.iter().filter(|provider| include(provider)) {
-            let dependency_scope = self.components[&provider.concrete_ty.type_id].scope;
-
-            if can_access(consumer, dependency_scope) {
+            if let Some(dependency_scope) =
+                self.accessible_scope(provider.concrete_ty.type_id, consumer, can_access)
+            {
                 groups
                     .entry((dependency_scope.rank(), dependency_scope.id()))
                     .or_insert_with(Vec::new)
@@ -188,13 +188,12 @@ impl ProviderSelectionModel {
             .iter()
             .filter(move |provider| provider_matches(provider, qualifier))
             .filter(move |provider| {
-                let scope = self.components[&provider.concrete_ty.type_id].scope;
-
-                if resolution != ResolutionMode::Fresh && scope.is_transient() {
+                if resolution != ResolutionMode::Fresh && self.is_transient(provider) {
                     return resolution != ResolutionMode::Deferred;
                 }
 
-                can_access(consumer, scope)
+                self.accessible_scope(provider.concrete_ty.type_id, consumer, &can_access)
+                    .is_some()
             })
             .copied()
     }
@@ -260,11 +259,11 @@ impl ProviderSelectionModel {
                 .iter()
                 .filter(|provider| include(provider))
                 .filter_map(|provider| {
-                    let scope = self.components[&provider.concrete_ty.type_id].scope;
+                    let scope =
+                        self.accessible_scope(provider.concrete_ty.type_id, consumer, can_access)?;
                     let key = (scope.rank(), scope.id());
 
-                    (can_access(consumer, scope) && after.is_none_or(|after| key > after))
-                        .then_some(key)
+                    after.is_none_or(|after| key > after).then_some(key)
                 })
                 .min()?;
 
@@ -274,8 +273,8 @@ impl ProviderSelectionModel {
                         return false;
                     }
 
-                    let scope = self.components[&provider.concrete_ty.type_id].scope;
-                    can_access(consumer, scope) && (scope.rank(), scope.id()) == key
+                    self.accessible_scope(provider.concrete_ty.type_id, consumer, can_access)
+                        .is_some_and(|scope| (scope.rank(), scope.id()) == key)
                 })
             {
                 return Some(ProviderSelection {

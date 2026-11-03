@@ -68,24 +68,30 @@ impl ComponentRegistry {
         &self,
         components: &[ComponentDescriptor],
     ) -> crate::Result<()> {
-        let scope_of: HashMap<TypeId, ScopeId> = components
-            .iter()
-            .map(|component| (component.ty.type_id, component.scope.id()))
-            .collect();
+        let mut scopes_of: HashMap<TypeId, Vec<ScopeId>> = HashMap::new();
         let mut seen: HashSet<(TypeId, &str, ScopeId)> = HashSet::new();
 
-        for provider in &self.providers {
-            let Some(scope) = scope_of.get(&provider.concrete_ty.type_id).copied() else {
-                continue;
-            };
+        for component in components {
+            scopes_of
+                .entry(component.ty.type_id)
+                .or_default()
+                .push(component.scope.id());
+        }
 
-            if !seen.insert((provider.trait_ty.type_id, provider.qualifier, scope)) {
-                return Err(Error::DuplicateProviderQualifier {
-                    trait_name: (provider.trait_ty.type_name)().to_string(),
-                    trait_type: (provider.trait_ty.type_name)().to_string(),
-                    qualifier: provider.qualifier.to_string(),
-                    scope,
-                });
+        for provider in &self.providers {
+            let scopes = scopes_of
+                .get(&provider.concrete_ty.type_id)
+                .map_or(&[][..], Vec::as_slice);
+
+            for scope in scopes.iter().copied() {
+                if !seen.insert((provider.trait_ty.type_id, provider.qualifier, scope)) {
+                    return Err(Error::DuplicateProviderQualifier {
+                        trait_name: (provider.trait_ty.type_name)().to_string(),
+                        trait_type: (provider.trait_ty.type_name)().to_string(),
+                        qualifier: provider.qualifier.to_string(),
+                        scope,
+                    });
+                }
             }
         }
 
@@ -143,7 +149,11 @@ pub(super) fn check_dependency(
 
         match selected {
             Some(selected) => {
-                if let Some(component) = model.component(selected.provider.concrete_ty.type_id) {
+                if let Some(component) = model.component_from(
+                    selected.provider.concrete_ty.type_id,
+                    consumer.scope,
+                    can_access,
+                ) {
                     crate::observability::provider_selection(
                         consumer,
                         dep,

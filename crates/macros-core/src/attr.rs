@@ -46,7 +46,7 @@ pub(crate) fn parse_path_override(input: ParseStream) -> syn::Result<syn::Path> 
     input.parse()
 }
 
-fn parse_scope_path(input: ParseStream) -> syn::Result<syn::Path> {
+pub(crate) fn parse_scope_path(input: ParseStream) -> syn::Result<syn::Path> {
     let path: syn::Path = input.parse()?;
 
     if path.leading_colon.is_none()

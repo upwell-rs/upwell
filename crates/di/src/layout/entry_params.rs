@@ -3,7 +3,9 @@
 
 use std::any::TypeId;
 
-use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, Scope, ScopeKey, Singleton};
+use upwell_core::{
+    Cardinality, DependencyDescriptor, ResolutionMode, Scope, ScopeId, ScopeKey, Singleton,
+};
 
 use super::{DepRef, RootTarget, SlotLayout, SlotRef};
 use crate::registry::ProviderSelectionModel;
@@ -122,17 +124,27 @@ impl SlotLayout {
             return None;
         }
 
-        let source = match selection.component(target) {
-            None if dependency.optional => DepRef::Absent,
-            None => return None,
-            Some(component) if component.scope.id() == self.scope.id() => DepRef::Local(SlotRef {
+        let placements = selection.placements(target);
+        let in_scope = |scope: ScopeId| {
+            placements
+                .iter()
+                .any(|component| component.scope.id() == scope)
+        };
+        let source = if placements.is_empty() {
+            if !dependency.optional {
+                return None;
+            }
+
+            DepRef::Absent
+        } else if in_scope(self.scope.id()) {
+            DepRef::Local(SlotRef {
                 slot: self.slot_of(target)?,
                 alias: None,
-            }),
-            Some(component) if component.scope.id() == Singleton::ID => {
-                DepRef::Root(RootTarget::Component(target))
-            }
-            Some(_) => return None,
+            })
+        } else if in_scope(Singleton::ID) {
+            DepRef::Root(RootTarget::Component(target))
+        } else {
+            return None;
         };
 
         Some(param(source, Box::default()))

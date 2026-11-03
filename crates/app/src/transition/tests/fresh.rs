@@ -67,6 +67,7 @@ static TRANSIENT_SEED_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFacto
     construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
+    scope: None,
 }];
 static ACTIVE_HOLDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "holder-active",
@@ -74,6 +75,7 @@ static ACTIVE_HOLDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactor
     construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
+    scope: None,
 }];
 static CANDIDATE_HOLDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "holder-candidate",
@@ -81,6 +83,7 @@ static CANDIDATE_HOLDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFac
     construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
+    scope: None,
 }];
 
 fn transient_seed_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -106,6 +109,7 @@ fn fresh_holder(factories: fn() -> &'static [ComponentFactoryDescriptor]) -> Com
         hooks: upwell_hooks::no_hooks,
         construction: upwell_di::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        declared_scope: None,
     }
 }
 
@@ -120,6 +124,7 @@ fn transient_seed() -> ComponentDescriptor {
         hooks: upwell_hooks::no_hooks,
         construction: upwell_di::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        declared_scope: None,
     }
 }
 

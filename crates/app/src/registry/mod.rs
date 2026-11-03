@@ -193,6 +193,10 @@ impl AppRegistry {
 
         let components = self.resolved_components()?;
 
+        self.component_registry()
+            .validate_placement_overlap(&components, |outer, inner| {
+                topology.encloses(&outer, &inner)
+            })?;
         self.validate_configs(&components)?;
 
         Ok(())
@@ -210,7 +214,10 @@ impl AppRegistry {
                 selection,
                 |consumer, dependency| topology.is_reachable(&consumer, &dependency),
             )?;
-
+        self.component_registry()
+            .validate_placement_overlap(components, |outer, inner| {
+                topology.encloses(&outer, &inner)
+            })?;
         self.validate_configs(components)?;
 
         Ok(())

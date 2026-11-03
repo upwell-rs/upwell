@@ -26,6 +26,34 @@ pub enum Error {
     )]
     AmbiguousFactory(String),
 
+    #[error(
+        "component '{component}' is placed in scope '{outer}' and in scope '{inner}', but '{outer}' encloses '{inner}' on at least one opening chain; the scopes one component type is placed in may not share a hierarchy"
+    )]
+    OverlappingPlacements {
+        component: String,
+        outer: &'static str,
+        outer_id: ScopeId,
+        inner: &'static str,
+        inner_id: ScopeId,
+    },
+
+    #[error(
+        "component '{component}' is placed in the transient scope and in scope '{other}'; a transient component is built wherever it is requested, so it cannot also be placed in another scope"
+    )]
+    TransientPlacement {
+        component: String,
+        other: &'static str,
+    },
+
+    #[error(
+        "component '{component}' is a seed in scope '{first}' and in scope '{second}'; a seed is addressed by type, so it may be supplied in one scope only"
+    )]
+    AmbiguousSeedScopes {
+        component: String,
+        first: &'static str,
+        second: &'static str,
+    },
+
     #[error("factory for component '{0}' has an empty stable identity")]
     EmptyFactoryId(String),
 

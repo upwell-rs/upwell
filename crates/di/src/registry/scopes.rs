@@ -1,8 +1,5 @@
 //! Scope validation: each dependency's scope must be reachable from its consumer's.
 
-use std::any::TypeId;
-use std::collections::HashMap;
-
 use upwell_core::{Cardinality, ResolutionMode, Scope, ScopeId, ScopeKey, Singleton};
 
 use super::ComponentRegistry;
@@ -26,13 +23,9 @@ impl ComponentRegistry {
         selection: &selection::ProviderSelectionModel,
         can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<()> {
-        let by_type: HashMap<TypeId, ComponentDescriptor> =
-            components.iter().map(|c| (c.ty.type_id, *c)).collect();
-        let lookup = |type_id: TypeId| by_type.get(&type_id).copied();
-
         for consumer in components {
             for dependency in consumer.dependencies() {
-                check_scope(selection, &lookup, consumer, &dependency, can_access)?;
+                check_scope(selection, consumer, &dependency, can_access)?;
             }
         }
 
@@ -44,7 +37,6 @@ impl ComponentRegistry {
 /// accessible from the consumer's scope. `lookup` finds a registered component by type.
 pub(super) fn check_scope(
     selection: &selection::ProviderSelectionModel,
-    lookup: &impl Fn(TypeId) -> Option<ComponentDescriptor>,
     consumer: &ComponentDescriptor,
     dep: &upwell_core::DependencyDescriptor,
     can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
@@ -55,7 +47,7 @@ pub(super) fn check_scope(
         return Ok(());
     }
 
-    let dep_scopes = match lookup(dep.ty.type_id) {
+    let dep_scopes = match selection.component_from(dep.ty.type_id, consumer.scope, can_access) {
         Some(component) => vec![(component.scope, (dep.ty.type_name)())],
         None => selected_dependency_scopes(selection, consumer, dep, can_access),
     };
@@ -88,17 +80,18 @@ pub(super) fn scope_unreachable_dependency(
     let providers = model
         .matching_providers(dependency.ty.type_id, dependency.qualifier)
         .into_iter()
-        .filter_map(|provider| {
-            let component = model.component(provider.concrete_ty.type_id)?;
-
-            Some(crate::error::ScopeUnreachableProvider {
-                component: component.name.to_string(),
-                component_id: component.id.to_string(),
-                component_type: (component.ty.type_name)().to_string(),
-                scope: component.scope.name().to_string(),
-                scope_id: component.scope.id(),
-                qualifier: provider.qualifier.to_string(),
-            })
+        .flat_map(|provider| {
+            model
+                .placements(provider.concrete_ty.type_id)
+                .iter()
+                .map(move |component| crate::error::ScopeUnreachableProvider {
+                    component: component.name.to_string(),
+                    component_id: component.id.to_string(),
+                    component_type: (component.ty.type_name)().to_string(),
+                    scope: component.scope.name().to_string(),
+                    scope_id: component.scope.id(),
+                    qualifier: provider.qualifier.to_string(),
+                })
         })
         .collect();
     let dependency_name = dependency.qualifier.map_or_else(
@@ -152,7 +145,11 @@ pub(super) fn selected_dependency_scopes(
     selected
         .into_iter()
         .filter_map(|selection| {
-            let component = model.component(selection.provider.concrete_ty.type_id)?;
+            let component = model.component_from(
+                selection.provider.concrete_ty.type_id,
+                consumer.scope,
+                can_access,
+            )?;
 
             Some((
                 component.scope,
