@@ -139,8 +139,8 @@ Entry table, first slice of #358:
   kept once (same key and same recorded declaration).
 - Under `di-check`, a required concrete `Arc<T>` target without a provider fails to compile at
   the parameter. Other targets are validated at preparation, as component fields are.
-- Running an entry is the opener's job (#346, #405); the marker is what `.open(..)` and `.run(..)`
-  will key on.
+- Running an entry is the opener's job (#346); `.open(&entry)` opens with the entry's plan, and
+  `.run(closure)` (#405) plans its closure without an entry.
 
 
 ### Scope values: zero-sized or parameterised
@@ -343,7 +343,7 @@ Status (#346, #353 HTTP): `AppRuntime::opener::<S>()` returns the `ScopeOpener<S
 `OpensUnder<P>`, with `Singleton` standing for the root) and `.seed(value)`, then
 `.open(&entry)` or `.open_default()`. The per-call path checks the parent topology only in
 debug builds; a seed without a slot, or a second seed for the same slot, fails the opening in
-every build. Params on `builder` arrive with `#[scope]` (#405), and `.open(&entry)` builds
+every build. `builder` takes the scope's value since #405, and `.open(&entry)` builds
 what the entry's plan lists (#348, below). Axum's HTTP requests open through it: a hand-written
 layer keeps the opener in reach of the request's task, and the scope opens on the first `Inject`
 or `ScopeHandle` extraction (`ScopeHandle::of` for middleware holding the whole request), so a
@@ -387,7 +387,7 @@ through an opener and hands protocols a `WsConnectionScope`, whose `message()` s
 scope under it; STOMP and JSON-WS open every message that way. The ad hoc `open_scope*` API is
 removed, so `ScopeOpener` is the only way to open a scope. A scope that does not implement
 `OpensUnder` for a parent cannot open under it; a hand-written impl the topology does not list
-is caught by a debug assertion until #405 generates both from one declaration.
+is caught by a debug assertion; `#[scope]` (#405) generates both from one declaration.
 
 Status (#348, #349): preparation plans every entry against its scope's layout, per runtime
 generation (`SlotLayout::plan_entry`, carried in `ScopeLayouts` and indexed by `EntryId`). A plan
@@ -585,6 +585,51 @@ order, so results do not depend on the thread count; wasm and single-thread host
 sequential. The threshold comes from the `entry_planning` bench: threads save 6-10% from about
 5 000 components, nothing at 2 000, and cost 15% at 1 000 plans on a small graph. Preparing 10 000
 components and 10 000 entries takes about 70 ms, mostly in serial work outside planning.
+
+Status (#405, user-authored scopes, also #137): `#[scope(parents = [..], generations = ..)]` on a
+unit or field struct generates, from the one parent list, the `Scope` impl, one `OpensUnder<P>`
+and one const rank check per parent, and a `ScopeDeclaration` carried by the type
+(`Descriptor<ScopeDeclaration>`) and appended to the `SCOPES` slice. Discovery and
+`AppBuilder::scope::<S>()` register it, and `ScopeTopology::prepare_with` adds its boundary to the
+protocol's topology, so the existing validation covers user scopes: a parent the topology lacks
+and an identity another boundary holds are `ScopeTopologyError`s. `Root` is a type alias of
+`Singleton`, and `ScopeParent::of::<Singleton>()` is `ScopeParent::Root`.
+
+The decisions, and why:
+
+- **Derived constants.** The ID defaults to `app/<type name in snake_case>` and the name to the
+  type name. The rank defaults to one below the lowest-ranked parent: the rank only has to order a
+  scope below its parents, since reachability, not rank, decides what a scope can see. `id`, `name`
+  and `rank` override them.
+- **Where params live.** A scope that is not zero-sized gets one factory-less slot of its own type
+  (`ScopeDeclaration::params`, added to the registry at preparation). `builder(params)` fills it
+  with a fixed `Live`, so `Arc<S>` reads it like any seed and needs no new container concept. A
+  zero-sized scope gets no slot and stores nothing, so it has no value to inject: `Arc<Unit>` is
+  rejected at preparation as a missing provider. The check is `size_of::<S>()`, which also lets
+  hand-written protocol scopes pass their unit value with no extra trait.
+- **One builder.** `builder` now takes the scope's value; `.under`, `.seed`, `.open(&entry)` and the
+  rest are unchanged, and protocols pass their unit scope. The builder's fields are private, so
+  options such as log capture can be added without changing its type.
+- **`.run` plans.** The work's parameters are its targets. The plan comes from the same
+  `SlotLayout::plan_entry` as an entry's, is made on the first run and kept in `ScopeLayouts`, so it
+  lives exactly as long as the layouts it was made from: a reload that reuses the generation's
+  layouts keeps it, one that plans new layouts starts empty. It is keyed by scope and by the tuple of
+  parameter types, not by the closure type: those types fully determine the plan, so closures with
+  the same parameters share one, and a closure may borrow from its caller, which a `TypeId` of the
+  closure would forbid. An unsatisfiable target fails the run with a `DiError` when it resolves;
+  unlike a registered entry it cannot be checked at preparation, since the closure is unknown then.
+  Work that should be validated up front registers an `#[entry]` and opens with `.open(&entry)`.
+- **Injected openers.** `ScopeOpener<S>` is a `FromContainer` parameter, reached through the seeded
+  `RuntimeReloader`. It holds the runtime weakly, so a singleton keeping one forms no cycle, and it
+  can be injected while the application builds; it checks that the scope is declared when it opens
+  an instance. It is not an `Injectable`, so it cannot be a `#[component]` field, and the planned
+  `S: OpensUnder<C>` assertion for an injecting component is not generated.
+
+Not done here: `S::current()`, `S::is_active()` and `.enter(future)` need the invocation context
+(#130). `.run` is the seam: `ScopeWork::call` runs the work with the instance's container in hand,
+and the instance's value is that container's `S` slot. Plugins cannot contribute a scope yet; a
+`PluginContributions::scope` follows the `entry` contribution when a plugin needs one. Protocol
+scopes keep their hand-written impls.
 
 A request scope opened under an app-chosen parent, such as a per-user `Session` scope the
 app caches and reuses across requests, fits this design: the parent is picked when the scope

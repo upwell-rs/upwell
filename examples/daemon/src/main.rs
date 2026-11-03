@@ -32,6 +32,8 @@
 //! Homeledger's example-local RPC definition also exposes audit-policy defaults: the declaration
 //! replaces the household policy with its compliance policy and suppresses optional audit export.
 //! The selected protocol still delegates preparation, runtime construction, and serving to RPC.
+//! The `after_build` hook also reconciles each household account in its own instance of the
+//! user-authored `AccountReconcile` scope.
 
 mod audit;
 mod commands;
@@ -39,6 +41,7 @@ mod components;
 mod lifecycle;
 mod operations;
 mod protocol;
+mod reconcile;
 mod service;
 
 use crate::commands::{DatabaseMigrateCommand, InspectRegistryCommand, OutputArgs};
