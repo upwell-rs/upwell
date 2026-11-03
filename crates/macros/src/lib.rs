@@ -218,6 +218,54 @@ pub fn entry(attr: TokenStream, item: TokenStream) -> TokenStream {
     upwell_macros_core::entry(attr.into(), item.into()).into()
 }
 
+/// Declares a struct as a scope whose fields are the parameters of each instance.
+///
+/// The struct stays as written. From its one `parents` list the macro generates the `Scope`
+/// impl, an `OpensUnder<P>` impl per parent (so `ScopeBuilder::under` accepts exactly those
+/// parents), a compile-time check that each parent outranks the scope, and the scope's
+/// `ScopeDeclaration`, which discovery registers and `AppBuilder::scope::<S>()` registers
+/// explicitly. Preparation adds the scope to the protocol's topology.
+///
+/// Open an instance with `ScopeOpener::<S>::builder(value)`. Components in the scope inject
+/// the value as `Arc<S>`, stored once per instance and immutable; a unit scope stores nothing.
+///
+/// ```ignore
+/// #[scope(parents = [Root])]
+/// pub struct CustomerSync {
+///     customer: CustomerId,
+/// }
+///
+/// #[component(scope = CustomerSync)]
+/// struct CustomerClient {
+///     sync: Arc<CustomerSync>,
+/// }
+///
+/// let synced = opener
+///     .builder(CustomerSync { customer })
+///     .run(|client: Arc<CustomerClient>| async move { client.sync().await })
+///     .await?;
+/// ```
+///
+/// # Arguments
+///
+/// - `parents = [Path, ..]` (required): every scope it opens under, `Root` for the application
+///   root. Each path is emitted as written.
+/// - `generations = pinned | durable | path`: how an open instance relates to later runtime
+///   generations, `pinned` by default.
+/// - `rank = N`: the lifetime rank, between 1 and 254, by default one below the lowest-ranked
+///   parent.
+/// - `id = ".."`: the stable scope ID, by default `app/<type name in snake_case>`.
+/// - `name = ".."`: the display name, by default the type name.
+///
+/// # Errors
+///
+/// A missing or empty `parents`, a generic struct, a malformed `id`, an out-of-range `rank` or
+/// a parent that does not outrank the scope is a compile error.
+#[proc_macro_attribute]
+pub fn scope(attr: TokenStream, item: TokenStream) -> TokenStream {
+    upwell_macros_core::scope(attr.into(), item.into()).into()
+}
+
 /// Registers a component's lifecycle methods from an inherent `impl` block.
 ///
 /// That is the `#[init]` constructor, the transition recipes and `#[hook]` methods. The

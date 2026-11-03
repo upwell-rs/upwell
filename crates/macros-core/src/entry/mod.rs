@@ -47,7 +47,7 @@ fn segment(name: &str, span: Span, role: &str) -> syn::Result<LitStr> {
     Ok(LitStr::new(&parts.join("/"), span))
 }
 
-fn is_segment(name: &str) -> bool {
+pub(crate) fn is_segment(name: &str) -> bool {
     let mut bytes = name.bytes();
     let starts_well = bytes
         .next()
