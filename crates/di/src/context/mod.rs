@@ -38,7 +38,8 @@
 //!
 //! [`InvocationContext::capture`] clones the active context: a few reference-count bumps and
 //! no allocation. The clone holds its scope instance strongly, so the instance lives until the
-//! clone is dropped. [`InvocationContext::enter`] runs a future inside it, on any task.
+//! clone is dropped. [`InvocationContext::enter`] runs a future inside it, on any task, and
+//! [`InvocationContext::enter_sync`] runs a closure inside it, on any thread.
 
 use std::any::Any;
 use std::fmt;
@@ -146,6 +147,14 @@ impl InvocationContext {
     #[doc(hidden)]
     pub fn enter<F: Future>(self, future: F) -> TaskLocalFuture<Self, F> {
         CONTEXT.scope(self, future)
+    }
+
+    /// Runs the synchronous `body` inside this context, on top of any context the thread
+    /// already runs in, on whichever thread calls it. For captured work on a blocking or OS
+    /// thread.
+    #[doc(hidden)]
+    pub fn enter_sync<R>(self, body: impl FnOnce() -> R) -> R {
+        CONTEXT.sync_scope(self, body)
     }
 
     /// A copy of the active context, to [`enter`](Self::enter) on another task. It holds the

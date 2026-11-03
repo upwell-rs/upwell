@@ -845,7 +845,11 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
                     }
                 };
 
-                proto.serve(socket, connection, shutdown).await;
+                let context = connection.connection_context();
+
+                context
+                    .enter(proto.serve(socket, connection, shutdown))
+                    .await;
             })
             .into_response()
         }

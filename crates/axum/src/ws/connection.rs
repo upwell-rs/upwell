@@ -1,10 +1,17 @@
 //! One upgraded socket's connection scope, handed to its [`WebsocketProtocol`](super::WebsocketProtocol).
+//!
+//! A protocol's whole `serve` runs in the connection's invocation context, whose innermost scope
+//! is the connection, so connection-level code never sees a message scope. Each message's handler
+//! runs in a context of its own ([`WsConnectionScope::message_context`]), nested in the
+//! connection's and ending with the handler. Work a protocol does between messages stays in the
+//! connection's.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use upwell_app::{EntryScope, OpenScope, ScopeBuilder, ScopeEntry, ScopeOpener};
 use upwell_di::ScopeContainer;
+use upwell_di::context::{Invocation, InvocationContext};
 
 use super::WsControllerDescriptor;
 use crate::scope::{WebsocketConnection, WebsocketMessage};
@@ -36,6 +43,23 @@ impl WsConnectionScope {
     /// The connection scope's container.
     pub fn container(&self) -> &Arc<ScopeContainer> {
         self.scope.container()
+    }
+
+    /// The invocation context of the connection, in its scope. The upgrade runs the protocol's
+    /// [`serve`](super::WebsocketProtocol::serve) in it.
+    pub(crate) fn connection_context(&self) -> InvocationContext {
+        self.messages
+            .context(Invocation::WebsocketConnection)
+            .with_scope(Arc::clone(self.scope.container()))
+    }
+
+    /// The invocation context of one message dispatched in `scope`, a message scope this
+    /// connection opened. A protocol runs the message's handler in it, so the handler and what
+    /// it calls see the message scope, or the connection scope until a deferred message scope
+    /// opens.
+    #[doc(hidden)]
+    pub fn message_context(&self, scope: &EntryScope<WebsocketMessage>) -> InvocationContext {
+        scope.establish(self.messages.context(Invocation::WebsocketMessage))
     }
 
     /// Starts a message scope under this connection, on the connection's runtime generation.

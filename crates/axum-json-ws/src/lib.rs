@@ -249,7 +249,11 @@ impl JsonWs {
                 .open_message(inbound.dest.as_str(), connection.message())
                 .await
             {
-                Ok(scope) => handler(inbound.payload, scope).await,
+                Ok(scope) => {
+                    let context = connection.message_context(&scope);
+
+                    context.enter(handler(inbound.payload, scope)).await
+                }
 
                 Err(error) => Err(WsDispatchError::Inject(error.to_string())),
             },

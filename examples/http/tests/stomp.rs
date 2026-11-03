@@ -21,6 +21,8 @@ use upwell::axum::{
 use upwell::prelude::*;
 use upwell_test_utils::{TestEnvironment, TestServer, deadline};
 
+mod context_report;
+
 app! {
     /// Generated host shared by the STOMP integration tests.
     app StompTestApplication {
@@ -57,7 +59,8 @@ struct Chat {}
 
 #[handlers(ws = Stomp)]
 impl Chat {
-    /// Handles an inbound chat SEND and publishes it to the room topic (typed, via `Publisher`).
+    /// Handles an inbound chat SEND and publishes it to the room topic (typed, via `Publisher`),
+    /// tagged with the invocation context the handler ran in.
     #[message("/app/chat")]
     async fn chat(
         &self,
@@ -65,7 +68,9 @@ impl Chat {
         Inject(publisher): Inject<Publisher<ChatTopics>>,
     ) -> Result<(), CodecError> {
         publisher
-            .publish_to::<1>(ChatTopics::Room(RoomMsg { text: msg.text }))
+            .publish_to::<1>(ChatTopics::Room(RoomMsg {
+                text: format!("{} ({})", msg.text, context_report::describe()),
+            }))
             .await
     }
 }
@@ -139,7 +144,7 @@ async fn stomp_send_is_broadcast_to_typed_subscribers() {
         .expect("the subscription stream is live")
         .expect("a decoded RoomMsg");
 
-    assert_eq!(received.text, "hello stomp");
+    assert_eq!(received.text, "hello stomp (message:message)");
 
     server.shutdown().await;
 }

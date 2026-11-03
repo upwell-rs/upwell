@@ -551,7 +551,9 @@ impl Stomp {
             }
         };
 
-        match handler(body, scope).await {
+        let context = connection.message_context(&scope);
+
+        match context.enter(handler(body, scope)).await {
             Ok(StompOutcome::Publish(publishes)) => {
                 for publish in publishes {
                     self.broker

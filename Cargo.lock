@@ -4594,6 +4594,7 @@ dependencies = [
  "tracing",
  "tsify",
  "upwell",
+ "upwell-di",
  "upwell-test-utils",
  "utoipa",
  "wasm-bindgen",
