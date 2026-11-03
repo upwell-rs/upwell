@@ -161,9 +161,10 @@ pub struct CustomerSync {
 
 The active scope's value is reachable two ways, both public:
 
-- **Through DI:** components in the scope inject `Arc<CustomerSync>`.
-- **Through the task-local context:** `#[scope]` generates `S::current() -> Result<Arc<S>, NoActiveScope>`.
-  For a zero-sized scope it answers "am I inside one?", also offered as `S::is_active()`.
+- **Through DI:** components in the scope inject `Arc<CustomerSync>` (implemented in #405).
+- **Through the task-local context (planned, depends on #130):** `#[scope]` will generate
+  `S::current() -> Result<Arc<S>, NoActiveScope>`. For a zero-sized scope it answers "am I inside
+  one?", also offered as `S::is_active()`.
 
 This refines the access rule. Reading the active scope's own value is allowed publicly, because it
 builds nothing, is typed and closed, and each instance carries its own value. Resolving components
@@ -175,8 +176,9 @@ from the active container without a declared dependency stays non-public.
   per-instance state belongs in a scoped component.
 - A `current()` read is not a dependency edge. It cannot build anything, so planning loses
   nothing, and tooling shows each scope's parameter fields from `#[scope]`.
-- `CustomerSync { .. }.enter(future)` runs a future inside just the params context, without an
-  app, so code that calls `current()` can be unit-tested.
+- `CustomerSync { .. }.enter(future)` (planned with the invocation context, #130) will run a
+  future inside just the params context, without an app, so code that calls `current()` can be
+  unit-tested.
 - The name "scope handle" is avoided while axum's `ScopeHandle` (an `Arc<ScopeContainer>` for
   dynamic access to a request's scope) exists; the value is plain `Arc<S>`.
 
@@ -304,9 +306,9 @@ async fn sync_all(customers: Arc<CustomerRepo>, sync: ScopeOpener<CustomerSync>)
   - `.open(&entry)`: opens the instance with a registered entry's plan and returns it; protocols
     run their handler in it.
   - `.run(closure)`: a planned entry whose closure parameters declare its dependencies. The plan
-    is cached per closure type.
-  - `.enter(future)`: propagation only. The future runs inside the scope and reaches its values
-    through declared `Current<T>` dependencies.
+    is cached per scope and parameter-type tuple.
+  - `.enter(future)` (planned with the invocation context, #130): propagation only. The future
+    will run inside the scope and reach its values through declared `Current<T>` dependencies.
 
 ### One opening API for protocols and users
 
@@ -605,8 +607,9 @@ The decisions, and why:
   (`ScopeDeclaration::params`, added to the registry at preparation). `builder(params)` fills it
   with a fixed `Live`, so `Arc<S>` reads it like any seed and needs no new container concept. A
   zero-sized scope gets no slot and stores nothing, so it has no value to inject: `Arc<Unit>` is
-  rejected at preparation as a missing provider. The check is `size_of::<S>()`, which also lets
-  hand-written protocol scopes pass their unit value with no extra trait.
+  rejected as a missing provider (at preparation, or at compile time under `di-check`). The
+  check is `size_of::<S>()`, which also lets hand-written protocol scopes pass their unit value
+  with no extra trait.
 - **One builder.** `builder` now takes the scope's value; `.under`, `.seed`, `.open(&entry)` and the
   rest are unchanged, and protocols pass their unit scope. The builder's fields are private, so
   options such as log capture can be added without changing its type.
