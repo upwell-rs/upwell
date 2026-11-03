@@ -747,3 +747,98 @@ These are decided by the task that implements them, and recorded here when they 
 2. Whether nested capturing scopes deliver to the innermost sink only, or also bubble to every
    capturing ancestor (a connection log containing its requests' records).
 3. Buffer size and the default capture level.
+
+## One component type in several scopes (#119)
+
+Owner decision, 2026-11-03: a single component type may belong to more than one scope, but the
+scopes may not share a hierarchy. No scope of the set may be an ancestor of another on any
+opening chain. This replaces the open candidate model of #119 (priorities, runtime conditions,
+data-dependent effective scope) with a static one. "Nearest wins" shadowing across placements is
+a possible later extension; the internals below keep the per-consumer lookup it would need, but no
+user surface exists for it.
+
+### Placements
+
+- A **placement** is one scope a type builds in. A type has one placement per distinct scope of
+  its explicit factories (`ComponentFactoryDescriptor::scope`, `None` meaning the component's
+  declared scope). With no scoped factory, the only placement is the declared scope. The default
+  field-injection factory stays in the declared scope and is used only when the type has no explicit
+  factory at all, as before.
+- Two sources produce placements: factories with distinct scopes on one descriptor, and
+  descriptors of one type declared in distinct scopes. `ComponentRegistry::resolved_components`
+  expands both into one `ComponentDescriptor` per placement. Overrides apply per placement: a seed
+  replaces the factory-built placement of its own scope only, and two descriptors of one type in
+  the same scope are still `DuplicateComponentType`.
+- A type with several placements gives each its own stable id, `<id>@<scope id>`, interned once so
+  reloads do not allocate. The effective graph, hook owners, conditions and tooling all key
+  components by id, so they need no change. A single placement in another scope than declared keeps
+  the plain id. Expansion is idempotent: a placement records the scope it inherited
+  (`declared_scope`) and expands to itself.
+
+### Resolution (#135, #136)
+
+- Selection is per app generation and per consumer scope, never per resolution: every lookup of a
+  type by a consumer calls `ProviderSelectionModel::component_from(type, consumer, can_access)`,
+  which returns the one placement the consumer can access. No overlap means at most one qualifies,
+  so there is no ordering or shadowing rule to decide. When none qualifies, the first placement is
+  returned so a violation names a real component.
+- Each scope holds its own slot for the type. Layouts, the dense slot store and `ScopeRegistry`
+  already key by scope, so a layout holds only its placement. `ScopeRegistry::from_placements`
+  keeps one factory-backed entry per placement and `factory_backed(type, can_access)` picks the
+  placement a `Fresh` request can reach.
+- Trait providers map a concrete type, so a provider is visible to a consumer when any placement
+  of its concrete type is accessible. Collections gather it once per consumer scope.
+- Both factories of a type produce the same handle type by construction: handle and identity come
+  from the `Component` impl, and only the scope varies. The per-factory fallback list
+  `scope = [Connection, Request]` of #136 is not built; the same effect is two `#[init]`s in
+  disjoint scopes.
+- The cache key of a built instance is the scope instance, as before. An ancestor instance of the
+  same type cannot exist by the overlap rule, so the "ancestor already has it" question of #135 does
+  not arise. A selection cannot fail after dependents are built, because it is fixed at
+  preparation.
+
+### Validation and diagnostics (#138)
+
+- `ComponentRegistry::validate_placement_overlap(components, encloses)` rejects a type placed in
+  scopes where one encloses the other on any chain, the root included, with
+  `Error::OverlappingPlacements` naming the type and both scopes. The app passes
+  `PreparedScopeTopology::encloses`, a new "ancestor on some chain" query beside the existing
+  "ancestor on every chain" `is_reachable`. It runs for startup preparation, topology validation and
+  reload candidates.
+- Two explicit factories building in one scope are `AmbiguousFactory`. A transient placement
+  beside any other is `TransientPlacement` (transient is built wherever requested, so it overlaps
+  everything). Captive-dependency, provider and fresh validation run per placement, because each
+  placement is its own consumer with its own factory dependencies; nothing is checked
+  conservatively across candidates.
+- Duplicate priorities do not exist in this model; the equivalent, two factories in one scope, is
+  rejected.
+
+### Seeds and `Scoped<T>` (#139)
+
+- A seed (factory-less descriptor) has one destination because `seed_destinations` and the seeding
+  API address a type, not a scope. A type seeded in two scopes is `AmbiguousSeedScopes`. A type may
+  be a seed in one scope and factory-built in a disjoint one.
+- Use matrix: authenticated identity and request metadata are seeds; a per-request or
+  per-connection optimised service is one type with an `#[init(scope = ..)]` per scope; a
+  singleton needing the current identity uses `Scoped<T>` or a deferred read; an optional contextual
+  value is an optional edge. Multi-scope placement is not a workaround for missing protocol
+  lifecycle control, and `Scoped<T>` is not a workaround for a scope mismatch a placement fixes.
+
+### Attributes (#140)
+
+- `#[init(scope = <ScopePath>)]` sets the scope of that factory, with the same path and lowercase
+  alias handling as `#[component]`. Omitting it inherits the component's scope.
+  `#[component(scope = ..)]` is unchanged and scopes the default factory.
+- A scoped `#[init]` emits a wrapper named after the marked function so several `#[init]`s on one
+  type coexist across impl blocks; two unscoped ones still collide at compile time.
+- `#[init]` parameters accept `#[config("path")]` and `#[qualifier = ".."]`, closing #115. The macro
+  wraps such a parameter in a local type whose `FromContainer` reports the path or qualifier on the
+  dependency edge and resolves through the config store or `resolve_qualified`. A bound parameter
+  makes the constructor use the async path, because the ready path reads by type.
+- Unknown `#[init]` arguments and a repeated `scope` are compile errors pointing at the argument.
+
+### Open
+
+- Two descriptors of one type declared in two scopes must carry distinct ids of their own;
+  factory-expanded placements get `<id>@<scope id>`, which tooling shows.
+- Nearest-wins shadowing and a fallback list are deferred.
