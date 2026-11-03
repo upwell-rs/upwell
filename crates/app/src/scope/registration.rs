@@ -12,6 +12,7 @@ use super::{ScopeBoundary, ScopeParent};
 /// Preparation adds the boundary to the active protocol's topology and registers the
 /// parameter slot, so every instance can inject its own value as `Arc<S>`.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct ScopeDeclaration {
     /// The scope and every parent it opens under.
     pub boundary: ScopeBoundary,
