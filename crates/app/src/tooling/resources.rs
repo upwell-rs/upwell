@@ -7,7 +7,7 @@ use super::{
     Projection, component_id, config_binding_id, contribution_provenance, item_location,
     lifecycle_resource, scope_id, type_location, with_source,
 };
-use crate::ProtocolDefinition;
+use crate::{ProtocolDefinition, ScopeDeclaration};
 
 mod condition;
 mod dependency;
@@ -94,6 +94,24 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
         }
     }
 
+    /// Where a scope comes from: the application's `declaration`, or the protocol's topology
+    /// without one.
+    fn scope_provenance(&self, declaration: Option<&ScopeDeclaration>) -> Provenance {
+        let Some(declaration) = declaration else {
+            return Provenance {
+                owner: Some(format!("protocol:{}", self.app.protocol_id().as_str())),
+                origin: Some(String::from("protocol")),
+                ..Provenance::default()
+            };
+        };
+
+        Provenance {
+            origin: Some(String::from("application")),
+            source: declaration.source.as_ref().and_then(item_location),
+            ..Provenance::default()
+        }
+    }
+
     pub(super) fn project_scopes(&mut self) {
         self.framework_scope(
             Singleton::ID.as_str(),
@@ -129,15 +147,24 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
                 }
             }
 
+            let declaration = self
+                .app
+                .registry()
+                .scopes
+                .iter()
+                .find(|scope| scope.boundary.id() == boundary.id());
+
+            if let Some(declaration) = declaration {
+                labels.insert(String::from("params"), declaration.fields.join(","));
+            }
+
+            let provenance = self.scope_provenance(declaration);
+
             self.resource(
                 &id,
                 ResourceKind::Scope,
                 boundary.name(),
-                Some(Provenance {
-                    owner: Some(format!("protocol:{}", self.app.protocol_id().as_str())),
-                    origin: Some(String::from("protocol")),
-                    ..Provenance::default()
-                }),
+                Some(provenance),
                 labels,
             );
 

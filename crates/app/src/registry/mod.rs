@@ -10,7 +10,7 @@ use upwell_di::{
 };
 
 use crate::entry::{ENTRIES, EntryDescriptor};
-use crate::scope::PreparedScopeTopology;
+use crate::scope::{PreparedScopeTopology, SCOPES, ScopeBoundary, ScopeDeclaration};
 
 mod condition;
 mod config;
@@ -39,6 +39,9 @@ pub struct AppRegistry {
     pub condition_facts: Vec<ConditionFactSource>,
     /// Entry points, from protocols, plugins and explicit builder registrations.
     pub entries: Vec<EntryDescriptor>,
+    /// Scopes the application declares beside its protocol's topology, from `#[scope]`
+    /// discovery and explicit builder registrations.
+    pub scopes: Vec<ScopeDeclaration>,
     /// Whether a scope opened for an entry may build, on demand, what the entry does not
     /// declare.
     pub unplanned: UnplannedConstruction,
@@ -53,6 +56,7 @@ impl AppRegistry {
         let mut providers: Vec<_> = PROVIDERS.iter().copied().collect();
         let mut config_bindings: Vec<_> = CONFIG_BINDINGS.iter().map(|d| d.to_binding()).collect();
         let mut entries: Vec<_> = ENTRIES.iter().copied().collect();
+        let mut scopes: Vec<_> = SCOPES.iter().copied().collect();
 
         // Distributed-slice order differs between linkers. Sort auto-discovered
         // descriptors only; explicit builder registrations retain caller order.
@@ -69,6 +73,7 @@ impl AppRegistry {
                 .then_with(|| left.path.cmp(&right.path))
         });
         entries.sort_by_key(|entry| entry.key);
+        scopes.sort_by_key(|scope| scope.boundary.id());
 
         Self {
             components,
@@ -76,8 +81,35 @@ impl AppRegistry {
             config_bindings,
             condition_facts: Vec::new(),
             entries,
+            scopes,
             unplanned: UnplannedConstruction::default(),
         }
+    }
+
+    /// Registers a declared scope unless the same declaration is already registered, so an
+    /// explicit registration and discovery of one `#[scope]` keep it once. Two different
+    /// declarations sharing a scope identity are both kept and rejected by preparation.
+    pub fn add_scope(&mut self, scope: ScopeDeclaration) {
+        let registered = scope.source.is_some()
+            && self.scopes.iter().any(|existing| {
+                existing.boundary.id() == scope.boundary.id() && existing.source == scope.source
+            });
+
+        if !registered {
+            self.scopes.push(scope);
+        }
+    }
+
+    /// The boundary of every declared scope, in registration order.
+    pub(crate) fn declared_boundaries(&self) -> impl Iterator<Item = ScopeBoundary> + '_ {
+        self.scopes.iter().map(|scope| scope.boundary)
+    }
+
+    /// Registers the parameter slot of every declared scope that stores its value.
+    pub(crate) fn lower_scope_params(&mut self) {
+        let params = self.scopes.iter().filter_map(|scope| scope.params);
+
+        self.components.extend(params);
     }
 
     /// Registers an entry unless the same declaration is already registered under the same

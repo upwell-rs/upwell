@@ -52,6 +52,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         let runtime_reloader = RuntimeReloader::new();
 
         protocol.register(&mut registry);
+        registry.lower_scope_params();
 
         let dirs = match dirs {
             Some(dirs) => dirs,
@@ -69,7 +70,11 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         protocol.pre_build(&mut PreBuildContext::new(&mut registry, &mut instances))?;
 
         let tree = finalize_config(config_source, &dirs, auto_discovery_enabled, &mut registry)?;
-        let scope_topology = Arc::new(D::SCOPE_TOPOLOGY.prepare().map_err(Error::from)?);
+        let scope_topology = Arc::new(
+            D::SCOPE_TOPOLOGY
+                .prepare_with(registry.declared_boundaries())
+                .map_err(Error::from)?,
+        );
         let entries =
             Arc::new(EntryTable::new(&registry.entries, &scope_topology).map_err(Error::from)?);
 

@@ -48,6 +48,11 @@ impl RuntimeReloader {
         let _ = self.runtime.set(runtime.downgrade());
     }
 
+    /// The runtime this handle is attached to, held weakly; `None` before it is attached.
+    pub(crate) fn runtime(&self) -> Option<&WeakAppRuntime> {
+        self.runtime.get()
+    }
+
     /// Re-reads configuration and transactionally republishes changed bindings and the
     /// derived component graph through [`AppRuntime::reload_config`].
     ///

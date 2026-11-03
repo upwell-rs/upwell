@@ -813,7 +813,7 @@ pub(crate) fn mount_ws<P: WebsocketProtocol>(
                 // Keep the admission permit for exactly the lifetime of this upgraded connection.
                 let _permit = permit;
                 let opening = connections
-                    .builder()
+                    .builder(crate::scope::WebsocketConnection)
                     .seed(WebsocketUpgradeMeta::from_parts(
                         head.method,
                         head.uri,

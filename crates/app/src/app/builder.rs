@@ -14,6 +14,7 @@ use crate::host::ExecutionMode;
 use crate::plugin::{EarlyPluginCatalog, Plugin, PluginCatalog, PluginWithOptions};
 use crate::protocol::ProtocolDefinition;
 use crate::registry::AppRegistry;
+use crate::scope::ScopeDeclaration;
 
 /// Assembles an [`App`] from an explicit set of components and a protocol definition.
 ///
@@ -128,8 +129,9 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         self
     }
 
-    /// Merges every link-time-registered component, provider and `#[entry]` descriptor (and
-    /// the protocol's own variants) into the app, and enables config auto-discovery.
+    /// Merges every link-time-registered component, provider, `#[entry]` and `#[scope]`
+    /// descriptor (and the protocol's own variants) into the app, and enables config
+    /// auto-discovery.
     pub fn auto_discover(mut self) -> Self {
         let discovered = AppRegistry::collect();
 
@@ -141,6 +143,10 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
 
         for entry in discovered.entries {
             self.registry.add_entry(entry);
+        }
+
+        for scope in discovered.scopes {
+            self.registry.add_scope(scope);
         }
 
         self.auto_discovery_enabled = true;
@@ -225,6 +231,22 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
     /// Registers an entry descriptor, for entries assembled without a typed target tuple.
     pub fn entry_descriptor(mut self, descriptor: EntryDescriptor) -> Self {
         self.registry.add_entry(descriptor);
+
+        self
+    }
+
+    /// Registers the scope `S` declares, such as a `#[scope]` type, beside the protocol's
+    /// topology. A scope that discovery also registers is kept once.
+    pub fn scope<S>(self) -> Self
+    where
+        S: Descriptor<ScopeDeclaration>,
+    {
+        self.scope_declaration(<S as Descriptor<ScopeDeclaration>>::DESCRIPTOR)
+    }
+
+    /// Registers a scope declaration, for scopes declared without `#[scope]`.
+    pub fn scope_declaration(mut self, declaration: ScopeDeclaration) -> Self {
+        self.registry.add_scope(declaration);
 
         self
     }

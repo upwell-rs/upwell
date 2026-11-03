@@ -17,8 +17,13 @@ pub enum ScopeParent {
 }
 
 impl ScopeParent {
-    /// Creates a parent reference to a scope type.
+    /// Creates a parent reference to a scope type: [`Root`](Self::Root) for [`Singleton`],
+    /// which stands for the application root, and a boundary otherwise.
     pub const fn of<T: Scope>() -> Self {
+        if same_id(T::ID, Singleton::ID) {
+            return Self::Root;
+        }
+
         Self::Boundary(T::ID)
     }
 
@@ -39,6 +44,27 @@ impl ScopeParent {
     pub const fn is_root(&self) -> bool {
         matches!(self, Self::Root)
     }
+}
+
+/// Whether two scope identities are equal, in a const context.
+const fn same_id(left: ScopeId, right: ScopeId) -> bool {
+    let left = left.as_str().as_bytes();
+    let right = right.as_str().as_bytes();
+    let mut index = 0;
+
+    if left.len() != right.len() {
+        return false;
+    }
+
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+
+        index += 1;
+    }
+
+    true
 }
 
 /// One openable scope and every parent it may be opened under.
@@ -135,6 +161,18 @@ impl ScopeTopology {
     /// Validates and owns this topology for deterministic planning and lookup.
     pub fn prepare(&self) -> Result<PreparedScopeTopology, ScopeTopologyError> {
         PreparedScopeTopology::new(self.boundaries)
+    }
+
+    /// Validates and owns this topology extended with the application's own `declared`
+    /// scopes, such as the ones `#[scope]` registers.
+    pub fn prepare_with(
+        &self,
+        declared: impl IntoIterator<Item = ScopeBoundary>,
+    ) -> Result<PreparedScopeTopology, ScopeTopologyError> {
+        let boundaries: Vec<ScopeBoundary> =
+            self.boundaries.iter().copied().chain(declared).collect();
+
+        PreparedScopeTopology::new(&boundaries)
     }
 }
 

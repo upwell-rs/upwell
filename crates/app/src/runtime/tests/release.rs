@@ -131,7 +131,7 @@ async fn a_displaced_generation_waits_for_its_durable_and_pinned_scopes() {
     let pinned = runtime
         .opener::<Shared>()
         .expect("shared is declared")
-        .builder()
+        .builder(Shared)
         .open_default()
         .await
         .expect("a pinned scope opens under the root");

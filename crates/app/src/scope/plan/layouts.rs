@@ -10,6 +10,7 @@ use upwell_core::{
 use upwell_di::{EntryPlan, ProviderSelectionModel, SlotLayout, UnplannedConstruction};
 
 use super::parallel::Parallelism;
+use super::runs::{RunPlanning, RunPlans};
 use crate::entry::{EntryDescriptor, EntryId};
 use crate::scope::PreparedScopeTopology;
 
@@ -26,6 +27,7 @@ pub(crate) struct ScopeLayouts {
     by_signature: HashMap<EntrySignature, usize>,
     entries: Box<[Option<usize>]>,
     unplanned: UnplannedConstruction,
+    runs: RunPlans,
 }
 
 /// What one generation plans entries with: provider selection over the scope topology,
@@ -129,7 +131,35 @@ impl ScopeLayouts {
             by_signature,
             entries: indexes.into_boxed_slice(),
             unplanned: planning.unplanned,
+            runs: RunPlans::default(),
         }
+    }
+
+    /// The plan of work into `scope` whose targets have type `targets`, made from
+    /// `descriptors` the first time such work runs on this generation. `None` when `scope` has
+    /// no layout.
+    pub(crate) fn run_plan(
+        &self,
+        scope: ScopeId,
+        targets: TypeId,
+        descriptors: impl FnOnce() -> Vec<DependencyDescriptor>,
+        selection: &ProviderSelectionModel,
+        topology: &PreparedScopeTopology,
+    ) -> Option<Arc<EntryPlan>> {
+        let planning = RunPlanning {
+            layout: self.by_scope.get(&scope)?,
+            selection,
+            topology,
+            unplanned: self.unplanned,
+        };
+
+        Some(self.runs.plan(scope, targets, descriptors, &planning))
+    }
+
+    /// The number of run plans this generation made.
+    #[cfg(test)]
+    pub(crate) fn run_plans(&self) -> usize {
+        self.runs.len()
     }
 
     /// The slot layout of `scope`.

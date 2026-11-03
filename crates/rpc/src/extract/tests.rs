@@ -79,7 +79,7 @@ async fn injecting_a_planned_singleton_leaves_a_deferred_call_scope_unopened() {
         .runtime()
         .opener::<Connection>()
         .expect("the connection scope is declared")
-        .builder()
+        .builder(Connection)
         .open_on_demand()
         .await
         .expect("the connection opens");
@@ -89,7 +89,7 @@ async fn injecting_a_planned_singleton_leaves_a_deferred_call_scope_unopened() {
         .expect("the call scope is declared");
     let entry = calls.entry(key).expect("the entry resolves");
     let scope = calls
-        .builder()
+        .builder(Request)
         .under(&connection)
         .open_when_needed(Some(&entry))
         .await

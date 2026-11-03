@@ -410,3 +410,53 @@ fn scopes_project_their_generation_policy() {
     assert_eq!(generations(DIAGNOSTIC_CONSUMER_SCOPE_ID), Some("pinned"));
     assert_eq!(generations(DIAGNOSTIC_DEPENDENCY_SCOPE_ID), Some("durable"));
 }
+
+#[test]
+fn declared_scopes_project_their_parameters_and_origin() {
+    struct Declared {
+        _customer: u64,
+    }
+
+    impl upwell_core::Scope for Declared {
+        const ID: upwell_core::ScopeId =
+            upwell_core::namespaced_id!(upwell_core::ScopeId, "test/declared");
+        const RANK: u8 = 10;
+        const NAME: &'static str = "Declared";
+    }
+
+    static PARENTS: [ScopeParent; 1] = [ScopeParent::Root];
+
+    let prepared = App::<DiagnosticFailureProtocol>::builder("scope-declared")
+        .config_source(ConfigManager::<Toml>::empty())
+        .scope_declaration(
+            crate::ScopeDeclaration::new::<Declared>(&PARENTS).with_fields(&["customer", "region"]),
+        )
+        .prepare()
+        .expect("application prepares");
+    let document = prepared
+        .tooling_document()
+        .expect("prepared state projects");
+    let resource = |id: &str| {
+        document
+            .resources
+            .iter()
+            .find(|resource| resource.id == id)
+            .expect("the scope projects as a resource")
+    };
+    let declared = resource("scope:test/declared");
+    let protocol = resource(&format!("scope:{}", DIAGNOSTIC_CONSUMER_SCOPE_ID.as_str()));
+    let origin = |resource: &upwell_tooling_schema::Resource| {
+        resource
+            .provenance
+            .as_ref()
+            .and_then(|provenance| provenance.origin.clone())
+    };
+
+    assert_eq!(
+        declared.labels.get("params").map(String::as_str),
+        Some("customer,region")
+    );
+    assert_eq!(origin(declared).as_deref(), Some("application"));
+    assert_eq!(protocol.labels.get("params"), None);
+    assert_eq!(origin(protocol).as_deref(), Some("protocol"));
+}

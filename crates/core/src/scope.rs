@@ -162,6 +162,10 @@ impl std::fmt::Debug for ScopeKey {
 /// only on other singletons.
 pub struct Singleton;
 
+/// The application root under the name a scope's opening parents use, as in
+/// `#[scope(parents = [Root])]`: the same scope as [`Singleton`].
+pub type Root = Singleton;
+
 /// A transient scope: rebuilt fresh on every resolution and never cached. The
 /// shortest-lived scope there can be, so it ranks [`u8::MIN`].
 pub struct Transient;

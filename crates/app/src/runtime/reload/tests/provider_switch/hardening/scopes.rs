@@ -111,7 +111,7 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
         .opener::<Step>()
         .expect("the step scope is declared");
     let open_call = calls
-        .builder()
+        .builder(Call)
         .open_default()
         .await
         .expect("a call opens before the switch");
@@ -123,13 +123,13 @@ async fn open_scopes_keep_their_generation_and_new_scopes_use_the_published_plan
         .await
         .expect("a switch with an open call commits");
     let nested = steps
-        .builder()
+        .builder(Step)
         .under(&open_call)
         .open_default()
         .await
         .expect("a step opens under the call opened before the switch");
     let new_call = calls
-        .builder()
+        .builder(Call)
         .open_default()
         .await
         .expect("a call opens after the switch");
@@ -196,7 +196,7 @@ async fn a_slot_built_on_demand_after_a_switch_uses_its_scopes_generation() {
         .expect("the call scope is declared");
     let entry = calls.entry(key).expect("the call entry is registered");
     let open_call = calls
-        .builder()
+        .builder(Call)
         .open(&entry)
         .await
         .expect("a call opens before the switch");

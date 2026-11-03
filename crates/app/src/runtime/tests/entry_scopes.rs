@@ -25,9 +25,11 @@ async fn open_for(
 ) -> crate::Result<EntryScope<Session>> {
     let sessions = runtime.opener::<Session>().expect("session is declared");
     let entry = sessions.entry(key(entry)).expect("the entry resolves");
-    let builder = seeds.iter().fold(sessions.builder(), |builder, seed| {
-        builder.seed(Visitor(*seed))
-    });
+    let builder = seeds
+        .iter()
+        .fold(sessions.builder(Session), |builder, seed| {
+            builder.seed(Visitor(*seed))
+        });
 
     builder.open_when_needed(Some(&entry)).await
 }
@@ -157,7 +159,7 @@ async fn open_bound(
     let opening = entry.as_ref().map_or(Opening::Everything, Opening::Entry);
     let mut asked = false;
     let session = sessions
-        .builder()
+        .builder(Session)
         .open_with_bound_seed(opening, || {
             asked = true;
 
