@@ -311,13 +311,13 @@ async fn a_failed_on_demand_build_is_not_kept() {
     );
 }
 
-/// The bytes opening scope `S` with `count` factory-backed slots allocates: every slot built
-/// without a plan, or with a plan that builds none.
-fn opening_bytes<S: Scope>(count: usize, planned: bool) -> u64 {
+/// The bytes opening scope `S` with `count` factory-backed slots allocates, with the on-demand
+/// plan, which builds none of them.
+fn opening_bytes<S: Scope>(count: usize) -> u64 {
     let parent = block_on(root());
     let lease = Arc::new(());
     let layout = layout_of::<S>(&slots::<S>(count, false));
-    let plan = planned.then(|| EntryPlan::on_demand(&layout));
+    let plan = Some(EntryPlan::on_demand(&layout));
 
     drop(block_on(open_with(
         &parent,
@@ -342,10 +342,10 @@ fn opening_bytes<S: Scope>(count: usize, planned: bool) -> u64 {
 
 #[test]
 fn a_plan_sizes_a_pinned_block_but_a_durable_scope_keeps_every_cell() {
-    let pinned_small = opening_bytes::<TestScope>(1, true);
-    let pinned_large = opening_bytes::<TestScope>(16, true);
-    let durable_small = opening_bytes::<DurableScope>(1, true);
-    let durable_large = opening_bytes::<DurableScope>(16, true);
+    let pinned_small = opening_bytes::<TestScope>(1);
+    let pinned_large = opening_bytes::<TestScope>(16);
+    let durable_small = opening_bytes::<DurableScope>(1);
+    let durable_large = opening_bytes::<DurableScope>(16);
 
     assert_eq!(
         pinned_large, pinned_small,

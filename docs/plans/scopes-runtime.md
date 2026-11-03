@@ -527,16 +527,18 @@ Reading allocates only the returned `Vec`, or the map and its keys (memory contr
 Planned entry parameters: `plan_entry` also pre-resolves each eager target an entry injects to
 the source it reads (`EntryParam`), copied from the layout's tables, so reading one is a scan of
 the entry's few parameters and a handle clone, with no lookup by type and no hashing.
-`ScopeContainer::extract_planned(plan)` and `FromContainer::read_planned` read them, falling back
-to `extract` for anything else. A parameter records only sources a plan carried into a later
+`FromContainer::read_planned` only probes: it returns `Option<H>`, `None` when the plan holds no
+parameter for the target or its source is not readable or built here.
+`ScopeContainer::extract_planned(plan)` tries that probe and falls back to `extract` on `None`. A parameter records only sources a plan carried into a later
 generation still names correctly: a slot of the entry's own scope (`plans_entries_like` keeps
 slots and aliases) and a root singleton (carrying requires unchanged selection of every target).
 A target in an enclosing scope has no parameter, since a carried plan could name a stale slot of
 an enclosing layout that changed; it reads through the layout's table as before. A plan made for
 one scope reads its own slots only from that scope, so the scope a deferred instance opens under
-can answer a singleton target. `EntryScope` keeps its entry's plan and its `extract` reads it
-first: an entry whose plan builds nothing and which injects only singletons never opens its
-container. RPC `Inject` and WebSocket message handlers (whose generated code calls
+can answer a singleton target. `EntryScope` keeps its entry's plan, and its `extract` runs the
+`read_planned` probe before it opens its container, and only opens it and calls
+`extract_planned` when the probe returns `None`: an entry whose plan builds nothing and which
+injects only singletons never opens its container. RPC `Inject` and WebSocket message handlers (whose generated code calls
 `EntryScope::extract`) read through it.
 
 Still open: HTTP `Inject` does not read planned parameters yet. Its request scope is opened in
