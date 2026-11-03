@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use upwell_config::ConfigReloader;
 use upwell_core::{RuntimeGenerationId, ScopeId};
+use upwell_di::context::{ContextRuntime, Invocation, InvocationContext};
 use upwell_di::{ComponentDescriptor, ScopeContainer};
 use upwell_hooks::HookManager;
 
@@ -261,6 +262,19 @@ impl AppRuntime {
 
     pub(crate) async fn begin_transition(&self) -> generation::RuntimeTransition {
         self.transitions.begin().await
+    }
+
+    /// A context for `invocation` pinned to the current generation, with no scope instance.
+    /// See [`RuntimeView::context`].
+    #[doc(hidden)]
+    pub fn context(&self, invocation: Invocation) -> InvocationContext {
+        self.view().context(invocation)
+    }
+}
+
+impl ContextRuntime for AppRuntime {
+    fn root(&self) -> Option<Arc<ScopeContainer>> {
+        Some(AppRuntime::root(self))
     }
 }
 

@@ -42,7 +42,7 @@ pub enum Opening<'e, S: Scope> {
 /// A stack value: it allocates nothing until a seed or a value that is not zero-sized is added.
 #[must_use = "a scope builder does nothing until it is opened"]
 pub struct ScopeBuilder<'a, S: Scope, P: Scope = Singleton> {
-    opener: &'a ScopeOpener<S>,
+    pub(super) opener: &'a ScopeOpener<S>,
     parent: Option<&'a OpenScope<P>>,
     pub(super) seeds: Vec<BoxedComponent>,
 }
