@@ -246,7 +246,11 @@ answers: scopes still open on that generation keep reading its instance through 
 on-demand builds and escaped `Lazy<T>` handles, while `Dep<T>` handles, including ones a
 pinned component holds, follow the live binding. A message opened under an old-generation
 connection runs on the connection's generation. `Cfg<T>` is not pinned yet: it reads the
-committed config in every scope.
+committed config in every scope. One edge case is still open: a pinned scope that reads a
+singleton's `Dep<T>` for the first time after its generation was displaced gets a cell the
+commit never saw, so that `Dep<T>` stays on the displaced instance rather than following the
+live binding. Whether `Dep<T>` in a pinned scope should pin or follow is to be settled in one
+place, for both cases (#458).
 - The enum is `#[non_exhaustive]` so a `Rebind` policy can follow once rebinding exists: rebuilt
   onto each new generation in place, with `Live` storage. A `Rebind` scope may only open under the
   root or other `Rebind` scopes, since a rebound child under a pinned parent would mix generations.
