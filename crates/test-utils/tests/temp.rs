@@ -44,19 +44,35 @@ fn fixture_below_a_parent_is_removed_when_the_test_panics() {
     let parent = TempFixture::new("upwell-temp-parent-");
     let observed = std::sync::Mutex::new(None);
 
-    let result = panic::catch_unwind(|| {
-        let fixture = TempFixture::new_in(parent.path(), "upwell-fixture-");
+    let joined = std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let fixture = TempFixture::new_in(parent.path(), "upwell-fixture-");
 
-        *observed.lock().expect("record fixture root") = Some(fixture.path().to_path_buf());
+                *observed.lock().expect("record fixture root") = Some(fixture.path().to_path_buf());
 
-        panic!("simulated test failure");
+                panic!("simulated test failure");
+            })
+            .join()
     });
     let root = observed
         .lock()
         .expect("read fixture root")
-        .clone()
+        .take()
         .expect("fixture was created");
 
-    assert!(result.is_err());
+    assert!(joined.is_err());
     assert!(!root.exists());
+}
+
+#[test]
+fn new_in_rejects_unsafe_prefixes_without_sweeping_siblings() {
+    let parent = TempFixture::new("upwell-temp-parent-");
+    let sibling = parent.write("other-fixture/keep.txt", b"keep");
+
+    for prefix in ["", "a/b", "..\\x"] {
+        assert!(panic::catch_unwind(|| TempFixture::new_in(parent.path(), prefix)).is_err());
+    }
+
+    assert!(sibling.exists());
 }
