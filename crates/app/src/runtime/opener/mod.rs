@@ -16,17 +16,20 @@ use upwell_di::context::{ContextRuntime, InvocationContext, TargetRef};
 use super::{AppRuntime, RuntimeGeneration, RuntimeView};
 use crate::builtins::RuntimeReloader;
 use crate::entry::EntryId;
+use crate::logs::{InstanceLogs, ScopeLogStream};
+use tracing::Span;
 
 mod builder;
 mod entry_scope;
 mod inject;
+mod log_options;
 mod run;
 
 use builder::{Builds, open_in};
 
 pub use builder::{Opening, ScopeBuilder};
 pub use entry_scope::EntryScope;
-pub use run::ScopeWork;
+pub use run::{ScopeRun, ScopeWork};
 
 /// Declares that scope `Self` may open under scope `P`.
 ///
@@ -69,6 +72,7 @@ pub struct ScopeEntry<S: Scope> {
 /// An open instance of scope `S`, usable as a typed parent for [`ScopeBuilder::under`].
 pub struct OpenScope<S: Scope> {
     container: Arc<ScopeContainer>,
+    logs: Option<Arc<InstanceLogs>>,
     scope: PhantomData<fn() -> S>,
 }
 
@@ -244,6 +248,34 @@ impl<S: Scope> Clone for ScopeEntry<S> {
 impl<S: Scope> Copy for ScopeEntry<S> {}
 
 impl<S: Scope> OpenScope<S> {
+    /// An open instance with the span and sink of `logs`, kept only when it captures.
+    fn new(container: Arc<ScopeContainer>, logs: InstanceLogs) -> Self {
+        Self {
+            container,
+            logs: logs.sink().is_some().then(|| Arc::new(logs)),
+            scope: PhantomData,
+        }
+    }
+
+    /// The instance's `upwell.scope` span, to instrument the work that runs in it. It is
+    /// disabled unless the instance was opened with
+    /// [`capture_logs`](ScopeBuilder::capture_logs).
+    pub fn span(&self) -> Span {
+        self.logs
+            .as_ref()
+            .map_or_else(Span::none, |logs| logs.span().clone())
+    }
+
+    /// A stream of the records the instance captures from now on, ending when the last handle
+    /// to the instance goes. Already ended unless the instance was opened with
+    /// [`capture_logs`](ScopeBuilder::capture_logs).
+    pub fn logs(&self) -> ScopeLogStream {
+        self.logs
+            .as_ref()
+            .and_then(|logs| logs.sink())
+            .map_or_else(ScopeLogStream::ended, |sink| sink.subscribe())
+    }
+
     /// The instance's container.
     pub fn container(&self) -> &Arc<ScopeContainer> {
         &self.container
@@ -259,6 +291,7 @@ impl<S: Scope> Clone for OpenScope<S> {
     fn clone(&self) -> Self {
         Self {
             container: Arc::clone(&self.container),
+            logs: self.logs.clone(),
             scope: PhantomData,
         }
     }

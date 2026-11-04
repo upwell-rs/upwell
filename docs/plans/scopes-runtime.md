@@ -739,12 +739,14 @@ event made inside a scope instance, including events from third-party crates.
    span with a sink, and pushing an owned `LogRecord` into it.
 4. Capture tees: every event still reaches the user's normal output.
 
-**Capture is on by default, and costs nothing until someone subscribes**
+**Capture is off by default, and costs nothing until someone asks**
 
-`.without_log_capture()` opts out. With capture on, the sink starts records flowing on its first
-subscriber; a scope nobody subscribes to costs one span-stack walk per event. Subscribing before
-the run starts sees every record. Each subscriber has a bounded buffer and reports dropped records
-as a `Lagged(n)` item rather than blocking the logging thread.
+Capture is requested per instance, with `.capture_logs()` on the builder or by taking a stream
+from the run (`run.logs()`); an instance that asks for neither has no sink and adds no per-event
+work. With capture on, the sink starts records flowing on its first subscriber: an unwatched sink
+costs a level check and one atomic read per event. Subscribing before the run starts sees every
+record. Each subscriber has a bounded buffer and reports dropped records as a `Lagged(n)` item
+rather than blocking the logging thread.
 
 **Consuming logs as a stream**
 
@@ -781,8 +783,9 @@ watcher.await?;
   so parallel instances never see each other's records.
 - **Completeness:** depends on propagation. Work spawned without the propagation primitives loses
   the span, so its events reach only the global output: uncaptured, never misrouted.
-- **Levels:** capture sees only events the global filter enables. A lower capture level is an
-  explicit per-scope option, because enabling a callsite for one layer enables it for every scope.
+- **Levels:** capture sees only events the layer's filter enables. A per-run capture level narrows
+  it; going more verbose than the filter needs a more verbose filter on the layer, because
+  enabling a callsite for one layer enables it for every layer.
 
 ## Further decisions
 
@@ -792,16 +795,65 @@ watcher.await?;
 - The end-of-scope hook is observer-only. It fires after the instance's work finishes and before
   its log sink closes, so its own events are still captured.
 
+## Decided at implementation (scope logs, #408, #409, #410)
+
+1. **Loggable params are opt-in.** Only fields marked `#[log]` on a `#[scope]` struct are recorded,
+   so credentials stay out of logs by default. The macro strips the marker and generates
+   `Scope::record_log_params`, which reports each marked field (it must be `Debug`).
+2. **Nested capture delivers to the innermost capturing scope only.** An instance that does not
+   capture is transparent: its events go to the nearest capturing ancestor.
+3. **Capture level defaults to the subscriber's.** `init_tracing` installs `ScopeLogLayer` behind
+   the same filter as the console output. A run's `.capture_level(..)` narrows that; it widens
+   capture only as far as the layer's filter lets events through, because enabling a callsite for
+   one layer enables it for every layer. Buffer size defaults to 1024 records per subscriber
+   (`.log_buffer(n)`), unmeasured against #351 since optimisation is paused.
+
+### Scope logs: surface and mechanism
+
+**Surface** (module `upwell_app::logs`, facade `upwell::logs`)
+
+- `ScopeLogLayer`: a `tracing_subscriber::Layer`, behind the `tracing-subscriber` feature.
+  `init_tracing` installs it; users composing their own subscriber add it behind the filter that
+  should bound capture.
+- Builder options on `ScopeBuilder`: `.capture_logs()`, `.capture_level(level)`, `.log_buffer(n)`.
+- `ScopeBuilder::run` returns a `ScopeRun`, which implements `IntoFuture` (so `.await` works as
+  before) and has `.logs() -> ScopeLogStream`. `OpenScope::logs()` and `OpenScope::span()` serve
+  an instance opened with `open*` and `.capture_logs()`.
+- `ScopeLogs`: an injectable parameter of `run` work with `.subscribe()` and `.is_capturing()`.
+- `ScopeLogStream` is a `Stream<Item = ScopeLog>`; `ScopeLog` is `Record(LogRecord)` or
+  `Lagged(n)`.
+
+**Mechanism**
+
+- Opening an instance creates the `upwell.scope` span (target `upwell::scope`, error level so
+  restrictive filters still open it, fields `scope.id`, `scope.name` and the rendered `#[log]`
+  params) and instruments the whole open-and-run future with it. `run` always makes the span;
+  `open*` makes it only when capture is requested, so protocol hot paths pay nothing.
+- The sink reaches the layer through a thread-local hand-off held only while the span is created:
+  the layer's `on_new_span` takes it into the span's extensions. No dependency on the layer's
+  crate is needed to create spans or sinks, and an instance whose span the layer never saw
+  (no layer, or a filter that rejects the span) reports `ScopeLogSink::is_attached() == false`
+  and captures nothing.
+- `on_event` walks the event's span stack to the innermost span holding a sink and offers an
+  owned `LogRecord` to every subscriber with `try_send`; a full buffer counts the record as
+  dropped. The stream yields `Lagged(n)` once the buffered records have been read.
+- Across spawned tasks routing follows the span, not the invocation context. Work spawned with
+  Upwell's propagation primitives (track C) carries the span; a plain `tokio::spawn` loses it and
+  its events reach only the console. `ScopeLogs` follows the task the same way, through a
+  task-local set around the instance.
+- **Seam for the end-of-scope hook (#406):** an instance's work ends in `InstanceLogs::finish`,
+  which closes the sink and ends every stream. The hook runs after the work and immediately
+  before that call, so its events are still captured.
+
+Not wired yet: protocol dispatch (HTTP, WebSocket, RPC) opening its scopes through `open*` does
+not request capture or instrument its handlers with `OpenScope::span()`; that follows with the
+protocol identity fields (#353). `open_when_needed` instances do not capture.
+
 ## Deferred to implementation
 
 These are decided by the task that implements them, and recorded here when they are.
 
-
-1. How a scope's params mark what may be logged: opt-in `#[log]`, or the config redaction model
-   (`#[secret]` excludes, everything else logged).
-2. Whether nested capturing scopes deliver to the innermost sink only, or also bubble to every
-   capturing ancestor (a connection log containing its requests' records).
-3. Buffer size and the default capture level.
+Nothing is open for scope logs; see the decisions above.
 
 ## One component type in several scopes (#119)
 

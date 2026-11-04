@@ -52,6 +52,20 @@ pub trait Scope: Send + Sync + 'static {
 
     /// The scope's identity and lifetime metadata as a copyable value.
     const KEY: ScopeKey = ScopeKey::of::<Self>();
+
+    /// Reports the fields of this instance marked loggable, one [`LogParams::param`] call each.
+    /// `#[scope]` generates it from the fields marked `#[log]`; a scope without any reports
+    /// nothing, so credentials stay out of logs unless a field opts in.
+    fn record_log_params(&self, params: &mut dyn LogParams) {
+        let _ = params;
+    }
+}
+
+/// Receives the loggable parameters of a scope instance, as [`Scope::record_log_params`]
+/// reports them.
+pub trait LogParams {
+    /// Records the loggable field `name` with its current `value`.
+    fn param(&mut self, name: &'static str, value: &dyn std::fmt::Debug);
 }
 
 /// A scope's identity and lifetime metadata, captured from its [`Scope`] type.

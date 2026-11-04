@@ -13,6 +13,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer, Registry, fmt};
 
 use crate::builtins::config::{LogFormat, LoggingConfig, SpanEvents};
+use crate::logs::ScopeLogLayer;
 
 /// A type-erased subscriber layer that can be composed onto the framework subscriber, e.g.
 /// per-run job log capture. Boxed so callers in other crates can hand in a layer the
@@ -57,6 +58,7 @@ pub(crate) fn init_tracing_resolved(
     })?;
     let mut layers = vec![fmt_layer(config)?.with_filter(filter).boxed()];
 
+    layers.push(scope_log_layer(config, None)?);
     layers.extend(extra);
 
     Registry::default()
@@ -82,12 +84,25 @@ pub fn init_tracing_with_layers(
     // Filter only console formatting. Extension layers enforce their own capture policies and may
     // intentionally observe events that are more verbose than terminal output.
     let mut layers: Vec<BoxedLayer> = vec![fmt_layer(config)?.with_filter(filter).boxed()];
+
+    layers.push(scope_log_layer(config, rust_log.as_deref())?);
     layers.extend(extra);
 
     Registry::default()
         .with(layers)
         .try_init()
         .map_err(|_| InitTracingError::AlreadyInstalled)
+}
+
+/// The scope log capture layer, behind the same filter as the console output so capture
+/// defaults to the level the subscriber logs at.
+fn scope_log_layer(
+    config: &LoggingConfig,
+    rust_log: Option<&OsStr>,
+) -> Result<BoxedLayer, InitTracingError> {
+    let filter = env_filter(config, rust_log)?;
+
+    Ok(ScopeLogLayer::new().with_filter(filter).boxed())
 }
 
 fn env_filter(

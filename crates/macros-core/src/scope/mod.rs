@@ -26,7 +26,7 @@ use args::Generations;
 const DEFAULT_NAMESPACE: &str = "app";
 
 /// Expands `#[scope]` on `item`.
-pub fn expand(args: ScopeArgs, item: ItemStruct, paths: &Paths) -> syn::Result<TokenStream> {
+pub fn expand(args: ScopeArgs, mut item: ItemStruct, paths: &Paths) -> syn::Result<TokenStream> {
     reject_generics(&item)?;
 
     let ident = &item.ident;
@@ -39,6 +39,7 @@ pub fn expand(args: ScopeArgs, item: ItemStruct, paths: &Paths) -> syn::Result<T
         None => LitStr::new(&ident.unraw().to_string(), ident.span()),
     };
     let fields = field_names(&item.fields);
+    let log_params = take_log_params(&mut item.fields, paths)?;
 
     let scope_trait = paths.core("Scope");
     let scope_id = paths.core("ScopeId");
@@ -67,6 +68,7 @@ pub fn expand(args: ScopeArgs, item: ItemStruct, paths: &Paths) -> syn::Result<T
             const RANK: u8 = #rank;
             const NAME: &'static str = #name;
             #generations
+            #log_params
         }
 
         #opens_under
@@ -104,6 +106,53 @@ pub fn expand(args: ScopeArgs, item: ItemStruct, paths: &Paths) -> syn::Result<T
         #item
 
         #server
+    })
+}
+
+/// Strips the `#[log]` marker from every field that carries it and returns the
+/// `record_log_params` method reporting those fields, or nothing when none opts in.
+fn take_log_params(fields: &mut Fields, paths: &Paths) -> syn::Result<TokenStream> {
+    let mut logged = Vec::new();
+
+    for (index, field) in fields.iter_mut().enumerate() {
+        let Some(position) = field
+            .attrs
+            .iter()
+            .position(|attr| attr.path().is_ident("log"))
+        else {
+            continue;
+        };
+        let attr = field.attrs.remove(position);
+
+        attr.meta.require_path_only()?;
+
+        let (name, member) = match &field.ident {
+            Some(ident) => (
+                LitStr::new(&ident.unraw().to_string(), ident.span()),
+                syn::Member::Named(ident.clone()),
+            ),
+            None => (
+                LitStr::new(&index.to_string(), field.ty.span()),
+                syn::Member::Unnamed(syn::Index {
+                    index: index as u32,
+                    span: field.ty.span(),
+                }),
+            ),
+        };
+
+        logged.push(quote_spanned!(field.ty.span()=> params.param(#name, &self.#member);));
+    }
+
+    if logged.is_empty() {
+        return Ok(quote!());
+    }
+
+    let log_params = paths.core("LogParams");
+
+    Ok(quote! {
+        fn record_log_params(&self, params: &mut dyn #log_params) {
+            #(#logged)*
+        }
     })
 }
 

@@ -1,14 +1,15 @@
 //! The inputs of one scope instance and how it opens.
 
 use std::any::{Any, TypeId};
-use std::marker::PhantomData;
 use std::sync::Arc;
 
+use tracing::Instrument;
 use upwell_core::{Scope, ScopeId, Singleton, TypeDescriptor};
 use upwell_di::{BoxedComponent, EntryPlan, Injectable, ScopeContainer};
 
 use super::{EntryScope, OpenScope, OpensUnder, ScopeEntry, ScopeOpener};
 use crate::entry::EntryId;
+use crate::logs::{InstanceLogs, LogOptions, ScopeLogSink};
 use crate::runtime::RuntimeView;
 use crate::scope::{ScopeParent, stores_params};
 
@@ -44,21 +45,19 @@ pub enum Opening<'e, S: Scope> {
 pub struct ScopeBuilder<'a, S: Scope, P: Scope = Singleton> {
     pub(super) opener: &'a ScopeOpener<S>,
     parent: Option<&'a OpenScope<P>>,
+    pub(super) params: S,
     pub(super) seeds: Vec<BoxedComponent>,
+    pub(super) logs: LogOptions,
 }
 
 impl<'a, S: Scope> ScopeBuilder<'a, S> {
     pub(super) fn new(opener: &'a ScopeOpener<S>, params: S) -> Self {
-        let mut seeds = Vec::new();
-
-        if stores_params::<S>() {
-            seeds.push(params_seed(params));
-        }
-
         Self {
             opener,
             parent: None,
-            seeds,
+            params,
+            seeds: Vec::new(),
+            logs: LogOptions::new(),
         }
     }
 }
@@ -72,7 +71,9 @@ impl<'a, S: Scope, P: Scope> ScopeBuilder<'a, S, P> {
         ScopeBuilder {
             opener: self.opener,
             parent: Some(parent),
+            params: self.params,
             seeds: self.seeds,
+            logs: self.logs,
         }
     }
 
@@ -134,7 +135,12 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         let (view, parent) = self.target()?;
         let builds = match entry {
             Some(entry) if plans_nothing(&view, entry) => {
-                return Ok(EntryScope::deferred(view, parent, entry.id, self.seeds));
+                return Ok(EntryScope::deferred(
+                    view,
+                    parent,
+                    entry.id,
+                    self.into_parts(false, None).0,
+                ));
             }
 
             Some(entry) => Builds::Entry(entry.id),
@@ -142,7 +148,8 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         };
         let plan =
             entry.and_then(|entry| view.scope_plan().layouts.shared_entry(entry.id).cloned());
-        let container = open_in(view, S::ID, parent, builds, self.seeds).await?;
+        let container =
+            open_in(view, S::ID, parent, builds, self.into_parts(false, None).0).await?;
 
         Ok(EntryScope::opened(container, plan))
     }
@@ -171,22 +178,51 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
             self.seeds.push(boxed_seed(source()));
         }
 
-        let container = open_in(view, S::ID, parent, builds, self.seeds).await?;
-
-        Ok(OpenScope {
-            container,
-            scope: PhantomData,
-        })
+        self.open_instance(view, parent, builds).await
     }
 
     async fn open_with(self, builds: Builds) -> crate::Result<OpenScope<S>> {
         let (view, parent) = self.target()?;
-        let container = open_in(view, S::ID, parent, builds, self.seeds).await?;
 
-        Ok(OpenScope {
-            container,
-            scope: PhantomData,
-        })
+        self.open_instance(view, parent, builds).await
+    }
+
+    /// Opens the instance inside its span, which is the instance's own only when it captures
+    /// logs.
+    async fn open_instance(
+        self,
+        view: RuntimeView,
+        parent: Arc<ScopeContainer>,
+        builds: Builds,
+    ) -> crate::Result<OpenScope<S>> {
+        let (seeds, logs) = self.into_parts(false, None);
+        let container = open_in(view, S::ID, parent, builds, seeds)
+            .instrument(logs.span().clone())
+            .await?;
+
+        Ok(OpenScope::new(container, logs))
+    }
+
+    /// Splits the builder into the seeds opening consumes, the instance's value first, and the
+    /// instance's span and sink. The span is made when `span` asks for it, or when the builder
+    /// captures logs or `sink` was made ahead; otherwise there is none and nothing is paid.
+    pub(super) fn into_parts(
+        self,
+        span: bool,
+        sink: Option<Arc<ScopeLogSink>>,
+    ) -> (Vec<BoxedComponent>, InstanceLogs) {
+        let logs = if span || self.logs.capture || sink.is_some() {
+            InstanceLogs::open(&self.params, &self.logs, sink)
+        } else {
+            InstanceLogs::none()
+        };
+        let mut seeds = self.seeds;
+
+        if stores_params::<S>() {
+            seeds.insert(0, params_seed(self.params));
+        }
+
+        (seeds, logs)
     }
 
     /// The generation the instance opens on and the container it opens under.

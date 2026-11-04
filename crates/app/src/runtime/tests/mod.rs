@@ -211,6 +211,7 @@ fn expect_app_error<T>(result: crate::Result<T>, message: &str) -> Error {
 
 mod context;
 mod entry_scopes;
+mod logs;
 mod release;
 mod runs;
 mod scopes;

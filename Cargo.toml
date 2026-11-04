@@ -363,3 +363,5 @@ required-features = ["cli", "tooling"]
 upwell-test-utils = { workspace = true }
 # The context tests inspect the invocation contexts protocols and hooks establish.
 upwell-di = { workspace = true, features = ["test-support"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

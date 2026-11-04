@@ -129,3 +129,56 @@ fn invalid_declarations_are_rejected() {
         .contains("cannot be generic")
     );
 }
+
+#[test]
+fn log_fields_are_reported_and_the_marker_is_stripped() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                #[log]
+                customer: u64,
+                credentials: String,
+                #[log]
+                region: String,
+            }
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains("fnrecord_log_params(&self,params:&mutdyn::upwell::LogParams)"));
+    assert!(expanded.contains(r#"params.param("customer",&self.customer);"#));
+    assert!(expanded.contains(r#"params.param("region",&self.region);"#));
+    assert!(!expanded.contains(r#"param("credentials""#));
+    assert!(!expanded.contains("#[log]"));
+}
+
+#[test]
+fn a_scope_without_log_fields_reports_nothing() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                customer: u64,
+            }
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(!expanded.contains("record_log_params"));
+}
+
+#[test]
+fn a_log_marker_with_arguments_is_rejected() {
+    let message = error(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                #[log(all)]
+                customer: u64,
+            }
+        ),
+    );
+
+    assert!(message.contains("expected"), "{message}");
+}

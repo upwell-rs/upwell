@@ -128,13 +128,13 @@ pub use upwell_app::{
     ProtocolPluginRegistrar, ProtocolRuntime, RelationKind, RelationTarget, ReplacementDecision,
     ResolvedPlugin, RestartReason, RestartRequired, RetirementContext, RetirementReason,
     RuntimeReloader, RuntimeTransitionReport, RuntimeView, SCOPES, ScopeBoundary, ScopeBuilder,
-    ScopeDeclaration, ScopeEntry, ScopeOpener, ScopeParent, ScopeTopology, ScopeTopologyError,
-    ScopeWork, Serve, ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents,
-    SuppressionDecision, TransitionAborted, TransitionAttemptId, TransitionCommitted,
-    TransitionDecision, TransitionFailure, TransitionHookContext, TransitionHookOutcome,
-    TransitionHookReport, TransitionOutcome, TransitionOutcomeContext, TransitionPhase,
-    TransitionProposal, TransitionRejection, TransitionVerdict, ValidationContext, build_host,
-    build_host_context, build_prepared_host, extend_late_plugins, prepare_host,
+    ScopeDeclaration, ScopeEntry, ScopeOpener, ScopeParent, ScopeRun, ScopeTopology,
+    ScopeTopologyError, ScopeWork, Serve, ServerConfig, Setup, ShutdownHandle, ShutdownSignal,
+    SlotPolicy, SpanEvents, SuppressionDecision, TransitionAborted, TransitionAttemptId,
+    TransitionCommitted, TransitionDecision, TransitionFailure, TransitionHookContext,
+    TransitionHookOutcome, TransitionHookReport, TransitionOutcome, TransitionOutcomeContext,
+    TransitionPhase, TransitionProposal, TransitionRejection, TransitionVerdict, ValidationContext,
+    build_host, build_host_context, build_prepared_host, extend_late_plugins, prepare_host,
     prepare_host_context, prepare_setup_host_context, rank_below, resolve_early_plugins,
     resolve_host_dependency, resolve_host_plugin_catalog, retain_host_plugin_catalog, serve_host,
     setup_host, setup_host_context,
@@ -259,6 +259,17 @@ pub mod config {
 
     #[cfg(feature = "yaml")]
     pub use upwell_config::Yaml;
+}
+
+/// Per-instance scope logs: the `upwell.scope` span, the routing layer and the log stream.
+#[cfg(not(target_family = "wasm"))]
+pub mod logs {
+    #[cfg(feature = "tracing-subscriber")]
+    pub use upwell_app::logs::ScopeLogLayer;
+    pub use upwell_app::logs::{
+        DEFAULT_LOG_BUFFER, InstanceLogs, LogField, LogOptions, LogRecord, SCOPE_LOG_TARGET,
+        SCOPE_SPAN_NAME, ScopeLog, ScopeLogSink, ScopeLogStream, ScopeLogs,
+    };
 }
 
 /// Framework builtins: the seeded [`ShutdownHandle`] and [`RuntimeReloader`] injectables, the opt-in

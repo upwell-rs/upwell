@@ -1,0 +1,84 @@
+//! Scope logs: opt-in `#[log]` params and per-instance capture through `ScopeBuilder::run`.
+
+use futures::StreamExt;
+use tracing::Dispatch;
+use tracing::instrument::WithSubscriber;
+use tracing_subscriber::Registry;
+use tracing_subscriber::layer::SubscriberExt;
+use upwell::logs::{LogField, ScopeLog, ScopeLogLayer};
+use upwell::scope;
+use upwell::scope::Root;
+
+use super::app;
+
+/// A run whose account is loggable and whose token is not.
+#[scope(parents = [Root])]
+pub struct AuditRun {
+    #[log]
+    account: u64,
+    #[allow(dead_code)]
+    token: String,
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn parallel_runs_capture_their_own_events_and_loggable_params() {
+    let dispatch = Dispatch::new(Registry::default().with(ScopeLogLayer::new()));
+    let app = app("user-scopes-logs").await;
+    let audits = app
+        .runtime()
+        .opener::<AuditRun>()
+        .expect("discovery declares the audit scope");
+
+    let runs = (0..16_u64).map(|account| {
+        let audits = audits.clone();
+        let dispatch = dispatch.clone();
+
+        tokio::spawn(
+            async move {
+                let run = audits
+                    .builder(AuditRun {
+                        account,
+                        token: "secret".to_owned(),
+                    })
+                    .run(move || async move {
+                        tracing::info!(account, "start");
+                        tokio::task::yield_now().await;
+                        tracing::info!(target: "dependency::crate", account, "finish");
+                    });
+                let logs = run.logs();
+
+                run.await.expect("the run succeeds");
+
+                (account, logs.collect::<Vec<_>>().await)
+            }
+            .with_subscriber(dispatch),
+        )
+    });
+
+    for outcome in futures::future::join_all(runs).await {
+        let (account, items) = outcome.expect("the run task completes");
+        let records: Vec<_> = items
+            .into_iter()
+            .map(|item| match item {
+                ScopeLog::Record(record) => record,
+                other => panic!("unexpected item {other:?}"),
+            })
+            .collect();
+
+        assert_eq!(records.len(), 2);
+
+        for record in &records {
+            assert_eq!(
+                record.params.as_ref(),
+                [LogField::new("account", account.to_string())]
+            );
+            assert!(
+                record
+                    .fields
+                    .contains(&LogField::new("account", account.to_string()))
+            );
+        }
+
+        assert_eq!(records[1].target, "dependency::crate");
+    }
+}
