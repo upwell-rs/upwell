@@ -2,7 +2,7 @@
 
 use std::any::TypeId;
 
-use upwell_core::{Cardinality, DependencyDescriptor, ScopeId, ScopeKey};
+use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, ScopeId, ScopeKey};
 
 use super::rules::{direct_component_is_selectable, provider_matches, select_provider};
 use super::{
@@ -86,6 +86,12 @@ impl ProviderSelectionModel {
 
         if dependency.dynamic {
             crate::observability::selection_external(consumer, dependency, "dynamic-runtime");
+
+            return Vec::new();
+        }
+
+        if dependency.resolution == ResolutionMode::Current {
+            crate::observability::selection_external(consumer, dependency, "invocation-context");
 
             return Vec::new();
         }

@@ -29,6 +29,18 @@ pub mod scope {
     pub use upwell_rpc::scope::{Connection, Request}; // should not be here, should be in crate::daemon with the rest of the daemon related items
 }
 
+/// The invocation context each framework entry point runs in, and the primitives that carry
+/// it into spawned work: [`CapturedContext`](context::CapturedContext) and the
+/// [`spawn`](context::spawn) family. Scoped values are read through the declared
+/// [`Current`](context::Current) and [`Scoped`](context::Scoped) dependencies.
+#[cfg(not(target_family = "wasm"))]
+pub mod context {
+    pub use upwell_di::context::{
+        CapturedContext, ContextError, Current, Scoped, ScopedError, spawn, spawn_blocking,
+        spawn_local, spawn_thread,
+    };
+}
+
 /// Component condition descriptors, callback inputs, and [`resolve`](condition::resolve),
 /// the raw config read a condition callback may make.
 #[cfg(not(target_family = "wasm"))]
@@ -46,19 +58,19 @@ pub use upwell_di::{
     ComponentContainer, ComponentDescriptor, ComponentFactories, ComponentFactory,
     ComponentFactoryDescriptor, ComponentFactoryRole, ComponentRegistry, ComponentSource,
     ConditionCatalog, ConditionDecision, ConditionDependency, ConditionError, ConditionEvaluation,
-    ConditionFactSnapshot, ConditionOutcome, DeclaredScope, Deferred, Dep, DescriptorFor, Dynamic,
-    EffectiveGraph, Factory, FactoryIdentity, FactoryOutput, Fresh, FreshFromContainer,
+    ConditionFactSnapshot, ConditionOutcome, Current, DeclaredScope, Deferred, Dep, DescriptorFor,
+    Dynamic, EffectiveGraph, Factory, FactoryIdentity, FactoryOutput, Fresh, FreshFromContainer,
     FromContainer, GenerationSnapshot, HotUpdate, HotUpdateFactory, HotUpdateOutput, Injectable,
     Lazy, Live, LiveCell, LiveRebind, LiveRef, NodeAction, OneShot, PROVIDERS, PlannedNode,
     Previous, Provided, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
     ReadyComponentFactory, ReadyFactory, ReasonKind, Registration, RegistryFor, ReplacementFactory,
-    RootResolver, ScopeContainer, ScopeRegistry, ScopedConstruction, ServiceComponent,
-    StaleGraphCandidate, StoredValue, TransitionPlan, TransitionReason, UnplannedConstruction,
-    UpwellDescriptor, ValidatedConditionEvaluation, Wired, Wiring, dependency_of,
-    dependency_of_observed, dispatch_factory, dispatch_hot_update, dispatch_ready_factory,
-    dispatch_replacement, dispatch_transition, erase_provider, factories, factory_dependencies,
-    from_boxed, hot_update_dependencies, provider_live_cell, replacement_dependencies,
-    topological_sort,
+    RootResolver, ScopeContainer, ScopeRegistry, Scoped, ScopedConstruction, ScopedError,
+    ServiceComponent, StaleGraphCandidate, StoredValue, TransitionPlan, TransitionReason,
+    UnplannedConstruction, UpwellDescriptor, ValidatedConditionEvaluation, Wired, Wiring,
+    dependency_of, dependency_of_observed, dispatch_factory, dispatch_hot_update,
+    dispatch_ready_factory, dispatch_replacement, dispatch_transition, erase_provider, factories,
+    factory_dependencies, from_boxed, hot_update_dependencies, provider_live_cell,
+    replacement_dependencies, topological_sort,
 };
 /// The DI layer's own error/result, exposed under distinct names so macro-generated
 /// **factory** code can name them without colliding with another layer's `Error`/`Result`.
@@ -155,6 +167,8 @@ pub mod tooling {
 #[cfg(not(target_family = "wasm"))]
 #[doc(hidden)]
 pub mod __private {
+    pub use upwell_di::context::{scope_is_active, scope_value};
+
     #[cfg(feature = "tooling")]
     pub use upwell_app::tooling::{
         catch_probe_panic, emit_probe_envelope_from_env, install_process_probe_panic_hook,
@@ -438,9 +452,10 @@ pub mod prelude {
 
     #[cfg(not(target_family = "wasm"))]
     pub use crate::{
-        App, Cfg, Component, ConfigManager, ConfigProperties, Deferred, Dep, Dir, DirKind,
+        App, Cfg, Component, ConfigManager, ConfigProperties, Current, Deferred, Dep, Dir, DirKind,
         DirectoriesManager, Fresh, FreshFromContainer, Injectable, Lazy, Plugin,
-        ProtocolDefinition, ProtocolRuntime, RuntimeDescriptor, Scope, Serve, ServiceComponent,
+        ProtocolDefinition, ProtocolRuntime, RuntimeDescriptor, Scope, Scoped, Serve,
+        ServiceComponent,
     };
 
     #[cfg(all(not(target_family = "wasm"), feature = "cli"))]

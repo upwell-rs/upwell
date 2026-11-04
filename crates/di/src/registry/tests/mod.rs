@@ -81,6 +81,7 @@ fn trait_provider(
 }
 
 mod captive;
+mod current;
 mod deferred;
 mod factories;
 mod fresh;

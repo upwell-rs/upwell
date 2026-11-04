@@ -49,9 +49,9 @@ pub(super) fn check_scope(
     dep: &upwell_core::DependencyDescriptor,
     can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
 ) -> crate::Result<()> {
-    // Config edges resolve against external bindings; dynamic edges are runtime-provided.
-    // Neither participates in the scope rule.
-    if dep.dynamic || dep.config {
+    // Config edges resolve against external bindings; dynamic edges are runtime-provided;
+    // invocation-context edges retain nothing. None participates in the scope rule.
+    if dep.dynamic || dep.config || dep.resolution == ResolutionMode::Current {
         return Ok(());
     }
 

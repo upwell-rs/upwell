@@ -60,6 +60,7 @@ pub fn expand(args: ScopeArgs, item: ItemStruct, paths: &Paths) -> syn::Result<T
         .map(|parent| quote_spanned!(parent.span()=> #scope_parent::of::<#parent>()));
     let source = crate::source::item_source(ident.span(), &ident.unraw().to_string(), paths);
     let provided = provided(&item.fields, ident, paths);
+    let accessors = accessors(&item.fields, ident, paths);
 
     let server = crate::gate::native_only(quote! {
         impl #scope_trait for #ident {
@@ -97,6 +98,8 @@ pub fn expand(args: ScopeArgs, item: ItemStruct, paths: &Paths) -> syn::Result<T
         };
 
         #provided
+
+        #accessors
     });
 
     Ok(quote! {
@@ -235,6 +238,39 @@ fn provided(fields: &Fields, ident: &syn::Ident, paths: &Paths) -> TokenStream {
         );
 
         #provide
+    }
+}
+
+/// `S::is_active()` for every scope and, for a scope with fields, `S::current()`: reads of the
+/// active invocation's instance of the scope.
+fn accessors(fields: &Fields, ident: &syn::Ident, paths: &Paths) -> TokenStream {
+    let is_active = paths.core("__private::scope_is_active");
+    let scope_value = paths.core("__private::scope_value");
+    let error = paths.core("context::ScopedError");
+    let current = if fields.is_empty() {
+        quote!()
+    } else {
+        quote! {
+            /// This scope's value in the active invocation.
+            ///
+            /// # Errors
+            ///
+            /// When the active invocation runs in no instance of this scope.
+            pub fn current() -> ::core::result::Result<::std::sync::Arc<Self>, #error> {
+                #scope_value::<Self>()
+            }
+        }
+    };
+
+    quote! {
+        impl #ident {
+            /// Whether the active invocation runs in an instance of this scope.
+            pub fn is_active() -> bool {
+                #is_active::<Self>()
+            }
+
+            #current
+        }
     }
 }
 

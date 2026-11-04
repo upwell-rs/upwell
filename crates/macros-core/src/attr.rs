@@ -510,6 +510,11 @@ pub fn lazy_inner(ty: &Type) -> Option<Type> {
     first_type_arg(ty, "Lazy")
 }
 
+/// Whether `ty` is an invocation-context accessor, `Current<T>` or `Scoped<S, T>`.
+pub fn is_context_accessor(ty: &Type) -> bool {
+    first_type_arg(ty, "Current").is_some() || first_type_arg(ty, "Scoped").is_some()
+}
+
 /// The wrapped shape of a `Fresh<H>` dependency.
 pub fn fresh_inner(ty: &Type) -> Option<Type> {
     first_type_arg(ty, "Fresh")

@@ -237,6 +237,7 @@ fn construction_edge_reason(dependency: &upwell_core::DependencyDescriptor) -> &
         ResolutionMode::Lazy => "lazy",
         ResolutionMode::Deferred => "deferred-cycle-break",
         ResolutionMode::Fresh => "fresh",
+        ResolutionMode::Current => "invocation-context",
     }
 }
 

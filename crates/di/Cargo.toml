@@ -17,6 +17,9 @@ di-check = []
 # Serialize the transition-planning vocabulary (actions, reasons, demand identities) for
 # redacted transition reports, tooling, and telemetry.
 serde = ["dep:serde"]
+# Carry the invocation context into rayon pools (`CapturedContext::install`, `join`,
+# `spawn_rayon`). Binding closures with `CapturedContext::bind` works without it.
+rayon = ["dep:rayon"]
 
 [dependencies]
 upwell-core = { workspace = true }
@@ -29,6 +32,7 @@ futures = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }

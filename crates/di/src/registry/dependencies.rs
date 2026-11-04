@@ -3,7 +3,7 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
-use upwell_core::{Cardinality, ScopeId, ScopeKey};
+use upwell_core::{Cardinality, ResolutionMode, ScopeId, ScopeKey};
 
 use super::ComponentRegistry;
 use super::scopes::{scope_allows_by_rank, scope_allows_with, scope_unreachable_dependency};
@@ -107,6 +107,10 @@ pub(super) fn check_dependency(
         return Ok(());
     }
 
+    if dep.resolution == ResolutionMode::Current {
+        return check_current(model, is_component, consumer, dep);
+    }
+
     let dep_id = dep.ty.type_id;
     let matching = model.has_matching_provider(dep_id, dep.qualifier);
     let visible = model.has_visible_provider(dep_id, dep.qualifier, consumer.scope, can_access);
@@ -183,6 +187,31 @@ pub(super) fn check_dependency(
     }
 
     Ok(())
+}
+
+/// Requires the target of an invocation-context edge (`Current<T>`, `Scoped<S, T>`) to be
+/// provided in some scope, unless the edge is optional or runtime-provided. Where it lives is
+/// not checked: the edge resolves from whichever chain is active when it is read.
+fn check_current(
+    model: &selection::ProviderSelectionModel,
+    is_component: &impl Fn(TypeId) -> bool,
+    consumer: &ComponentDescriptor,
+    dep: &upwell_core::DependencyDescriptor,
+) -> crate::Result<()> {
+    let dep_id = dep.ty.type_id;
+    let must_exist = dep.cardinality.requires_provider() && !dep.optional && !dep.dynamic;
+    let provided = is_component(dep_id) || model.has_matching_provider(dep_id, dep.qualifier);
+
+    if !must_exist || provided {
+        return Ok(());
+    }
+
+    Err(Error::MissingDependency {
+        component: consumer.name.to_string(),
+        component_id: consumer.id.to_string(),
+        dependency: (dep.ty.type_name)().to_string(),
+        type_name: (dep.ty.type_name)().to_string(),
+    })
 }
 
 /// The error for a single-provider dependency no provider can be selected for: a tie

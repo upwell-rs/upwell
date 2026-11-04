@@ -332,6 +332,7 @@ pub(super) fn dependency_labels(dependency: &DependencyDescriptor) -> BTreeMap<S
         ResolutionMode::Deferred => "deferred",
         ResolutionMode::Lazy => "lazy",
         ResolutionMode::Fresh => "fresh",
+        ResolutionMode::Current => "current",
     };
     let observation = match dependency.observation {
         DependencyObservation::Snapshot => "snapshot",

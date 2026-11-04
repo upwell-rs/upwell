@@ -34,6 +34,9 @@ pub enum ResolutionMode {
     Lazy,
     /// Re-run the target component factory without using its declared-scope cache.
     Fresh,
+    /// Resolve from the active invocation's scope chain on every access, never at
+    /// construction and never cached: `Current<T>` and `Scoped<S, T>`.
+    Current,
 }
 
 /// Whether a consumer keeps one resolved snapshot or follows a compatible live binding.

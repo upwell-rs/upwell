@@ -233,6 +233,20 @@ pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> Fiel
         };
     }
 
+    if attr::is_context_accessor(ty) {
+        return FieldPlan {
+            value: quote!(<#ty as #from_container>::from_container(cx).await?),
+            ready: ReadyField::read(
+                &binding,
+                quote!(<#ty as #from_container>::ready_at(cx, #index)),
+                quote!(#binding?),
+            ),
+            dependency: Some(quote!(<#ty as #from_container>::dependency())),
+            check: None,
+            wired: None,
+        };
+    }
+
     // A `#[config]` / `#[config("path")]` field is a config binding injected as
     // `Cfg<T>`, keyed by property path. Config edges are validated against the
     // registered bindings (not the component graph), so they emit no di-check
