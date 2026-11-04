@@ -123,6 +123,7 @@ pub(super) fn generate_init(
     } else {
         quote!()
     };
+
     let bound = info.params.iter().any(InitParam::is_bound);
     let named = info.scope.is_some() || bound;
 
@@ -158,6 +159,7 @@ pub(super) fn generate_init(
         true => format_ident!("__upwell_init_{}", marked),
         false => format_ident!("init"),
     };
+
     let marker = if marked == "init" && !named {
         quote!()
     } else {
@@ -174,6 +176,7 @@ pub(super) fn generate_init(
             };
         }
     };
+
     let slot = match named {
         true => format_ident!(
             "__UPWELL_INIT_FACTORY_{}",
