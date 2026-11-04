@@ -2,7 +2,8 @@
 
 //! End-to-end tests for the invocation context of RPC calls, over the in-memory transport.
 //!
-//! Each call runs in its own context, middleware, handler and global error handler included. The call's scope joins it when it opens, so until then the connection
+//! Each call runs in its own context, middleware, handler, response stream and global error
+//! handler included. The call's scope joins it when it opens, so until then the connection
 //! scope is the innermost one.
 
 mod common;
@@ -15,10 +16,10 @@ use std::task::{Context, Poll};
 use common::{MemoryServer, deadline};
 use upwell::daemon::tower::{Layer, Service};
 use upwell::daemon::{
-    App, Connection, ErrorHandler, ErrorResponse, Inject, Payload, Request, RpcAppBuilder,
-    RpcOutcome, RpcRequest, handlers, service,
+    App, Connection, ErrorHandler, ErrorResponse, Inject, Payload, Request, ResponseStream,
+    RpcAppBuilder, RpcOutcome, RpcRequest, handlers, service,
 };
-use upwell::{CallResult, MemoryConnectionHandle, Scope, component, methods};
+use upwell::{CallResult, MemoryConnectionHandle, Scope, ServerEvent, component, methods};
 use upwell_di::context::{Invocation, InvocationContext};
 
 /// What the error handler saw last.
@@ -83,6 +84,14 @@ impl ContextSvc {
             .push(context);
 
         describe()
+    }
+
+    /// Reports the context from inside the stream, polled after the handler returned.
+    #[rpc]
+    async fn streamed(Inject(_ticket): Inject<Arc<CallTicket>>) -> ResponseStream<String> {
+        ResponseStream::new(futures::stream::unfold(0u32, |sent| async move {
+            (sent < 2).then(|| (Ok(describe()), sent + 1))
+        }))
     }
 
     /// Always fails, so the global error handler runs.
@@ -199,6 +208,28 @@ async fn a_handler_sees_the_connection_scope_until_its_call_scope_opens() {
         "rpc:call"
     );
 
+    server.shutdown([connection]).await;
+}
+
+#[tokio::test]
+async fn a_response_stream_is_polled_in_the_call_context() {
+    let server = start().await;
+    let connection = server.connect().await;
+    let mut call = deadline(
+        "the streaming call",
+        connection.open("ContextSvc.streamed", encode(&()), false),
+    )
+    .await
+    .expect("the stream opens");
+    let mut items = Vec::new();
+
+    while let Some(ServerEvent::Item(bytes)) = deadline("the next event", call.recv()).await {
+        items.push(postcard::from_bytes::<String>(&bytes).expect("a string item"));
+    }
+
+    assert_eq!(items, ["rpc:call", "rpc:call"]);
+
+    drop(call);
     server.shutdown([connection]).await;
 }
 
