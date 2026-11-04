@@ -7,7 +7,7 @@
 //! - the [`Invocation`] metadata saying which entry point this is;
 //! - the application runtime, opaque here ([`ContextRuntime`]), which supplies the root of the
 //!   current generation while no scope is open;
-//! - the innermost open scope instance. A [`ScopeContainer`] links to its parents, so the
+//! - the innermost open scope instance. A `ScopeContainer` links to its parents, so the
 //!   innermost instance is the whole chain up to the root, and it pins the runtime generation
 //!   it was opened on.
 //!

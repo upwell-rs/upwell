@@ -50,6 +50,7 @@ fn describe() -> String {
         Invocation::RpcCall => "rpc",
         _ => "other",
     };
+
     let scope = match context.scope_key().map(|key| key.id()) {
         Some(id) if id == Request::ID => "call",
         Some(id) if id == Connection::ID => "connection",

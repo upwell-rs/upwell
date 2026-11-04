@@ -7,7 +7,7 @@ use upwell_core::{ResolverSet, Scope, ScopeId};
 
 use super::*;
 use crate::container::{ScopeContainer, ScopeRegistry};
-use crate::test_support::measure;
+use crate::test_support;
 
 /// A request-like scope opened under the root.
 struct Request;
@@ -321,7 +321,7 @@ async fn establishing_binding_and_capturing_allocate_nothing() {
     let runtime = runtime(&chain);
     let mut cx = Context::from_waker(Waker::noop());
 
-    let (poll, delta) = measure(|| {
+    let (poll, delta) = test_support::measure(|| {
         let entered = InvocationContext::new(Invocation::HttpRequest, runtime)
             .with_pending_scope(Request::KEY, None);
         let mut future = pin!(entered.enter(async {
