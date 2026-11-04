@@ -25,9 +25,13 @@ pub(crate) fn with_current_sink<F: Future>(
 /// The log of the scope instance a component or run closure runs in, injectable as a
 /// parameter of `ScopeBuilder::run` work.
 ///
-/// It reaches the instance through the task, like the instance's span does, so work spawned
-/// without Upwell's propagation primitives does not see it. In an instance that does not
-/// capture, [`subscribe`](Self::subscribe) returns a stream that has already ended.
+/// It is task-local access, in the sense of `tracing`'s current span: it reflects the capturing
+/// instance the *current task* runs in, so it is meant for `run` work and entries, not as a
+/// property of a component. Work spawned without Upwell's propagation primitives does not see
+/// it. A component built lazily, or as an ancestor while a child instance opens, sees the sink
+/// of the task that resolves it, not of its own scope; routing construction to the owning
+/// scope's sink is a follow-up (#470). In an instance that does not capture,
+/// [`subscribe`](Self::subscribe) returns a stream that has already ended.
 #[derive(Clone)]
 pub struct ScopeLogs {
     sink: Option<Arc<ScopeLogSink>>,

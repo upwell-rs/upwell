@@ -23,7 +23,8 @@ pub struct AuditRun {
     token: String,
 }
 
-/// Records whether the instance that built it captures logs, as seen while it was built.
+/// Records whether the task that built it ran inside a capturing instance. `ScopeLogs` is task-local,
+/// so this pins what code running during an instance's own open sees, not a component property.
 #[component(scope = AuditRun, default_factory = false)]
 struct CaptureProbe {
     capturing: bool,
@@ -56,7 +57,7 @@ async fn probe_of(scope: &upwell::OpenScope<AuditRun>) -> bool {
 }
 
 #[tokio::test]
-async fn a_component_built_while_opening_sees_its_own_instance_sink() {
+async fn construction_during_an_open_sees_the_opening_instances_sink() {
     let app = app("user-scopes-open-sink").await;
     let audits = app.runtime().opener::<AuditRun>().expect("declared");
     let captured = audits
@@ -76,7 +77,7 @@ async fn a_component_built_while_opening_sees_its_own_instance_sink() {
 }
 
 #[tokio::test]
-async fn a_nested_non_capturing_open_does_not_inherit_the_outer_sink() {
+async fn a_non_capturing_open_hides_the_enclosing_instances_sink() {
     let app = app("user-scopes-open-nested").await;
     let audits = app.runtime().opener::<AuditRun>().expect("declared");
 
