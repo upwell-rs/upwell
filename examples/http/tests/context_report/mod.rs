@@ -11,11 +11,13 @@ pub fn describe() -> String {
     let Ok(context) = InvocationContext::capture() else {
         return "none".to_owned();
     };
+
     let kind = match context.invocation() {
         Invocation::WebsocketMessage => "message",
         Invocation::WebsocketConnection => "connection",
         _ => "other",
     };
+
     let scope = match context.scope_key().map(|key| key.id()) {
         Some(id) if id == WebsocketMessage::ID => "message",
         Some(id) if id == WebsocketConnection::ID => "connection",

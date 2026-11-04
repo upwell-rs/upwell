@@ -64,6 +64,7 @@ fn describe(expected: Option<&Arc<ScopeContainer>>) -> String {
         Invocation::HttpRequest => "http",
         _ => "other",
     };
+
     let scope = match (context.scope_key(), expected) {
         (None, _) => "none",
         (Some(_), Some(expected)) if context.is_scope(expected) => "same",

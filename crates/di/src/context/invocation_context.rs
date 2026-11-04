@@ -16,6 +16,7 @@ tokio::task_local! {
 
 /// What one framework invocation runs inside of: its metadata, its runtime and its innermost
 /// open scope instance. See the [module documentation](super).
+#[must_use = "an invocation context does nothing until something enters it"]
 #[derive(Clone)]
 pub struct InvocationContext {
     invocation: Invocation,
