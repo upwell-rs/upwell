@@ -21,6 +21,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
 
@@ -143,6 +144,13 @@ jobs:
     timeout-minutes: 60
     if: ${{ !startsWith(github.head_ref, 'release-plz-') }}
     steps:
+      - &free_disk
+        name: Free runner disk space
+        shell: bash
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
       - *checkout
       - *cache
       - name: Install Rust toolchain
@@ -208,6 +216,7 @@ jobs:
     timeout-minutes: 60
     needs: test_archive_linux
     steps:
+      - *free_disk
       - *checkout
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -226,6 +235,10 @@ jobs:
         with:
           name: nextest-archive-linux-${{ github.run_id }}
           path: nextest-archive
+      - name: Show disk usage after download
+        run: |
+          df -h /
+          du -sh nextest-archive/*
       - name: Run critical tests
         env:
           UPWELL_SKIP_GENERATED_PROJECT_BUILDS: "1"
@@ -252,6 +265,7 @@ jobs:
     timeout-minutes: 90
     needs: test_archive_linux
     steps:
+      - *free_disk
       - *checkout
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -270,6 +284,10 @@ jobs:
         with:
           name: nextest-archive-linux-${{ github.run_id }}
           path: nextest-archive
+      - name: Show disk usage after download
+        run: |
+          df -h /
+          du -sh nextest-archive/*
       - name: Run extended tests
         env:
           UPWELL_SKIP_GENERATED_PROJECT_BUILDS: "1"
