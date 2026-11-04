@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 use tracing::Event;
 use tracing::level_filters::LevelFilter;
 use upwell_core::ScopeId;
@@ -39,7 +39,7 @@ impl ScopeLogSink {
             scope,
             params,
             level: options.level,
-            buffer: options.buffer.max(1),
+            buffer: options.buffer.clamp(1, Semaphore::MAX_PERMITS),
             watchers: AtomicUsize::new(0),
             attached: AtomicBool::new(false),
             subscribers: Mutex::new(Some(Vec::new())),

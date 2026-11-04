@@ -6,14 +6,13 @@ use std::marker::PhantomData;
 use std::sync::{Arc, OnceLock};
 
 use futures::future::BoxFuture;
-use tracing::Instrument;
 use upwell_core::{DependencyDescriptor, Scope};
 use upwell_di::{EntryPlan, FromContainer, ScopeContainer};
 
 use super::builder::open_planned_in;
 use super::{OpensUnder, ScopeBuilder};
 use crate::entry::EntryTargets;
-use crate::logs::{ScopeLogSink, ScopeLogStream, new_sink, with_current_sink};
+use crate::logs::{self, ScopeLogSink, ScopeLogStream};
 use crate::runtime::{RuntimeView, scope_run_target};
 
 /// Work [`ScopeBuilder::run`] runs inside a scope instance: a closure whose parameters are the
@@ -102,7 +101,7 @@ impl<S: Scope, P: Scope, W, Targets> ScopeRun<'_, S, P, W, Targets> {
     /// [`ScopeLogLayer`](crate::logs::ScopeLogLayer) in the subscriber.
     pub fn logs(&self) -> ScopeLogStream {
         self.sink
-            .get_or_init(|| new_sink(&self.builder.params, &self.builder.logs))
+            .get_or_init(|| logs::new_sink(&self.builder.params, &self.builder.logs))
             .subscribe()
     }
 }
@@ -124,6 +123,8 @@ where
 
 impl<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets> ScopeRun<'_, S, P, W, Targets> {
     async fn execute(self) -> crate::Result<W::Output> {
+        use tracing::Instrument;
+
         let Self {
             builder,
             work,
@@ -139,9 +140,9 @@ impl<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets> ScopeRun<'_, S,
             builder
                 .logs
                 .capture
-                .then(|| new_sink(&builder.params, &builder.logs))
+                .then(|| logs::new_sink(&builder.params, &builder.logs))
         });
-        let (seeds, logs) = builder.into_parts(true, sink);
+        let (seeds, instance_logs) = builder.into_parts(true, sink);
         let instance = async {
             let container = open_planned_in(&view, S::ID, parent, Some(&plan), seeds).await?;
 
@@ -150,13 +151,13 @@ impl<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets> ScopeRun<'_, S,
                 .enter(work.call(&container))
                 .await
         };
-        let outcome = with_current_sink(
-            logs.sink().map(Arc::clone),
-            instance.instrument(logs.span().clone()),
+        let outcome = logs::with_current_sink(
+            instance_logs.sink().map(Arc::clone),
+            instance.instrument(instance_logs.span().clone()),
         )
         .await;
 
-        logs.finish();
+        instance_logs.finish();
 
         outcome
     }

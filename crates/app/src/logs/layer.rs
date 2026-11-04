@@ -8,7 +8,7 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
-use super::span::take_handoff;
+use super::span as handoff;
 use super::{SCOPE_SPAN_NAME, ScopeLogSink};
 
 /// Routes every event made inside a capturing scope instance to that instance's sink.
@@ -44,7 +44,7 @@ where
             return;
         }
 
-        let Some(sink) = take_handoff() else {
+        let Some(sink) = handoff::take_handoff() else {
             return;
         };
         let Some(span) = ctx.span(id) else {

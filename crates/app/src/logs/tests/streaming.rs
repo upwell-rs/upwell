@@ -85,3 +85,20 @@ async fn dropping_the_instance_ends_its_streams() {
 
     assert!(records(stream).await.is_empty());
 }
+
+#[tokio::test]
+async fn an_unbounded_buffer_request_is_clamped_instead_of_panicking() {
+    let _guard = install();
+    let huge = LogOptions {
+        buffer: usize::MAX,
+        ..options()
+    };
+    let zero = LogOptions {
+        buffer: 0,
+        ..options()
+    };
+    let (huge, _stream) = instance(1, &huge);
+    let (zero, _other) = instance(2, &zero);
+
+    drop((huge, zero));
+}
