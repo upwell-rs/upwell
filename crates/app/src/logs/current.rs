@@ -30,7 +30,9 @@ pub(crate) fn with_current_sink<F: Future>(
 /// property of a component. Work spawned without Upwell's propagation primitives does not see
 /// it. A component built lazily, or as an ancestor while a child instance opens, sees the sink
 /// of the task that resolves it, not of its own scope; routing construction to the owning
-/// scope's sink is a follow-up (#470). In an instance that does not capture,
+/// scope's sink is a follow-up (#470). [`current`](Self::current) returns a snapshot of the sink
+/// at that moment: a handle moved into another task or a nested instance keeps its original
+/// sink and does not follow the current task. In an instance that does not capture,
 /// [`subscribe`](Self::subscribe) returns a stream that has already ended.
 #[derive(Clone)]
 pub struct ScopeLogs {
