@@ -1,5 +1,7 @@
 //! Log capture options of a [`ScopeBuilder`].
 
+use std::num::NonZeroUsize;
+
 use tracing::level_filters::LevelFilter;
 use upwell_core::Scope;
 
@@ -30,8 +32,8 @@ impl<S: Scope, P: Scope> ScopeBuilder<'_, S, P> {
     }
 
     /// Holds up to `records` in each subscriber's buffer before it drops records and reports
-    /// them as lagged. At least one.
-    pub fn log_buffer(mut self, records: usize) -> Self {
+    /// them as lagged.
+    pub fn log_buffer(mut self, records: NonZeroUsize) -> Self {
         self.logs.buffer = records;
 
         self

@@ -1,5 +1,6 @@
 #![cfg(feature = "tracing-subscriber")]
 
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use futures::StreamExt;
