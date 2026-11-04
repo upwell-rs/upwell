@@ -26,13 +26,13 @@ impl TempFixture {
     ///
     /// # Panics
     ///
-    /// Panics when `prefix` is empty or contains a path separator, when
-    /// `parent` cannot be created or read, or when a stale directory cannot be
-    /// removed.
+    /// Panics when `prefix` is empty, contains a path separator or starts with a
+    /// Windows path prefix such as `C:`, when `parent` cannot be created or
+    /// read, or when a stale directory cannot be removed.
     pub fn new_in(parent: &Path, prefix: &str) -> Self {
         assert!(
-            !prefix.is_empty() && !prefix.contains(['/', '\\']),
-            "temporary fixture prefix must be non-empty and contain no path separators"
+            is_plain_prefix(prefix),
+            "temporary fixture prefix must be non-empty and contain no path separators or drive prefix"
         );
 
         fs::create_dir_all(parent).expect("create temporary fixture parent directory");
@@ -89,4 +89,12 @@ fn remove_stale(parent: &Path, prefix: &str) {
             fs::remove_dir_all(entry.path()).expect("remove stale temporary fixture");
         }
     }
+}
+
+fn is_plain_prefix(prefix: &str) -> bool {
+    !prefix.is_empty()
+        && !prefix.contains(['/', '\\'])
+        && !Path::new(prefix)
+            .components()
+            .any(|component| matches!(component, Component::Prefix(_)))
 }

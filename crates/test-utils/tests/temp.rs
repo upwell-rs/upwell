@@ -76,3 +76,11 @@ fn new_in_rejects_unsafe_prefixes_without_sweeping_siblings() {
 
     assert!(sibling.exists());
 }
+
+#[cfg(windows)]
+#[test]
+fn new_in_rejects_a_windows_drive_prefix() {
+    let parent = TempFixture::new("upwell-temp-parent-");
+
+    assert!(panic::catch_unwind(|| TempFixture::new_in(parent.path(), "C:")).is_err());
+}
