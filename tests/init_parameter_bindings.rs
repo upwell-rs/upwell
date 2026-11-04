@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use upwell::{App, Cfg, ComponentFactories, component, config, injectable, methods};
 
-/// A config section bound at `replicas.eu`.
+/// A config section bound at both `replicas.eu` and `replicas.us`.
 #[config]
 #[derive(serde::Deserialize)]
 struct Replica {
@@ -46,6 +46,8 @@ struct Router {
     #[default]
     host: String,
     #[default]
+    us_host: String,
+    #[default]
     backend: String,
 }
 
@@ -54,11 +56,13 @@ impl Router {
     #[init]
     fn build(
         #[config("replicas.eu")] replica: Cfg<Replica>,
+        #[config("replicas.us")] us_replica: Cfg<Replica>,
         #[qualifier = "secondary"] backend: Arc<dyn Backend>,
         _plain: Arc<PrimaryBackend>,
     ) -> Self {
         Self {
             host: replica.get().host.clone(),
+            us_host: us_replica.get().host.clone(),
             backend: backend.name().to_string(),
         }
     }
@@ -72,23 +76,26 @@ fn bound_parameters_report_their_path_and_qualifier() {
         .expect("the init is registered");
     let dependencies = (factory.dependencies)();
 
-    assert_eq!(dependencies.len(), 3);
+    assert_eq!(dependencies.len(), 4);
     assert!(dependencies[0].config);
     assert_eq!(dependencies[0].qualifier, Some("replicas.eu"));
-    assert!(!dependencies[1].config);
-    assert_eq!(dependencies[1].qualifier, Some("secondary"));
-    assert_eq!(dependencies[2].qualifier, None);
+    assert!(dependencies[1].config);
+    assert_eq!(dependencies[1].qualifier, Some("replicas.us"));
+    assert!(!dependencies[2].config);
+    assert_eq!(dependencies[2].qualifier, Some("secondary"));
+    assert_eq!(dependencies[3].qualifier, None);
 }
 
 #[tokio::test]
 async fn bound_parameters_select_the_config_path_and_the_qualified_provider() {
     let config = upwell::ConfigManager::<upwell::config::Toml>::from_str(
-        "[replicas.eu]\nhost = \"eu-host\"\n",
+        "[replicas.eu]\nhost = \"eu-host\"\n[replicas.us]\nhost = \"us-host\"\n",
     )
     .expect("the config parses");
     let app = App::<()>::builder("init-bindings")
         .auto_discover()
         .config::<Replica>("replicas.eu")
+        .config::<Replica>("replicas.us")
         .config_source(config)
         .build()
         .await
@@ -99,6 +106,10 @@ async fn bound_parameters_select_the_config_path_and_the_qualified_provider() {
     assert_eq!(
         router.host, "eu-host",
         "the config comes from the bound path"
+    );
+    assert_eq!(
+        router.us_host, "us-host",
+        "the second binding comes from its own path"
     );
     assert_eq!(
         router.backend, "secondary",
