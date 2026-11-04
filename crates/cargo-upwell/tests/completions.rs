@@ -65,7 +65,67 @@ fn refresh_populates_workspace_resource_candidates() {
     let cache = fixture.child("cache");
     let template = fixture.child("template");
 
-    std::fs::create_dir_all(&template).expect("template directory exists");
+    write_completion_template(&template);
+
+    let generated = cargo_upwell(
+        fixture.path(),
+        [
+            "init",
+            project.to_str().expect("project path is UTF-8"),
+            "--template-path",
+            template.to_str().expect("template path is UTF-8"),
+            "--upwell-path",
+            common::workspace_root()
+                .to_str()
+                .expect("workspace path is UTF-8"),
+            "--no-vcs",
+        ],
+        Some(&cache),
+    );
+    assert_success(&generated, "fixture generation");
+
+    let refreshed = cargo_upwell(
+        &project,
+        ["completions", "refresh", "--features", "metrics"],
+        Some(&cache),
+    );
+    assert_success(&refreshed, "completion refresh");
+    let snapshot = completion_snapshot(&cache);
+
+    assert!(snapshot.is_file());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        assert_eq!(
+            std::fs::metadata(&snapshot)
+                .expect("snapshot metadata exists")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+
+    let resources = complete(&project, &cache, ["cargo-upwell", "explain", "component:w"]);
+    let features = complete(
+        &project,
+        &cache,
+        ["cargo-upwell", "check", "--features", "m"],
+    );
+
+    assert!(
+        resources.contains("component\\:worker"),
+        "unexpected resource completions: {resources:?}"
+    );
+    assert!(
+        features.starts_with("metrics"),
+        "unexpected feature completions: {features:?}"
+    );
+}
+
+fn write_completion_template(template: &Path) {
+    std::fs::create_dir_all(template).expect("template directory exists");
     std::fs::write(
         template.join("Cargo.toml.liquid"),
         r#"[package]
@@ -132,62 +192,6 @@ prompt = "Upwell dependency"
 "#,
     )
     .expect("template configuration is written");
-
-    let generated = cargo_upwell(
-        fixture.path(),
-        [
-            "init",
-            project.to_str().expect("project path is UTF-8"),
-            "--template-path",
-            template.to_str().expect("template path is UTF-8"),
-            "--upwell-path",
-            common::workspace_root()
-                .to_str()
-                .expect("workspace path is UTF-8"),
-            "--no-vcs",
-        ],
-        Some(&cache),
-    );
-    assert_success(&generated, "fixture generation");
-
-    let refreshed = cargo_upwell(
-        &project,
-        ["completions", "refresh", "--features", "metrics"],
-        Some(&cache),
-    );
-    assert_success(&refreshed, "completion refresh");
-    let snapshot = completion_snapshot(&cache);
-
-    assert!(snapshot.is_file());
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        assert_eq!(
-            std::fs::metadata(&snapshot)
-                .expect("snapshot metadata exists")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
-    }
-
-    let resources = complete(&project, &cache, ["cargo-upwell", "explain", "component:w"]);
-    let features = complete(
-        &project,
-        &cache,
-        ["cargo-upwell", "check", "--features", "m"],
-    );
-
-    assert!(
-        resources.contains("component\\:worker"),
-        "unexpected resource completions: {resources:?}"
-    );
-    assert!(
-        features.starts_with("metrics"),
-        "unexpected feature completions: {features:?}"
-    );
 }
 
 fn completion_snapshot(cache: &Path) -> PathBuf {

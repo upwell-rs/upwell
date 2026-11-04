@@ -23,7 +23,18 @@ impl TempFixture {
     /// directories with the same prefix that an earlier killed run left behind.
     ///
     /// Callers must serialize runs that share `parent` and `prefix`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `prefix` is empty or contains a path separator, when
+    /// `parent` cannot be created or read, or when a stale directory cannot be
+    /// removed.
     pub fn new_in(parent: &Path, prefix: &str) -> Self {
+        assert!(
+            !prefix.is_empty() && !prefix.contains(['/', '\\']),
+            "temporary fixture prefix must be non-empty and contain no path separators"
+        );
+
         fs::create_dir_all(parent).expect("create temporary fixture parent directory");
         remove_stale(parent, prefix);
 
