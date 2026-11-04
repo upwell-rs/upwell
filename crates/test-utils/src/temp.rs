@@ -19,6 +19,22 @@ impl TempFixture {
         Self { root }
     }
 
+    /// Creates an automatically removed fixture below `parent`, first removing
+    /// directories with the same prefix that an earlier killed run left behind.
+    ///
+    /// Callers must serialize runs that share `parent` and `prefix`.
+    pub fn new_in(parent: &Path, prefix: &str) -> Self {
+        fs::create_dir_all(parent).expect("create temporary fixture parent directory");
+        remove_stale(parent, prefix);
+
+        let root = Builder::new()
+            .prefix(prefix)
+            .tempdir_in(parent)
+            .expect("create temporary test fixture");
+
+        Self { root }
+    }
+
     /// Returns the fixture root.
     pub fn path(&self) -> &Path {
         self.root.path()
@@ -48,5 +64,18 @@ impl TempFixture {
         fs::write(&path, contents).expect("write temporary fixture file");
 
         path
+    }
+}
+
+fn remove_stale(parent: &Path, prefix: &str) {
+    let entries = fs::read_dir(parent).expect("read temporary fixture parent directory");
+
+    for entry in entries.flatten() {
+        let stale = entry.file_name().to_string_lossy().starts_with(prefix)
+            && entry.file_type().is_ok_and(|kind| kind.is_dir());
+
+        if stale {
+            fs::remove_dir_all(entry.path()).expect("remove stale temporary fixture");
+        }
     }
 }
