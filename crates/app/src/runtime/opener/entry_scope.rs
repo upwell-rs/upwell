@@ -187,12 +187,15 @@ impl Deferred {
                     .take()
                     .ok_or(crate::Error::DeferredScopeFailed { scope: S::ID })?;
 
-                let container = open_in(
-                    self.view.clone(),
-                    S::ID,
-                    Arc::clone(&self.parent),
-                    Builds::Entry(self.entry),
-                    seeds,
+                let container = crate::logs::with_current_sink(
+                    None,
+                    open_in(
+                        self.view.clone(),
+                        S::ID,
+                        Arc::clone(&self.parent),
+                        Builds::Entry(self.entry),
+                        seeds,
+                    ),
                 )
                 .await?;
 

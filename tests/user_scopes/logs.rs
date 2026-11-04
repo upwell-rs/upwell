@@ -99,6 +99,36 @@ async fn a_non_capturing_open_hides_the_enclosing_instances_sink() {
     assert!(!inner_capturing);
 }
 
+#[tokio::test]
+async fn a_non_capturing_open_when_needed_hides_the_enclosing_instances_sink() {
+    let app = app("user-scopes-open-when-needed").await;
+    let audits = app.runtime().opener::<AuditRun>().expect("declared");
+
+    let inner_capturing = audits
+        .builder(audit(1))
+        .capture_logs()
+        .run(|opener: ScopeOpener<AuditRun>| async move {
+            let inner = opener
+                .builder(audit(2))
+                .open_when_needed(None)
+                .await
+                .expect("the inner opens");
+            let probe = inner
+                .container()
+                .await
+                .expect("the container opens")
+                .extract::<Arc<CaptureProbe>>()
+                .await
+                .expect("the probe builds");
+
+            probe.capturing
+        })
+        .await
+        .expect("the run succeeds");
+
+    assert!(!inner_capturing);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn parallel_runs_capture_their_own_events_and_loggable_params() {
     let dispatch = Dispatch::new(Registry::default().with(ScopeLogLayer::new()));

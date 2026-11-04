@@ -147,8 +147,10 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         };
         let plan =
             entry.and_then(|entry| view.scope_plan().layouts.shared_entry(entry.id).cloned());
+        let seeds = self.into_parts(false, None).0;
         let container =
-            open_in(view, S::ID, parent, builds, self.into_parts(false, None).0).await?;
+            crate::logs::with_current_sink(None, open_in(view, S::ID, parent, builds, seeds))
+                .await?;
 
         Ok(EntryScope::opened(container, plan))
     }
