@@ -838,6 +838,14 @@ watcher.await?;
 - `on_event` walks the event's span stack to the innermost span holding a sink and offers an
   owned `LogRecord` to every subscriber with `try_send`; a full buffer counts the record as
   dropped. The stream yields `Lagged(n)` once the buffered records have been read.
+- `ScopeLogs` is task-local access, like `tracing`'s current span: it is the capturing instance
+  of the current task, meant for `run` work and entries, not a per-component property. Code that
+  runs while an instance opens (its eager components, an `open*` call) sees that instance's sink,
+  and an open without capture hides an enclosing one. A component built lazily, via
+  `open_on_demand`, or as an ancestor while a child instance opens, sees the sink of the task
+  that resolves it, not of its own scope. Routing construction to the owning scope's sink (a sink
+  stored on the container and restored around factories) is a follow-up (#470); it costs a
+  restore on the construction hot path and interacts with protocol identity (#353).
 - Across spawned tasks routing follows the span, not the invocation context. Work spawned with
   Upwell's propagation primitives (track C) carries the span; a plain `tokio::spawn` loses it and
   its events reach only the console. `ScopeLogs` follows the task the same way, through a
