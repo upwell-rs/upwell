@@ -51,6 +51,7 @@ impl ComponentRegistry {
 /// beside any other, and more than one seed of a type.
 pub(super) fn validate_placement_set(components: &[ComponentDescriptor]) -> crate::Result<()> {
     for placements in group_by_type(components).values() {
+        let mut seeds = Vec::new();
         let transient = placements
             .iter()
             .find(|placement| placement.scope.id() == Transient::ID);
@@ -64,8 +65,6 @@ pub(super) fn validate_placement_set(components: &[ComponentDescriptor]) -> crat
                 other: beside.scope.name(),
             });
         }
-
-        let mut seeds = Vec::new();
 
         for placement in placements {
             if placement.effective_factory()?.is_none() {

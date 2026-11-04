@@ -51,6 +51,14 @@ fn placed(factories: fn() -> &'static [ComponentFactoryDescriptor]) -> Component
     descriptor_with_factories(factories).with_scope(SiblingA::KEY)
 }
 
+fn twin(
+    id: &'static str,
+    scope: upwell_core::ScopeKey,
+    factories: fn() -> &'static [ComponentFactoryDescriptor],
+) -> ComponentDescriptor {
+    planned(id, TypeDescriptor::of::<u128>("Twin"), factories).with_scope(scope)
+}
+
 fn resolve(components: Vec<ComponentDescriptor>) -> crate::Result<Vec<ComponentDescriptor>> {
     ComponentRegistry {
         components,
@@ -146,10 +154,8 @@ fn two_factories_in_one_scope_stay_ambiguous() {
 
 #[test]
 fn descriptors_of_one_type_in_distinct_scopes_are_kept() {
-    let first = planned("first", TypeDescriptor::of::<u128>("Twin"), default_only)
-        .with_scope(SiblingA::KEY);
-    let second = planned("second", TypeDescriptor::of::<u128>("Twin"), default_only)
-        .with_scope(SiblingB::KEY);
+    let first = twin("first", SiblingA::KEY, default_only);
+    let second = twin("second", SiblingB::KEY, default_only);
 
     let resolved = resolve(vec![first, second]).expect("distinct scopes resolve");
 
@@ -158,10 +164,8 @@ fn descriptors_of_one_type_in_distinct_scopes_are_kept() {
 
 #[test]
 fn descriptors_of_one_type_in_one_scope_stay_duplicates() {
-    let first = planned("first", TypeDescriptor::of::<u128>("Twin"), default_only)
-        .with_scope(SiblingA::KEY);
-    let second = planned("second", TypeDescriptor::of::<u128>("Twin"), default_only)
-        .with_scope(SiblingA::KEY);
+    let first = twin("first", SiblingA::KEY, default_only);
+    let second = twin("second", SiblingA::KEY, default_only);
 
     let error = resolve(vec![first, second]).expect_err("one scope, two constructors");
 

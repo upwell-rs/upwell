@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use upwell_core::{Scope, ScopeId, Singleton};
 
 use super::validate::{
@@ -90,14 +92,30 @@ impl PreparedScopeTopology {
     /// chain, this holds when any chain opens `descendant` under `ancestor`. The root
     /// encloses every declared boundary and nothing encloses the root.
     pub fn encloses(&self, ancestor: &ScopeId, descendant: &ScopeId) -> bool {
-        let Some(boundary) = self.boundary(descendant) else {
-            return false;
-        };
+        let mut pending = vec![*descendant];
+        let mut visited = BTreeSet::new();
 
-        boundary.parents().iter().any(|parent| match parent {
-            ScopeParent::Root => *ancestor == Singleton::ID,
-            ScopeParent::Boundary(id) => id == ancestor || self.encloses(ancestor, id),
-        })
+        while let Some(id) = pending.pop() {
+            if !visited.insert(id) {
+                continue;
+            }
+
+            let Some(boundary) = self.boundary(&id) else {
+                continue;
+            };
+
+            for parent in boundary.parents() {
+                if parent.id() == *ancestor {
+                    return true;
+                }
+
+                if let ScopeParent::Boundary(parent_id) = parent {
+                    pending.push(*parent_id);
+                }
+            }
+        }
+
+        false
     }
 }
 
