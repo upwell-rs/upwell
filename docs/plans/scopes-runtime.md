@@ -806,7 +806,8 @@ watcher.await?;
    the same filter as the console output. A run's `.capture_level(..)` narrows that; it widens
    capture only as far as the layer's filter lets events through, because enabling a callsite for
    one layer enables it for every layer. Buffer size defaults to 1024 records per subscriber
-   (`.log_buffer(n)`), unmeasured against #351 since optimisation is paused.
+   (`.log_buffer(NonZeroUsize)`; zero is unrepresentable, and a huge value is clamped to the channel
+   maximum), unmeasured against #351 since optimisation is paused.
 
 ### Scope logs: surface and mechanism
 
@@ -815,7 +816,7 @@ watcher.await?;
 - `ScopeLogLayer`: a `tracing_subscriber::Layer`, behind the `tracing-subscriber` feature.
   `init_tracing` installs it; users composing their own subscriber add it behind the filter that
   should bound capture.
-- Builder options on `ScopeBuilder`: `.capture_logs()`, `.capture_level(level)`, `.log_buffer(n)`.
+- Builder options on `ScopeBuilder`: `.capture_logs()`, `.capture_level(level)`, `.log_buffer(NonZeroUsize)`.
 - `ScopeBuilder::run` returns a `ScopeRun`, which implements `IntoFuture` (so `.await` works as
   before) and has `.logs() -> ScopeLogStream`. `OpenScope::logs()` and `OpenScope::span()` serve
   an instance opened with `open*` and `.capture_logs()`.
@@ -844,6 +845,10 @@ watcher.await?;
 - **Seam for the end-of-scope hook (#406):** an instance's work ends in `InstanceLogs::finish`,
   which closes the sink and ends every stream. The hook runs after the work and immediately
   before that call, so its events are still captured.
+
+Delivery is always bounded and drops the newest record when a buffer is full, counting it in
+`Lagged(n)`. An explicit `LogBuffer { Bounded(NonZeroUsize), Unbounded }` choice is a possible later
+extension if wanted; `0` is never "unlimited".
 
 Not wired yet: protocol dispatch (HTTP, WebSocket, RPC) opening its scopes through `open*` does
 not request capture or instrument its handlers with `OpenScope::span()`; that follows with the

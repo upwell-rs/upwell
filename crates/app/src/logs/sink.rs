@@ -39,7 +39,7 @@ impl ScopeLogSink {
             scope,
             params,
             level: options.level,
-            buffer: options.buffer.clamp(1, Semaphore::MAX_PERMITS),
+            buffer: options.buffer.get().min(Semaphore::MAX_PERMITS),
             watchers: AtomicUsize::new(0),
             attached: AtomicBool::new(false),
             subscribers: Mutex::new(Some(Vec::new())),

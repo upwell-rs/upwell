@@ -1,9 +1,11 @@
 //! How an instance captures its logs.
 
+use std::num::NonZeroUsize;
+
 use tracing::level_filters::LevelFilter;
 
 /// The records a subscriber's buffer holds unless [`LogOptions::buffer`] says otherwise.
-pub const DEFAULT_LOG_BUFFER: usize = 1024;
+pub const DEFAULT_LOG_BUFFER: NonZeroUsize = NonZeroUsize::new(1024).expect("1024 is not zero");
 
 /// How one scope instance captures its logs, set on its builder.
 ///
@@ -18,8 +20,9 @@ pub struct LogOptions {
     /// the filter on the [`ScopeLogLayer`](super::ScopeLogLayer) lets events through.
     pub level: Option<LevelFilter>,
     /// The records each subscriber's buffer holds. When it is full, new records are dropped and
-    /// reported as [`ScopeLog::Lagged`](super::ScopeLog::Lagged). Clamped to what a channel allows.
-    pub buffer: usize,
+    /// reported as [`ScopeLog::Lagged`](super::ScopeLog::Lagged). Never zero; clamped to what a channel
+    /// allows. Delivery is always bounded.
+    pub buffer: NonZeroUsize,
 }
 
 impl LogOptions {

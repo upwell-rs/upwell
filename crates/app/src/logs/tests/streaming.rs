@@ -24,7 +24,7 @@ async fn events_before_the_first_subscriber_are_not_captured() {
 async fn a_slow_subscriber_lags_without_blocking_the_instance() {
     let _guard = install();
     let small = LogOptions {
-        buffer: 2,
+        buffer: NonZeroUsize::new(2).expect("two is not zero"),
         ..options()
     };
     let (logs, mut stream) = instance(1, &small);
@@ -87,18 +87,18 @@ async fn dropping_the_instance_ends_its_streams() {
 }
 
 #[tokio::test]
-async fn an_unbounded_buffer_request_is_clamped_instead_of_panicking() {
+async fn the_largest_buffer_is_clamped_instead_of_panicking() {
     let _guard = install();
     let huge = LogOptions {
-        buffer: usize::MAX,
+        buffer: NonZeroUsize::MAX,
         ..options()
     };
-    let zero = LogOptions {
-        buffer: 0,
-        ..options()
-    };
-    let (huge, _stream) = instance(1, &huge);
-    let (zero, _other) = instance(2, &zero);
+    let (logs, stream) = instance(1, &huge);
 
-    drop((huge, zero));
+    async { tracing::info!("one") }
+        .instrument(logs.span().clone())
+        .await;
+    logs.finish();
+
+    assert_eq!(messages(&records(stream).await), ["one"]);
 }
