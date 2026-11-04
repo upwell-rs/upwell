@@ -57,7 +57,10 @@ fn refresh_populates_workspace_resource_candidates() {
         return;
     }
     let _guard = common::cargo_build_lock();
-    let fixture = TempFixture::new("cargo-upwell-completion-cache");
+    let fixture = TempFixture::new_in(
+        Path::new(env!("CARGO_TARGET_TMPDIR")),
+        "cargo-upwell-completion-cache",
+    );
     let project = fixture.child("generated");
     let cache = fixture.child("cache");
     let template = fixture.child("template");
@@ -69,6 +72,8 @@ fn refresh_populates_workspace_resource_candidates() {
 name = "{{ project-name }}"
 version = "0.1.0"
 edition = "2024"
+
+[workspace]
 
 [features]
 default = ["cli"]
