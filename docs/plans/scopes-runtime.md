@@ -85,6 +85,8 @@ no scope; a scheduler whose root is gone runs the job without a context. Startup
 hooks, the reload transaction (proposal on the base, config-reload and decision hooks on the
 candidate root), retirement and the transition outcome observers each run in a `Hook` context
 pinned to the generation they address, with no scope.
+Work a `ScopeBuilder::run` runs, its targets' resolution included, runs in a
+`ScopeRun { scope }` context whose innermost scope is the instance the run opened.
 
 ## Design
 

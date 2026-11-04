@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::pin::pin;
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
-use upwell_core::{ResolverSet, Scope};
+use upwell_core::{ResolverSet, Scope, ScopeId};
 
 use super::*;
-use crate::container::ScopeRegistry;
+use crate::container::{ScopeContainer, ScopeRegistry};
 use crate::test_support::measure;
 
 /// A request-like scope opened under the root.
@@ -58,10 +59,13 @@ async fn child<S: Scope>(parent: &Arc<ScopeContainer>) -> Arc<ScopeContainer> {
     .expect("an empty child scope opens")
 }
 
-fn context(chain: &Chain, invocation: Invocation) -> InvocationContext {
-    let runtime: Arc<dyn ContextRuntime> = Arc::clone(&chain.root) as Arc<dyn ContextRuntime>;
+/// The chain's root as the runtime a context runs on.
+fn runtime(chain: &Chain) -> Arc<dyn ContextRuntime> {
+    Arc::clone(&chain.root) as Arc<dyn ContextRuntime>
+}
 
-    InvocationContext::new(invocation, runtime)
+fn context(chain: &Chain, invocation: Invocation) -> InvocationContext {
+    InvocationContext::new(invocation, runtime(chain))
 }
 
 fn innermost() -> Result<Arc<ScopeContainer>, ContextError> {
@@ -314,7 +318,7 @@ async fn concurrent_tasks_never_see_each_others_scope() {
 #[tokio::test]
 async fn establishing_binding_and_capturing_allocate_nothing() {
     let chain = chain().await;
-    let runtime: Arc<dyn ContextRuntime> = Arc::clone(&chain.root) as Arc<dyn ContextRuntime>;
+    let runtime = runtime(&chain);
     let mut cx = Context::from_waker(Waker::noop());
 
     let (poll, delta) = measure(|| {
