@@ -3,7 +3,6 @@
 use std::any::{Any, TypeId};
 use std::sync::Arc;
 
-use tracing::Instrument;
 use upwell_core::{Scope, ScopeId, Singleton, TypeDescriptor};
 use upwell_di::{BoxedComponent, EntryPlan, Injectable, ScopeContainer};
 
@@ -195,6 +194,8 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         parent: Arc<ScopeContainer>,
         builds: Builds,
     ) -> crate::Result<OpenScope<S>> {
+        use tracing::Instrument;
+
         let (seeds, logs) = self.into_parts(false, None);
         let container = open_in(view, S::ID, parent, builds, seeds)
             .instrument(logs.span().clone())

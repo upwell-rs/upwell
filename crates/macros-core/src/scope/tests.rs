@@ -180,5 +180,50 @@ fn a_log_marker_with_arguments_is_rejected() {
         ),
     );
 
-    assert!(message.contains("expected"), "{message}");
+    assert!(message.contains("`#[log]` takes no arguments"), "{message}");
+}
+
+#[test]
+fn a_repeated_log_marker_is_rejected() {
+    let message = error(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                #[log]
+                #[log]
+                customer: u64,
+            }
+        ),
+    );
+
+    assert!(message.contains("at most one `#[log]`"), "{message}");
+}
+
+#[test]
+fn cfg_on_a_logged_tuple_scope_is_rejected() {
+    let message = error(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync(#[cfg(any())] u8, #[log] u64);
+        ),
+    );
+
+    assert!(message.contains("`#[cfg]` is not supported"), "{message}");
+}
+
+#[test]
+fn a_cfg_on_a_logged_named_field_gates_its_report() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                #[cfg(unix)]
+                #[log]
+                customer: u64,
+            }
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains(r#"#[cfg(unix)]params.param("customer""#));
 }

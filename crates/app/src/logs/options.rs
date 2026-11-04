@@ -17,7 +17,8 @@ pub struct LogOptions {
     /// stricter than the filter narrows capture; a more verbose one only widens it as far as
     /// the filter on the [`ScopeLogLayer`](super::ScopeLogLayer) lets events through.
     pub level: Option<LevelFilter>,
-    /// The records each subscriber's buffer holds before older-than-newest ones are dropped.
+    /// The records each subscriber's buffer holds. When it is full, new records are dropped and
+    /// reported as [`ScopeLog::Lagged`](super::ScopeLog::Lagged). Clamped to what a channel allows.
     pub buffer: usize,
 }
 

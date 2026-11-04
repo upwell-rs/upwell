@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tracing::{Level, Span};
 use upwell_core::Scope;
 
-use super::render::{Rendered, collect};
+use super::render::{self, Rendered};
 use super::{LogOptions, SCOPE_LOG_TARGET, ScopeLogSink};
 
 thread_local! {
@@ -73,7 +73,11 @@ impl Drop for InstanceLogs {
 
 /// A sink for an instance of `S` with the value `scope`.
 pub(crate) fn new_sink<S: Scope>(scope: &S, options: &LogOptions) -> Arc<ScopeLogSink> {
-    Arc::new(ScopeLogSink::new(S::ID, collect(scope).into(), options))
+    Arc::new(ScopeLogSink::new(
+        S::ID,
+        render::collect(scope).into(),
+        options,
+    ))
 }
 
 /// The `upwell.scope` span of an instance. It is at error level so a filter that hides

@@ -10,6 +10,8 @@
 
 mod args;
 
+use std::mem;
+
 use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
@@ -114,17 +116,33 @@ pub fn expand(args: ScopeArgs, mut item: ItemStruct, paths: &Paths) -> syn::Resu
 fn take_log_params(fields: &mut Fields, paths: &Paths) -> syn::Result<TokenStream> {
     let mut logged = Vec::new();
 
+    reject_cfg_in_logged_tuple(fields)?;
+
     for (index, field) in fields.iter_mut().enumerate() {
-        let Some(position) = field
-            .attrs
-            .iter()
-            .position(|attr| attr.path().is_ident("log"))
-        else {
+        let (markers, rest): (Vec<syn::Attribute>, Vec<syn::Attribute>) =
+            mem::take(&mut field.attrs)
+                .into_iter()
+                .partition(|attr| attr.path().is_ident("log"));
+
+        field.attrs = rest;
+
+        let Some(marker) = markers.first() else {
             continue;
         };
-        let attr = field.attrs.remove(position);
 
-        attr.meta.require_path_only()?;
+        if let Some(extra) = markers.get(1) {
+            return Err(syn::Error::new_spanned(
+                extra,
+                "a field takes at most one `#[log]` marker",
+            ));
+        }
+
+        if !matches!(marker.meta, syn::Meta::Path(_)) {
+            return Err(syn::Error::new_spanned(
+                &marker.meta,
+                "`#[log]` takes no arguments",
+            ));
+        }
 
         let (name, member) = match &field.ident {
             Some(ident) => (
@@ -140,7 +158,13 @@ fn take_log_params(fields: &mut Fields, paths: &Paths) -> syn::Result<TokenStrea
             ),
         };
 
-        logged.push(quote_spanned!(field.ty.span()=> params.param(#name, &self.#member);));
+        let cfgs = field
+            .attrs
+            .iter()
+            .filter(|attr| attr.path().is_ident("cfg"));
+
+        logged
+            .push(quote_spanned!(field.ty.span()=> #(#cfgs)* params.param(#name, &self.#member);));
     }
 
     if logged.is_empty() {
@@ -154,6 +178,34 @@ fn take_log_params(fields: &mut Fields, paths: &Paths) -> syn::Result<TokenStrea
             #(#logged)*
         }
     })
+}
+
+/// Rejects `#[cfg]` on a tuple scope's fields when one is logged: a disabled field shifts the
+/// positions of the fields after it, so the generated `self.N` would read the wrong field.
+fn reject_cfg_in_logged_tuple(fields: &Fields) -> syn::Result<()> {
+    let Fields::Unnamed(tuple) = fields else {
+        return Ok(());
+    };
+    let has_marker = tuple
+        .unnamed
+        .iter()
+        .any(|field| field.attrs.iter().any(|attr| attr.path().is_ident("log")));
+
+    if !has_marker {
+        return Ok(());
+    }
+
+    for field in &tuple.unnamed {
+        if let Some(cfg) = field.attrs.iter().find(|attr| attr.path().is_ident("cfg")) {
+            return Err(syn::Error::new_spanned(
+                cfg,
+                "`#[cfg]` is not supported on the fields of a tuple #[scope] with a `#[log]` \
+                 field: a disabled field would shift the position of the logged one",
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 /// Rejects a generic scope: a scope's identity and rank are constants of one type.
