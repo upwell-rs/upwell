@@ -127,6 +127,8 @@ impl ProviderSelectionModel {
         validate_provider_components(components, &providers)?;
 
         let mut placed = HashMap::<TypeId, Vec<ComponentDescriptor>>::new();
+        let mut by_trait = HashMap::<TypeId, Vec<ProviderDescriptor>>::new();
+        let mut by_concrete = HashMap::<TypeId, Vec<ProviderDescriptor>>::new();
 
         for component in components {
             placed
@@ -134,10 +136,6 @@ impl ProviderSelectionModel {
                 .or_default()
                 .push(*component);
         }
-
-        let components = placed;
-        let mut by_trait = HashMap::<TypeId, Vec<ProviderDescriptor>>::new();
-        let mut by_concrete = HashMap::<TypeId, Vec<ProviderDescriptor>>::new();
 
         for provider in &providers {
             let order = ordinals.entry(provider.trait_ty.type_id).or_default();
@@ -165,7 +163,7 @@ impl ProviderSelectionModel {
         }
 
         Ok(Self {
-            components,
+            components: placed,
             by_trait,
             by_concrete,
             ordinals,

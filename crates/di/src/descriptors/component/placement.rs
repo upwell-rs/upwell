@@ -49,12 +49,11 @@ impl ComponentDescriptor {
     /// all key components by id.
     pub(crate) fn expand_placements(&self) -> Vec<ComponentDescriptor> {
         let placements = self.placements();
+        let several = placements.len() > 1;
 
         if self.declared_scope.is_some() || placements == [self.scope] {
             return vec![*self];
         }
-
-        let several = placements.len() > 1;
 
         placements
             .into_iter()
@@ -78,7 +77,7 @@ fn placement_id(id: &'static str, scope: ScopeId) -> &'static str {
     let mut interned = PLACEMENT_IDS
         .get_or_init(Mutex::default)
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+        .expect("the placement id table lock is poisoned, so a holder panicked: this is a bug");
 
     interned
         .entry((id, scope))

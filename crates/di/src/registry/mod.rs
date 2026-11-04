@@ -90,6 +90,11 @@ impl ComponentRegistry {
         Ok(chosen)
     }
 
+    /// Places `component` by type and scope. A manual instance replaces an auto-constructed
+    /// descriptor at its original position, so lifecycle hook ordering never depends on
+    /// `HashMap` iteration. A raw pre-built registration replaces a snapshot-capable factoryless
+    /// catalog descriptor with the same id, because it has stronger provenance; this keeps the
+    /// active-seed policy for later transitions.
     fn place(
         chosen: &mut Vec<ComponentDescriptor>,
         positions: &mut HashMap<(TypeId, ScopeId), usize>,
@@ -108,19 +113,14 @@ impl ComponentRegistry {
         let existing = &chosen[position];
         let existing_manual = existing.effective_factory()?.is_none();
 
-        if new_manual && !existing_manual {
-            // An override replaces the descriptor at its original position.
-            // Lifecycle hook ordering must not depend on HashMap iteration.
-            chosen[position] = component;
-        } else if new_manual
+        let replaces_factory_built = new_manual && !existing_manual;
+        let replaces_catalog_seed = new_manual
             && existing_manual
             && existing.id == component.id
             && existing.is_retainable()
-            && !component.is_retainable()
-        {
-            // A raw pre-built registration has stronger provenance than a
-            // snapshot-capable factoryless catalog descriptor for the same
-            // component. Preserve that active-seed policy for later transitions.
+            && !component.is_retainable();
+
+        if replaces_factory_built || replaces_catalog_seed {
             chosen[position] = component;
         } else if new_manual == existing_manual && existing.id != component.id {
             return Err(Error::DuplicateComponentType(
