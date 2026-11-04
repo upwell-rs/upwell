@@ -34,8 +34,8 @@ pub use generation::RuntimeGenerationId;
 pub use id::{FRAMEWORK_NAMESPACE, IdErrorKind, InvalidNamespacedId, NamespacedIdType};
 pub use resolver::{Resolver, ResolverCtx, ResolverCtxExt, ResolverSet};
 pub use scope::{
-    InvalidScopeId, InvalidScopeIdReason, Root, Scope, ScopeGenerations, ScopeId, ScopeKey,
-    Singleton, Transient,
+    InvalidScopeId, InvalidScopeIdReason, LogParams, Root, Scope, ScopeGenerations, ScopeId,
+    ScopeKey, Singleton, Transient,
 };
 pub use source::{DescriptorSource, ItemSource};
 pub use types::{TypeDescriptor, type_id_of};

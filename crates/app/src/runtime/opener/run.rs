@@ -1,15 +1,19 @@
 //! Running planned work in a fresh scope instance: [`ScopeBuilder::run`].
 
 use std::any::TypeId;
-use std::future::Future;
-use std::sync::Arc;
+use std::future::{Future, IntoFuture};
+use std::marker::PhantomData;
+use std::sync::{Arc, OnceLock};
 
+use futures::future::BoxFuture;
+use tracing::Instrument;
 use upwell_core::{DependencyDescriptor, Scope};
 use upwell_di::{EntryPlan, FromContainer, ScopeContainer};
 
 use super::builder::open_planned_in;
 use super::{OpensUnder, ScopeBuilder};
 use crate::entry::EntryTargets;
+use crate::logs::{ScopeLogSink, ScopeLogStream, new_sink, with_current_sink};
 use crate::runtime::{RuntimeView, scope_run_target};
 
 /// Work [`ScopeBuilder::run`] runs inside a scope instance: a closure whose parameters are the
@@ -43,12 +47,26 @@ mod sealed {
     pub trait Sealed<Targets> {}
 }
 
-impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
-    /// Opens the instance for `work`, runs it there and returns its output, closing the
-    /// instance once the work finishes (anything the work still shares keeps it alive).
+/// Work waiting to run in a fresh scope instance, made by [`ScopeBuilder::run`]. Awaiting it
+/// opens the instance, runs the work there and returns its output.
+///
+/// Before that, [`logs`](Self::logs) subscribes to the instance's log, so a stream taken
+/// ahead of the run sees every record.
+#[must_use = "a scope run does nothing until it is awaited"]
+pub struct ScopeRun<'a, S: Scope, P: Scope, W, Targets> {
+    builder: ScopeBuilder<'a, S, P>,
+    work: W,
+    sink: OnceLock<Arc<ScopeLogSink>>,
+    targets: PhantomData<fn() -> Targets>,
+}
+
+impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
+    /// Prepares `work` to run in a fresh instance: awaiting the result opens the instance, runs
+    /// the work there, returns its output and closes the instance once the work finishes
+    /// (anything the work still shares keeps it alive).
     ///
     /// The work, its targets' resolution included, runs in an invocation context of its own
-    /// whose innermost scope is the instance.
+    /// whose innermost scope is the instance, and inside the instance's `upwell.scope` span.
     ///
     /// `work` is planned like an entry whose targets are its parameters: the instance builds
     /// what they need, and under [`deny_unplanned`](crate::AppBuilder::deny_unplanned) anything
@@ -64,20 +82,83 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     ///
     /// # Errors
     ///
-    /// Fails as [`open`](Self::open) does, and when a target fails to resolve.
-    pub async fn run<W, Targets>(self, work: W) -> crate::Result<W::Output>
+    /// Awaiting it fails as [`open`](Self::open) does, and when a target fails to resolve.
+    pub fn run<W, Targets>(self, work: W) -> ScopeRun<'a, S, P, W, Targets>
     where
         W: ScopeWork<Targets>,
     {
-        let (view, parent) = self.target()?;
-        let plan = run_plan::<S, W, Targets>(&view)?;
-        let context = self.opener.context(scope_run_target!(S::ID));
-        let container = open_planned_in(&view, S::ID, parent, Some(&plan), self.seeds).await?;
+        ScopeRun {
+            builder: self,
+            work,
+            sink: OnceLock::new(),
+            targets: PhantomData,
+        }
+    }
+}
 
-        context
-            .with_scope(Arc::clone(&container))
-            .enter(work.call(&container))
-            .await
+impl<S: Scope, P: Scope, W, Targets> ScopeRun<'_, S, P, W, Targets> {
+    /// A stream of the instance's log, from the first record: the instance has not started.
+    /// It ends when the instance closes, so collecting it yields the whole log. Needs a
+    /// [`ScopeLogLayer`](crate::logs::ScopeLogLayer) in the subscriber.
+    pub fn logs(&self) -> ScopeLogStream {
+        self.sink
+            .get_or_init(|| new_sink(&self.builder.params, &self.builder.logs))
+            .subscribe()
+    }
+}
+
+impl<'a, S, P, W, Targets> IntoFuture for ScopeRun<'a, S, P, W, Targets>
+where
+    S: OpensUnder<P>,
+    P: Scope,
+    W: ScopeWork<Targets> + 'a,
+    Targets: 'a,
+{
+    type Output = crate::Result<W::Output>;
+    type IntoFuture = BoxFuture<'a, Self::Output>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(self.execute())
+    }
+}
+
+impl<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets> ScopeRun<'_, S, P, W, Targets> {
+    async fn execute(self) -> crate::Result<W::Output> {
+        let Self {
+            builder,
+            work,
+            sink,
+            ..
+        } = self;
+        let (view, parent) = builder.target()?;
+        let plan = run_plan::<S, W, Targets>(&view)?;
+        let context = builder
+            .opener
+            .context(scope_run_target!(S::ID));
+        let sink = sink.into_inner().or_else(|| {
+            builder
+                .logs
+                .capture
+                .then(|| new_sink(&builder.params, &builder.logs))
+        });
+        let (seeds, logs) = builder.into_parts(true, sink);
+        let instance = async {
+            let container = open_planned_in(&view, S::ID, parent, Some(&plan), seeds).await?;
+
+            context
+                .with_scope(Arc::clone(&container))
+                .enter(work.call(&container))
+                .await
+        };
+        let outcome = with_current_sink(
+            logs.sink().map(Arc::clone),
+            instance.instrument(logs.span().clone()),
+        )
+        .await;
+
+        logs.finish();
+
+        outcome
     }
 }
 

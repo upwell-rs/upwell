@@ -4346,6 +4346,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "trybuild",
  "upwell-app",
  "upwell-axum",

@@ -16,6 +16,7 @@ pub mod entry;
 pub mod error;
 pub mod host;
 pub mod lifecycle;
+pub mod logs;
 pub mod plugin;
 pub mod protocol;
 pub mod registry;
@@ -77,7 +78,7 @@ pub use runtime::{
     AppConditionState, AppRuntime, ComponentRetired, ComponentRetirement,
     ComponentTransitionReport, DisplacedGeneration, EntryScope, HookTarget, OpenScope, Opening,
     OpensUnder, PendingTransition, PhaseTiming, RetirementContext, RetirementReason,
-    RuntimeTransitionReport, RuntimeView, ScopeBuilder, ScopeEntry, ScopeOpener, ScopeRunTarget,
+    RuntimeTransitionReport, RuntimeView, ScopeBuilder, ScopeEntry, ScopeOpener, ScopeRun, ScopeRunTarget,
     ScopeWork, TransitionAborted, TransitionAttemptId, TransitionCommitted, TransitionDecision,
     TransitionFailure, TransitionHookContext, TransitionHookOutcome, TransitionHookReport,
     TransitionOutcome, TransitionOutcomeContext, TransitionPhase, TransitionProposal,

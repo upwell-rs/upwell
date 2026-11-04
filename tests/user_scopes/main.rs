@@ -10,6 +10,8 @@ extern crate upwell as fork;
 
 mod declaration;
 mod isolation;
+#[cfg(feature = "tracing-subscriber")]
+mod logs;
 mod opener;
 
 use std::sync::Arc;

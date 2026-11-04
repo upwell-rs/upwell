@@ -109,6 +109,6 @@ The protocol crates (`upwell-rpc`, `upwell-axum`) build directly on this crate: 
 | `tooling` | read-only projection of prepared application plans into the protocol-neutral tooling schema |
 | `yaml` | forward YAML config support (`upwell-config/yaml`) |
 | `watch` | forward config file watching/reload (`upwell-config/watch`) |
-| `tracing-subscriber` | pull in `tracing-subscriber` for the `init_tracing` helper |
+| `tracing-subscriber` | pull in `tracing-subscriber` for the `init_tracing` helper and the `ScopeLogLayer` scope log capture |
 | `di-check` | compile-time DI graph validation (forwards to `upwell-di`/`upwell-config`) |
 | `serde` | serialize redacted `RuntimeTransitionReport`s for tooling and telemetry (forwards to `upwell-di/serde`) |
