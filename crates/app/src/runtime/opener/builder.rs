@@ -197,9 +197,11 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         use tracing::Instrument;
 
         let (seeds, logs) = self.into_parts(false, None);
-        let container = open_in(view, S::ID, parent, builds, seeds)
-            .instrument(logs.span().clone())
-            .await?;
+        let container = crate::logs::with_current_sink(
+            logs.sink().map(Arc::clone),
+            open_in(view, S::ID, parent, builds, seeds).instrument(logs.span().clone()),
+        )
+        .await?;
 
         Ok(OpenScope::new(container, logs))
     }

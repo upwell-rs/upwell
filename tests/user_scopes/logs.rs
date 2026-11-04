@@ -1,13 +1,16 @@
 //! Scope logs: opt-in `#[log]` params and per-instance capture through `ScopeBuilder::run`.
 
 use futures::StreamExt;
+use std::sync::Arc;
 use tracing::Dispatch;
 use tracing::instrument::WithSubscriber;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::SubscriberExt;
-use upwell::logs::{LogField, ScopeLog, ScopeLogLayer};
+
+use upwell::logs::{LogField, ScopeLog, ScopeLogLayer, ScopeLogs};
 use upwell::scope;
 use upwell::scope::Root;
+use upwell::{ScopeOpener, component, methods};
 
 use super::app;
 
@@ -18,6 +21,81 @@ pub struct AuditRun {
     account: u64,
     #[allow(dead_code)]
     token: String,
+}
+
+/// Records whether the instance that built it captures logs, as seen while it was built.
+#[component(scope = AuditRun, default_factory = false)]
+struct CaptureProbe {
+    capturing: bool,
+}
+
+#[methods]
+impl CaptureProbe {
+    #[init]
+    fn new(logs: ScopeLogs, _run: Arc<AuditRun>) -> Self {
+        Self {
+            capturing: logs.is_capturing(),
+        }
+    }
+}
+
+fn audit(account: u64) -> AuditRun {
+    AuditRun {
+        account,
+        token: "secret".to_owned(),
+    }
+}
+
+async fn probe_of(scope: &upwell::OpenScope<AuditRun>) -> bool {
+    scope
+        .container()
+        .extract::<Arc<CaptureProbe>>()
+        .await
+        .expect("the probe builds")
+        .capturing
+}
+
+#[tokio::test]
+async fn a_component_built_while_opening_sees_its_own_instance_sink() {
+    let app = app("user-scopes-open-sink").await;
+    let audits = app.runtime().opener::<AuditRun>().expect("declared");
+    let captured = audits
+        .builder(audit(1))
+        .capture_logs()
+        .open_default()
+        .await
+        .expect("opens");
+    let plain = audits
+        .builder(audit(2))
+        .open_default()
+        .await
+        .expect("opens");
+
+    assert!(probe_of(&captured).await);
+    assert!(!probe_of(&plain).await);
+}
+
+#[tokio::test]
+async fn a_nested_non_capturing_open_does_not_inherit_the_outer_sink() {
+    let app = app("user-scopes-open-nested").await;
+    let audits = app.runtime().opener::<AuditRun>().expect("declared");
+
+    let inner_capturing = audits
+        .builder(audit(1))
+        .capture_logs()
+        .run(|opener: ScopeOpener<AuditRun>| async move {
+            let inner = opener
+                .builder(audit(2))
+                .open_default()
+                .await
+                .expect("the inner opens");
+
+            probe_of(&inner).await
+        })
+        .await
+        .expect("the run succeeds");
+
+    assert!(!inner_capturing);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
