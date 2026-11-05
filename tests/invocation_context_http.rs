@@ -17,10 +17,10 @@ use upwell::axum::axum::middleware::{self as axum_middleware, Next};
 use upwell::axum::axum::response::Response;
 use upwell::axum::prelude::*;
 use upwell::axum::tower::{Layer, Service, ServiceExt};
-use upwell::axum::{Axum, ScopeHandle};
+use upwell::axum::{Axum, HttpTarget, ScopeHandle};
 use upwell::{AppBuilder, Scope, component, methods};
 use upwell_di::ScopeContainer;
-use upwell_di::context::{Invocation, InvocationContext};
+use upwell_di::context::InvocationContext;
 
 /// The header middleware reports what it saw in.
 const MIDDLEWARE: &str = "x-middleware";
@@ -60,8 +60,8 @@ impl ContextController {
 /// without one, `same` when it is `expected`, or else the scope's name.
 fn describe(expected: Option<&Arc<ScopeContainer>>) -> String {
     let context = InvocationContext::capture().expect("the request runs in a context");
-    let kind = match context.invocation() {
-        Invocation::HttpRequest => "http",
+    let kind = match context.target().downcast_ref::<HttpTarget>() {
+        Some(HttpTarget::Request) => "http",
         _ => "other",
     };
 

@@ -54,4 +54,4 @@ tokio-tungstenite = { workspace = true }
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 upwell-test-utils = { workspace = true, features = ["app"] }
 # The WebSocket tests check the invocation context a message handler runs in.
-upwell-di = { workspace = true }
+upwell-di = { workspace = true, features = ["test-support"] }

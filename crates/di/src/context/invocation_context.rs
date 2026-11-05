@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock};
 use tokio::task::futures::TaskLocalFuture;
 use upwell_core::{ScopeId, ScopeKey};
 
-use super::{ContextError, ContextRuntime, Invocation};
+use super::{ContextError, ContextRuntime, TargetRef};
 use crate::container::ScopeContainer;
 
 tokio::task_local! {
@@ -19,7 +19,7 @@ tokio::task_local! {
 #[must_use = "an invocation context does nothing until something enters it"]
 #[derive(Clone)]
 pub struct InvocationContext {
-    invocation: Invocation,
+    target: TargetRef,
     runtime: Arc<dyn ContextRuntime>,
     scope: ActiveScope,
 }
@@ -44,11 +44,11 @@ struct PendingScope {
 }
 
 impl InvocationContext {
-    /// A context for `invocation` on `runtime`, with no scope instance.
+    /// A context for `target` on `runtime`, with no scope instance.
     #[doc(hidden)]
-    pub fn new(invocation: Invocation, runtime: Arc<dyn ContextRuntime>) -> Self {
+    pub fn new(target: TargetRef, runtime: Arc<dyn ContextRuntime>) -> Self {
         Self {
-            invocation,
+            target,
             runtime,
             scope: ActiveScope::None,
         }
@@ -102,40 +102,6 @@ impl InvocationContext {
         Self::with_current(Self::clone)
     }
 
-    /// What this context's entry point is.
-    #[doc(hidden)]
-    pub fn invocation(&self) -> &Invocation {
-        &self.invocation
-    }
-
-    /// The scope of the innermost open instance, if any.
-    #[doc(hidden)]
-    pub fn scope_key(&self) -> Option<ScopeKey> {
-        self.scope().ok().map(|scope| scope.scope())
-    }
-
-    /// Whether `container` is this context's innermost open scope instance.
-    #[doc(hidden)]
-    pub fn is_scope(&self, container: &Arc<ScopeContainer>) -> bool {
-        self.scope()
-            .is_ok_and(|scope| Arc::ptr_eq(&scope, container))
-    }
-
-    /// Whether this context and `other` run in the same innermost scope instance.
-    #[doc(hidden)]
-    pub fn same_scope(&self, other: &Self) -> bool {
-        match (self.scope(), other.scope()) {
-            (Ok(own), Ok(other)) => Arc::ptr_eq(&own, &other),
-            _ => false,
-        }
-    }
-
-    /// Whether this context resolves singletons from `root`.
-    #[doc(hidden)]
-    pub fn resolves_root(&self, root: &Arc<ScopeContainer>) -> bool {
-        self.root().is_ok_and(|own| Arc::ptr_eq(&own, root))
-    }
-
     /// Runs `read` over the active context.
     pub(crate) fn with_current<R>(read: impl FnOnce(&Self) -> R) -> Result<R, ContextError> {
         CONTEXT
@@ -167,12 +133,45 @@ impl InvocationContext {
     }
 }
 
+/// Inspection for tests, behind the `test-support` feature.
+#[cfg(any(test, feature = "test-support"))]
+impl InvocationContext {
+    /// What this context's entry point is.
+    pub fn target(&self) -> &TargetRef {
+        &self.target
+    }
+
+    /// The scope of the innermost open instance, if any.
+    pub fn scope_key(&self) -> Option<ScopeKey> {
+        self.scope().ok().map(|scope| scope.scope())
+    }
+
+    /// Whether `container` is this context's innermost open scope instance.
+    pub fn is_scope(&self, container: &Arc<ScopeContainer>) -> bool {
+        self.scope()
+            .is_ok_and(|scope| Arc::ptr_eq(&scope, container))
+    }
+
+    /// Whether this context and `other` run in the same innermost scope instance.
+    pub fn same_scope(&self, other: &Self) -> bool {
+        match (self.scope(), other.scope()) {
+            (Ok(own), Ok(other)) => Arc::ptr_eq(&own, &other),
+            _ => false,
+        }
+    }
+
+    /// Whether this context resolves singletons from `root`.
+    pub fn resolves_root(&self, root: &Arc<ScopeContainer>) -> bool {
+        self.root().is_ok_and(|own| Arc::ptr_eq(&own, root))
+    }
+}
+
 impl fmt::Debug for InvocationContext {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("InvocationContext")
-            .field("invocation", &self.invocation)
-            .field("scope", &self.scope_key())
+            .field("target", &self.target)
+            .field("scope", &self.scope().ok().map(|scope| scope.scope()))
             .finish_non_exhaustive()
     }
 }

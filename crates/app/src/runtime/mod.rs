@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use upwell_config::ConfigReloader;
 use upwell_core::{RuntimeGenerationId, ScopeId};
-use upwell_di::context::{ContextRuntime, Invocation, InvocationContext};
+use upwell_di::context::{ContextRuntime, InvocationContext, TargetRef};
 use upwell_di::{ComponentDescriptor, ScopeContainer};
 use upwell_hooks::HookManager;
 
@@ -25,6 +25,7 @@ mod opener;
 mod reentrancy;
 mod reload;
 mod report;
+mod targets;
 mod transition_hooks;
 
 pub(crate) use generation::PreparedRuntimeGeneration;
@@ -41,6 +42,7 @@ pub use report::{
     TransitionFailure, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,
     TransitionPhase, TransitionRejection,
 };
+pub use targets::{HookTarget, ScopeRunTarget};
 pub use transition_hooks::{
     ComponentRetired, ComponentRetirement, PendingTransition, RetirementContext, RetirementReason,
     TransitionAborted, TransitionCommitted, TransitionDecision, TransitionHookContext,
@@ -204,8 +206,7 @@ impl AppRuntime {
     }
 
     /// The resolved component set (the effective per-type descriptors). A protocol may
-    /// introspect it — the RPC protocol uses it to decide whether the peer is depended
-    /// on and therefore worth seeding.
+    /// introspect it, for example to decide whether a component it seeds is depended on.
     pub fn resolved_components(&self) -> Arc<[ComponentDescriptor]> {
         Arc::clone(self.view().resolved_components())
     }
@@ -264,11 +265,11 @@ impl AppRuntime {
         self.transitions.begin().await
     }
 
-    /// A context for `invocation` pinned to the current generation, with no scope instance.
+    /// A context for `target` pinned to the current generation, with no scope instance.
     /// See [`RuntimeView::context`].
     #[doc(hidden)]
-    pub fn context(&self, invocation: Invocation) -> InvocationContext {
-        self.view().context(invocation)
+    pub fn context(&self, target: TargetRef) -> InvocationContext {
+        self.view().context(target)
     }
 }
 

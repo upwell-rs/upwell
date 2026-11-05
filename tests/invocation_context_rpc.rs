@@ -17,10 +17,10 @@ use common::{MemoryServer, deadline};
 use upwell::daemon::tower::{Layer, Service};
 use upwell::daemon::{
     App, Connection, ErrorHandler, ErrorResponse, Inject, Payload, Request, ResponseStream,
-    RpcAppBuilder, RpcOutcome, RpcRequest, handlers, service,
+    RpcAppBuilder, RpcOutcome, RpcRequest, RpcTarget, handlers, service,
 };
 use upwell::{CallResult, MemoryConnectionHandle, Scope, ServerEvent, component, methods};
-use upwell_di::context::{Invocation, InvocationContext};
+use upwell_di::context::InvocationContext;
 
 /// What the error handler saw last.
 static HANDLER_SAW: Mutex<Option<String>> = Mutex::new(None);
@@ -46,8 +46,8 @@ impl CallTicket {
 /// `rpc` when the active context is an RPC call's, then its innermost scope.
 fn describe() -> String {
     let context = InvocationContext::capture().expect("a call runs in a context");
-    let kind = match context.invocation() {
-        Invocation::RpcCall => "rpc",
+    let kind = match context.target().downcast_ref::<RpcTarget>() {
+        Some(RpcTarget) => "rpc",
         _ => "other",
     };
 

@@ -44,10 +44,9 @@ use std::any::TypeId;
 
 use upwell_core::{DependencyDescriptor, RuntimeGenerationId};
 use upwell_di::NodeAction;
-use upwell_di::context::Invocation;
 use upwell_hooks::{HookKind, HookParam, HookParticipation};
 
-use super::super::RuntimeView;
+use super::super::{HookTarget, RuntimeView};
 use super::{HookOwners, event_dependency, failed_observers};
 use crate::RuntimeTransitionReport;
 use crate::runtime::report::{TRANSITION_TARGET, TransitionAttemptId, TransitionOutcome};
@@ -180,9 +179,7 @@ async fn retire(base: &RuntimeView, owners: &HookOwners, retirement: ComponentRe
         );
     }
 
-    let context = base.context(Invocation::Hook {
-        kind: ComponentRetired::NAME,
-    });
+    let context = base.context(HookTarget::target(ComponentRetired::NAME));
     let fired = context
         .enter(
             base.hooks()

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use upwell_core::{EntryKey, Scope, ScopeId};
 use upwell_di::ScopeContainer;
-use upwell_di::context::{ContextRuntime, Invocation, InvocationContext};
+use upwell_di::context::{ContextRuntime, InvocationContext, TargetRef};
 
 use super::{AppRuntime, RuntimeGeneration, RuntimeView};
 use crate::builtins::RuntimeReloader;
@@ -195,18 +195,18 @@ impl<S: Scope> ScopeOpener<S> {
         })
     }
 
-    /// A context for `invocation` on this opener's runtime, with no scope instance yet. An
+    /// A context for `target` on this opener's runtime, with no scope instance yet. An
     /// opener a serve loop prepared shares its runtime handle, so this allocates nothing; an
     /// injected one allocates a weak handle. Until a scope instance joins it, it resolves the
     /// root of the runtime's current generation; the instance then pins its own generation.
     #[doc(hidden)]
-    pub fn context(&self, invocation: Invocation) -> InvocationContext {
+    pub fn context(&self, target: TargetRef) -> InvocationContext {
         let runtime: Arc<dyn ContextRuntime> = match &self.runtime {
             OpenerRuntime::Owned(runtime) => Arc::clone(runtime) as Arc<dyn ContextRuntime>,
             OpenerRuntime::Injected(reloader) => Arc::new(reloader.clone()),
         };
 
-        InvocationContext::new(invocation, runtime)
+        InvocationContext::new(target, runtime)
     }
 
     /// Starts an instance with the value `params` under the application root;

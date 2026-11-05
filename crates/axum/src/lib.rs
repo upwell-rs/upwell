@@ -58,6 +58,8 @@ pub mod request_meta;
 mod request_scope;
 #[cfg(not(target_family = "wasm"))]
 pub mod scope;
+#[cfg(not(target_family = "wasm"))]
+mod target;
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
 pub mod ws;
 
@@ -203,6 +205,10 @@ pub use upwell_di::Error as DiError;
 /// The standard HTTP request scope marker.
 #[cfg(not(target_family = "wasm"))]
 pub use scope::{HttpRequest, HttpRequest as HttpRequestScope};
+
+/// The invocation targets the HTTP protocol establishes contexts for.
+#[cfg(not(target_family = "wasm"))]
+pub use target::HttpTarget;
 
 /// Standard WebSocket scope markers available to downstream protocol implementations.
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]

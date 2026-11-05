@@ -11,10 +11,11 @@ use std::sync::Arc;
 
 use upwell_app::{EntryScope, OpenScope, ScopeBuilder, ScopeEntry, ScopeOpener};
 use upwell_di::ScopeContainer;
-use upwell_di::context::{Invocation, InvocationContext};
+use upwell_di::context::{InvocationContext, TargetRef};
 
 use super::WsControllerDescriptor;
 use crate::scope::{WebsocketConnection, WebsocketMessage};
+use crate::target::HttpTarget;
 
 /// The entry of each message handler of one endpoint, by destination.
 pub(crate) type MessageEntries = HashMap<&'static str, ScopeEntry<WebsocketMessage>>;
@@ -49,7 +50,7 @@ impl WsConnectionScope {
     /// [`serve`](super::WebsocketProtocol::serve) in it.
     pub(crate) fn connection_context(&self) -> InvocationContext {
         self.messages
-            .context(Invocation::WebsocketConnection)
+            .context(TargetRef::from_static(&HttpTarget::WebsocketConnection))
             .with_scope(Arc::clone(self.scope.container()))
     }
 
@@ -59,7 +60,10 @@ impl WsConnectionScope {
     /// opens.
     #[doc(hidden)]
     pub fn message_context(&self, scope: &EntryScope<WebsocketMessage>) -> InvocationContext {
-        scope.establish(self.messages.context(Invocation::WebsocketMessage))
+        scope.establish(
+            self.messages
+                .context(TargetRef::from_static(&HttpTarget::WebsocketMessage)),
+        )
     }
 
     /// Starts a message scope under this connection, on the connection's runtime generation.

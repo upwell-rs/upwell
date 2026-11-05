@@ -181,12 +181,11 @@ use super::transition_hooks::{
     AffectedComponents, HookOwners, PendingTransition, TransitionDecision, TransitionProposal,
     fire_gate, observe_outcome,
 };
-use super::{AppRuntime, RuntimeView};
+use super::{AppRuntime, HookTarget, RuntimeView};
 use stages::{commit_candidate, construct_candidate, evaluate_conditions, plan_transition};
 #[cfg(feature = "tooling")]
 pub(crate) use stages::{resolve_staged_transition, staged_condition_snapshot};
 use upwell_config::ReloadCause;
-use upwell_di::context::Invocation;
 
 /// The hook kind a reload transaction's invocation contexts name: its pre-commit phases, which
 /// fire several hook kinds and construct the candidate, share one context on each generation.
@@ -294,7 +293,7 @@ impl AppRuntime {
             self.reloader.generation(),
         );
 
-        let context = base.context(Invocation::Hook { kind: RELOAD_HOOKS });
+        let context = base.context(HookTarget::target(RELOAD_HOOKS));
         let result = active
             .scope(context.enter(self.run_reload(transition, &mut recorder)))
             .await;
@@ -397,7 +396,7 @@ impl AppRuntime {
 
         recorder.enter(TransitionPhase::Hooks);
 
-        let candidate_context = prepared.context(Invocation::Hook { kind: RELOAD_HOOKS });
+        let candidate_context = prepared.context(HookTarget::target(RELOAD_HOOKS));
         let hook_reports = candidate_context
             .clone()
             .enter(

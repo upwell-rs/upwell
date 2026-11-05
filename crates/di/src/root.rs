@@ -23,7 +23,7 @@ use upwell_core::{Scope, TypeDescriptor};
 
 use crate::construct::FromContainer;
 use crate::container::ScopeContainer;
-use crate::context::{Invocation, InvocationContext};
+use crate::context::{InvocationContext, TargetRef};
 use crate::descriptors::{Component, Injectable};
 use crate::error::Error;
 
@@ -61,11 +61,11 @@ impl RootResolver {
         self.root.get()?.upgrade()
     }
 
-    /// A context for `invocation` holding this root, which stays alive with it, or `None` if
+    /// A context for `target` holding this root, which stays alive with it, or `None` if
     /// the root was never attached or has been dropped.
     #[doc(hidden)]
-    pub fn context(&self, invocation: Invocation) -> Option<InvocationContext> {
-        Some(InvocationContext::new(invocation, self.root()?))
+    pub fn context(&self, target: TargetRef) -> Option<InvocationContext> {
+        Some(InvocationContext::new(target, self.root()?))
     }
 
     /// Resolves the component of type `C` as its handle through the root scope.

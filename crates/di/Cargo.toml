@@ -17,6 +17,9 @@ di-check = []
 # Serialize the transition-planning vocabulary (actions, reasons, demand identities) for
 # redacted transition reports, tooling, and telemetry.
 serde = ["dep:serde"]
+# Expose the invocation context's inspection helpers (`target`, `scope_key`, `is_scope`, ...) to
+# the tests of crates that establish contexts. Never enabled outside dev-dependencies.
+test-support = []
 
 [dependencies]
 upwell-core = { workspace = true }
