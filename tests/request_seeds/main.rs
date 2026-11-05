@@ -121,6 +121,15 @@ async fn json<T: serde::de::DeserializeOwned>(response: Response) -> T {
     serde_json::from_slice(&body).expect("the body decodes")
 }
 
+/// Asserts `response` carries no body, so no internal error text reaches the client.
+async fn assert_empty_body(response: Response) {
+    let body = upwell::axum::axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("the body reads");
+
+    assert!(body.is_empty(), "a rejection answers an empty body");
+}
+
 /// The tenant the `/tenant/declared` handler's [`Reader`] holds.
 async fn declared_tenant(response: Response) -> Option<String> {
     json(response).await

@@ -255,7 +255,10 @@ pub(crate) async fn inject<H: FromContainer>(parts: &mut Parts) -> Result<H, Inj
     scope
         .extract_seeding::<H, RequestMeta>(|| head.capture())
         .await
-        .map_err(|error| InjectRejection::Unresolved(std::any::type_name::<H>(), error.to_string()))
+        .map_err(|source| InjectRejection::Unresolved {
+            type_name: std::any::type_name::<H>(),
+            source,
+        })
 }
 
 /// The request's scope for its [`ScopeHandle`] extractor. The handle resolves anything at any
@@ -287,7 +290,7 @@ pub(crate) async fn handle_of_request(
 fn capture_into(scope: &ScopeContainer, head: Head<'_>) -> Result<(), InjectRejection> {
     scope
         .ensure_seed(|| head.capture())
-        .map_err(|error| InjectRejection::ScopeFailed(error.to_string()))
+        .map_err(InjectRejection::SeedFailed)
 }
 
 /// Middleware opening a routed request's scope, unless something has already. Without an entry
@@ -352,7 +355,7 @@ async fn open(
         .builder(HttpRequest)
         .open_with_bound_seed(opening, || head.capture())
         .await
-        .map_err(|error| InjectRejection::ScopeFailed(error.to_string()))?;
+        .map_err(InjectRejection::ScopeFailed)?;
     let container = opened.into_container();
 
     bind_opened_scope(&container);

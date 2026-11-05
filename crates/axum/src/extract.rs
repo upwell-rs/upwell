@@ -62,49 +62,48 @@ impl<S: Send + Sync> FromRequestParts<S> for ScopeHandle {
 /// `&self`, resolved once when its router is built.
 pub struct Inject<H>(pub H);
 
-/// Why an [`Inject`] extraction failed: a misconfiguration rather than bad client input, so
-/// both arms render as `500 Internal Server Error` (and log the cause).
-#[derive(Debug)]
+/// Why an [`Inject`] or [`ScopeHandle`] extraction failed. Always a server-side
+/// misconfiguration: it answers an empty `500` and logs the typed cause.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum InjectRejection {
     /// The request is not served by the protocol's router, so it has no scope to open.
+    #[error("request scope unavailable; the request is not served by the Axum protocol's router")]
     MissingScope,
 
-    /// The request's scope failed to open. Carries the underlying error.
-    ScopeFailed(String),
+    /// The request's scope failed to open.
+    #[error("the request scope failed to open")]
+    ScopeFailed(#[source] upwell_app::Error),
+
+    /// The request head could not be seeded into the request scope.
+    #[error("the request head could not be seeded into the request scope")]
+    SeedFailed(#[source] upwell_di::Error),
 
     /// The requested type could not be extracted from the container (no such component or
-    /// provider, or a resolver-backed value like `Cfg<T>` was unavailable). Carries the type
-    /// name and the underlying DI error.
-    Unresolved(&'static str, String),
+    /// provider, or a resolver-backed value like `Cfg<T>` was unavailable).
+    #[error("failed to inject `{type_name}`")]
+    Unresolved {
+        /// The type that was being injected.
+        type_name: &'static str,
+        /// The underlying DI error.
+        #[source]
+        source: upwell_di::Error,
+    },
 }
+
+const _: () = {
+    const fn assert_send_sync_static<T: Send + Sync + 'static>() {}
+
+    assert_send_sync_static::<InjectRejection>();
+};
 
 impl IntoResponse for InjectRejection {
     fn into_response(self) -> Response {
-        match self {
-            InjectRejection::MissingScope => {
-                tracing::error!(
-                    target: "upwell::axum",
-                    "request scope unavailable; is the request served by the Axum protocol's router?"
-                );
-            }
-
-            InjectRejection::ScopeFailed(error) => {
-                tracing::error!(
-                    target: "upwell::axum",
-                    error = %error,
-                    "request scope build failed"
-                );
-            }
-
-            InjectRejection::Unresolved(name, error) => {
-                tracing::error!(
-                    target: "upwell::axum",
-                    type_name = name,
-                    error = %error,
-                    "failed to extract injected dependency"
-                );
-            }
-        }
+        tracing::error!(
+            target: "upwell::axum",
+            error = &self as &(dyn std::error::Error + 'static),
+            "request scope extraction failed"
+        );
 
         StatusCode::INTERNAL_SERVER_ERROR.into_response()
     }
@@ -121,3 +120,6 @@ where
         crate::request_scope::inject::<H>(parts).await.map(Inject)
     }
 }
+
+#[cfg(test)]
+mod tests;
