@@ -232,7 +232,10 @@ where
 {
     let mut command = Command::new(cargo_upwell_executable());
 
-    command.current_dir(current_dir).args(arguments);
+    command
+        .current_dir(current_dir)
+        .env_remove("CARGO_TARGET_DIR")
+        .args(arguments);
     if let Some(cache) = cache {
         command.env("UPWELL_COMPLETION_CACHE_DIR", cache);
     }
