@@ -70,7 +70,7 @@ fn new_in_rejects_unsafe_prefixes_without_sweeping_siblings() {
     let parent = TempFixture::new("upwell-temp-parent-");
     let sibling = parent.write("other-fixture/keep.txt", b"keep");
 
-    for prefix in ["", "a/b", "..\\x"] {
+    for prefix in ["", ".", "..", "a/b", "..\\x"] {
         assert!(panic::catch_unwind(|| TempFixture::new_in(parent.path(), prefix)).is_err());
     }
 

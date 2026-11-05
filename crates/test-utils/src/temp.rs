@@ -26,7 +26,7 @@ impl TempFixture {
     ///
     /// # Panics
     ///
-    /// Panics when `prefix` is empty, contains a path separator or starts with a
+    /// Panics when `prefix` is empty, is `.` or `..`, contains a path separator or starts with a
     /// Windows path prefix such as `C:`, when `parent` cannot be created or
     /// read, or when a stale directory cannot be removed.
     pub fn new_in(parent: &Path, prefix: &str) -> Self {
@@ -93,6 +93,7 @@ fn remove_stale(parent: &Path, prefix: &str) {
 
 fn is_plain_prefix(prefix: &str) -> bool {
     !prefix.is_empty()
+        && !matches!(prefix, "." | "..")
         && !prefix.contains(['/', '\\'])
         && !Path::new(prefix)
             .components()
