@@ -110,6 +110,24 @@ async fn get(router: &Router, uri: &str) -> StatusCode {
         .status()
 }
 
+/// The length of the body a GET to `uri` answers with.
+async fn body_of(router: &Router, uri: &str) -> usize {
+    let request = RawRequest::builder()
+        .uri(uri)
+        .body(Body::empty())
+        .expect("the request is valid");
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the router is infallible");
+    let body = upwell::axum::axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("the body reads");
+
+    body.len()
+}
+
 /// Middleware answering every request itself.
 async fn reject(_request: RawRequest, _next: Next) -> Response {
     StatusCode::UNAUTHORIZED.into_response()
@@ -178,6 +196,11 @@ async fn a_failing_eager_component_fails_a_route_injecting_nothing() {
     assert_eq!(
         get(&router, "/eager/none").await,
         StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        body_of(&router, "/eager/none").await,
+        0,
+        "no internal error text reaches the client"
     );
 }
 

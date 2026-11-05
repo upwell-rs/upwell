@@ -93,6 +93,24 @@ async fn status(router: &Router, uri: &'static str) -> StatusCode {
         .status()
 }
 
+/// The body bytes a GET to `uri` answers with.
+async fn body_of(router: &Router, uri: &str) -> usize {
+    let request = RawRequest::builder()
+        .uri(uri)
+        .body(Body::empty())
+        .expect("the request is valid");
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the router is infallible");
+    let body = upwell::axum::axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("the body reads");
+
+    body.len()
+}
+
 #[tokio::test]
 async fn a_strict_app_builds_only_what_a_route_declares() {
     let router = router(UnplannedConstruction::Deny).await;
@@ -105,6 +123,11 @@ async fn a_strict_app_builds_only_what_a_route_declares() {
         drift,
         StatusCode::INTERNAL_SERVER_ERROR,
         "middleware reading a component the route does not declare is rejected"
+    );
+    assert_eq!(
+        body_of(&router, "/audit/drift").await,
+        0,
+        "no internal error text reaches the client"
     );
 }
 

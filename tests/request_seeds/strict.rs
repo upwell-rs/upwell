@@ -19,4 +19,6 @@ async fn an_undeclared_seed_read_is_allowed_and_an_undeclared_build_is_not() {
     assert_eq!(built_undeclared.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(built_declared.status(), StatusCode::OK);
     assert_eq!(seen(&built_declared), Some("original"));
+
+    assert_empty_body(built_undeclared).await;
 }
