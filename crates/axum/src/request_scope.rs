@@ -64,13 +64,14 @@ use tower::{Layer, Service};
 use upwell_app::{Opening, ScopeEntry, ScopeOpener};
 use upwell_config::Cfg;
 use upwell_core::Scope;
-use upwell_di::context::{Invocation, InvocationContext, bind_opened_scope};
+use upwell_di::context::{InvocationContext, TargetRef, bind_opened_scope};
 use upwell_di::{FromContainer, ScopeContainer};
 
 use crate::config::AxumConfig;
 use crate::extract::InjectRejection;
 use crate::request_meta::RequestMeta;
 use crate::scope::HttpRequest;
+use crate::target::HttpTarget;
 
 tokio::task_local! {
     static REQUEST_SCOPES: Arc<RequestScopes>;
@@ -208,7 +209,7 @@ impl<S: Service<Request>> Service<Request> for RequestScopeService<S> {
         let context = self
             .scopes
             .opener
-            .context(Invocation::HttpRequest)
+            .context(TargetRef::from_static(&HttpTarget::Request))
             .with_pending_scope(HttpRequest::KEY, None);
 
         REQUEST_SCOPES.scope(

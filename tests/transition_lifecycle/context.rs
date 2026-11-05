@@ -1,17 +1,20 @@
 //! The invocation context each lifecycle and transition hook runs in, and the generation it
 //! addresses.
 
-use upwell_di::context::{Invocation, InvocationContext};
+use upwell_app::HookTarget;
+use upwell_di::context::InvocationContext;
 
 use crate::app::{build, collect_contexts, collected_contexts, freeze, lock, write_mode};
 
 fn hook_kinds(contexts: &[InvocationContext]) -> Vec<&'static str> {
     contexts
         .iter()
-        .map(|context| match context.invocation() {
-            Invocation::Hook { kind } => *kind,
-            other => panic!("a hook runs in a hook context, not {other:?}"),
-        })
+        .map(
+            |context| match context.target().downcast_ref::<HookTarget>() {
+                Some(HookTarget { kind }) => *kind,
+                None => panic!("a hook runs in a hook context, not {:?}", context.target()),
+            },
+        )
         .collect()
 }
 

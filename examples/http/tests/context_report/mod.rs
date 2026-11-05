@@ -1,8 +1,9 @@
 //! Describes the invocation context a WebSocket handler runs in, for the WebSocket tests.
 
 use upwell::Scope;
+use upwell::axum::HttpTarget;
 use upwell::axum::{WebsocketConnection, WebsocketMessage};
-use upwell_di::context::{Invocation, InvocationContext};
+use upwell_di::context::InvocationContext;
 
 /// `<kind>:<scope>` for the active context: the invocation kind (`message`, `connection` or
 /// `other`) and the innermost scope instance (`message`, `connection` or `other`), or `none`
@@ -12,9 +13,9 @@ pub fn describe() -> String {
         return "none".to_owned();
     };
 
-    let kind = match context.invocation() {
-        Invocation::WebsocketMessage => "message",
-        Invocation::WebsocketConnection => "connection",
+    let kind = match context.target().downcast_ref::<HttpTarget>() {
+        Some(HttpTarget::WebsocketMessage) => "message",
+        Some(HttpTarget::WebsocketConnection) => "connection",
         _ => "other",
     };
 

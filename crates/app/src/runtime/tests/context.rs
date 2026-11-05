@@ -1,9 +1,15 @@
 //! Invocation contexts established on a runtime and over the scopes its openers open.
 
-use upwell_di::context::{Invocation, InvocationContext};
+use upwell_di::context::{InvocationContext, InvocationTarget, TargetRef};
 
 use super::*;
-use crate::{EntryDescriptor, EntryScope, ScopeOpener};
+use crate::{EntryDescriptor, EntryScope, HookTarget, ScopeOpener, ScopeRunTarget};
+
+/// A target standing in for a protocol's call.
+#[derive(Debug)]
+struct Call;
+
+impl InvocationTarget for Call {}
 
 /// A runtime with an entry injecting nothing (`test/ping`), so its session scope defers.
 async fn runtime() -> AppRuntime {
@@ -19,7 +25,7 @@ fn sessions(runtime: &AppRuntime) -> ScopeOpener<Session> {
 
 /// The context of an RPC call running in `session`.
 fn call_context(runtime: &AppRuntime, session: &EntryScope<Session>) -> InvocationContext {
-    session.establish(sessions(runtime).context(Invocation::RpcCall))
+    session.establish(sessions(runtime).context(TargetRef::from_static(&Call)))
 }
 
 async fn deferred_session(runtime: &AppRuntime) -> EntryScope<Session> {
@@ -77,8 +83,8 @@ async fn contexts_of_two_runtimes_resolve_their_own_roots() {
     let first = runtime().await;
     let second = runtime().await;
     let contexts = [
-        first.context(Invocation::Hook { kind: "startup" }),
-        second.context(Invocation::Hook { kind: "startup" }),
+        first.context(HookTarget::target("startup")),
+        second.context(HookTarget::target("startup")),
     ];
 
     let roots = contexts.map(|context| {
@@ -95,7 +101,7 @@ async fn contexts_of_two_runtimes_resolve_their_own_roots() {
 async fn a_context_without_a_scope_keeps_the_generation_it_was_established_on() {
     let runtime = runtime().await;
     let pinned = runtime.root();
-    let context = runtime.context(Invocation::Hook { kind: "reload" });
+    let context = runtime.context(HookTarget::target("reload"));
 
     publish_next(&runtime).await;
 
@@ -106,7 +112,7 @@ async fn a_context_without_a_scope_keeps_the_generation_it_was_established_on() 
 #[tokio::test]
 async fn an_opener_context_without_a_scope_follows_the_current_generation() {
     let runtime = runtime().await;
-    let context = sessions(&runtime).context(Invocation::HttpRequest);
+    let context = sessions(&runtime).context(TargetRef::from_static(&Call));
 
     publish_next(&runtime).await;
 
@@ -119,7 +125,7 @@ async fn a_context_in_a_scope_keeps_the_generation_the_scope_pinned() {
     let pinned = runtime.root();
     let session = open_session(&runtime).await;
     let context = runtime
-        .context(Invocation::RpcCall)
+        .context(TargetRef::from_static(&Call))
         .with_scope(Arc::clone(session.container()));
 
     publish_next(&runtime).await;
@@ -133,18 +139,22 @@ async fn run_work_runs_in_a_context_on_its_instance() {
     let runtime = runtime().await;
     let sessions = sessions(&runtime);
 
-    let (invocation, scope, visitor) = sessions
+    let (target, scope, visitor) = sessions
         .builder(Session)
         .seed(Visitor(7))
         .run(|visitor: Visitor| async move {
             let context = captured();
 
-            (context.invocation().clone(), context.scope_key(), visitor)
+            (
+                context.target().downcast_ref::<ScopeRunTarget>().copied(),
+                context.scope_key(),
+                visitor,
+            )
         })
         .await
         .expect("the run succeeds");
 
-    assert_eq!(invocation, Invocation::ScopeRun { scope: Session::ID });
+    assert_eq!(target, Some(ScopeRunTarget { scope: Session::ID }));
     assert_eq!(scope, Some(Session::KEY));
     assert_eq!(visitor, Visitor(7));
     assert!(

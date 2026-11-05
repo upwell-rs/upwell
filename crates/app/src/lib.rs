@@ -75,13 +75,13 @@ pub use protocol::{
 pub use registry::{AppConditionEvaluation, AppRegistry};
 pub use runtime::{
     AppConditionState, AppRuntime, ComponentRetired, ComponentRetirement,
-    ComponentTransitionReport, DisplacedGeneration, EntryScope, OpenScope, Opening, OpensUnder,
-    PendingTransition, PhaseTiming, RetirementContext, RetirementReason, RuntimeTransitionReport,
-    RuntimeView, ScopeBuilder, ScopeEntry, ScopeOpener, ScopeWork, TransitionAborted,
-    TransitionAttemptId, TransitionCommitted, TransitionDecision, TransitionFailure,
-    TransitionHookContext, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,
-    TransitionOutcomeContext, TransitionPhase, TransitionProposal, TransitionRejection,
-    TransitionVerdict,
+    ComponentTransitionReport, DisplacedGeneration, EntryScope, HookTarget, OpenScope, Opening,
+    OpensUnder, PendingTransition, PhaseTiming, RetirementContext, RetirementReason,
+    RuntimeTransitionReport, RuntimeView, ScopeBuilder, ScopeEntry, ScopeOpener, ScopeRunTarget,
+    ScopeWork, TransitionAborted, TransitionAttemptId, TransitionCommitted, TransitionDecision,
+    TransitionFailure, TransitionHookContext, TransitionHookOutcome, TransitionHookReport,
+    TransitionOutcome, TransitionOutcomeContext, TransitionPhase, TransitionProposal,
+    TransitionRejection, TransitionVerdict,
 };
 pub use scope::{
     PreparedScopeTopology, SCOPES, ScopeBoundary, ScopeDeclaration, ScopeParent, ScopeTopology,

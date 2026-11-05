@@ -3,10 +3,9 @@
 crate::namespaced_id_type!(
     /// A stable namespaced identity of one entry point.
     ///
-    /// An entry is a unit of work that runs inside a scope: an HTTP route, an RPC method,
-    /// a WebSocket handler, a plugin entry, or an entry into a user-defined scope. Tooling
-    /// and diagnostics key on this identity; the prepared application maps it to a dense
-    /// process-local index.
+    /// An entry is a unit of work that a protocol or plugin runs inside a scope, such as a
+    /// route, a method or a handler. Tooling and diagnostics key on this identity; the
+    /// prepared application maps it to a dense process-local index.
     pub struct EntryKey,
     "entry"
 );
@@ -21,7 +20,7 @@ pub trait EntryKeyOwner {
 }
 
 /// Builds an [`EntryKey`] at compile time by joining string constants, so a macro can derive
-/// an entry's key from its owner's key segment (`"http/", <owner segment>, ".", "handler"`).
+/// an entry's key from its owner's key segment (`"<protocol>/", <owner segment>, ".", "handler"`).
 ///
 /// Every part must be a constant expression. Compilation fails when the joined text is not a
 /// valid namespaced identifier.

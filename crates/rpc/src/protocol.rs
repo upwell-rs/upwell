@@ -21,7 +21,7 @@ use upwell_app::{
     AppRuntime, OpenScope, ProtocolRuntime, ScopeEntry, ScopeOpener, Serve, ShutdownSignal,
 };
 use upwell_core::Scope;
-use upwell_di::context::{Invocation, bind_opened_scope};
+use upwell_di::context::{TargetRef, bind_opened_scope};
 use upwell_transport::{
     CallResult, Connection, Error as TransportError, PeerInfo, PredefinedCode, Respond,
     RespondStream, ResponseSink, StatusCode, Transport,
@@ -32,6 +32,7 @@ use crate::extract::ErrorResponse;
 use crate::middleware::{ErrorHandler, RpcRequest, RpcService};
 use crate::router::RpcRouter;
 use crate::scope::{Connection as ConnectionScope, Request as RequestScope};
+use crate::target::RpcTarget;
 
 /// Default number of concurrently served RPC connections.
 pub const DEFAULT_MAX_CONNECTIONS: usize = 1024;
@@ -411,7 +412,7 @@ async fn serve_connection<C: Connection>(
                     let peer = peer.clone();
                     let context = scopes
                         .calls
-                        .context(Invocation::RpcCall)
+                        .context(TargetRef::from_static(&RpcTarget))
                         .with_pending_scope(
                             RequestScope::KEY,
                             Some(Arc::clone(connection_scope.container())),

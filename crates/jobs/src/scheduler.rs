@@ -33,7 +33,7 @@ use std::pin::Pin;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use upwell_core::{DependencyDescriptor, ResolverCtx, ResolverCtxExt, Scope, TypeDescriptor};
-use upwell_di::context::Invocation;
+use upwell_di::context::TargetRef;
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentFactoryRole, ComponentSource, GenerationSnapshot,
@@ -51,6 +51,7 @@ use crate::registry::{
 };
 use crate::run::{Runner, drive_job};
 use crate::schedule::{JobOptions, Schedule, ScheduleError};
+use crate::target::JobTarget;
 
 #[cfg(test)]
 mod tests;
@@ -233,12 +234,11 @@ impl JobScheduler {
     /// goes ahead without a context, and any lookup it makes fails as outside every context.
     fn in_run_context(&self, job: Arc<str>, runner: Runner) -> Runner {
         let root = self.root.clone();
+        let target = TargetRef::shared(Arc::new(JobTarget { name: job }));
 
         Arc::new(move |cx| {
             let runner = Arc::clone(&runner);
-            let context = root.context(Invocation::JobRun {
-                job: Arc::clone(&job),
-            });
+            let context = root.context(target.clone());
 
             Box::pin(async move {
                 let run = async move { runner(cx).await };

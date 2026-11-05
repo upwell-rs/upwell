@@ -1,10 +1,11 @@
 //! The invocation context: what the current task runs inside of.
 //!
-//! Every framework entry point (an HTTP request, a WebSocket connection or message, an RPC
-//! call, a job run, a lifecycle hook) runs its whole future inside one [`InvocationContext`],
-//! kept in a task-local. It holds:
+//! Every framework entry point (a protocol's dispatch, a job run, a lifecycle hook) runs its
+//! whole future inside one [`InvocationContext`], kept in a task-local. It holds:
 //!
-//! - the [`Invocation`] metadata saying which entry point this is;
+//! - an [`InvocationTarget`] saying which entry point this is. The engine defines no concrete
+//!   target: each protocol or subsystem defines its own typed targets and recognises them with
+//!   [`downcast_ref`](dyn InvocationTarget::downcast_ref);
 //! - the application runtime, opaque here ([`ContextRuntime`]), which supplies the root of the
 //!   current generation while no scope is open;
 //! - the innermost open scope instance. A `ScopeContainer` links to its parents, so the
@@ -20,9 +21,9 @@
 //!
 //! # Scopes that open after the context
 //!
-//! A protocol may open an invocation's scope only when something first resolves from it: HTTP
-//! opens the request scope on the first injection, RPC and WebSocket open a call or message
-//! scope whose entry builds nothing on its first resolution. The context is established
+//! A protocol may open an invocation's scope only when something first resolves from it, so a
+//! request, call or message scope whose entry builds nothing is opened on its first
+//! resolution. The context is established
 //! before that, around the whole dispatch, with a *pending* scope: the scope it expects and,
 //! when the scope opens under one, the parent instance. Until the scope opens, the parent is
 //! the innermost scope; the opening then binds its container into the pending slot of the
@@ -42,14 +43,14 @@
 //! [`InvocationContext::enter_sync`] runs a closure inside it, on any thread.
 
 mod error;
-mod invocation;
 mod invocation_context;
 mod runtime;
+mod target;
 
 pub use error::ContextError;
-pub use invocation::Invocation;
 pub use invocation_context::{InvocationContext, bind_opened_scope};
 pub use runtime::ContextRuntime;
+pub use target::{InvocationTarget, TargetRef};
 
 #[cfg(test)]
 mod tests;

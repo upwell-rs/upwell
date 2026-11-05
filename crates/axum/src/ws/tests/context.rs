@@ -1,10 +1,11 @@
 //! The invocation contexts a WebSocket connection and its messages run in.
 
 use upwell_core::Scope;
-use upwell_di::context::{Invocation, InvocationContext};
+use upwell_di::context::InvocationContext;
 
 use super::*;
 use crate::scope::{WebsocketConnection, WebsocketMessage};
+use crate::target::HttpTarget;
 
 /// A protocol reporting the context its connection runs in, and the one a message it opens
 /// would dispatch in.
@@ -16,9 +17,9 @@ fn describe() -> String {
         return "none".to_owned();
     };
 
-    let kind = match context.invocation() {
-        Invocation::WebsocketConnection => "connection",
-        Invocation::WebsocketMessage => "message",
+    let kind = match context.target().downcast_ref::<HttpTarget>() {
+        Some(HttpTarget::WebsocketConnection) => "connection",
+        Some(HttpTarget::WebsocketMessage) => "message",
         _ => "other",
     };
 

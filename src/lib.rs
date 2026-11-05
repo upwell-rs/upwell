@@ -287,8 +287,8 @@ pub mod daemon {
         ParameterKind, Payload, Peer, PreparedRpc, RequestStream, ResolvedService, Responder,
         ResponseError, ResponseStream, Result, RouterService, Rpc, RpcAppBuilder, RpcCallContext,
         RpcDescriptor, RpcGroup, RpcHandler, RpcLimits, RpcOutcome, RpcRequest, RpcResponse,
-        RpcRouter, RpcRuntime, RpcService, SERVICES, ServiceDescriptor, ServiceRpcs, Streaming,
-        dispatch_fallible, dispatch_with,
+        RpcRouter, RpcRuntime, RpcService, RpcTarget, SERVICES, ServiceDescriptor, ServiceRpcs,
+        Streaming, dispatch_fallible, dispatch_with,
     };
 
     /// Service/RPC route resolution, for introspecting the registered surface.

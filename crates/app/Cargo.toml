@@ -48,6 +48,8 @@ clap = { workspace = true, optional = true }
 upwell-tooling-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
+# Inspect the invocation contexts the runtime establishes.
+upwell-di = { workspace = true, features = ["test-support"] }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -4,10 +4,11 @@ use std::collections::HashMap;
 
 use tokio::sync::mpsc;
 use upwell_core::ResolverSet;
-use upwell_di::context::{ContextError, Invocation, InvocationContext};
+use upwell_di::context::{ContextError, InvocationContext};
 use upwell_di::{ScopeContainer, ScopeRegistry};
 
 use super::*;
+use crate::target::JobTarget;
 
 /// A root, and a resolver attached to it.
 async fn attached() -> (Arc<ScopeContainer>, RootResolver) {
@@ -27,7 +28,7 @@ async fn attached() -> (Arc<ScopeContainer>, RootResolver) {
 #[derive(Debug)]
 struct Run {
     name: &'static str,
-    invocation: Invocation,
+    target: Option<JobTarget>,
     resolves_root: bool,
     has_scope: bool,
 }
@@ -52,7 +53,7 @@ fn report_runs(
             let context = InvocationContext::capture().expect("a job run has a context");
             let run = Run {
                 name,
-                invocation: context.invocation().clone(),
+                target: context.target().downcast_ref::<JobTarget>().cloned(),
                 resolves_root: context.resolves_root(&root),
                 has_scope: context.scope_key().is_some(),
             };
@@ -80,10 +81,10 @@ async fn concurrent_job_runs_each_see_their_own_job_and_the_root() {
         let run = runs.recv().await.expect("the jobs keep running");
 
         assert_eq!(
-            run.invocation,
-            Invocation::JobRun {
-                job: Arc::from(run.name)
-            }
+            run.target,
+            Some(JobTarget {
+                name: Arc::from(run.name)
+            })
         );
         assert!(run.resolves_root);
         assert!(!run.has_scope, "a job run opens no scope");
