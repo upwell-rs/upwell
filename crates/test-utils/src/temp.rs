@@ -82,7 +82,8 @@ fn remove_stale(parent: &Path, prefix: &str) {
     let entries = fs::read_dir(parent).expect("read temporary fixture parent directory");
 
     for entry in entries.flatten() {
-        let stale = entry.file_name().to_string_lossy().starts_with(prefix)
+        let name = entry.file_name();
+        let stale = name.as_encoded_bytes().starts_with(prefix.as_bytes())
             && entry.file_type().is_ok_and(|kind| kind.is_dir());
 
         if stale {
