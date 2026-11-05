@@ -84,3 +84,21 @@ fn new_in_rejects_a_windows_drive_prefix() {
 
     assert!(panic::catch_unwind(|| TempFixture::new_in(parent.path(), "C:")).is_err());
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stale_sweep_ignores_names_that_are_not_valid_utf8() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let parent = TempFixture::new("upwell-temp-parent-");
+    let invalid = parent
+        .path()
+        .join(OsStr::from_bytes(b"\xffinvalid-fixture"));
+
+    std::fs::create_dir(&invalid).expect("create invalid-name directory");
+
+    let _fixture = TempFixture::new_in(parent.path(), "\u{fffd}invalid-");
+
+    assert!(invalid.exists());
+}
