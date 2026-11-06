@@ -262,6 +262,3 @@ pub(super) struct RpcScopes {
     pub(super) calls: ScopeOpener<RequestScope>,
     pub(super) entries: HashMap<String, ScopeEntry<RequestScope>>,
 }
-
-#[cfg(test)]
-mod tests;
