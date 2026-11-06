@@ -56,5 +56,8 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true, optional = true }
 
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [build-dependencies]
 upwell-build = { workspace = true }
