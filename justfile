@@ -111,7 +111,7 @@ test-doc:
     cargo test --doc --workspace --all-features --locked
 
 review pr worktree model="gpt-6.1-terra" effort="medium":
-    scripts/review/review-pr.sh {{ pr }} {{ worktree }} {{ model }} {{ effort }}
+    scripts/review/review-pr.sh {{ quote(pr) }} {{ quote(worktree) }} {{ quote(model) }} {{ quote(effort) }}
 
 test-config:
     #!/usr/bin/env bash
