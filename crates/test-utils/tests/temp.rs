@@ -1,6 +1,6 @@
 use std::panic;
 
-use upwell_test_utils::TempFixture;
+use upwell_test_utils::{FIXTURE_MARKER, TempFixture};
 
 #[test]
 fn writes_are_scoped_to_the_fixture() {
@@ -26,6 +26,7 @@ fn child_rejects_paths_that_escape_the_fixture() {
 fn fixture_below_a_parent_is_removed_on_drop_and_stale_siblings_are_swept() {
     let parent = TempFixture::new("upwell-temp-parent-");
     let stale = parent.write("upwell-fixture-stale/leftover.txt", b"old");
+    parent.write(format!("upwell-fixture-stale/{FIXTURE_MARKER}"), b"");
     let unrelated = parent.write("unrelated/keep.txt", b"keep");
     let fixture = TempFixture::new_in(parent.path(), "upwell-fixture-");
     let root = fixture.path().to_path_buf();
@@ -97,8 +98,19 @@ fn stale_sweep_ignores_names_that_are_not_valid_utf8() {
         .join(OsStr::from_bytes(b"\xffinvalid-fixture"));
 
     std::fs::create_dir(&invalid).expect("create invalid-name directory");
+    std::fs::write(invalid.join(FIXTURE_MARKER), b"").expect("mark invalid-name directory");
 
     let _fixture = TempFixture::new_in(parent.path(), "\u{fffd}invalid-");
 
     assert!(invalid.exists());
+}
+
+#[test]
+fn stale_sweep_keeps_prefixed_directories_without_the_fixture_marker() {
+    let parent = TempFixture::new("upwell-temp-parent-");
+    let unmarked = parent.write("upwell-fixture-results/report.txt", b"keep");
+
+    let _fixture = TempFixture::new_in(parent.path(), "upwell-fixture-");
+
+    assert!(unmarked.exists());
 }
