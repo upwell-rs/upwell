@@ -142,7 +142,7 @@ impl<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets> ScopeRun<'_, S,
                 .capture
                 .then(|| logs::new_sink(&builder.params, &builder.logs))
         });
-        let (seeds, instance_logs) = builder.into_parts(true, sink);
+        let (seeds, instance_logs) = builder.into_parts(sink);
         let instance = async {
             let container = open_planned_in(&view, S::ID, parent, Some(&plan), seeds).await?;
 

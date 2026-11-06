@@ -131,15 +131,14 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         self,
         entry: Option<&ScopeEntry<S>>,
     ) -> crate::Result<EntryScope<S>> {
+        use tracing::Instrument;
+
         let (view, parent) = self.target()?;
         let builds = match entry {
             Some(entry) if plans_nothing(&view, entry) => {
-                return Ok(EntryScope::deferred(
-                    view,
-                    parent,
-                    entry.id,
-                    self.into_parts(false, None).0,
-                ));
+                let (seeds, logs) = self.into_parts(None);
+
+                return Ok(EntryScope::deferred(view, parent, entry.id, seeds, logs));
             }
 
             Some(entry) => Builds::Entry(entry.id),
@@ -147,12 +146,14 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         };
         let plan =
             entry.and_then(|entry| view.scope_plan().layouts.shared_entry(entry.id).cloned());
-        let seeds = self.into_parts(false, None).0;
-        let container =
-            crate::logs::with_current_sink(None, open_in(view, S::ID, parent, builds, seeds))
-                .await?;
+        let (seeds, logs) = self.into_parts(None);
+        let container = crate::logs::with_current_sink(
+            logs.sink().map(Arc::clone),
+            open_in(view, S::ID, parent, builds, seeds).instrument(logs.span().clone()),
+        )
+        .await?;
 
-        Ok(EntryScope::opened(container, plan))
+        Ok(EntryScope::opened(container, plan, logs))
     }
 
     /// Opens the instance as `opening` says, adding the seed of type `T` from `source` only when
@@ -188,8 +189,8 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         self.open_instance(view, parent, builds).await
     }
 
-    /// Opens the instance inside its span, which is the instance's own only when it captures
-    /// logs.
+    /// Opens the instance inside its `upwell.scope` span, which routes events to a sink only when
+    /// the instance captures logs.
     async fn open_instance(
         self,
         view: RuntimeView,
@@ -198,7 +199,7 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     ) -> crate::Result<OpenScope<S>> {
         use tracing::Instrument;
 
-        let (seeds, logs) = self.into_parts(false, None);
+        let (seeds, logs) = self.into_parts(None);
         let container = crate::logs::with_current_sink(
             logs.sink().map(Arc::clone),
             open_in(view, S::ID, parent, builds, seeds).instrument(logs.span().clone()),
@@ -209,18 +210,14 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     }
 
     /// Splits the builder into the seeds opening consumes, the instance's value first, and the
-    /// instance's span and sink. The span is made when `span` asks for it, or when the builder
-    /// captures logs or `sink` was made ahead; otherwise there is none and nothing is paid.
+    /// instance's span and sink. Every instance gets its span, which costs a callsite check when
+    /// no subscriber enables it; the sink exists only when the builder captures logs or `sink`
+    /// was made ahead.
     pub(super) fn into_parts(
         self,
-        span: bool,
         sink: Option<Arc<ScopeLogSink>>,
     ) -> (Vec<BoxedComponent>, InstanceLogs) {
-        let logs = if span || self.logs.capture || sink.is_some() {
-            InstanceLogs::open(&self.params, &self.logs, sink)
-        } else {
-            InstanceLogs::none()
-        };
+        let logs = InstanceLogs::open(&self.params, &self.logs, sink);
         let mut seeds = self.seeds;
 
         if stores_params::<S>() {

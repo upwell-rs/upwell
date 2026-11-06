@@ -13,7 +13,7 @@ impl<S: Scope, P: Scope> ScopeBuilder<'_, S, P> {
     /// nobody asked about costs nothing per event.
     ///
     /// It applies to an instance opened with `open`, `open_default`, `open_on_demand`,
-    /// `open_with_bound_seed` and `run`, and needs a
+    /// `open_with_bound_seed`, `open_when_needed` and `run`, and needs a
     /// [`ScopeLogLayer`](crate::logs::ScopeLogLayer) in the subscriber.
     pub fn capture_logs(mut self) -> Self {
         self.logs.capture = true;

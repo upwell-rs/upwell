@@ -108,11 +108,10 @@ async fn an_open_instance_captures_when_asked() {
 }
 
 #[tokio::test]
-async fn an_open_instance_that_does_not_capture_has_no_span_and_an_ended_stream() {
+async fn an_open_instance_that_does_not_capture_has_an_ended_stream() {
     let _guard = install();
     let (runtime, _registry) = build_runtime(HashMap::new()).await;
     let scope = open_session(&runtime).await;
 
-    assert!(scope.span().is_disabled());
     assert!(messages(scope.logs()).await.is_empty());
 }
