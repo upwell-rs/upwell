@@ -3,6 +3,9 @@ use std::path::{Component, Path, PathBuf};
 
 use tempfile::{Builder, TempDir};
 
+/// Name of the file `TempFixture::new_in` writes into each fixture root so a later sweep recognizes it.
+pub const FIXTURE_MARKER: &str = ".upwell-temp-fixture";
+
 /// Owns a uniquely named temporary filesystem fixture.
 pub struct TempFixture {
     root: TempDir,
@@ -21,6 +24,8 @@ impl TempFixture {
 
     /// Creates an automatically removed fixture below `parent`, first removing
     /// directories with the same prefix that an earlier killed run left behind.
+    /// Only directories holding the `FIXTURE_MARKER` file are removed, so an
+    /// unrelated sibling that merely shares the prefix is left alone.
     ///
     /// Callers must serialize runs that share `parent` and `prefix`.
     ///
@@ -42,6 +47,8 @@ impl TempFixture {
             .prefix(prefix)
             .tempdir_in(parent)
             .expect("create temporary test fixture");
+
+        fs::write(root.path().join(FIXTURE_MARKER), b"").expect("write temporary fixture marker");
 
         Self { root }
     }
@@ -84,7 +91,8 @@ fn remove_stale(parent: &Path, prefix: &str) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let stale = name.as_encoded_bytes().starts_with(prefix.as_bytes())
-            && entry.file_type().is_ok_and(|kind| kind.is_dir());
+            && entry.file_type().is_ok_and(|kind| kind.is_dir())
+            && entry.path().join(FIXTURE_MARKER).is_file();
 
         if stale {
             fs::remove_dir_all(entry.path()).expect("remove stale temporary fixture");

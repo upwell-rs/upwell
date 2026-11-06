@@ -19,5 +19,5 @@ pub use server::TestServer;
 pub use task::AbortOnDropTask;
 #[cfg(feature = "app")]
 pub(crate) use task::LoopbackTask;
-pub use temp::TempFixture;
+pub use temp::{FIXTURE_MARKER, TempFixture};
 pub use timeout::{DEFAULT_TEST_TIMEOUT, deadline, deadline_with_timeout};
