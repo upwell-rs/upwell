@@ -12,7 +12,7 @@ just review <pr> <worktree> [model] [effort]
 - `<worktree>` is a checkout of the PR head; the script refuses a tree that differs from the PR head.
 - Defaults: `gpt-6.1-terra` at `medium` effort. Use `gpt-6.1-sol` at `high` for large or risky PRs.
   Keep `gpt-6-astra` for small, focused areas and only when plenty of usage is left.
-- Output (prompt, structured review, log) lands in `$UPWELL_REVIEW_OUT`, default `$TMPDIR/upwell-review`.
+- Output (prompt, structured review, log) lands in a fresh directory under `$UPWELL_REVIEW_OUT` (default `$TMPDIR/upwell-review`) per run, so concurrent reviews cannot clash. A run refuses a worktree with uncommitted tracked changes and does not post if the PR head or base moved while it ran.
 
 Files:
 
