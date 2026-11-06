@@ -33,7 +33,7 @@ def diff_lines(pr):
                 if hunk:
                     new = int(hunk.group(1))
                     continue
-                if raw.startswith("-"):
+                if raw.startswith("-") or raw.startswith("\\"):
                     continue
                 lines.add(new)
                 new += 1
