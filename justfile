@@ -110,6 +110,9 @@ test-ui:
 test-doc:
     cargo test --doc --workspace --all-features --locked
 
+review pr worktree model="gpt-6.1-terra" effort="medium":
+    scripts/review/review-pr.sh {{ pr }} {{ worktree }} {{ model }} {{ effort }}
+
 test-config:
     #!/usr/bin/env bash
     set -euo pipefail
