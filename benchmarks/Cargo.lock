@@ -2656,6 +2656,7 @@ dependencies = [
  "directories",
  "futures",
  "inventory",
+ "libc",
  "linkme",
  "postcard",
  "serde",
