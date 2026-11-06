@@ -8,6 +8,7 @@ use tracing::Event;
 use tracing::level_filters::LevelFilter;
 use upwell_core::ScopeId;
 
+use super::stream::LagCounter;
 use super::{LogField, LogOptions, LogRecord, ScopeLogStream};
 
 /// The sink of one scope instance, shared by its span and its subscribers.
@@ -28,7 +29,7 @@ pub struct ScopeLogSink {
 /// One subscriber's end of the sink.
 struct Subscriber {
     sender: mpsc::Sender<LogRecord>,
-    dropped: Arc<AtomicUsize>,
+    lag: Arc<LagCounter>,
 }
 
 impl ScopeLogSink {
@@ -50,18 +51,18 @@ impl ScopeLogSink {
     /// closes. Taken after the instance closed, it ends at once.
     pub fn subscribe(&self) -> ScopeLogStream {
         let (sender, receiver) = mpsc::channel(self.buffer);
-        let dropped = Arc::new(AtomicUsize::new(0));
+        let lag = Arc::new(LagCounter::default());
         let mut subscribers = self.subscribers.lock().expect("sink lock not poisoned");
 
         if let Some(open) = subscribers.as_mut() {
             open.push(Subscriber {
                 sender,
-                dropped: Arc::clone(&dropped),
+                lag: Arc::clone(&lag),
             });
             self.watchers.fetch_add(1, Ordering::Release);
         }
 
-        ScopeLogStream::new(receiver, dropped)
+        ScopeLogStream::new(receiver, lag)
     }
 
     /// Whether a layer took the sink when the instance's span opened. False when no
@@ -118,7 +119,7 @@ impl Subscriber {
         match self.sender.try_send(record.clone()) {
             Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(_)) => {
-                self.dropped.fetch_add(1, Ordering::AcqRel);
+                self.lag.record_drop();
 
                 true
             }

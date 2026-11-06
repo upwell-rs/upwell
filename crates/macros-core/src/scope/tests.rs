@@ -208,7 +208,7 @@ fn cfg_on_a_logged_tuple_scope_is_rejected() {
         ),
     );
 
-    assert!(message.contains("`#[cfg]` is not supported"), "{message}");
+    assert!(message.contains("`#[cfg]` or a `#[cfg_attr]`"), "{message}");
 }
 
 #[test]
@@ -225,5 +225,52 @@ fn a_cfg_on_a_logged_named_field_gates_its_report() {
     )
     .expect("the scope expands");
 
-    assert!(expanded.contains(r#"#[cfg(unix)]params.param("customer""#));
+    assert!(expanded.contains(r#"#[cfg(all(unix))]params.param("customer""#));
+}
+
+#[test]
+fn a_cfg_attr_that_can_remove_a_logged_tuple_field_is_rejected() {
+    let message = error(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync(#[cfg_attr(unix, cfg(any()))] u8, #[log] u64);
+        ),
+    );
+
+    assert!(
+        message.contains("`#[cfg_attr]` that can remove"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_cfg_attr_that_only_adds_attributes_is_accepted_on_a_logged_tuple() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync(#[cfg_attr(unix, allow(dead_code))] u8, #[log] u64);
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains(r#"params.param("1",&self.1);"#));
+}
+
+#[test]
+fn a_cfg_attr_carrying_a_cfg_gates_a_logged_named_field() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                #[cfg_attr(unix, cfg(feature = "x"))]
+                #[log]
+                customer: u64,
+            }
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(
+        expanded.contains(r#"#[cfg(all(any(not(unix),all(feature="x"))))]params.param("customer""#)
+    );
 }

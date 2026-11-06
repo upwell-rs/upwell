@@ -16,8 +16,9 @@ use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::ext::IdentExt;
+use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::{Fields, ItemStruct, LitStr};
+use syn::{Fields, ItemStruct, LitStr, Token};
 
 pub use args::ScopeArgs;
 
@@ -158,13 +159,9 @@ fn take_log_params(fields: &mut Fields, paths: &Paths) -> syn::Result<TokenStrea
             ),
         };
 
-        let cfgs = field
-            .attrs
-            .iter()
-            .filter(|attr| attr.path().is_ident("cfg"));
+        let cfg = effective_cfg(&field.attrs)?.map(|condition| quote!(#[cfg(#condition)]));
 
-        logged
-            .push(quote_spanned!(field.ty.span()=> #(#cfgs)* params.param(#name, &self.#member);));
+        logged.push(quote_spanned!(field.ty.span()=> #cfg params.param(#name, &self.#member);));
     }
 
     if logged.is_empty() {
@@ -180,8 +177,9 @@ fn take_log_params(fields: &mut Fields, paths: &Paths) -> syn::Result<TokenStrea
     })
 }
 
-/// Rejects `#[cfg]` on a tuple scope's fields when one is logged: a disabled field shifts the
-/// positions of the fields after it, so the generated `self.N` would read the wrong field.
+/// Rejects a field attribute that can remove a tuple scope's field when one field is logged: a
+/// removed field shifts the positions of the fields after it, so the generated `self.N` would
+/// read the wrong field.
 fn reject_cfg_in_logged_tuple(fields: &Fields) -> syn::Result<()> {
     let Fields::Unnamed(tuple) = fields else {
         return Ok(());
@@ -196,16 +194,73 @@ fn reject_cfg_in_logged_tuple(fields: &Fields) -> syn::Result<()> {
     }
 
     for field in &tuple.unnamed {
-        if let Some(cfg) = field.attrs.iter().find(|attr| attr.path().is_ident("cfg")) {
-            return Err(syn::Error::new_spanned(
-                cfg,
-                "`#[cfg]` is not supported on the fields of a tuple #[scope] with a `#[log]` \
-                 field: a disabled field would shift the position of the logged one",
-            ));
+        for attr in &field.attrs {
+            if cfg_condition(&attr.meta)?.is_some() {
+                return Err(syn::Error::new_spanned(
+                    attr,
+                    "`#[cfg]` or a `#[cfg_attr]` that can remove a field is not supported on the \
+                     fields of a tuple #[scope] with a `#[log]` field: a removed field would \
+                     shift the position of the logged one",
+                ));
+            }
         }
     }
 
     Ok(())
+}
+
+/// The `cfg` predicate under which `attrs` keep their field, or `None` when none can remove it.
+/// A `cfg_attr(predicate, ..)` removes the field when `predicate` holds and a `cfg` it carries
+/// does not.
+fn effective_cfg(attrs: &[syn::Attribute]) -> syn::Result<Option<TokenStream>> {
+    let mut conditions = Vec::new();
+
+    for attr in attrs {
+        if let Some(condition) = cfg_condition(&attr.meta)? {
+            conditions.push(condition);
+        }
+    }
+
+    if conditions.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(quote!(all(#(#conditions),*))))
+}
+
+/// The predicate under which one attribute keeps its field, recursing through `cfg_attr`.
+fn cfg_condition(meta: &syn::Meta) -> syn::Result<Option<TokenStream>> {
+    let syn::Meta::List(list) = meta else {
+        return Ok(None);
+    };
+
+    if list.path.is_ident("cfg") {
+        return Ok(Some(list.tokens.clone()));
+    }
+
+    if !list.path.is_ident("cfg_attr") {
+        return Ok(None);
+    }
+
+    let mut args = list
+        .parse_args_with(Punctuated::<syn::Meta, Token![,]>::parse_terminated)?
+        .into_iter();
+    let Some(predicate) = args.next() else {
+        return Ok(None);
+    };
+    let mut nested = Vec::new();
+
+    for arg in args {
+        if let Some(condition) = cfg_condition(&arg)? {
+            nested.push(condition);
+        }
+    }
+
+    if nested.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(quote!(any(not(#predicate), all(#(#nested),*)))))
 }
 
 /// Rejects a generic scope: a scope's identity and rank are constants of one type.
