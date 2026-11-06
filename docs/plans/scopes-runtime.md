@@ -833,8 +833,11 @@ watcher.await?;
 
 - Opening an instance creates the `upwell.scope` span (target `upwell::scope`, error level so
   restrictive filters still open it, fields `scope.id`, `scope.name` and the rendered `#[log]`
-  params) and instruments the whole open-and-run future with it. `run` always makes the span;
-  `open*` makes it only when capture is requested, so protocol hot paths pay nothing.
+  params) and instruments the whole open-and-run future with it. Every open path makes the span,
+  capturing or not (`run`, `open*`, immediate and deferred `open_when_needed`; the deferred one
+  enters it when the container opens): without a subscriber that enables it the span is a
+  callsite check, so protocol hot paths pay no allocation. Only an instance that captures gets a
+  sink.
 - The sink reaches the layer through a thread-local hand-off held only while the span is created:
   the layer's `on_new_span` takes it into the span's extensions. No dependency on the layer's
   crate is needed to create spans or sinks, and an instance whose span the layer never saw
@@ -865,7 +868,7 @@ extension if wanted; `0` is never "unlimited".
 
 Not wired yet: protocol dispatch (HTTP, WebSocket, RPC) opening its scopes through `open*` does
 not request capture or instrument its handlers with `OpenScope::span()`; that follows with the
-protocol identity fields (#353). `open_when_needed` instances do not capture.
+protocol identity fields (#353).
 
 ## Deferred to implementation
 

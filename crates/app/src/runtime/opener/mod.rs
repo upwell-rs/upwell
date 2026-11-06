@@ -73,6 +73,7 @@ pub struct ScopeEntry<S: Scope> {
 pub struct OpenScope<S: Scope> {
     container: Arc<ScopeContainer>,
     logs: Option<Arc<InstanceLogs>>,
+    span: Span,
     scope: PhantomData<fn() -> S>,
 }
 
@@ -248,22 +249,24 @@ impl<S: Scope> Clone for ScopeEntry<S> {
 impl<S: Scope> Copy for ScopeEntry<S> {}
 
 impl<S: Scope> OpenScope<S> {
-    /// An open instance with the span and sink of `logs`, kept only when it captures.
+    /// An open instance with the span of `logs`, and its sink when it captures.
     fn new(container: Arc<ScopeContainer>, logs: InstanceLogs) -> Self {
+        let span = logs.span().clone();
+
         Self {
             container,
             logs: logs.sink().is_some().then(|| Arc::new(logs)),
+            span,
             scope: PhantomData,
         }
     }
 
-    /// The instance's `upwell.scope` span, to instrument the work that runs in it. It is
-    /// disabled unless the instance was opened with
-    /// [`capture_logs`](ScopeBuilder::capture_logs).
+    /// The instance's `upwell.scope` span, to instrument the work that runs in it. Events made
+    /// inside it reach the instance's log only when it was opened with
+    /// [`capture_logs`](ScopeBuilder::capture_logs); the span is disabled when no subscriber
+    /// enables it.
     pub fn span(&self) -> Span {
-        self.logs
-            .as_ref()
-            .map_or_else(Span::none, |logs| logs.span().clone())
+        self.span.clone()
     }
 
     /// A stream of the records the instance captures from now on, ending when the last handle
@@ -292,6 +295,7 @@ impl<S: Scope> Clone for OpenScope<S> {
         Self {
             container: Arc::clone(&self.container),
             logs: self.logs.clone(),
+            span: self.span.clone(),
             scope: PhantomData,
         }
     }

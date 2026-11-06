@@ -214,4 +214,5 @@ mod entry_scopes;
 mod logs;
 mod release;
 mod runs;
+mod scope_spans;
 mod scopes;

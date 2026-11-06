@@ -4,12 +4,14 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::OnceCell;
+use tracing::{Instrument, Span};
 use upwell_core::Scope;
 use upwell_di::context::{self, InvocationContext};
 use upwell_di::{BoxedComponent, Component, EntryPlan, FromContainer, ScopeContainer};
 
 use super::{Builds, open_in};
 use crate::entry::EntryId;
+use crate::logs::{InstanceLogs, ScopeLogSink, ScopeLogStream};
 use crate::runtime::RuntimeView;
 
 /// An instance of scope `S` opened for an entry by [`ScopeBuilder::open_when_needed`].
@@ -23,6 +25,8 @@ use crate::runtime::RuntimeView;
 /// [`ScopeBuilder::open_when_needed`]: super::ScopeBuilder::open_when_needed
 pub struct EntryScope<S: Scope> {
     state: State,
+    span: Span,
+    logs: Option<Arc<InstanceLogs>>,
     scope: PhantomData<fn() -> S>,
 }
 
@@ -45,19 +49,37 @@ struct Deferred {
     parent: Arc<ScopeContainer>,
     entry: EntryId,
     seeds: Mutex<Option<Vec<BoxedComponent>>>,
+    span: Span,
+    sink: Option<Arc<ScopeLogSink>>,
     container: OnceCell<Arc<ScopeContainer>>,
 }
 
 impl<S: Scope> EntryScope<S> {
     /// An instance whose container is already open.
     pub fn from_container(container: Arc<ScopeContainer>) -> Self {
-        Self::opened(container, None)
+        Self {
+            state: State::Open {
+                container,
+                plan: None,
+            },
+            span: Span::none(),
+            logs: None,
+            scope: PhantomData,
+        }
     }
 
     /// An instance whose container opened at once for an entry planned as `plan`.
-    pub(super) fn opened(container: Arc<ScopeContainer>, plan: Option<Arc<EntryPlan>>) -> Self {
+    pub(super) fn opened(
+        container: Arc<ScopeContainer>,
+        plan: Option<Arc<EntryPlan>>,
+        logs: InstanceLogs,
+    ) -> Self {
+        let span = logs.span().clone();
+
         Self {
             state: State::Open { container, plan },
+            span,
+            logs: logs.sink().is_some().then(|| Arc::new(logs)),
             scope: PhantomData,
         }
     }
@@ -67,17 +89,41 @@ impl<S: Scope> EntryScope<S> {
         parent: Arc<ScopeContainer>,
         entry: EntryId,
         seeds: Vec<BoxedComponent>,
+        logs: InstanceLogs,
     ) -> Self {
+        let span = logs.span().clone();
+        let sink = logs.sink().map(Arc::clone);
+
         Self {
             state: State::Deferred(Box::new(Deferred {
                 view,
                 parent,
                 entry,
                 seeds: Mutex::new(Some(seeds)),
+                span: span.clone(),
+                sink,
                 container: OnceCell::new(),
             })),
+            span,
+            logs: logs.sink().is_some().then(|| Arc::new(logs)),
             scope: PhantomData,
         }
+    }
+
+    /// The instance's `upwell.scope` span, to instrument the work that runs in it. Events made
+    /// inside it reach the instance's log only when it was opened with
+    /// [`capture_logs`](super::ScopeBuilder::capture_logs).
+    pub fn span(&self) -> Span {
+        self.span.clone()
+    }
+
+    /// A stream of the records the instance captures from now on. Already ended unless the
+    /// instance was opened with [`capture_logs`](super::ScopeBuilder::capture_logs).
+    pub fn logs(&self) -> ScopeLogStream {
+        self.logs
+            .as_ref()
+            .and_then(|logs| logs.sink())
+            .map_or_else(ScopeLogStream::ended, |sink| sink.subscribe())
     }
 
     /// Whether the instance's container is open.
@@ -188,14 +234,15 @@ impl Deferred {
                     .ok_or(crate::Error::DeferredScopeFailed { scope: S::ID })?;
 
                 let container = crate::logs::with_current_sink(
-                    None,
+                    self.sink.clone(),
                     open_in(
                         self.view.clone(),
                         S::ID,
                         Arc::clone(&self.parent),
                         Builds::Entry(self.entry),
                         seeds,
-                    ),
+                    )
+                    .instrument(self.span.clone()),
                 )
                 .await?;
 
