@@ -1,3 +1,5 @@
+use futures::Stream;
+
 use super::*;
 
 #[tokio::test]
@@ -101,4 +103,38 @@ async fn the_largest_buffer_is_clamped_instead_of_panicking() {
     logs.finish();
 
     assert_eq!(messages(&records(stream).await), ["one"]);
+}
+
+#[tokio::test]
+async fn counting_a_drop_wakes_a_pending_reader() {
+    let (_sender, receiver) = tokio::sync::mpsc::channel(1);
+    let lag = Arc::new(stream::LagCounter::default());
+    let mut reader = ScopeLogStream::new(receiver, Arc::clone(&lag));
+    let woken = Arc::new(WakeFlag::default());
+    let waker = futures::task::waker(Arc::clone(&woken));
+    let mut cx = std::task::Context::from_waker(&waker);
+
+    assert!(
+        std::pin::Pin::new(&mut reader)
+            .poll_next(&mut cx)
+            .is_pending()
+    );
+
+    lag.record_drop();
+
+    assert!(woken.0.load(std::sync::atomic::Ordering::Acquire));
+    assert!(matches!(
+        std::pin::Pin::new(&mut reader).poll_next(&mut cx),
+        std::task::Poll::Ready(Some(ScopeLog::Lagged(1)))
+    ));
+}
+
+/// Remembers that it was woken.
+#[derive(Default)]
+struct WakeFlag(std::sync::atomic::AtomicBool);
+
+impl futures::task::ArcWake for WakeFlag {
+    fn wake_by_ref(arc_self: &Arc<Self>) {
+        arc_self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
 }

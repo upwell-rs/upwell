@@ -802,8 +802,13 @@ watcher.await?;
    `Scope::record_log_params`, which reports each marked field (it must be `Debug`).
 2. **Nested capture delivers to the innermost capturing scope only.** An instance that does not
    capture is transparent: its events go to the nearest capturing ancestor.
-3. **Capture level defaults to the subscriber's.** `init_tracing` installs `ScopeLogLayer` behind
-   the same filter as the console output. A run's `.capture_level(..)` narrows that; it widens
+3. **Capture level defaults to the subscriber's.** `init_tracing` installs `ScopeLogLayer` with
+   the same event filter as the console output. An error-level fallback admits the `upwell.scope`
+   routing span without enabling additional captured events; `upwell::scope=off` takes
+   precedence over this static fallback, though a dynamic selector can independently enable
+   the span. Dynamic span selectors keep `EnvFilter`'s native semantics: for example,
+   `upwell::scope[upwell.scope]=off` does not override the static fallback. A run's
+   `.capture_level(..)` narrows what the event filter admits; it widens
    capture only as far as the layer's filter lets events through, because enabling a callsite for
    one layer enables it for every layer. Buffer size defaults to 1024 records per subscriber
    (`.log_buffer(NonZeroUsize)`; zero is unrepresentable, and a huge value is clamped to the channel

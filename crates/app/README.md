@@ -97,6 +97,21 @@ a job, an entry or `.run` work. Injected, it holds the runtime weakly. `.run` pl
 an entry whose targets are its parameters, once per parameter types and runtime generation, and
 closes the instance when the work finishes.
 
+### Scope log filtering
+
+With `tracing-subscriber` enabled, `init_tracing` uses the configured `RUST_LOG` or logging
+filter for captured events. It additionally supplies an error-level fallback for the
+`upwell.scope` routing span (target `upwell::scope`), so a filter such as `myapp=info` can
+still attach a scope sink. This fallback does not enable additional captured events. An explicit
+`upwell::scope=off` takes precedence over the static fallback; repeated and more specific
+directives use `tracing-subscriber`'s `EnvFilter` precedence, and dynamic selectors can enable a
+span independently.
+
+Span- and field-specific selectors follow `EnvFilter`'s native behavior, not hard-exclusion
+semantics. For example, `upwell::scope[upwell.scope]=off` does not override the static routing
+fallback. Applications composing `ScopeLogLayer` into their own subscriber must configure its
+filter to admit the routing span themselves.
+
 ## Internal role
 
 The protocol crates (`upwell-rpc`, `upwell-axum`) build directly on this crate: each provides definition, prepared, and runtime states plus [`Serve`] implementations, and drives requests through the [`AppRuntime`] handle. The `upwell` facade re-exports the whole surface, and named `app!` declarations (in `upwell-macros`) generate lifecycle hosts whose configured builders target the [`AppBuilder`] here.
