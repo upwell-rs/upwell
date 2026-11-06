@@ -5,7 +5,7 @@ use tracing::error;
 use upwell_core::TypeDescriptor;
 use upwell_hooks::{HookKind, Shutdown, Startup};
 
-use crate::runtime::{AppRuntime, HookTarget};
+use crate::runtime::{AppRuntime, hook_target};
 
 /// Fires the startup event, returning the components whose startup gates all succeeded.
 ///
@@ -17,7 +17,7 @@ pub(super) async fn run_startup(
     runtime: &AppRuntime,
 ) -> Result<HashSet<TypeId>, (crate::Error, HashSet<TypeId>)> {
     let view = runtime.view();
-    let context = view.context(HookTarget::target(Startup::NAME));
+    let context = view.context(hook_target!(Startup::NAME));
     let fired = context.enter(view.hooks().fire_all::<Startup>(&())).await;
     let mut started = HashSet::new();
 
@@ -60,7 +60,7 @@ pub(super) async fn run_startup(
 pub(super) async fn run_shutdown(runtime: &AppRuntime, started: &HashSet<TypeId>) {
     let view = runtime.view();
     let hooks = view.hooks();
-    let context = view.context(HookTarget::target(Shutdown::NAME));
+    let context = view.context(hook_target!(Shutdown::NAME));
     let fired = context
         .enter(hooks.fire::<Shutdown>(&(), |hook| {
             let component_ty = hook.component_ty.type_id;

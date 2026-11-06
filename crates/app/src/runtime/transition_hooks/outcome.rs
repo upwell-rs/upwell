@@ -41,7 +41,7 @@
 use upwell_core::DependencyDescriptor;
 use upwell_hooks::{HookKind, HookParam, HookParticipation};
 
-use super::super::{HookTarget, RuntimeView};
+use super::super::{RuntimeView, hook_target};
 use super::retirement::retire_displaced;
 use super::{HookOwners, event_dependency, failed_observers};
 use crate::RuntimeTransitionReport;
@@ -122,7 +122,7 @@ where
     let cx = TransitionOutcomeContext {
         report: report.clone(),
     };
-    let context = view.context(HookTarget::target(K::NAME));
+    let context = view.context(hook_target!(K::NAME));
     let fired = context.enter(hooks.fire_all::<K>(&cx)).await;
     let owners = HookOwners::new(view.resolved_components());
 

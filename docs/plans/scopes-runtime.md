@@ -88,6 +88,14 @@ pinned to the generation they address, with no scope.
 Work a `ScopeBuilder::run` runs, its targets' resolution included, runs in a
 `ScopeRun { scope }` context whose innermost scope is the instance the run opened.
 
+**Correction (2026-11-06, #472):** The status descriptions above name the former closed
+`Invocation` enum. The context instead holds an open `InvocationTarget`, and each owner defines
+its own target: `HttpTarget`, `RpcTarget`, `JobTarget`, `HookTarget` and `ScopeRunTarget`.
+`TargetRef` stores either a static reference or a shared `Arc`; HTTP, RPC, hook and scope-run
+targets use static references, while a job target is shared across its runs. Inspection helpers
+are available to framework tests through `upwell-di`'s `test-support` feature; no public dynamic
+context lookup is added. The scope and generation behavior described above is unchanged.
+
 ## Design
 
 ### Scope identity moves onto the type

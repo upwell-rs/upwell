@@ -1,9 +1,7 @@
 //! The invocation targets the application runtime itself establishes.
 
-use std::sync::Arc;
-
 use upwell_core::ScopeId;
-use upwell_di::context::{InvocationTarget, TargetRef};
+use upwell_di::context::InvocationTarget;
 
 /// Work run in a fresh instance of a scope by [`ScopeBuilder::run`](crate::ScopeBuilder::run).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -14,12 +12,17 @@ pub struct ScopeRunTarget {
 
 impl InvocationTarget for ScopeRunTarget {}
 
-impl ScopeRunTarget {
-    /// A shared target for work run in `scope`.
-    pub fn target(scope: ScopeId) -> TargetRef {
-        TargetRef::shared(Arc::new(Self { scope }))
-    }
+/// A `'static` [`TargetRef`](upwell_di::context::TargetRef) for work run in `$scope`, a constant expression that may depend on
+/// generic parameters. Allocates nothing.
+macro_rules! scope_run_target {
+    ($scope:expr) => {
+        ::upwell_di::context::TargetRef::from_static(
+            const { &$crate::runtime::ScopeRunTarget { scope: $scope } },
+        )
+    };
 }
+
+pub(crate) use scope_run_target;
 
 /// One firing of a lifecycle, reload, transition or retirement hook kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,10 +33,14 @@ pub struct HookTarget {
 
 impl InvocationTarget for HookTarget {}
 
-impl HookTarget {
-    /// A shared target for a firing of the hook kind named `kind`. Hooks are not a hot path, so
-    /// one small allocation per firing keeps every kind, generic or not, on one constructor.
-    pub fn target(kind: &'static str) -> TargetRef {
-        TargetRef::shared(Arc::new(Self { kind }))
-    }
+/// A `'static` [`TargetRef`](upwell_di::context::TargetRef) for a firing of the hook kind named `$kind`, a constant expression
+/// that may depend on generic parameters. Allocates nothing.
+macro_rules! hook_target {
+    ($kind:expr) => {
+        ::upwell_di::context::TargetRef::from_static(
+            const { &$crate::runtime::HookTarget { kind: $kind } },
+        )
+    };
 }
+
+pub(crate) use hook_target;
