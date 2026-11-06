@@ -36,9 +36,12 @@ fi
 
 mise exec -- git -C "$worktree" fetch -q origin "$base"
 
+base_tip="$(mise exec -- git -C "$worktree" rev-parse FETCH_HEAD)"
+merge_base="$(mise exec -- git -C "$worktree" merge-base "$base_tip" "$head_sha")"
+
 {
     cat "$here/review-prompt.md"
-    printf '\nThis is PR #%s, head %s. Its base branch is origin/%s (a moving integration branch); review `git diff $(git merge-base origin/%s HEAD)...HEAD` in the working directory. Prioritise correctness, concurrency, layering and behaviour changes hidden in refactors over style nits.\n' "$pr" "$head_sha" "$base" "$base"
+    printf '\nThis is PR #%s, head %s. Its base branch is %s (a moving integration branch, currently at %s); review exactly `git diff %s...%s` in the working directory. Those are fixed commit ids, so do not substitute branch names. Prioritise correctness, concurrency, layering and behaviour changes hidden in refactors over style nits.\n' "$pr" "$head_sha" "$base" "$base_tip" "$merge_base" "$head_sha"
     printf '\nFINAL ANSWER FORMAT: reply with JSON only, matching the provided schema. `path` is repo-relative and `line` is a line number in the NEW version of the file that is part of the PR diff (prefer a changed line). Put a concrete failure scenario in `body`. Use verdict NO_FINDINGS with an empty findings list when you found nothing you could verify. `suggestion` may be an empty string. `unchecked` says what you could not check (for example, that you did not run the tests).\n'
 } > "$prompt"
 
