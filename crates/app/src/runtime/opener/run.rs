@@ -10,7 +10,7 @@ use upwell_di::{EntryPlan, FromContainer, ScopeContainer};
 use super::builder::open_planned_in;
 use super::{OpensUnder, ScopeBuilder};
 use crate::entry::EntryTargets;
-use crate::runtime::{RuntimeView, ScopeRunTarget};
+use crate::runtime::{RuntimeView, scope_run_target};
 
 /// Work [`ScopeBuilder::run`] runs inside a scope instance: a closure whose parameters are the
 /// targets it injects, each a [`FromContainer`] type as an `#[init]` constructor takes, and
@@ -71,7 +71,7 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     {
         let (view, parent) = self.target()?;
         let plan = run_plan::<S, W, Targets>(&view)?;
-        let context = self.opener.context(ScopeRunTarget::target(S::ID));
+        let context = self.opener.context(scope_run_target!(S::ID));
         let container = open_planned_in(&view, S::ID, parent, Some(&plan), self.seeds).await?;
 
         context

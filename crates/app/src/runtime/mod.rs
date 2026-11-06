@@ -43,6 +43,7 @@ pub use report::{
     TransitionPhase, TransitionRejection,
 };
 pub use targets::{HookTarget, ScopeRunTarget};
+pub(crate) use targets::{hook_target, scope_run_target};
 pub use transition_hooks::{
     ComponentRetired, ComponentRetirement, PendingTransition, RetirementContext, RetirementReason,
     TransitionAborted, TransitionCommitted, TransitionDecision, TransitionHookContext,

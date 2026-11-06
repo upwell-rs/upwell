@@ -3,6 +3,7 @@
 use upwell_di::context::{InvocationContext, InvocationTarget, TargetRef};
 
 use super::*;
+use crate::runtime::{hook_target, scope_run_target};
 use crate::{EntryDescriptor, EntryScope, HookTarget, ScopeOpener, ScopeRunTarget};
 
 /// A target standing in for a protocol's call.
@@ -46,6 +47,34 @@ fn captured() -> InvocationContext {
     InvocationContext::capture().expect("a context is active")
 }
 
+#[test]
+fn generic_targets_use_static_storage() {
+    fn hook<K: upwell_hooks::HookKind>() -> TargetRef {
+        hook_target!(K::NAME)
+    }
+
+    fn scope<S: upwell_core::Scope>() -> TargetRef {
+        scope_run_target!(S::ID)
+    }
+
+    let hook = hook::<upwell_hooks::Startup>();
+    let scope = scope::<Session>();
+
+    assert!(matches!(hook, TargetRef::Static(_)));
+    assert!(matches!(scope, TargetRef::Static(_)));
+    assert_eq!(
+        hook.downcast_ref::<HookTarget>().expect("hook target").kind,
+        "startup"
+    );
+    assert_eq!(
+        scope
+            .downcast_ref::<ScopeRunTarget>()
+            .expect("scope target")
+            .scope,
+        Session::ID
+    );
+}
+
 #[tokio::test]
 async fn a_deferred_scope_binds_into_the_context_waiting_for_it() {
     let runtime = runtime().await;
@@ -83,8 +112,8 @@ async fn contexts_of_two_runtimes_resolve_their_own_roots() {
     let first = runtime().await;
     let second = runtime().await;
     let contexts = [
-        first.context(HookTarget::target("startup")),
-        second.context(HookTarget::target("startup")),
+        first.context(hook_target!("startup")),
+        second.context(hook_target!("startup")),
     ];
 
     let roots = contexts.map(|context| {
@@ -101,7 +130,7 @@ async fn contexts_of_two_runtimes_resolve_their_own_roots() {
 async fn a_context_without_a_scope_keeps_the_generation_it_was_established_on() {
     let runtime = runtime().await;
     let pinned = runtime.root();
-    let context = runtime.context(HookTarget::target("reload"));
+    let context = runtime.context(hook_target!("reload"));
 
     publish_next(&runtime).await;
 

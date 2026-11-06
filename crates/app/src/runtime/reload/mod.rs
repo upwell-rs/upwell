@@ -181,7 +181,7 @@ use super::transition_hooks::{
     AffectedComponents, HookOwners, PendingTransition, TransitionDecision, TransitionProposal,
     fire_gate, observe_outcome,
 };
-use super::{AppRuntime, HookTarget, RuntimeView};
+use super::{AppRuntime, RuntimeView, hook_target};
 use stages::{commit_candidate, construct_candidate, evaluate_conditions, plan_transition};
 #[cfg(feature = "tooling")]
 pub(crate) use stages::{resolve_staged_transition, staged_condition_snapshot};
@@ -293,7 +293,7 @@ impl AppRuntime {
             self.reloader.generation(),
         );
 
-        let context = base.context(HookTarget::target(RELOAD_HOOKS));
+        let context = base.context(hook_target!(RELOAD_HOOKS));
         let result = active
             .scope(context.enter(self.run_reload(transition, &mut recorder)))
             .await;
@@ -396,7 +396,7 @@ impl AppRuntime {
 
         recorder.enter(TransitionPhase::Hooks);
 
-        let candidate_context = prepared.context(HookTarget::target(RELOAD_HOOKS));
+        let candidate_context = prepared.context(hook_target!(RELOAD_HOOKS));
         let hook_reports = candidate_context
             .clone()
             .enter(
