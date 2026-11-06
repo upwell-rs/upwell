@@ -52,14 +52,17 @@ fn fish_registration_completes_direct_and_cargo_subcommand_forms() {
 }
 
 #[test]
-fn cargo_upwell_command_clears_inherited_target_directory() {
-    let command = cargo_upwell_command(Path::new("."), ["--version"], None);
+fn cargo_upwell_command_pins_the_target_directory_inside_the_fixture() {
+    let fixture = TempFixture::new("cargo-upwell-completion-env");
+
+    let command = cargo_upwell_command(Path::new("."), ["--version"], Some(&fixture));
 
     let target_directory = command
         .get_envs()
-        .find(|(key, _)| *key == "CARGO_TARGET_DIR");
+        .find(|(key, _)| *key == "CARGO_TARGET_DIR")
+        .and_then(|(_, value)| value);
 
-    assert!(matches!(target_directory, Some((_, None))));
+    assert_eq!(target_directory, Some(fixture.child("target").as_os_str()));
 }
 
 #[test]
@@ -91,19 +94,19 @@ fn refresh_populates_workspace_resource_candidates() {
                 .expect("workspace path is UTF-8"),
             "--no-vcs",
         ],
-        Some(&cache),
+        Some(&fixture),
     );
     assert_success(&generated, "fixture generation");
 
     let refreshed = cargo_upwell(
         &project,
         ["completions", "refresh", "--features", "metrics"],
-        Some(&cache),
+        Some(&fixture),
     );
     assert_success(&refreshed, "completion refresh");
     let snapshot = completion_snapshot(&cache);
 
-    assert!(project.join("target/upwell/build").is_dir());
+    assert!(fixture.child("target/upwell/build").is_dir());
     assert!(snapshot.is_file());
     #[cfg(unix)]
     {
@@ -237,30 +240,33 @@ fn complete<const N: usize>(current_dir: &Path, cache: &Path, words: [&str; N]) 
     String::from_utf8(output.stdout).expect("completion output is UTF-8")
 }
 
-fn cargo_upwell<I, S>(current_dir: &Path, arguments: I, cache: Option<&Path>) -> Output
+fn cargo_upwell<I, S>(current_dir: &Path, arguments: I, fixture: Option<&TempFixture>) -> Output
 where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
-    let mut command = cargo_upwell_command(current_dir, arguments, cache);
+    let mut command = cargo_upwell_command(current_dir, arguments, fixture);
 
     run_command("cargo-upwell", &mut command)
 }
 
-fn cargo_upwell_command<I, S>(current_dir: &Path, arguments: I, cache: Option<&Path>) -> Command
+fn cargo_upwell_command<I, S>(
+    current_dir: &Path,
+    arguments: I,
+    fixture: Option<&TempFixture>,
+) -> Command
 where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
     let mut command = Command::new(cargo_upwell_executable());
 
-    command
-        .current_dir(current_dir)
-        .env_remove("CARGO_TARGET_DIR")
-        .args(arguments);
+    command.current_dir(current_dir).args(arguments);
 
-    if let Some(cache) = cache {
-        command.env("UPWELL_COMPLETION_CACHE_DIR", cache);
+    if let Some(fixture) = fixture {
+        command
+            .env("CARGO_TARGET_DIR", fixture.child("target"))
+            .env("UPWELL_COMPLETION_CACHE_DIR", fixture.child("cache"));
     }
 
     command
