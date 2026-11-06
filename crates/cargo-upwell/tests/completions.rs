@@ -52,6 +52,17 @@ fn fish_registration_completes_direct_and_cargo_subcommand_forms() {
 }
 
 #[test]
+fn cargo_upwell_command_clears_inherited_target_directory() {
+    let command = cargo_upwell_command(Path::new("."), ["--version"], None);
+
+    let target_directory = command
+        .get_envs()
+        .find(|(key, _)| *key == "CARGO_TARGET_DIR");
+
+    assert!(matches!(target_directory, Some((_, None))));
+}
+
+#[test]
 fn refresh_populates_workspace_resource_candidates() {
     if std::env::var_os("UPWELL_SKIP_GENERATED_PROJECT_BUILDS").is_some() {
         return;
@@ -92,6 +103,7 @@ fn refresh_populates_workspace_resource_candidates() {
     assert_success(&refreshed, "completion refresh");
     let snapshot = completion_snapshot(&cache);
 
+    assert!(project.join("target/upwell/build").is_dir());
     assert!(snapshot.is_file());
     #[cfg(unix)]
     {
@@ -230,17 +242,28 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
+    let mut command = cargo_upwell_command(current_dir, arguments, cache);
+
+    run_command("cargo-upwell", &mut command)
+}
+
+fn cargo_upwell_command<I, S>(current_dir: &Path, arguments: I, cache: Option<&Path>) -> Command
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
     let mut command = Command::new(cargo_upwell_executable());
 
     command
         .current_dir(current_dir)
         .env_remove("CARGO_TARGET_DIR")
         .args(arguments);
+
     if let Some(cache) = cache {
         command.env("UPWELL_COMPLETION_CACHE_DIR", cache);
     }
 
-    run_command("cargo-upwell", &mut command)
+    command
 }
 
 fn assert_success(output: &Output, context: &str) {
