@@ -1,5 +1,3 @@
-use std::error::Error as _;
-
 use axum::body;
 
 use super::*;
@@ -76,4 +74,69 @@ async fn every_rejection_answers_an_empty_500_without_the_source_text() {
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(bytes.is_empty(), "the body stays empty");
     }
+}
+
+/// Collects the fields of every event it sees, as `name=value` strings.
+#[derive(Default)]
+struct Capture {
+    fields: std::sync::Mutex<Vec<String>>,
+}
+
+/// Records event fields into the captured output.
+struct FieldVisitor<'a>(&'a mut Vec<String>);
+
+impl tracing::field::Visit for FieldVisitor<'_> {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0.push(format!("{}={value:?}", field.name()));
+    }
+}
+
+impl tracing::Subscriber for Capture {
+    fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+
+    fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+
+    fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+    fn event(&self, event: &tracing::Event<'_>) {
+        let mut fields = self
+            .fields
+            .lock()
+            .expect("the capture lock is not poisoned");
+
+        event.record(&mut FieldVisitor(&mut fields));
+    }
+
+    fn enter(&self, _span: &tracing::span::Id) {}
+
+    fn exit(&self, _span: &tracing::span::Id) {}
+}
+
+#[test]
+fn the_log_event_carries_the_source_text() {
+    let capture = std::sync::Arc::new(Capture::default());
+    let dispatch = tracing::Dispatch::new(std::sync::Arc::clone(&capture));
+
+    tracing::dispatcher::with_default(&dispatch, || {
+        for rejection in rejections() {
+            let _ = rejection.into_response();
+        }
+    });
+
+    let fields = capture
+        .fields
+        .lock()
+        .expect("the capture lock is not poisoned");
+    let causes = fields
+        .iter()
+        .filter(|field| field.starts_with("cause=") && field.contains(SECRET))
+        .count();
+
+    assert_eq!(causes, 3, "each source-bearing variant logs its cause text");
 }

@@ -7,6 +7,7 @@
 //! [`Inject`] resolves a component through the scope chain. Native axum extractors (`Json`, `Path`, `Query`, `State`, …)
 //! are untouched and compose with [`Inject`] in the same handler signature.
 
+use std::error::Error as _;
 use std::sync::Arc;
 
 use axum::extract::{FromRequestParts, Request};
@@ -102,6 +103,7 @@ impl IntoResponse for InjectRejection {
         tracing::error!(
             target: "upwell::axum",
             error = &self as &(dyn std::error::Error + 'static),
+            cause = self.source().map(tracing::field::display),
             "request scope extraction failed"
         );
 
