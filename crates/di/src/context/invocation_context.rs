@@ -20,6 +20,9 @@ tokio::task_local! {
 #[derive(Clone)]
 pub struct InvocationContext {
     target: TargetRef,
+    /// Read only by [`root`](Self::root), which nothing but the test inspection helpers calls
+    /// until the scope access lookups use it.
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     runtime: Arc<dyn ContextRuntime>,
     scope: ActiveScope,
 }
@@ -124,6 +127,7 @@ impl InvocationContext {
 
     /// The root this context resolves singletons from: the root of its scope chain, pinned
     /// with the generation the chain runs on, or the runtime's current root without a scope.
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
     pub(crate) fn root(&self) -> Result<Arc<ScopeContainer>, ContextError> {
         match self.scope() {
             Ok(scope) => scope.root_handle(),
