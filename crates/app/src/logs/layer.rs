@@ -61,7 +61,9 @@ where
         };
 
         for span in scope {
-            if let Some(sink) = span.extensions().get::<Arc<ScopeLogSink>>() {
+            let sink = span.extensions().get::<Arc<ScopeLogSink>>().cloned();
+
+            if let Some(sink) = sink {
                 sink.deliver(event);
 
                 return;
