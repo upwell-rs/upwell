@@ -132,15 +132,18 @@ impl InvocationContext {
 
     /// The innermost open scope instance: the whole chain up to the root.
     pub(crate) fn scope(&self) -> Result<Arc<ScopeContainer>, ContextError> {
-        let innermost = match &self.scope {
+        self.innermost()
+            .map(Arc::clone)
+            .ok_or(ContextError::OutsideInvocationScope)
+    }
+
+    /// The innermost open scope instance, borrowed.
+    fn innermost(&self) -> Option<&Arc<ScopeContainer>> {
+        match &self.scope {
             ActiveScope::None => None,
             ActiveScope::Open(scope) => Some(scope),
             ActiveScope::Pending(pending) => pending.opened.get().or(pending.parent.as_ref()),
-        };
-
-        innermost
-            .map(Arc::clone)
-            .ok_or(ContextError::OutsideInvocationScope)
+        }
     }
 
     /// The scope this context waits for while it has not opened.
@@ -210,6 +213,66 @@ impl ContextRuntime for ScopeContainer {
     fn root(&self) -> Option<Arc<ScopeContainer>> {
         self.root_handle()
     }
+}
+
+/// What the calling task or thread runs inside of, as [`with_context_state`] reads it.
+#[doc(hidden)]
+pub enum ContextState<'a> {
+    /// No invocation context was ever entered on this task or thread.
+    Absent,
+    /// Work captured outside every invocation masks the context it runs in.
+    Masked,
+    /// An invocation context is entered: its open scope instances, innermost first.
+    Entered(ScopeChain<'a>),
+}
+
+/// Open scope instances from one instance up to the root, innermost first.
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct ScopeChain<'a> {
+    next: Option<&'a Arc<ScopeContainer>>,
+}
+
+impl<'a> ScopeChain<'a> {
+    /// `container` and every instance it opened under.
+    pub fn starting_at(container: &'a Arc<ScopeContainer>) -> Self {
+        Self {
+            next: Some(container),
+        }
+    }
+
+    /// The innermost instance, when there is one.
+    pub fn innermost(&self) -> Option<&'a Arc<ScopeContainer>> {
+        self.next
+    }
+}
+
+impl<'a> Iterator for ScopeChain<'a> {
+    type Item = &'a Arc<ScopeContainer>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.next?;
+
+        self.next = current.parent();
+
+        Some(current)
+    }
+}
+
+/// Runs `read` over what the calling task or thread runs inside of, borrowing the context
+/// instead of cloning it. `read` must not enter or mask a context itself.
+#[doc(hidden)]
+pub fn with_context_state<R>(read: impl FnOnce(ContextState<'_>) -> R) -> R {
+    if CONTEXT.try_with(|_| ()).is_err() {
+        return read(ContextState::Absent);
+    }
+
+    CONTEXT.with(|context| match context {
+        None => read(ContextState::Masked),
+        Some(context) => read(ContextState::Entered(ScopeChain {
+            next: context.innermost(),
+        })),
+    })
 }
 
 /// Binds `container`, just opened, into the running context when that context waits for an
