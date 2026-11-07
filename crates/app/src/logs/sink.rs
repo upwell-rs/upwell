@@ -55,11 +55,12 @@ impl ScopeLogSink {
         let mut subscribers = self.subscribers.lock().expect("sink lock not poisoned");
 
         if let Some(open) = subscribers.as_mut() {
+            open.retain(|subscriber| !subscriber.sender.is_closed());
             open.push(Subscriber {
                 sender,
                 lag: Arc::clone(&lag),
             });
-            self.watchers.fetch_add(1, Ordering::Release);
+            self.watchers.store(open.len(), Ordering::Release);
         }
 
         ScopeLogStream::new(receiver, lag)
@@ -82,6 +83,12 @@ impl ScopeLogSink {
 
         drop(closed);
         self.watchers.store(0, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    /// How many subscribers the sink still holds, closed ones included until it next prunes.
+    pub(super) fn watching(&self) -> usize {
+        self.watchers.load(Ordering::Acquire)
     }
 
     pub(super) fn attach(&self) {

@@ -138,3 +138,33 @@ impl futures::task::ArcWake for WakeFlag {
         arc_self.0.store(true, std::sync::atomic::Ordering::Release);
     }
 }
+
+#[tokio::test]
+async fn subscription_churn_without_events_does_not_accumulate_subscribers() {
+    let _guard = install();
+    let logs = InstanceLogs::open(&customer(1), &options(), None);
+    let sink = logs.sink().expect("the instance captures");
+
+    for _ in 0..1000 {
+        drop(sink.subscribe());
+    }
+
+    assert!(sink.watching() <= 1);
+}
+
+#[tokio::test]
+async fn subscription_churn_is_pruned_even_when_the_capture_level_rejects_events() {
+    let _guard = install();
+    let off = LogOptions {
+        level: Some(LevelFilter::OFF),
+        ..options()
+    };
+    let logs = InstanceLogs::open(&customer(1), &off, None);
+    let sink = logs.sink().expect("the instance captures");
+
+    for _ in 0..100 {
+        drop(sink.subscribe());
+    }
+
+    assert!(sink.watching() <= 1);
+}
