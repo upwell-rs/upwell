@@ -411,6 +411,7 @@ impl TestEnvironment {
         for (name, value) in values {
             // SAFETY: these current-thread tests hold WORKSPACE_CWD for the guard's full lifetime,
             // serializing every environment mutation and generated bootstrap read in this module.
+            #[allow(unsafe_code)]
             unsafe {
                 match value {
                     Some(value) => std::env::set_var(name, value),
@@ -427,6 +428,7 @@ impl Drop for TestEnvironment {
     fn drop(&mut self) {
         for (name, value) in &self.original {
             // SAFETY: the guard still holds WORKSPACE_CWD while restoring the process environment.
+            #[allow(unsafe_code)]
             unsafe {
                 match value {
                     Some(value) => std::env::set_var(name, value),

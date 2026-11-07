@@ -14,26 +14,33 @@ thread_local! {
 
 static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
 
+// SAFETY: every method forwards its arguments unchanged to `System`, so the contract the caller
+// upholds is the one `System` requires. Counting only touches atomics and a thread-local.
+#[allow(unsafe_code)]
 unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         count_allocation();
 
+        // SAFETY: the caller's arguments, forwarded unchanged.
         unsafe { System.alloc(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // SAFETY: the caller's arguments, forwarded unchanged.
         unsafe { System.dealloc(ptr, layout) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         count_allocation();
 
+        // SAFETY: the caller's arguments, forwarded unchanged.
         unsafe { System.alloc_zeroed(layout) }
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         count_allocation();
 
+        // SAFETY: the caller's arguments, forwarded unchanged.
         unsafe { System.realloc(ptr, layout, new_size) }
     }
 }

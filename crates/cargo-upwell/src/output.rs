@@ -162,6 +162,7 @@ fn replace_file_windows(temporary: &Path, destination: &Path) -> io::Result<()> 
         .collect::<Vec<_>>();
 
     // SAFETY: Both paths are valid null-terminated UTF-16 buffers for the duration of the call.
+    #[allow(unsafe_code)]
     let replaced = unsafe {
         windows_sys::Win32::Storage::FileSystem::ReplaceFileW(
             destination.as_ptr(),

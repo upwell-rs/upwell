@@ -42,6 +42,7 @@ struct TrackingAllocator;
 
 // SAFETY: every method forwards its arguments unchanged to `System`, so the contract the caller
 // upholds is the one `System` requires. Recording only updates thread-local counters.
+#[allow(unsafe_code)]
 unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         record_allocation(1, layout.size(), layout.size() as i64);

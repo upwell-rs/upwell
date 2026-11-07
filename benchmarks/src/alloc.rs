@@ -28,8 +28,12 @@ static LIVE_BYTES: AtomicI64 = AtomicI64::new(0);
 /// live bytes. Zero-sized: install one `static` of it as the global allocator.
 pub struct TrackingAllocator;
 
+// SAFETY: every method forwards its arguments unchanged to `System`, so the contract the caller
+// upholds is the one `System` requires. Recording only updates atomic counters.
+#[allow(unsafe_code)]
 unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: the caller's arguments, forwarded unchanged.
         let ptr = unsafe { System.alloc(layout) };
 
         if !ptr.is_null() {
@@ -42,10 +46,12 @@ unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         LIVE_BYTES.fetch_sub(layout.size() as i64, Ordering::Relaxed);
 
+        // SAFETY: the caller's arguments, forwarded unchanged.
         unsafe { System.dealloc(ptr, layout) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: the caller's arguments, forwarded unchanged.
         let ptr = unsafe { System.alloc_zeroed(layout) };
 
         if !ptr.is_null() {
@@ -56,6 +62,7 @@ unsafe impl GlobalAlloc for TrackingAllocator {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // SAFETY: the caller's arguments, forwarded unchanged.
         let new_ptr = unsafe { System.realloc(ptr, layout, new_size) };
 
         // A successful realloc hands out a fresh `new_size`-byte buffer, so it is `new_size` bytes of

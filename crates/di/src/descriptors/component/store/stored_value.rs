@@ -34,10 +34,12 @@ struct InlineValue {
 }
 
 // SAFETY: [`StoredValue::new`], the only constructor, requires the value's type to be `Send`.
+#[allow(unsafe_code)]
 unsafe impl Send for InlineValue {}
 
 // SAFETY: [`StoredValue::new`], the only constructor, requires the value's type to be `Sync`,
 // and an `InlineValue` hands out only `&S` through a shared reference.
+#[allow(unsafe_code)]
 unsafe impl Sync for InlineValue {}
 
 /// What an [`InlineValue`] needs to know about the type it erases.
@@ -97,7 +99,10 @@ impl InlineValue {
         // SAFETY: the caller checked `S` fits in `InlineBytes` by size and alignment, and
         // `bytes` is valid for writes. `MaybeUninit` keeps every byte of the value, provenance
         // included, whenever this struct moves.
-        unsafe { bytes.as_mut_ptr().cast::<S>().write(value) };
+        #[allow(unsafe_code)]
+        unsafe {
+            bytes.as_mut_ptr().cast::<S>().write(value)
+        };
 
         Self {
             bytes: UnsafeCell::new(bytes),
@@ -110,12 +115,14 @@ impl InlineValue {
         }
     }
 
+    #[allow(unsafe_code)]
     fn downcast_ref<S: Any>(&self) -> Option<&S> {
         // SAFETY: equal type ids mean `new` wrote an `S` into `bytes`, and it stays initialized
         // until this value is dropped or taken, both of which consume it.
         (self.ops.type_id == TypeId::of::<S>()).then(|| unsafe { &*self.bytes.get().cast::<S>() })
     }
 
+    #[allow(unsafe_code)]
     fn take<S: Any>(self) -> Result<S, Self> {
         if self.ops.type_id != TypeId::of::<S>() {
             return Err(self);
@@ -133,7 +140,10 @@ impl Drop for InlineValue {
     fn drop(&mut self) {
         // SAFETY: `ops` was made for the type `new` wrote into `bytes`, which is initialized
         // and is dropped only here.
-        unsafe { (self.ops.drop)(self.bytes.get_mut()) };
+        #[allow(unsafe_code)]
+        unsafe {
+            (self.ops.drop)(self.bytes.get_mut())
+        };
     }
 }
 
@@ -143,6 +153,7 @@ impl Drop for InlineValue {
 ///
 /// `bytes` must point to a live `S` written by [`InlineValue::new`], which must not be used
 /// again.
+#[allow(unsafe_code)]
 unsafe fn drop_inline<S>(bytes: *mut InlineBytes) {
     // SAFETY: the caller upholds that `bytes` holds a live `S` that nothing reads again.
     unsafe { bytes.cast::<S>().drop_in_place() };

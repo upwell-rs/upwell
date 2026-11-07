@@ -37,6 +37,7 @@ fn component_file_limit_is_enforced_before_wasmtime_compilation() {
 
 #[cfg(unix)]
 #[test]
+#[allow(unsafe_code)]
 fn component_loader_rejects_fifo_without_waiting_for_a_writer() {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt as _;

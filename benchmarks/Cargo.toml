@@ -99,3 +99,9 @@ harness = false
 [[bench]]
 name = "http_upwell"
 harness = false
+
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
