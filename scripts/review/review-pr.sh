@@ -108,6 +108,7 @@ mise exec -- git -C "$worktree" diff "$merge_base...$head_sha" > "$diff_file"
 
 rm -f "$out"
 
+agy_settings='{"permissions":{"allow":["mcp(blast-radius/open_project)","mcp(blast-radius/find_symbol)","mcp(blast-radius/symbol_info)","mcp(blast-radius/blast_radius)","mcp(blast-radius/diff_blast)","mcp(blast-radius/call_slice)","mcp(blast-radius/module_graph)","mcp(blast-radius/dead_code)","mcp(codegraph/codegraph_explore)"]}}'
 filter=(python3 -I "$here/stream_drafts.py" "$provider" "$log" "$drafts" "$mirror" "$out")
 
 set +e
@@ -121,7 +122,7 @@ case "$provider" in
     gemini)
         (
             cd "$worktree"
-            agy --model "$model" --mode plan --sandbox --output-format stream-json \
+            agy --model "$model" --mode plan --sandbox --output-format stream-json --settings "$agy_settings" \
                 --json-schema "$here/review-schema.json" --add-dir "$worktree" --add-dir "$work" \
                 -p "$(cat "$prompt")" 2>&1
         ) | "${filter[@]}"
@@ -138,7 +139,7 @@ report_drafts() {
 }
 
 if [ "${statuses[0]}" -ne 0 ] || [ "${statuses[1]}" -ne 0 ]; then
-    echo "the $provider run failed (provider exit ${statuses[0]}, filter exit ${statuses[1]}); not posting (see $log)" >&2
+    echo "the $provider run failed (provider exit ${statuses[0]}, filter exit ${statuses[1]}); not posting (see $log; the full agy answer text, if any, is in $work/response.md)" >&2
     report_drafts
     exit 10
 fi

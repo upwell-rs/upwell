@@ -6,6 +6,8 @@ reassembled into lines and the final structured answer is written to <review.jso
 """
 
 import json
+import os
+import re
 import sys
 
 MARKER = "UPWELL_FINDING_DRAFT"
@@ -51,6 +53,24 @@ def run_codex(sink):
         sink.scan(line)
 
 
+def fallback_answer(response):
+    """Returns the last fenced json block, else the last top-level JSON object, of an agy response."""
+    for block in reversed(re.findall(r"```(?:json)?[ \t]*\n(.*?)```", response, re.DOTALL)):
+        try:
+            return json.loads(block)
+        except ValueError:
+            continue
+    decoder = json.JSONDecoder()
+    found = None
+    for match in re.finditer(r"^\{", response, re.MULTILINE):
+        try:
+            value, _ = decoder.raw_decode(response[match.start():])
+        except ValueError:
+            continue
+        found = value
+    return found
+
+
 def run_gemini(sink, review_path):
     buffers = {}
     final = None
@@ -77,10 +97,20 @@ def run_gemini(sink, review_path):
         sink.scan(text)
     if final is None:
         sys.exit("agy ended without a result event")
-    if final.get("status") != "SUCCESS" or "structured_output" not in final:
-        sys.exit(f"agy result without a structured answer (status {final.get('status')})")
+    response = final.get("response") or ""
+    response_path = os.path.join(os.path.dirname(review_path), "response.md")
+    with open(response_path, "w", encoding="utf-8") as handle:
+        handle.write(response)
+    if final.get("status") != "SUCCESS":
+        sys.exit(f"agy result was not successful (status {final.get('status')}); full response saved in {response_path}")
+    answer = final.get("structured_output")
+    if answer is None:
+        answer = fallback_answer(response)
+        if answer is None:
+            sys.exit(f"agy result without a structured answer; full response saved in {response_path}")
+        sys.stderr.write(f"agy gave no structured_output; using the last JSON block of {response_path}\n")
     with open(review_path, "w", encoding="utf-8") as handle:
-        json.dump(final["structured_output"], handle)
+        json.dump(answer, handle)
 
 
 def main():
