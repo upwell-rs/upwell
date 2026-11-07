@@ -60,7 +60,9 @@ mod target;
 
 pub use access::{Current, Scoped, ScopedError, scope_is_active, scope_value};
 pub use error::ContextError;
-pub use invocation_context::{Entered, InvocationContext, bind_opened_scope};
+pub use invocation_context::{
+    ContextState, Entered, InvocationContext, ScopeChain, bind_opened_scope, with_context_state,
+};
 #[cfg(feature = "rayon")]
 pub use propagate::rayon;
 pub use propagate::{CapturedContext, thread, tokio};

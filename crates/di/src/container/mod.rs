@@ -148,7 +148,9 @@ impl ScopeContainer {
     /// Retains `guard` until this container is dropped, then drops it after the
     /// container's own instances, so its `Drop` observes the scope's final release.
     ///
-    /// A container retains at most one guard; a second one is handed back unchanged.
+    /// A container retains at most one guard; a second one is handed back unchanged. The slot
+    /// belongs to whoever owns the container's lifetime: the runtime's generation for a root,
+    /// the code that opened it for a scope instance.
     #[doc(hidden)]
     pub fn retain_drop_guard<T: Any + Send + Sync>(&self, guard: T) -> Result<(), T> {
         self.drop_guard.set(Box::new(guard)).map_err(|rejected| {
@@ -156,6 +158,13 @@ impl ScopeContainer {
                 .downcast::<T>()
                 .expect("a rejected drop guard is the guard just offered")
         })
+    }
+
+    /// The guard [`retain_drop_guard`](Self::retain_drop_guard) retained, when it is a `T`.
+    /// Framework-internal: only the owner of the slot reads it back.
+    #[doc(hidden)]
+    pub fn drop_guard<T: 'static>(&self) -> Option<&T> {
+        self.drop_guard.get()?.downcast_ref()
     }
 
     /// The instance this scope opened under, `None` for the root.

@@ -5,7 +5,9 @@ use std::task::{Context, Poll, Waker};
 use upwell_core::Scope;
 
 use super::fixtures::{Custom, Entry, Message, Request, chain, child, context, innermost, runtime};
-use super::{ContextError, InvocationContext, TargetRef, bind_opened_scope};
+use super::{
+    ContextError, ContextState, InvocationContext, TargetRef, bind_opened_scope, with_context_state,
+};
 use crate::test_support;
 
 #[tokio::test]
@@ -337,4 +339,42 @@ async fn establishing_binding_and_capturing_allocate_nothing() {
 
     assert!(matches!(poll, Poll::Ready(Ok(true))));
     assert_eq!(delta.allocations, 0, "a context lives inline in its future");
+}
+
+/// The open instances `with_context_state` reports, innermost first, or `None` when absent
+/// and an empty list when masked.
+fn state() -> Option<Option<Vec<Arc<crate::ScopeContainer>>>> {
+    with_context_state(|state| match state {
+        ContextState::Absent => None,
+        ContextState::Masked => Some(None),
+        ContextState::Entered(chain) => Some(Some(chain.map(Arc::clone).collect())),
+    })
+}
+
+#[tokio::test]
+async fn the_context_state_tells_absent_masked_and_entered_apart() {
+    let chain = chain().await;
+    let entered = context(&chain, &Entry::Http).with_scope(Arc::clone(&chain.request));
+
+    assert!(state().is_none(), "no context was entered");
+
+    let (inside, masked) = entered
+        .enter(async {
+            let inside = state();
+            let masked = InvocationContext::enter_or_mask(None, async { state() }).await;
+
+            (inside, masked)
+        })
+        .await;
+    let inside = inside
+        .flatten()
+        .expect("the entered context reports its chain");
+
+    assert!(
+        matches!(masked, Some(None)),
+        "a masked context reports no chain"
+    );
+    assert_eq!(inside.len(), 2, "the request and the root");
+    assert!(Arc::ptr_eq(&inside[0], &chain.request));
+    assert!(Arc::ptr_eq(&inside[1], &chain.root));
 }
