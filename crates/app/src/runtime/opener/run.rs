@@ -1,9 +1,11 @@
 //! Running planned work in a fresh scope instance: [`ScopeBuilder::run`].
 
 use std::any::TypeId;
-use std::future::{Future, IntoFuture};
+use std::future::Future;
 use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
+use std::task::{Context, Poll, ready};
 
 use futures::future::BoxFuture;
 use upwell_core::{DependencyDescriptor, Scope};
@@ -52,12 +54,14 @@ mod sealed {
 /// Before that, [`logs`](Self::logs) subscribes to the instance's log, so a stream taken
 /// ahead of the run sees every record.
 #[must_use = "a scope run does nothing until it is awaited"]
-pub struct ScopeRun<'a, S: Scope, P: Scope, W, Targets> {
-    builder: ScopeBuilder<'a, S, P>,
-    work: W,
+pub struct ScopeRun<'a, S: Scope, P: Scope, W: ScopeWork<Targets>, Targets> {
+    ready: Option<(ScopeBuilder<'a, S, P>, W)>,
+    running: Option<BoxFuture<'a, crate::Result<W::Output>>>,
     sink: OnceLock<Arc<ScopeLogSink>>,
     targets: PhantomData<fn() -> Targets>,
 }
+
+impl<S: Scope, P: Scope, W: ScopeWork<Targets>, Targets> Unpin for ScopeRun<'_, S, P, W, Targets> {}
 
 impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
     /// Prepares `work` to run in a fresh instance: awaiting the result opens the instance, runs
@@ -87,26 +91,33 @@ impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
         W: ScopeWork<Targets>,
     {
         ScopeRun {
-            builder: self,
-            work,
+            ready: Some((self, work)),
+            running: None,
             sink: OnceLock::new(),
             targets: PhantomData,
         }
     }
 }
 
-impl<S: Scope, P: Scope, W, Targets> ScopeRun<'_, S, P, W, Targets> {
-    /// A stream of the instance's log, from the first record: the instance has not started.
-    /// It ends when the instance closes, so collecting it yields the whole log. Needs a
+impl<S: Scope, P: Scope, W: ScopeWork<Targets>, Targets> ScopeRun<'_, S, P, W, Targets> {
+    /// A stream of the instance's log, from the first record when taken before the run is
+    /// polled. It ends when the instance closes, so collecting it yields the whole log. Needs a
     /// [`ScopeLogLayer`](crate::logs::ScopeLogLayer) in the subscriber.
     pub fn logs(&self) -> ScopeLogStream {
+        let Some((builder, _)) = &self.ready else {
+            return self
+                .sink
+                .get()
+                .map_or_else(ScopeLogStream::ended, |sink| sink.subscribe());
+        };
+
         self.sink
-            .get_or_init(|| logs::new_sink(&self.builder.params, &self.builder.logs))
+            .get_or_init(|| logs::new_sink(&builder.params, &builder.logs))
             .subscribe()
     }
 }
 
-impl<'a, S, P, W, Targets> IntoFuture for ScopeRun<'a, S, P, W, Targets>
+impl<'a, S, P, W, Targets> Future for ScopeRun<'a, S, P, W, Targets>
 where
     S: OpensUnder<P>,
     P: Scope,
@@ -114,53 +125,62 @@ where
     Targets: 'a,
 {
     type Output = crate::Result<W::Output>;
-    type IntoFuture = BoxFuture<'a, Self::Output>;
 
-    fn into_future(self) -> Self::IntoFuture {
-        Box::pin(self.execute())
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+
+        if let Some((builder, work)) = this.ready.take() {
+            let sink = this.sink.get().map(Arc::clone);
+
+            this.running = Some(Box::pin(execute(builder, work, sink)));
+        }
+
+        let running = this
+            .running
+            .as_mut()
+            .expect("a scope run is polled after it completed");
+        let outcome = ready!(running.as_mut().poll(cx));
+
+        this.running = None;
+
+        Poll::Ready(outcome)
     }
 }
 
-impl<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets> ScopeRun<'_, S, P, W, Targets> {
-    async fn execute(self) -> crate::Result<W::Output> {
-        use tracing::Instrument;
+async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
+    builder: ScopeBuilder<'_, S, P>,
+    work: W,
+    sink: Option<Arc<ScopeLogSink>>,
+) -> crate::Result<W::Output> {
+    use tracing::Instrument;
 
-        let Self {
-            builder,
-            work,
-            sink,
-            ..
-        } = self;
-        let (view, parent) = builder.target()?;
-        let plan = run_plan::<S, W, Targets>(&view)?;
-        let context = builder
-            .opener
-            .context(scope_run_target!(S::ID));
-        let sink = sink.into_inner().or_else(|| {
-            builder
-                .logs
-                .capture
-                .then(|| logs::new_sink(&builder.params, &builder.logs))
-        });
-        let (seeds, instance_logs) = builder.into_parts(sink);
-        let instance = async {
-            let container = open_planned_in(&view, S::ID, parent, Some(&plan), seeds).await?;
+    let (view, parent) = builder.target()?;
+    let plan = run_plan::<S, W, Targets>(&view)?;
+    let context = builder.opener.context(scope_run_target!(S::ID));
+    let sink = sink.or_else(|| {
+        builder
+            .logs
+            .capture
+            .then(|| logs::new_sink(&builder.params, &builder.logs))
+    });
+    let (seeds, instance_logs) = builder.into_parts(sink);
+    let instance = async {
+        let container = open_planned_in(&view, S::ID, parent, Some(&plan), seeds).await?;
 
-            context
-                .with_scope(Arc::clone(&container))
-                .enter(work.call(&container))
-                .await
-        };
-        let outcome = logs::with_current_sink(
-            instance_logs.sink().map(Arc::clone),
-            instance.instrument(instance_logs.span().clone()),
-        )
-        .await;
+        context
+            .with_scope(Arc::clone(&container))
+            .enter(work.call(&container))
+            .await
+    };
+    let outcome = logs::with_current_sink(
+        instance_logs.sink().map(Arc::clone),
+        instance.instrument(instance_logs.span().clone()),
+    )
+    .await;
 
-        instance_logs.finish();
+    instance_logs.finish();
 
-        outcome
-    }
+    outcome
 }
 
 /// The plan `view` keeps for work `W` into scope `S`, made on the first run.
