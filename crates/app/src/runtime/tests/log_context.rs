@@ -298,3 +298,23 @@ async fn a_span_entered_by_hand_in_an_unrelated_invocation_logs_to_the_invocatio
     assert_eq!(messages(run_stream).await, ["entered by hand"]);
     assert!(messages(unrelated_stream).await.is_empty());
 }
+
+#[tokio::test]
+async fn an_open_instance_inside_a_scopeless_hook_context_captures_by_its_span() {
+    let _guard = install();
+    let (runtime, _registry) = build_runtime(HashMap::new()).await;
+    let hook = sessions(&runtime).context(crate::runtime::hook_target!("startup"));
+
+    let stream = hook
+        .enter(async {
+            let session = capturing_session(&runtime).await;
+            let stream = session.logs();
+
+            session.span().in_scope(|| tracing::info!("in the hook"));
+
+            stream
+        })
+        .await;
+
+    assert_eq!(messages(stream).await, ["in the hook"]);
+}

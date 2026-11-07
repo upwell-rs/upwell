@@ -6,6 +6,8 @@
 //! - with no context on the task or thread at all, the span decides, as for code that never
 //!   runs inside the framework's propagation;
 //! - with a masked context, for work captured outside every invocation, no sink applies;
+//! - with an entered context that runs in no scope instance, such as a job's or a lifecycle
+//!   hook's, the span decides, since there is no chain to check it against;
 //! - with an entered context, the span's sink applies when its instance is on the context's
 //!   scope chain or opens under the context's innermost instance, as an instance does while
 //!   it opens. Otherwise the innermost capturing instance on the context's chain applies.
@@ -32,6 +34,7 @@ pub(super) fn route(span_sink: Option<Arc<ScopeLogSink>>) -> Option<Arc<ScopeLog
     let routed = with_context_state(|state| match state {
         ContextState::Absent => span_sink,
         ContextState::Masked => None,
+        ContextState::Entered(chain) if chain.innermost().is_none() => span_sink,
         ContextState::Entered(chain) => entered(span_sink, parent.as_ref(), chain),
     });
 

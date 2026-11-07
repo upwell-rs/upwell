@@ -119,8 +119,9 @@ impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
     /// the work there, returns its output and closes the instance once the work finishes
     /// (anything the work still shares keeps it alive).
     ///
-    /// The work, its targets' resolution included, runs in an invocation context of its own
-    /// whose innermost scope is the instance, and inside the instance's `upwell.scope` span.
+    /// The instance opens, and the work runs, its targets' resolution included, in an invocation
+    /// context of its own: under the instance's parent while it opens, then with the instance
+    /// as its innermost scope, and inside the instance's `upwell.scope` span.
     /// Work it carries into other tasks, threads or pools with Upwell's propagation primitives
     /// keeps logging to the instance, and sees it through [`ScopeLogs`](crate::logs::ScopeLogs).
     ///
@@ -199,17 +200,24 @@ async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
     }
 
     let (seeds, instance_logs) = builder.into_parts(&parent, sink);
+    let context = context.with_pending_scope(S::KEY, Some(Arc::clone(&parent)));
     let instance = async {
         let container = open_planned_in(&view, S::ID, parent, Some(&plan), seeds).await?;
 
         logs::retain_sink(&container, instance_logs.sink());
 
-        context
-            .with_scope(Arc::clone(&container))
-            .enter(work.call(&container))
-            .await
+        let bound = upwell_di::context::bind_opened_scope(&container);
+
+        // Checked only in debug builds: the context was made just above waiting for exactly
+        // this scope under this parent, so the bind cannot miss.
+        debug_assert!(bound, "a run's context waits for the instance it opens");
+
+        work.call(&container).await
     };
-    let outcome = instance.instrument(instance_logs.span().clone()).await;
+    let outcome = context
+        .enter(instance)
+        .instrument(instance_logs.span().clone())
+        .await;
 
     instance_logs.finish();
 
