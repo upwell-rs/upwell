@@ -200,6 +200,39 @@ impl<S: Scope> ScopeOpener<S> {
         })
     }
 
+    /// Whether an opening of the scope on the current generation must open it at once: it
+    /// builds an eager component, or an invocation-context accessor reads one of its slots.
+    /// False once an injected opener outlives its runtime.
+    pub fn opens_at_once(&self) -> bool {
+        self.runtime.get::<S>().is_ok_and(|runtime| {
+            runtime
+                .view()
+                .scope_plan()
+                .layouts
+                .get(&S::ID)
+                .is_some_and(|layout| {
+                    layout.eager_components().next().is_some() || layout.is_accessed()
+                })
+        })
+    }
+
+    /// Whether some generation may make an opening of the scope open at once: the scope
+    /// builds eagerly, or a component the application registers, enabled or not, declares an
+    /// invocation-context edge. A protocol installs its at-once opening only then, and checks
+    /// [`opens_at_once`](Self::opens_at_once) per opening.
+    pub fn may_open_at_once(&self) -> bool {
+        self.builds_eagerly()
+            || self.runtime.get::<S>().is_ok_and(|runtime| {
+                runtime
+                    .view()
+                    .condition()
+                    .catalog()
+                    .components
+                    .iter()
+                    .any(declares_accessor)
+            })
+    }
+
     /// A context for `target` on this opener's runtime, with no scope instance yet. An
     /// opener a serve loop prepared shares its runtime handle, so this allocates nothing; an
     /// injected one allocates a weak handle. Until a scope instance joins it, it resolves the
@@ -299,4 +332,13 @@ impl<S: Scope> Clone for OpenScope<S> {
             scope: PhantomData,
         }
     }
+}
+
+/// Whether a factory of `component` declares an invocation-context edge.
+fn declares_accessor(component: &upwell_di::ComponentDescriptor) -> bool {
+    (component.factories)().iter().any(|factory| {
+        (factory.dependencies)()
+            .iter()
+            .any(|dependency| dependency.resolution == upwell_core::ResolutionMode::Current)
+    })
 }

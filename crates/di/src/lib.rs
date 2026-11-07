@@ -41,6 +41,7 @@ pub use construct::{
 pub use container::{
     ComponentContainer, ComponentSource, ScopeContainer, ScopeRegistry, topological_sort,
 };
+pub use context::{Current, Scoped, ScopedError};
 pub use descriptors::component::from_boxed;
 pub use descriptors::{
     BoxedComponent, COMPONENTS, Cardinality, Component, ComponentConstructionContext,

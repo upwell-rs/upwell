@@ -8,6 +8,7 @@
 
 extern crate upwell as fork;
 
+mod access;
 mod declaration;
 mod isolation;
 #[cfg(feature = "tracing-subscriber")]

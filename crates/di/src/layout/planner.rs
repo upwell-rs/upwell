@@ -62,6 +62,7 @@ impl SlotLayout {
 
         layout.selected = selected;
         layout.eager = layout.eager_closure(selection, &can_reach);
+        layout.accessed = layout.accessed_closure(selection, &can_reach);
         layout.read = layout.slots_factories_read();
 
         Ok(layout)
@@ -73,7 +74,7 @@ impl SlotLayout {
 
         for dependency in self.slots.iter().flat_map(|spec| spec.dependencies.iter()) {
             match &dependency.source {
-                DepRef::Unplanned => {
+                DepRef::Unplanned | DepRef::Contextual => {
                     self.for_each_target_slot(dependency.target, |slot| {
                         read[slot.index()] = true;
                     });
@@ -142,11 +143,13 @@ impl SlotLayout {
         let constructs = slots.iter().any(|spec| spec.factory.is_some());
         let eager = vec![false; slots.len()].into_boxed_slice();
         let read = eager.clone();
+        let accessed = eager.clone();
 
         Ok(Self {
             scope,
             slots: slots.into_boxed_slice(),
             eager,
+            accessed,
             read,
             by_type,
             by_trait,
@@ -173,7 +176,8 @@ fn mark_local_sources(source: &DepRef, read: &mut [bool]) {
         | DepRef::Ancestor { .. }
         | DepRef::Transient(_)
         | DepRef::Absent
-        | DepRef::Unplanned => {}
+        | DepRef::Unplanned
+        | DepRef::Contextual => {}
     }
 }
 
@@ -236,6 +240,8 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
 
             let source = if is_planned(&dependency) {
                 self.source(consumer, &dependency, visiting)?
+            } else if dependency.resolution == ResolutionMode::Current {
+                DepRef::Contextual
             } else {
                 DepRef::Unplanned
             };

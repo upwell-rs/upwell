@@ -23,6 +23,7 @@ pub enum Cardinality {
 }
 
 /// When a dependency is resolved relative to component construction.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ResolutionMode {
     /// Resolve during ordinary component construction and impose build ordering.
@@ -34,6 +35,9 @@ pub enum ResolutionMode {
     Lazy,
     /// Re-run the target component factory without using its declared-scope cache.
     Fresh,
+    /// Resolve from the active invocation's scope chain on every access, never at
+    /// construction and never cached: `Current<T>` and `Scoped<S, T>`.
+    Current,
 }
 
 /// Whether a consumer keeps one resolved snapshot or follows a compatible live binding.
@@ -42,6 +46,19 @@ pub enum DependencyObservation {
     #[default]
     Snapshot,
     Live,
+}
+
+impl ResolutionMode {
+    /// The mode's stable lowercase name, as tooling reports it.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Eager => "eager",
+            Self::Deferred => "deferred",
+            Self::Lazy => "lazy",
+            Self::Fresh => "fresh",
+            Self::Current => "current",
+        }
+    }
 }
 
 impl Cardinality {

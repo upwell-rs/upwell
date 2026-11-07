@@ -35,3 +35,18 @@ fn invalid_scope_declarations_fail_to_compile() {
 
     cases.compile_fail("tests/ui/scopes/*.rs");
 }
+
+#[test]
+fn unsupported_attributes_on_context_accessors_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/access/*.rs");
+}
+
+#[cfg(feature = "rayon")]
+#[test]
+fn nested_parallel_adapters_after_current_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/rayon/*.rs");
+}

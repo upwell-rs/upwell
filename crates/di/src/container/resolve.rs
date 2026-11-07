@@ -134,6 +134,28 @@ impl ScopeContainer {
         self.extract_selected::<H>().await
     }
 
+    /// Whether a component or provider of `target` with `qualifier` is placed in a scope this
+    /// scope's chain reaches, built or not.
+    pub(crate) fn reaches_provider(&self, target: TypeId, qualifier: Option<&str>) -> bool {
+        let selection = &self.registry.selection;
+        let can_access = |_: ScopeKey, dependency: ScopeKey| self.can_access(dependency);
+        let placed = selection
+            .placements(target)
+            .iter()
+            .any(|placement| self.can_access(placement.scope));
+
+        placed
+            || selection
+                .select_runtime_one(
+                    target,
+                    qualifier,
+                    ResolutionMode::Eager,
+                    self.scope,
+                    &can_access,
+                )
+                .is_some()
+    }
+
     /// Extracts `H` through runtime provider selection and a construction context, building
     /// what it resolves to where its scope's opening left it out.
     pub(super) async fn extract_selected<H: crate::construct::FromContainer>(
@@ -174,7 +196,8 @@ impl ScopeContainer {
             | DepRef::Transient(_)
             | DepRef::Many(_)
             | DepRef::Absent
-            | DepRef::Unplanned => None,
+            | DepRef::Unplanned
+            | DepRef::Contextual => None,
         }
     }
 

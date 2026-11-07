@@ -23,6 +23,8 @@ use syn::{Field, Fields, ItemStruct, LitStr};
 
 use crate::paths::Paths;
 
+mod accessor;
+mod config;
 mod field;
 mod registrations;
 
@@ -43,7 +45,7 @@ pub fn field_injection_component(
     condition: &TokenStream,
     construction: &TokenStream,
     paths: &Paths,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
     let self_ident = item.ident.clone();
     let boxed_component = paths.core("BoxedComponent");
     let component_construction_context = paths.core("ComponentConstructionContext");
@@ -73,14 +75,15 @@ pub fn field_injection_component(
     let mut plan = |inits: &mut Vec<TokenStream>,
                     ready_inits: &mut Vec<TokenStream>,
                     prefix: TokenStream,
-                    field: &mut Field| {
+                    field: &mut Field|
+     -> syn::Result<()> {
         let FieldPlan {
             value,
             ready,
             dependency,
             check,
             wired,
-        } = plan_field(field, dep_descriptors.len(), paths);
+        } = plan_field(field, dep_descriptors.len(), paths)?;
 
         inits.push(quote!(#prefix #value));
 
@@ -100,13 +103,15 @@ pub fn field_injection_component(
         if let Some(wired) = wired {
             wired_targets.push(wired);
         }
+
+        Ok(())
     };
 
     let (construct, construct_ready) = match &mut item.fields {
         Fields::Named(named) => {
             for field in &mut named.named {
                 let field_ident = field.ident.clone().expect("named field");
-                plan(&mut inits, &mut ready_inits, quote!(#field_ident:), field);
+                plan(&mut inits, &mut ready_inits, quote!(#field_ident:), field)?;
             }
 
             (
@@ -117,7 +122,7 @@ pub fn field_injection_component(
 
         Fields::Unnamed(unnamed) => {
             for field in &mut unnamed.unnamed {
-                plan(&mut inits, &mut ready_inits, quote!(), field);
+                plan(&mut inits, &mut ready_inits, quote!(), field)?;
             }
 
             (
@@ -234,7 +239,7 @@ pub fn field_injection_component(
     let declared_ty = crate::source::declared_type(&self_ident, &self_ident, &name, paths);
     let scope_key = quote_spanned! {scope_path.span()=> <#scope_path as #scope_trait>::KEY };
 
-    quote! {
+    Ok(quote! {
         #default_factory
 
         const __UPWELL_COMPONENT_DESCRIPTOR: #component_descriptor =
@@ -259,7 +264,7 @@ pub fn field_injection_component(
         #[linkme(crate = #linkme_crate)]
         #[allow(unsafe_code)]
         static __UPWELL_COMPONENT: #component_descriptor = __UPWELL_COMPONENT_DESCRIPTOR;
-    }
+    })
 }
 
 /// A non-default `ComponentFactoryDescriptor` literal with id `id` that drives the async

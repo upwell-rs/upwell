@@ -5,14 +5,18 @@ use std::future::Future;
 use std::sync::{Arc, OnceLock};
 
 use tokio::task::futures::TaskLocalFuture;
-use upwell_core::{ScopeId, ScopeKey};
+use upwell_core::ScopeKey;
 
 use super::{ContextError, ContextRuntime, TargetRef};
 use crate::container::ScopeContainer;
 
 tokio::task_local! {
-    static CONTEXT: InvocationContext;
+    static CONTEXT: Option<InvocationContext>;
 }
+
+/// A future running inside an entered invocation context, or with every context masked.
+#[doc(hidden)]
+pub type Entered<F> = TaskLocalFuture<Option<InvocationContext>, F>;
 
 /// What one framework invocation runs inside of: its metadata, its runtime and its innermost
 /// open scope instance. See the [module documentation](super).
@@ -41,7 +45,7 @@ enum ActiveScope {
 /// A scope instance an [`InvocationContext`] expects to open later.
 #[derive(Clone)]
 struct PendingScope {
-    scope: ScopeId,
+    scope: ScopeKey,
     parent: Option<Arc<ScopeContainer>>,
     opened: OnceLock<Arc<ScopeContainer>>,
 }
@@ -72,7 +76,7 @@ impl InvocationContext {
     pub fn with_pending_scope(self, scope: ScopeKey, parent: Option<Arc<ScopeContainer>>) -> Self {
         Self {
             scope: ActiveScope::Pending(PendingScope {
-                scope: scope.id(),
+                scope,
                 parent,
                 opened: OnceLock::new(),
             }),
@@ -82,8 +86,8 @@ impl InvocationContext {
 
     /// Runs `future` inside this context, on top of any context the task already runs in.
     #[doc(hidden)]
-    pub fn enter<F: Future>(self, future: F) -> TaskLocalFuture<Self, F> {
-        CONTEXT.scope(self, future)
+    pub fn enter<F: Future>(self, future: F) -> Entered<F> {
+        CONTEXT.scope(Some(self), future)
     }
 
     /// Runs the synchronous `body` inside this context, on top of any context the thread
@@ -91,7 +95,19 @@ impl InvocationContext {
     /// thread.
     #[doc(hidden)]
     pub fn enter_sync<R>(self, body: impl FnOnce() -> R) -> R {
-        CONTEXT.sync_scope(self, body)
+        CONTEXT.sync_scope(Some(self), body)
+    }
+
+    /// Runs `future` inside `context`, or with any context the task runs in masked when it is
+    /// `None`, so work captured outside every invocation never sees one it happens to run in.
+    pub(crate) fn enter_or_mask<F: Future>(context: Option<Self>, future: F) -> Entered<F> {
+        CONTEXT.scope(context, future)
+    }
+
+    /// Runs `body` inside `context`, or with any context the thread runs in masked when it is
+    /// `None`, restoring the thread's context afterwards.
+    pub(crate) fn enter_sync_or_mask<R>(context: Option<Self>, body: impl FnOnce() -> R) -> R {
+        CONTEXT.sync_scope(context, body)
     }
 
     /// A copy of the active context, to [`enter`](Self::enter) on another task. It holds the
@@ -108,8 +124,10 @@ impl InvocationContext {
     /// Runs `read` over the active context.
     pub(crate) fn with_current<R>(read: impl FnOnce(&Self) -> R) -> Result<R, ContextError> {
         CONTEXT
-            .try_with(read)
-            .map_err(|_| ContextError::OutsideContext)
+            .try_with(|context| context.as_ref().map(read))
+            .ok()
+            .flatten()
+            .ok_or(ContextError::OutsideContext)
     }
 
     /// The innermost open scope instance: the whole chain up to the root.
@@ -123,6 +141,14 @@ impl InvocationContext {
         innermost
             .map(Arc::clone)
             .ok_or(ContextError::OutsideInvocationScope)
+    }
+
+    /// The scope this context waits for while it has not opened.
+    pub(crate) fn unopened_scope(&self) -> Option<ScopeKey> {
+        match &self.scope {
+            ActiveScope::Pending(pending) if pending.opened.get().is_none() => Some(pending.scope),
+            ActiveScope::None | ActiveScope::Open(_) | ActiveScope::Pending(_) => None,
+        }
     }
 
     /// The root this context resolves singletons from: the root of its scope chain, pinned
@@ -194,12 +220,14 @@ impl ContextRuntime for ScopeContainer {
 #[doc(hidden)]
 pub fn bind_opened_scope(container: &Arc<ScopeContainer>) -> bool {
     CONTEXT
-        .try_with(|context| match &context.scope {
-            ActiveScope::Pending(pending) if pending.expects(container) => {
-                pending.opened.set(Arc::clone(container)).is_ok()
-            }
-            _ => false,
-        })
+        .try_with(
+            |context| match context.as_ref().map(|context| &context.scope) {
+                Some(ActiveScope::Pending(pending)) if pending.expects(container) => {
+                    pending.opened.set(Arc::clone(container)).is_ok()
+                }
+                _ => false,
+            },
+        )
         .unwrap_or(false)
 }
 
@@ -211,6 +239,6 @@ impl PendingScope {
             (None, _) => true,
         };
 
-        self.scope == container.scope().id() && parent_matches
+        self.scope.id() == container.scope().id() && parent_matches
     }
 }

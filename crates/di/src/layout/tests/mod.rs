@@ -200,6 +200,7 @@ fn sources(layout: &SlotLayout, slot: usize) -> Vec<&DepRef> {
         .collect()
 }
 
+mod contextual;
 mod planning;
 mod positions;
 mod replan;

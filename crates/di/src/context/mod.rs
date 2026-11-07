@@ -41,16 +41,33 @@
 //! no allocation. The clone holds its scope instance strongly, so the instance lives until the
 //! clone is dropped. [`InvocationContext::enter`] runs a future inside it, on any task, and
 //! [`InvocationContext::enter_sync`] runs a closure inside it, on any thread.
+//!
+//! # Public access and propagation
+//!
+//! Users never resolve from the context directly. They declare [`Current<T>`] or
+//! [`Scoped<S, T>`] dependencies, which resolve from the active invocation on each call, and
+//! carry the context into spawned work with the [`tokio`], [`thread`] and (with the `rayon`
+//! feature) `rayon` modules, or with an explicit [`CapturedContext`] for any other executor.
+//! The one direct read is a `#[scope]` type's own value, through its generated
+//! `S::current()` and `S::is_active()` ([`scope_value`], [`scope_is_active`]).
 
+mod access;
 mod error;
 mod invocation_context;
+mod propagate;
 mod runtime;
 mod target;
 
+pub use access::{Current, Scoped, ScopedError, scope_is_active, scope_value};
 pub use error::ContextError;
-pub use invocation_context::{InvocationContext, bind_opened_scope};
+pub use invocation_context::{Entered, InvocationContext, bind_opened_scope};
+#[cfg(feature = "rayon")]
+pub use propagate::rayon;
+pub use propagate::{CapturedContext, thread, tokio};
 pub use runtime::ContextRuntime;
 pub use target::{InvocationTarget, TargetRef};
 
+#[cfg(test)]
+mod fixtures;
 #[cfg(test)]
 mod tests;

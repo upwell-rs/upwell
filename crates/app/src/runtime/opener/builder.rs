@@ -118,8 +118,9 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     }
 
     /// Opens the instance to run `entry` as [`open`](Self::open) does, or without an entry as
-    /// [`open_default`](Self::open_default) does, unless the entry's plan builds nothing (an
-    /// eager component of the scope makes every plan build it): then the container opens the
+    /// [`open_default`](Self::open_default) does, unless the entry's plan builds nothing and no
+    /// `Current`/`Scoped` accessor it reaches reads the scope (an eager component of the scope
+    /// makes every plan build it): then the container opens the
     /// first time something resolves from the returned scope, with this builder's seeds.
     /// Until then, reads that never build see only the scopes it opens under, not the seeds.
     ///
@@ -253,12 +254,13 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     }
 }
 
-/// Whether the plan `view` prepared for `entry` builds nothing.
+/// Whether the plan `view` prepared for `entry` builds nothing and no invocation-context
+/// accessor it reaches reads the scope, so its container may wait for a first resolution.
 fn plans_nothing<S: Scope>(view: &RuntimeView, entry: &ScopeEntry<S>) -> bool {
     view.scope_plan()
         .layouts
         .entry(entry.id)
-        .is_some_and(EntryPlan::is_empty)
+        .is_some_and(|plan| plan.is_empty() && !plan.is_accessed())
 }
 
 fn boxed_seed<T: Any + Send + Sync>(value: T) -> BoxedComponent {
