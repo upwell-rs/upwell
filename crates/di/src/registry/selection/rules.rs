@@ -154,6 +154,6 @@ pub(crate) fn direct_component_is_selectable(
                     .effective_factory()
                     .is_ok_and(|factory| factory.is_some())
         }
-        ResolutionMode::Eager | ResolutionMode::Lazy => true,
+        _ => true,
     }
 }

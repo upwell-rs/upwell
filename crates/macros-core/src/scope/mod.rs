@@ -8,6 +8,7 @@
 //! protocol's topology and its parameter slot to the registry, so the trait impls and the
 //! topology cannot drift apart. That generated surface is server-only and gated out on wasm.
 
+mod accessors;
 mod args;
 
 use std::mem;
@@ -64,6 +65,7 @@ pub fn expand(args: ScopeArgs, mut item: ItemStruct, paths: &Paths) -> syn::Resu
         .map(|parent| quote_spanned!(parent.span()=> #scope_parent::of::<#parent>()));
     let source = crate::source::item_source(ident.span(), &ident.unraw().to_string(), paths);
     let provided = provided(&item.fields, ident, paths);
+    let accessors = accessors::accessors(&item.fields, ident, paths);
 
     let server = crate::gate::native_only(quote! {
         impl #scope_trait for #ident {
@@ -102,6 +104,8 @@ pub fn expand(args: ScopeArgs, mut item: ItemStruct, paths: &Paths) -> syn::Resu
         };
 
         #provided
+
+        #accessors
     });
 
     Ok(quote! {

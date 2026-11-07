@@ -29,6 +29,9 @@ pub mod scope {
     pub use upwell_rpc::scope::{Connection, Request}; // should not be here, should be in crate::daemon with the rest of the daemon related items
 }
 
+#[cfg(not(target_family = "wasm"))]
+pub mod context;
+
 /// Component condition descriptors, callback inputs, and [`resolve`](condition::resolve),
 /// the raw config read a condition callback may make.
 #[cfg(not(target_family = "wasm"))]

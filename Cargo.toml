@@ -96,6 +96,7 @@ fs2 = "0.4.3"
 globset = "0.4.19"
 notify = "6"
 thiserror = "2"
+rayon = "1.11"
 tempfile = "3"
 toml = "1.1"
 serde_yaml_ng = "0.10"
@@ -183,6 +184,10 @@ tooling = [
     "upwell-rpc?/tooling",
     "upwell-axum?/tooling",
 ]
+
+# Carry the invocation context into rayon pools (`upwell::context::rayon`). Off by default;
+# `upwell::context::CapturedContext::bind` works with any pool without it.
+rayon = ["upwell-di/rayon"]
 
 # Re-export the native RPC daemon through the facade for convenience. The protocol crate owns
 # its own macros; the facade just enables its `facade` feature (so its codegen roots at

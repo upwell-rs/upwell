@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, Scope, Singleton,
-    Transient,
+    Cardinality, DependencyDescriptor, DependencyObservation, Scope, Singleton, Transient,
 };
 use upwell_di::{DependencyTarget, ProviderDescriptor};
 use upwell_tooling_schema::{RelationshipKind, ResourceKind};
@@ -327,12 +326,7 @@ pub(super) fn dependency_labels(dependency: &DependencyDescriptor) -> BTreeMap<S
         Cardinality::Collection => "collection",
         Cardinality::Keyed => "keyed",
     };
-    let resolution = match dependency.resolution {
-        ResolutionMode::Eager => "eager",
-        ResolutionMode::Deferred => "deferred",
-        ResolutionMode::Lazy => "lazy",
-        ResolutionMode::Fresh => "fresh",
-    };
+    let resolution = dependency.resolution.as_str();
     let observation = match dependency.observation {
         DependencyObservation::Snapshot => "snapshot",
         DependencyObservation::Live => "live",
