@@ -11,8 +11,9 @@
 //! only what the route injects; anything else is built when something resolves it. Other
 //! requests build every slot of the scope.
 //!
-//! The exception is a scope with eager components, which must run for every routed request.
-//! [`open_eager_scope`] then opens the scope before global middleware runs, as RPC opens a
+//! The exception is a scope with eager components, which must run for every routed request,
+//! or one a `Current`/`Scoped` accessor reads, which must be open for any code of the request
+//! to read it. [`open_eager_scope`] then opens the scope before global middleware runs, as RPC opens a
 //! call's scope before its middleware: eager components run for a request middleware rejects
 //! too, and read the request head as the client sent it. A request no route matches still opens
 //! no scope on its own. The placement is the `router.layer` call for [`open_eager_scope`] in
@@ -298,13 +299,19 @@ fn capture_into(scope: &ScopeContainer, head: Head<'_>) -> Result<(), InjectReje
 /// the scope.
 ///
 /// The protocol installs it only when the application registers an eager request-scoped
-/// component, so other applications do not pay for the layer. It is applied after the global
+/// component or a component with a `Current`/`Scoped` accessor, so other applications do not
+/// pay for the layer, and it opens the scope only while the current generation builds an eager
+/// component or an accessor reads the scope. It is applied after the global
 /// middleware, so it runs before all of it, as RPC opens a call's scope before its middleware,
 /// and inside the request timeout, which covers eager construction.
 pub(crate) async fn open_eager_scope(mut request: Request, next: Next) -> Response {
     let routed = request.extensions().get::<MatchedPath>().is_some();
+    let at_once = REQUEST_SCOPES
+        .try_with(|scopes| scopes.opener.opens_at_once())
+        .unwrap_or(false);
 
     if routed
+        && at_once
         && opened(request.extensions()).is_none()
         && let Err(rejection) = open_request(&mut request, WithoutEntry::Eager).await
     {

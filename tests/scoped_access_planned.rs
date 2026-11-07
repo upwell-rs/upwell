@@ -74,19 +74,56 @@ async fn read_desk(
     request: RawRequest,
     next: Next,
 ) -> Response {
-    let user = desk
-        .identity
+    let user = user_of(&desk.identity).await;
+
+    report(next.run(request).await, &user)
+}
+
+/// An eager request-scoped desk reading the request's identity, which only middleware
+/// injects.
+#[component(scope = HttpRequest, eager)]
+struct EagerDesk {
+    identity: Current<Arc<Identity>>,
+}
+
+/// The user `identity` holds, or an empty string.
+async fn user_of(identity: &Current<Arc<Identity>>) -> String {
+    identity
         .get()
         .await
-        .expect("the middleware's desk reads the identity")
+        .expect("the middleware reads the identity")
         .user
         .clone()
-        .unwrap_or_default();
-    let mut response = next.run(request).await;
+        .unwrap_or_default()
+}
 
+/// Middleware injecting the already built singleton [`Desk`] and reporting the user it reads.
+async fn read_singleton_desk(
+    Inject(desk): Inject<Arc<Desk>>,
+    request: RawRequest,
+    next: Next,
+) -> Response {
+    let user = user_of(&desk.identity).await;
+
+    report(next.run(request).await, &user)
+}
+
+/// Middleware injecting the eager [`EagerDesk`] and reporting the user it reads.
+async fn read_eager_desk(
+    Inject(desk): Inject<Arc<EagerDesk>>,
+    request: RawRequest,
+    next: Next,
+) -> Response {
+    let user = user_of(&desk.identity).await;
+
+    report(next.run(request).await, &user)
+}
+
+/// `response` with `user` reported in [`SEEN`].
+fn report(mut response: Response, user: &str) -> Response {
     response.headers_mut().insert(
         SEEN,
-        HeaderValue::from_str(&user).expect("the user is a header value"),
+        HeaderValue::from_str(user).expect("the user is a header value"),
     );
 
     response
@@ -213,10 +250,10 @@ async fn a_target_that_fails_to_build_keeps_its_source_apart_from_an_absent_one(
     );
 }
 
-/// What middleware injecting [`RequestDesk`] reported for a request to a route that injects
-/// only [`Unrelated`].
+/// What the middleware `layer` reported for a request to a route that injects only
+/// [`Unrelated`].
 async fn seen_by_middleware(app: AppBuilder<Axum>) -> String {
-    let router = router(app.layer(from_fn(read_desk))).await;
+    let router = router(app).await;
     let request = RawRequest::builder()
         .uri("/desk/unrelated")
         .header(USER, "ada")
@@ -239,5 +276,66 @@ async fn seen_by_middleware(app: AppBuilder<Axum>) -> String {
 
 #[tokio::test]
 async fn middleware_injecting_an_accessor_owner_the_route_never_reaches_captures_the_head() {
-    assert_eq!(seen_by_middleware(app()).await, "ada");
+    let app = app().layer(from_fn(read_desk));
+
+    assert_eq!(seen_by_middleware(app).await, "ada");
+}
+
+#[tokio::test]
+async fn middleware_injecting_a_built_singleton_with_an_accessor_captures_the_head() {
+    let app = app().layer(from_fn(read_singleton_desk));
+
+    assert_eq!(seen_by_middleware(app).await, "ada");
+}
+
+#[tokio::test]
+async fn an_eager_accessor_owner_reads_a_declared_value_under_deny_unplanned() {
+    let app = app()
+        .component::<EagerDesk>()
+        .deny_unplanned()
+        .layer(from_fn(read_eager_desk));
+
+    assert_eq!(seen_by_middleware(app).await, "ada");
+}
+
+/// Whether an eager-only opening of the request scope of `app` binds the request head.
+async fn eager_opening_binds_the_head(app: AppBuilder<Axum>) -> bool {
+    let app = AppBuilder::build(app).await.expect("app builds");
+    let opened = app
+        .runtime()
+        .opener::<HttpRequest>()
+        .expect("the request scope is declared")
+        .builder(HttpRequest)
+        .open_with_bound_seed(upwell_app::Opening::OnDemand, || {
+            RequestMeta::from_parts(
+                upwell::axum::axum::http::Method::GET,
+                upwell::axum::axum::http::Uri::from_static("/"),
+                upwell::axum::axum::http::HeaderMap::new(),
+            )
+        })
+        .await
+        .expect("the request scope opens");
+
+    opened
+        .container()
+        .resolve::<RequestMeta>()
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+}
+
+#[tokio::test]
+async fn an_eager_only_opening_binds_the_seeds_an_accessor_reads_and_only_then() {
+    let accessed = app();
+    let plain = upwell::App::<Axum>::builder("test-scoped-access-plain").component::<Identity>();
+
+    assert!(
+        eager_opening_binds_the_head(accessed).await,
+        "the accessor's identity reads the head"
+    );
+    assert!(
+        !eager_opening_binds_the_head(plain).await,
+        "an application without accessors copies no head"
+    );
 }

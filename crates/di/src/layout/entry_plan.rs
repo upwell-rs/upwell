@@ -16,8 +16,8 @@ use crate::registry::scopes::scope_allows_with;
 ///
 /// Planned once per runtime generation from the entry's targets. A slot the plan leaves out
 /// is built on demand, when something resolves it from the open scope. The plan also holds the
-/// slots the entry declares: those it builds, those its lazy targets reach, and those the
-/// invocation-context accessors reachable from it read. Under
+/// slots the entry declares: those it builds, those its lazy targets reach, and the slots
+/// invocation-context accessors read in its scope (the layout's accessed set). Under
 /// [`UnplannedConstruction::Deny`] an on-demand build outside them is reported.
 ///
 /// Its parameters pre-resolve the targets it injects to the sources they read, so extracting
@@ -29,7 +29,6 @@ pub struct EntryPlan {
     builds: Box<[bool]>,
     declared: Arc<[bool]>,
     accessed: bool,
-    accessor_reads: Option<Arc<[TypeId]>>,
     unplanned: UnplannedConstruction,
     params: Box<[EntryParam]>,
     positions: Arc<SlotPositions>,
@@ -38,8 +37,8 @@ pub struct EntryPlan {
 /// Whether a scope opened for an entry may build, on demand, a slot the entry does not
 /// declare.
 ///
-/// An entry declares the slots its plan builds, those its lazy targets reach and those the
-/// invocation-context accessors reachable from it read. A scope
+/// An entry declares the slots its plan builds, those its lazy targets reach and the slots
+/// invocation-context accessors read in its scope. A scope
 /// opened without an entry builds on demand under either policy.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
@@ -60,8 +59,7 @@ impl EntryPlan {
             scope: layout.scope(),
             builds: layout.eager().into(),
             declared: layout.eager().into(),
-            accessed: false,
-            accessor_reads: None,
+            accessed: layout.is_accessed(),
             unplanned: UnplannedConstruction::Allow,
             params: Box::default(),
             positions: Arc::new(SlotPositions::of(layout, layout.eager())),
@@ -138,20 +136,8 @@ impl EntryPlan {
         !self.builds.contains(&true)
     }
 
-    /// The types the walk for invocation-context edges consulted, sorted.
-    pub(crate) fn accessor_reads(&self) -> &[TypeId] {
-        self.accessor_reads.as_deref().unwrap_or_default()
-    }
-
-    /// Whether planning walked for invocation-context edges, which it does only when some
-    /// component of the generation declares one. A plan made without the walk does not hold
-    /// for a generation that declares such an edge.
-    pub fn walked_accessors(&self) -> bool {
-        self.accessor_reads.is_some()
-    }
-
-    /// Whether an invocation-context accessor the entry reaches resolves from a slot of this
-    /// scope, so the scope must be open while the entry runs even when it builds nothing.
+    /// Whether an invocation-context accessor reads a slot of this scope, so the scope must be
+    /// open while the entry runs even when it builds nothing.
     pub fn is_accessed(&self) -> bool {
         self.accessed
     }
@@ -199,14 +185,12 @@ impl SlotLayout {
             can_access: &can_access,
         };
         let builds = self.built_up_front(&selector, targets);
-        let accessed = self.accessed(&selector, targets);
-        let declared = self.declared(&selector, targets, &builds, &accessed.slots);
+        let declared = self.declared(&selector, targets, &builds);
 
         EntryPlan {
             scope: self.scope,
             declared,
-            accessed: accessed.slots.contains(&true),
-            accessor_reads: accessed.reads,
+            accessed: self.is_accessed(),
             unplanned,
             params: self.plan_params(targets, selection),
             positions: Arc::new(SlotPositions::of(self, &builds)),
@@ -259,18 +243,17 @@ impl SlotLayout {
         eager
     }
 
-    /// The slots `builds` and `accessed` hold and those the lazy targets of `targets` resolve
-    /// to here, with their dependencies.
+    /// The slots `builds` and the layout's accessed set hold and those the lazy targets of
+    /// `targets` resolve to here, with their dependencies.
     fn declared(
         &self,
         selector: &EagerSelection<'_>,
         targets: &[DependencyDescriptor],
         builds: &[bool],
-        accessed: &[bool],
     ) -> Arc<[bool]> {
         let mut declares: Vec<bool> = builds
             .iter()
-            .zip(accessed)
+            .zip(self.accessed.iter())
             .map(|(builds, accessed)| *builds || *accessed)
             .collect();
 
