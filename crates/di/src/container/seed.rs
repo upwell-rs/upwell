@@ -82,7 +82,8 @@ impl ScopeContainer {
     }
 
     /// Whether resolving `dependency` from this scope reads its empty seed slot for `seed`:
-    /// the slot itself, or a slot it reaches over edges of any kind.
+    /// the slot itself, a slot it reaches over edges of any kind, or a slot an
+    /// invocation-context accessor reachable from it reads.
     fn reads_empty_seed(&self, seed: TypeId, dependency: &DependencyDescriptor) -> bool {
         if dependency.config {
             return false;
@@ -105,16 +106,6 @@ impl ScopeContainer {
             selection: &self.registry.selection,
             can_access: &can_access,
         };
-        let mut reached = vec![false; layout.len()];
-
-        layout.for_each_selected_slot(
-            &selector,
-            dependency.ty.type_id,
-            dependency.qualifier,
-            dependency.cardinality,
-            |target| layout.include(&selector, target, &mut reached),
-        );
-
-        reached[slot.index()]
+        layout.read_by(&selector, dependency)[slot.index()]
     }
 }
