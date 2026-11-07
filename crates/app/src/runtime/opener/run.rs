@@ -6,6 +6,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
+use pin_project_lite::pin_project;
 use upwell_core::{DependencyDescriptor, Scope, ScopeId};
 use upwell_di::{EntryPlan, FromContainer, ScopeContainer};
 
@@ -46,15 +47,18 @@ mod sealed {
     pub trait Sealed<Targets> {}
 }
 
-/// Work waiting to run in a fresh scope instance, made by [`ScopeBuilder::run`]. Awaiting it
-/// opens the instance, runs the work there and returns its output.
-///
-/// Before that, [`logs`](Self::logs) subscribes to the instance's log, so a stream taken
-/// ahead of the run sees every record.
-#[must_use = "a scope run does nothing until it is awaited"]
-pub struct ScopeRun<F> {
-    execution: F,
-    logs: Arc<RunLogs>,
+pin_project! {
+    /// Work waiting to run in a fresh scope instance, made by [`ScopeBuilder::run`]. Awaiting it
+    /// opens the instance, runs the work there and returns its output.
+    ///
+    /// Before that, [`logs`](Self::logs) subscribes to the instance's log, so a stream taken
+    /// ahead of the run sees every record.
+    #[must_use = "a scope run does nothing until it is awaited"]
+    pub struct ScopeRun<F> {
+        #[pin]
+        execution: F,
+        logs: Arc<RunLogs>,
+    }
 }
 
 /// The sink of one run, shared by its handle and its execution, so a stream taken from either
@@ -164,12 +168,7 @@ impl<F: Future> Future for ScopeRun<F> {
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // SAFETY: `execution` is never moved out of the pinned `ScopeRun`, which has no `Drop`
-        // impl and no other access to the field, so projecting the pin to it upholds the pinning
-        // guarantee.
-        let execution = unsafe { self.map_unchecked_mut(|run| &mut run.execution) };
-
-        execution.poll(cx)
+        self.project().execution.poll(cx)
     }
 }
 
