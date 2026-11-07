@@ -15,6 +15,7 @@ use super::*;
 
 mod routing;
 mod streaming;
+mod waking;
 
 const CUSTOMER_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/customer");
 
