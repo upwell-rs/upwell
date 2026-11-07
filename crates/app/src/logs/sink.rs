@@ -1,28 +1,37 @@
 //! The place one scope instance's captured events go.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use tokio::sync::{Semaphore, mpsc};
 use tracing::Event;
 use tracing::level_filters::LevelFilter;
 use upwell_core::ScopeId;
+use upwell_di::ScopeContainer;
 
 use super::stream::LagCounter;
 use super::{LogField, LogOptions, LogRecord, ScopeLogStream};
+
+/// How many sinks are open in the process, so an event costs one atomic read while none is.
+static OPEN_SINKS: AtomicUsize = AtomicUsize::new(0);
 
 /// The sink of one scope instance, shared by its span and its subscribers.
 ///
 /// Records start flowing on the first subscriber: until then an event costs a level check and
 /// one atomic read. Each subscriber has its own bounded buffer, and a full buffer drops the
 /// record and counts it, so the logging thread never waits.
+///
+/// The sink knows the instance it opens under, so the instance's events made while it opens,
+/// before its container joins any invocation context, still belong to it.
 pub struct ScopeLogSink {
     scope: ScopeId,
+    parent: OnceLock<Weak<ScopeContainer>>,
     params: OnceLock<Arc<[LogField]>>,
     level: Option<LevelFilter>,
     buffer: usize,
     watchers: AtomicUsize,
     attached: AtomicBool,
+    open: AtomicBool,
     subscribers: Mutex<Option<Vec<Subscriber>>>,
 }
 
@@ -36,13 +45,17 @@ impl ScopeLogSink {
     /// A sink for an instance of `scope` with the loggable `params`, capturing as `options`
     /// say.
     pub(super) fn new(scope: ScopeId, params: Arc<[LogField]>, options: &LogOptions) -> Self {
+        OPEN_SINKS.fetch_add(1, Ordering::AcqRel);
+
         Self {
             scope,
+            parent: OnceLock::new(),
             params: OnceLock::from(params),
             level: options.level,
             buffer: options.buffer.get().min(Semaphore::MAX_PERMITS),
             watchers: AtomicUsize::new(0),
             attached: AtomicBool::new(false),
+            open: AtomicBool::new(true),
             subscribers: Mutex::new(Some(Vec::new())),
         }
     }
@@ -96,8 +109,28 @@ impl ScopeLogSink {
             .expect("sink lock not poisoned")
             .take();
 
-        drop(closed);
         self.watchers.store(0, Ordering::Release);
+        drop(closed);
+
+        if self.open.swap(false, Ordering::AcqRel) {
+            OPEN_SINKS.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+
+    /// Whether the instance is still open, so the sink still captures.
+    pub(super) fn is_open(&self) -> bool {
+        self.open.load(Ordering::Acquire)
+    }
+
+    /// Records `parent` as the instance this sink's instance opens under, unless it is
+    /// recorded already.
+    pub(crate) fn open_under(&self, parent: &Arc<ScopeContainer>) {
+        self.parent.get_or_init(|| Arc::downgrade(parent));
+    }
+
+    /// The instance this sink's instance opens under, while it lives.
+    pub(super) fn parent(&self) -> Option<Arc<ScopeContainer>> {
+        self.parent.get().and_then(Weak::upgrade)
     }
 
     #[cfg(test)]
@@ -164,6 +197,19 @@ impl ScopeLogSink {
             self.watchers.store(subscribers.len(), Ordering::Release);
         }
     }
+}
+
+impl Drop for ScopeLogSink {
+    fn drop(&mut self) {
+        if *self.open.get_mut() {
+            OPEN_SINKS.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+}
+
+/// Whether any sink in the process is open.
+pub(super) fn any_open() -> bool {
+    OPEN_SINKS.load(Ordering::Acquire) > 0
 }
 
 impl Subscriber {

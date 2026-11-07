@@ -112,7 +112,8 @@ impl<S: Scope> EntryScope<S> {
 
     /// The instance's `upwell.scope` span, to instrument the work that runs in it. Events made
     /// inside it reach the instance's log only when it was opened with
-    /// [`capture_logs`](super::ScopeBuilder::capture_logs).
+    /// [`capture_logs`](super::ScopeBuilder::capture_logs), and, inside an invocation context,
+    /// when that context runs in the instance or the instance opened under it.
     pub fn span(&self) -> Span {
         self.span.clone()
     }
@@ -233,19 +234,17 @@ impl Deferred {
                     .take()
                     .ok_or(crate::Error::DeferredScopeFailed { scope: S::ID })?;
 
-                let container = crate::logs::with_current_sink(
-                    self.sink.clone(),
-                    open_in(
-                        self.view.clone(),
-                        S::ID,
-                        Arc::clone(&self.parent),
-                        Builds::Entry(self.entry),
-                        seeds,
-                    )
-                    .instrument(self.span.clone()),
+                let container = open_in(
+                    self.view.clone(),
+                    S::ID,
+                    Arc::clone(&self.parent),
+                    Builds::Entry(self.entry),
+                    seeds,
                 )
+                .instrument(self.span.clone())
                 .await?;
 
+                crate::logs::retain_sink(&container, self.sink.as_ref());
                 context::bind_opened_scope(&container);
 
                 Ok(container)

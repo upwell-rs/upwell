@@ -9,15 +9,23 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
 use super::span as handoff;
-use super::{SCOPE_SPAN_NAME, ScopeLogSink};
+use super::{SCOPE_SPAN_NAME, ScopeLogSink, route, sink};
 
 /// Routes every event made inside a capturing scope instance to that instance's sink.
 ///
-/// It walks the event's span stack to the innermost `upwell.scope` span that has a sink, so
+/// The innermost `upwell.scope` span around an event that has a sink names the candidate, so
 /// parallel instances never see each other's records and an instance nested in another
-/// delivers only to itself. Events made outside any capturing instance, or on a task that lost
-/// the span, reach only the other layers: uncaptured, never misrouted. Capture tees: the layer
-/// never stops an event reaching the rest of the subscriber.
+/// delivers only to itself. The invocation context the event is made in decides whether the
+/// candidate applies: inside an invocation, an event reaches only an instance on the
+/// invocation's scope chain or one opening under it, else the innermost capturing instance of
+/// the invocation, so work carried with Upwell's propagation primitives logs to the invocation
+/// it was captured in. Work captured outside every invocation reaches no instance. Code that
+/// never runs inside an invocation context is routed by the span alone. Events made outside
+/// any capturing instance reach only the other layers: uncaptured, never misrouted. Capture
+/// tees: the layer never stops an event reaching the rest of the subscriber.
+///
+/// A span entered by hand inside an unrelated invocation's context therefore does not capture
+/// into its own instance unless that instance opened under the invocation's innermost one.
 ///
 /// `init_tracing` installs it behind the same filter as the console output, so capture defaults
 /// to the level the subscriber logs at. When composing it into your own subscriber, wrap it in
@@ -56,18 +64,18 @@ where
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        let Some(scope) = ctx.event_scope(event) else {
+        if !sink::any_open() {
             return;
-        };
+        }
 
-        for span in scope {
-            let sink = span.extensions().get::<Arc<ScopeLogSink>>().cloned();
+        let span_sink = ctx.event_scope(event).and_then(|scope| {
+            scope
+                .into_iter()
+                .find_map(|span| span.extensions().get::<Arc<ScopeLogSink>>().cloned())
+        });
 
-            if let Some(sink) = sink {
-                sink.deliver(event);
-
-                return;
-            }
+        if let Some(sink) = route::route(span_sink) {
+            sink.deliver(event);
         }
     }
 }

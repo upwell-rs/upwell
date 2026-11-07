@@ -1,9 +1,10 @@
 //! Per-instance scope logs: an `upwell.scope` span for every instance, a [`ScopeLogLayer`] that
 //! routes the events made inside it to the instance, and the [`ScopeLogStream`] a run exposes.
 //!
-//! Routing rides on `tracing`'s span stack, not on the invocation context, so it covers every
-//! event made inside an instance, including those of third-party crates. Capture is off unless
-//! it is asked for: an instance nobody watches adds one span and no per-event work.
+//! The span names the instance an event was made in, which covers every event, those of
+//! third-party crates included; the invocation context decides whether that instance applies,
+//! so work carried into another task, thread or pool logs to the invocation it belongs to. The logs read the context; propagation knows nothing about logs. Capture is off
+//! unless it is asked for: while no instance captures, an event costs one atomic read.
 //!
 //! # Seam for the end-of-scope hook
 //!
@@ -19,6 +20,7 @@ mod options;
 #[cfg_attr(not(feature = "tracing-subscriber"), allow(dead_code))]
 mod record;
 mod render;
+mod route;
 #[cfg_attr(not(feature = "tracing-subscriber"), allow(dead_code))]
 mod sink;
 mod span;
@@ -35,7 +37,7 @@ pub use sink::ScopeLogSink;
 pub use span::InstanceLogs;
 pub use stream::ScopeLogStream;
 
-pub(crate) use current::with_current_sink;
+pub(crate) use route::retain_sink;
 pub(crate) use span::{deferred_sink, describe_sink};
 
 /// The name of the span every scope instance runs in.

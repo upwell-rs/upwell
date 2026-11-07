@@ -97,6 +97,25 @@ a job, an entry or `.run` work. Injected, it holds the runtime weakly. `.run` pl
 an entry whose targets are its parameters, once per parameter types and runtime generation, and
 closes the instance when the work finishes.
 
+### Scope log routing
+
+The `upwell.scope` span names the instance an event was made in; the invocation context decides
+whether that instance captures it, and `ScopeLogs::current()` resolves the same way. On a task or
+thread where no invocation context is set at all, the span alone decides, so logs work without
+the propagation machinery. Work captured outside every invocation (a `context::tokio` or
+`context::rayon` job spawned outside one) never logs into a capture it happens to run inside.
+Inside an invocation, an event reaches the span's instance only when that instance is on the
+invocation's scope chain or opens under its innermost instance; otherwise it reaches the
+invocation's innermost capturing instance. Work carried with the propagation primitives therefore
+logs to the invocation it was captured in. One cost: an `OpenScope` span entered by hand inside
+an unrelated invocation routes to that invocation, not to the hand-entered instance, unless the
+instance opened under it.
+
+`ScopeLogs::current()` uses that same resolution, so it reports where events made at that point
+are delivered: `is_capturing()` is true when they are captured, including by an enclosing
+capturing instance that a non-capturing one passes its events to, and outside an invocation it
+needs a `ScopeLogLayer`, as capture does. It no longer reads a task-local of its own.
+
 ### Scope log filtering
 
 With `tracing-subscriber` enabled, `init_tracing` uses the configured `RUST_LOG` or logging

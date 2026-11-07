@@ -1,53 +1,43 @@
-//! The sink of the instance a task runs in, for [`ScopeLogs`].
+//! The sink of the instance the calling code runs in, for [`ScopeLogs`].
 
-use std::future::Future;
 use std::sync::Arc;
 
 use upwell_core::DependencyDescriptor;
 use upwell_di::{ComponentConstructionContext, FromContainer};
 
-use super::{ScopeLogSink, ScopeLogStream};
+use super::{ScopeLogSink, ScopeLogStream, route};
 use crate::builtins::RuntimeReloader;
-
-tokio::task_local! {
-    static CURRENT: Option<Arc<ScopeLogSink>>;
-}
-
-/// Runs `future` with `sink` as the sink of the instance it runs in, or with none for an
-/// instance that does not capture, so it never sees an enclosing instance's.
-pub(crate) fn with_current_sink<F: Future>(
-    sink: Option<Arc<ScopeLogSink>>,
-    future: F,
-) -> impl Future<Output = F::Output> {
-    CURRENT.scope(sink, future)
-}
 
 /// The log of the scope instance a component or run closure runs in, injectable as a
 /// parameter of `ScopeBuilder::run` work.
 ///
-/// It is task-local access, in the sense of `tracing`'s current span: it reflects the capturing
-/// instance the *current task* runs in, so it is meant for `run` work and entries, not as a
-/// property of a component. Work spawned without Upwell's propagation primitives does not see
-/// it. A component built lazily, or as an ancestor while a child instance opens, sees the sink
-/// of the task that resolves it, not of its own scope; routing construction to the owning
-/// scope's sink is a follow-up (#470). [`current`](Self::current) returns a snapshot of the sink
-/// at that moment: a handle moved into another task or a nested instance keeps its original
-/// sink and does not follow the current task. In an instance that does not capture,
-/// [`subscribe`](Self::subscribe) returns a stream that has already ended.
+/// It follows the invocation context, as the layer's routing does: inside an invocation it is
+/// the log of the instance the context runs in, or of an instance opening under it, and work
+/// carried with Upwell's propagation primitives sees the log of the invocation it was captured
+/// in. Work captured outside every invocation sees no log. Code that runs outside the
+/// invocation machinery entirely sees the log of the `upwell.scope` span it runs in. A
+/// component sees the log of the code that resolves it, which for a component built while its
+/// instance opens is that instance's; routing a lazily built component to its owning scope is
+/// a follow-up (#470). [`current`](Self::current) returns a snapshot of the sink at that
+/// moment: a handle moved into other work keeps its original sink. In an instance that does
+/// not capture, [`subscribe`](Self::subscribe) returns a stream that has already ended.
 #[derive(Clone)]
 pub struct ScopeLogs {
     sink: Option<Arc<ScopeLogSink>>,
 }
 
 impl ScopeLogs {
-    /// The log of the instance the calling task runs in.
+    /// The log of the instance the calling code runs in.
     pub fn current() -> Self {
         Self {
-            sink: CURRENT.try_with(Clone::clone).ok().flatten(),
+            sink: route::route(span_sink()),
         }
     }
 
-    /// Whether the instance captures logs.
+    /// Whether events made where this log was taken are captured: by the instance itself, or
+    /// by the enclosing capturing instance a non-capturing one passes its events to. Like
+    /// capture, it needs a [`ScopeLogLayer`](super::ScopeLogLayer) in the subscriber, except
+    /// inside a capturing instance's own invocation context.
     pub fn is_capturing(&self) -> bool {
         self.sink.is_some()
     }
@@ -72,3 +62,29 @@ impl FromContainer for ScopeLogs {
 }
 
 impl upwell_di::Provided<ScopeLogs> for upwell_di::Wiring {}
+
+/// The sink of the innermost capturing `upwell.scope` span the calling code runs in, read from
+/// the default subscriber's span registry.
+#[cfg(feature = "tracing-subscriber")]
+fn span_sink() -> Option<Arc<ScopeLogSink>> {
+    use tracing_subscriber::registry::{LookupSpan, Registry};
+
+    if !super::sink::any_open() {
+        return None;
+    }
+
+    tracing::Span::current()
+        .with_subscriber(|(id, dispatch)| {
+            let span = dispatch.downcast_ref::<Registry>()?.span(id)?;
+
+            span.scope()
+                .find_map(|span| span.extensions().get::<Arc<ScopeLogSink>>().cloned())
+        })
+        .flatten()
+}
+
+/// Without a layer no span holds a sink.
+#[cfg(not(feature = "tracing-subscriber"))]
+fn span_sink() -> Option<Arc<ScopeLogSink>> {
+    None
+}

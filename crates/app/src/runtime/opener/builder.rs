@@ -137,7 +137,7 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         let (view, parent) = self.target()?;
         let builds = match entry {
             Some(entry) if plans_nothing(&view, entry) => {
-                let (seeds, logs) = self.into_parts(None);
+                let (seeds, logs) = self.into_parts(&parent, None);
 
                 return Ok(EntryScope::deferred(view, parent, entry.id, seeds, logs));
             }
@@ -147,12 +147,12 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         };
         let plan =
             entry.and_then(|entry| view.scope_plan().layouts.shared_entry(entry.id).cloned());
-        let (seeds, logs) = self.into_parts(None);
-        let container = crate::logs::with_current_sink(
-            logs.sink().map(Arc::clone),
-            open_in(view, S::ID, parent, builds, seeds).instrument(logs.span().clone()),
-        )
-        .await?;
+        let (seeds, logs) = self.into_parts(&parent, None);
+        let container = open_in(view, S::ID, parent, builds, seeds)
+            .instrument(logs.span().clone())
+            .await?;
+
+        crate::logs::retain_sink(&container, logs.sink());
 
         Ok(EntryScope::opened(container, plan, logs))
     }
@@ -200,26 +200,31 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     ) -> crate::Result<OpenScope<S>> {
         use tracing::Instrument;
 
-        let (seeds, logs) = self.into_parts(None);
-        let container = crate::logs::with_current_sink(
-            logs.sink().map(Arc::clone),
-            open_in(view, S::ID, parent, builds, seeds).instrument(logs.span().clone()),
-        )
-        .await?;
+        let (seeds, logs) = self.into_parts(&parent, None);
+        let container = open_in(view, S::ID, parent, builds, seeds)
+            .instrument(logs.span().clone())
+            .await?;
+
+        crate::logs::retain_sink(&container, logs.sink());
 
         Ok(OpenScope::new(container, logs))
     }
 
     /// Splits the builder into the seeds opening consumes, the instance's value first, and the
-    /// instance's span and sink. Every instance gets its span, which costs a callsite check when
-    /// no subscriber enables it; the sink exists only when the builder captures logs or `sink`
-    /// was made ahead.
+    /// span and sink of the instance opening under `parent`. Every instance gets its span, which
+    /// costs a callsite check when no subscriber enables it; the sink exists only when the
+    /// builder captures logs or `sink` was made ahead.
     pub(super) fn into_parts(
         self,
+        parent: &Arc<ScopeContainer>,
         sink: Option<Arc<ScopeLogSink>>,
     ) -> (Vec<BoxedComponent>, InstanceLogs) {
         let logs = InstanceLogs::open(&self.params, &self.logs, sink);
         let mut seeds = self.seeds;
+
+        if let Some(sink) = logs.sink() {
+            sink.open_under(parent);
+        }
 
         if stores_params::<S>() {
             seeds.insert(0, params_seed(self.params));

@@ -11,13 +11,13 @@ use tracing_subscriber::layer::SubscriberExt;
 use super::*;
 use crate::logs::{ScopeLog, ScopeLogLayer, ScopeLogStream, ScopeLogs};
 
-fn install() -> DefaultGuard {
+pub(super) fn install() -> DefaultGuard {
     tracing::dispatcher::set_default(&Dispatch::new(
         Registry::default().with(ScopeLogLayer::new()),
     ))
 }
 
-async fn messages(stream: ScopeLogStream) -> Vec<String> {
+pub(super) async fn messages(stream: ScopeLogStream) -> Vec<String> {
     stream
         .filter_map(|item| async move {
             match item {
