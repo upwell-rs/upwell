@@ -1078,10 +1078,15 @@ with a typed error. Follow-up: carry the pinned scope on the edge.
 ### rayon
 
 rayon has no per-job hook, so the context travels per job: `join`, `scope`, `spawn` and `install`
-bind every closure they hand to the pool, a rayon `Scope` hands its jobs a scope that binds their
-nested spawns too, and `.current()` wraps a parallel iterator's consumer so every fold and
-reduction downstream of it runs in the context. The adapter yields an unindexed iterator, so
-indexed adapters (`zip`, `enumerate`) go before it. Each bound job sets the context on the worker
+bind every closure they hand to the pool, and a rayon `Scope` hands its jobs a scope that binds
+their nested spawns too. `.current()` returns a `WithContext` that is deliberately not a
+`ParallelIterator`: it offers `map`, `filter`, `filter_map`, `inspect`, `fold`, `for_each`,
+`reduce`, `all`, `any`, `count` and `collect`, and runs every closure passed to them inside the
+context, whichever worker steals it. Wrapping rayon's consumer instead cannot follow the
+consumer rayon hands a nested iterator (`flat_map`, `flatten`), so those adapters are not
+offered; nested parallel work started inside a bound closure carries the context by calling
+`.current()` or a `context::rayon` function there. Adapters before `.current()`, indexed ones
+(`zip`, `enumerate`) included, run outside the context. Each bound job sets the context on the worker
 thread only for its own run and restores what was there, so bound jobs never see each other's
 contexts. The remaining hazard: a bound closure that itself blocks in rayon (a nested `join`,
 `scope` or parallel iterator) may run other pool jobs on its thread while it waits, and a job

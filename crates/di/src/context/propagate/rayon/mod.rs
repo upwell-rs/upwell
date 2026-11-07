@@ -1,7 +1,10 @@
 //! rayon's entry points, carrying the active invocation context and span into pool jobs.
 //!
 //! rayon has no per-job hook, so each function binds the closures it hands to the pool, and
-//! [`ParallelIteratorExt::current`] binds every fold and reduction of a parallel iterator.
+//! [`ParallelIteratorExt::current`] binds every closure passed to the adapters and consumers
+//! [`WithContext`] offers. Adapters that start nested parallel iterators, such as `flat_map`
+//! and `flatten`, are not offered: start nested work inside a bound closure with `.current()`
+//! or a function of this module instead.
 //! Outside every context they carry only the span and run the work with any context of the
 //! worker masked, and otherwise behave as the rayon function they wrap.
 //!

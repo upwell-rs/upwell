@@ -1,0 +1,20 @@
+error[E0599]: `WithContext<rayon::range::Iter<{integer}>>` is not an iterator
+ --> tests/ui/rayon/flat_map_after_current.rs:8:10
+  |
+5 |       let _ = (0..4)
+  |  _____________-
+6 | |         .into_par_iter()
+7 | |         .current()
+8 | |         .flat_map(|_| (0..4).into_par_iter())
+  | |         -^^^^^^^^ `WithContext<rayon::range::Iter<{integer}>>` is not an iterator
+  | |_________|
+  |
+  |
+ ::: crates/di/src/context/propagate/rayon/iter.rs
+  |
+  |   pub struct WithContext<I> {
+  |   ------------------------- doesn't satisfy `_: Iterator`
+  |
+  = note: the following trait bounds were not satisfied:
+          `WithContext<rayon::range::Iter<{integer}>>: Iterator`
+          which is required by `&mut WithContext<rayon::range::Iter<{integer}>>: Iterator`

@@ -4362,6 +4362,7 @@ dependencies = [
  "clap",
  "futures",
  "postcard",
+ "rayon",
  "serde",
  "serde_json",
  "tempfile",

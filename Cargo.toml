@@ -348,6 +348,8 @@ postcard = { workspace = true }
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = { workspace = true }
+# The `rayon` UI test builds parallel iterators to show what `upwell::context::rayon` refuses.
+rayon = { workspace = true }
 # The facade's axum integration tests use `#[controller]`/`#[handlers]`/`#[dto]`, which emit
 # `::utoipa` references when the `openapi` feature is on (as under `--all-features`). Like the http
 # example, a crate using those macros with `openapi` needs `utoipa` as a direct dependency; a

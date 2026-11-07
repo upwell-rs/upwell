@@ -179,3 +179,25 @@ async fn a_job_captured_outside_every_context_never_sees_a_waiting_workers_conte
         "the context-free job ran without the waiting job's context"
     );
 }
+
+#[tokio::test]
+async fn nested_parallel_work_in_a_current_closure_carries_the_context_again() {
+    let chain = chain().await;
+    let (captured, request) = captured(&chain).await;
+    let pool = pool(2);
+
+    let outer = captured.run(|| (0..8).into_par_iter().current());
+    let seen = pool.install(|| {
+        outer
+            .map(|_| {
+                (0..512)
+                    .into_par_iter()
+                    .current()
+                    .map(|_| sees(&request))
+                    .all(|seen| seen)
+            })
+            .all(|seen| seen)
+    });
+
+    assert!(seen, "every stolen inner job runs inside the context");
+}
