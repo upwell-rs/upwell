@@ -30,8 +30,8 @@ steps; they never search or select providers.
 
 ### Spawned work holds its scope strongly
 
-`upwell::spawn` and the other propagation primitives (#132, #267) carry the context and keep the
-scope instance alive until the spawned work finishes. A plain `tokio::spawn` or
+`upwell::context::tokio::spawn` and the other propagation primitives (#132, #267) carry the
+context and keep the scope instance alive until the spawned work finishes. A plain `tokio::spawn` or
 `std::thread::spawn` carries nothing.
 
 ### One context per task, holding the whole chain
@@ -970,3 +970,111 @@ user surface exists for it.
 - Two descriptors of one type declared in two scopes must carry distinct ids of their own;
   factory-expanded placements get `<id>@<scope id>`, which tooling shows.
 - Nearest-wins shadowing and a fallback list are deferred.
+
+## Access and propagation (#131, #132, #134, #267)
+
+Track C of #403. It builds on the invocation context (#130, #266, #472) and follows the access
+rule above: users get declared access and propagation, never a dynamic `current::<T>()`.
+
+### Surface
+
+Everything lives in `upwell_di::context`, re-exported by the facade as `upwell::context`.
+
+| Item | What it does |
+|---|---|
+| `Current<T>` | A declared dependency. `get(&self).await` resolves `T` from the innermost scope instance of the active invocation, through its parent chain, so the closest instance wins. |
+| `Scoped<S, T>` | A declared dependency pinned to scope `S`: it walks the active chain to the instance of `S` and resolves `T` from there, skipping any closer instance of `T`. |
+| `ScopedError` | Why an accessor could not resolve. |
+| `context::tokio` | `spawn`, `spawn_local` and `spawn_blocking`, carrying the context and the current `tracing` span. |
+| `context::thread` | `spawn` and `scope`; every thread a `Scope` spawns carries the context. |
+| `context::rayon` (`rayon` feature) | `join`, `scope`, `spawn`, `install` and the `ParallelIteratorExt::current()` adapter over the optional `rayon` dependency. Off by default. |
+| `CapturedContext` | `capture()?` clones the active context and span for any other executor: `enter(future)` (a `JoinSet`, a custom executor), `run`, `bind` and `bind_fn` for synchronous code. |
+
+Both accessors are zero-sized, `Copy` and stateless: constructing one captures nothing, and every
+`get` resolves anew, so a singleton may hold one and see each invocation's own value. Neither
+returns references into a container.
+
+The propagation modules mirror the executors they wrap instead of a `CapturedContext::spawn*`
+family, so the call site reads as the executor it targets. Each captures the context where it is
+called; outside every context it carries only the span and otherwise behaves as the function it
+wraps. `CapturedContext::capture()` is the strict form that fails with
+`ContextError::OutsideContext`. The capture is the task-local `InvocationContext` itself, so the
+`InvocationTarget` (and whether it is a static or a shared `TargetRef`) arrives unchanged.
+
+### Typed errors
+
+`ScopedError` is a `#[non_exhaustive]` `thiserror` enum:
+
+- `Context(ContextError)`: no context (`OutsideContext`) or a context without a scope instance,
+  such as a job run or a hook (`OutsideInvocationScope`).
+- `ScopeNotActive { scope, name }`: `Scoped<S, T>` ran in an invocation whose chain has no `S`,
+  such as `Scoped<Connection, _>` in a plain REST request. `scope` is the `ScopeId`, `name` its
+  display name.
+- `Unavailable { type_name }`: nothing on the chain provides `T`.
+- `Resolution { type_name, source }`: building `T` failed, with the DI error as its source.
+
+### Declared edges and validation
+
+An accessor's `FromContainer::dependency()` is `T`'s own edge with `ResolutionMode::Current`, a
+new resolution mode. `ResolutionMode` is now `#[non_exhaustive]`, with `as_str()` for tooling
+labels (both breaking changes to the core vocabulary). The edge:
+
+- is never planned, ordered or built at construction, and imposes no build order;
+- is exempt from the captive-scope rule, since nothing is retained;
+- still requires `T` to be provided by some registered component, provider or seed in some scope
+  unless the edge is optional. A missing provider fails preparation with `MissingDependency`, so
+  an accessor never makes a dependency silently optional;
+- is reported by selection diagnostics as `invocation-context` and by tooling as `current`.
+
+The macro rejects `#[qualifier]` and `#[config]` on a `Current<..>` or `Scoped<..>` field with a
+compile error at the attribute: an accessor resolves its target's unqualified provider, so a
+qualifier would otherwise be dropped silently.
+
+The captive-scope error (`ScopeViolation`) names `Current<T>` as the way for a longer-lived
+component to read a shorter-lived value.
+
+Not validated at preparation: that `S` of `Scoped<S, T>` can be on a chain where the consumer
+runs, and that `T` is reachable from `S`. The edge has no slot for `S`; both fail at run time
+with a typed error. Follow-up: carry the pinned scope on the edge.
+
+### Propagation semantics
+
+- Explicit only: a plain `tokio::spawn`, `spawn_blocking` or `std::thread::spawn` carries nothing.
+- A capture holds its scope instance (and so the whole chain and its pinned generation) strongly
+  until the captured work ends.
+- Cancellation is the executor's own, and nothing is tied to the response's completion. Dropping
+  a tokio `JoinHandle` detaches the task rather than cancelling it, and aborting a
+  `spawn_blocking` task that already runs does not stop it; threads cannot be cancelled at all. A
+  detached task therefore extends the life of a request's components, so request-bound work must
+  be awaited (`JoinSet`, `join!`, `context::thread::scope`) or its handle managed explicitly.
+- A capture taken before a pending scope opens keeps the pending state, so capture after the
+  handler has resolved from its scope (or injected anything from it).
+- Synchronous code sees the same context as async code: tokio's task-local is a thread-local
+  while a scope is entered, so `run`/`bind` on any thread set exactly the storage a future reads,
+  and `Handle::block_on(current.get())` inside them resolves from the captured context.
+- Spawned work is also instrumented with the span that was current at the capture, so its events
+  keep their scope's log routing.
+- Every spawning function documents its `# Panics` (outside a runtime or `LocalSet`, thread
+  creation failure, rayon's global pool failing to start).
+
+### rayon
+
+rayon has no per-job hook, so the context travels per job: `join`, `scope`, `spawn` and `install`
+bind every closure they hand to the pool, a rayon `Scope` hands its jobs a scope that binds their
+nested spawns too, and `.current()` wraps a parallel iterator's consumer so every fold and
+reduction downstream of it runs in the context. The adapter yields an unindexed iterator, so
+indexed adapters (`zip`, `enumerate`) go before it. Each bound job sets the context on the worker
+thread only for its own run and restores what was there, so bound jobs never see each other's
+contexts. The remaining hazard: a bound closure that itself blocks in rayon (a nested `join`,
+`scope` or parallel iterator) may run other pool jobs on its thread while it waits, and a job
+there that was not bound sees the waiting job's context. When the context selects identity,
+tenant data or credentials, bind every job of a pool shared with context-carrying work, or give
+such work its own pool and `install` into it.
+
+### `S::current()` and `S::is_active()`
+
+`#[scope]` generates `S::is_active()` for every scope and, for a scope with params,
+`S::current() -> Result<Arc<S>, ScopedError>`, both reading the active chain. Reading the active
+scope's own value is the public exception above: it builds nothing and is not a dependency edge.
+`S { .. }.enter(future)` (a params-only context for unit tests, without an app) is not done: it
+needs a context form with a value but no container. Follow-up.
