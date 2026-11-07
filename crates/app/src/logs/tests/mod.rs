@@ -13,6 +13,7 @@ use upwell_core::{LogParams, Scope, ScopeId};
 
 use super::*;
 
+mod current;
 mod routing;
 mod streaming;
 mod waking;

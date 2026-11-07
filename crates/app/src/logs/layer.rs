@@ -9,7 +9,7 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
 use super::span as handoff;
-use super::{SCOPE_SPAN_NAME, ScopeLogSink, route, sink};
+use super::{SCOPE_SPAN_NAME, ScopeLogSink, entered, route, sink};
 
 /// Routes every event made inside a capturing scope instance to that instance's sink.
 ///
@@ -61,6 +61,27 @@ where
 
         sink.attach();
         span.extensions_mut().insert(sink);
+    }
+
+    fn on_enter(&self, id: &Id, ctx: Context<'_, S>) {
+        if !sink::any_open() {
+            return;
+        }
+
+        let Some(span) = ctx.span(id) else {
+            return;
+        };
+        let found = span
+            .scope()
+            .find_map(|span| span.extensions().get::<Arc<ScopeLogSink>>().cloned());
+
+        if let Some(sink) = found {
+            entered::enter(id, sink);
+        }
+    }
+
+    fn on_exit(&self, id: &Id, _ctx: Context<'_, S>) {
+        drop(entered::exit(id));
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
