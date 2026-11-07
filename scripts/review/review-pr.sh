@@ -34,9 +34,11 @@ if [ -n "$(mise exec -- git -C "$worktree" status --porcelain --untracked-files=
     exit 4
 fi
 
-mise exec -- git -C "$worktree" fetch -q origin "$base"
+base_ref="refs/upwell-review/pr$pr-base"
 
-base_tip="$(mise exec -- git -C "$worktree" rev-parse FETCH_HEAD)"
+mise exec -- git -C "$worktree" fetch -q origin "+refs/heads/$base:$base_ref"
+
+base_tip="$(mise exec -- git -C "$worktree" rev-parse "$base_ref")"
 merge_base="$(mise exec -- git -C "$worktree" merge-base "$base_tip" "$head_sha")"
 
 {
@@ -57,6 +59,12 @@ fi
 
 current_head="$(mise exec -- gh pr view "$pr" --json headRefOid --jq .headRefOid)"
 current_base="$(mise exec -- gh pr view "$pr" --json baseRefOid --jq .baseRefOid)"
+local_head="$(mise exec -- git -C "$worktree" rev-parse HEAD)"
+
+if [ "$local_head" != "$head_sha" ] || [ -n "$(mise exec -- git -C "$worktree" status --porcelain --untracked-files=no)" ]; then
+    echo "the local checkout changed while the review ran; not posting (see $work)" >&2
+    exit 7
+fi
 
 if [ "$current_head" != "$head_sha" ]; then
     echo "the PR head moved to $current_head while the review ran; not posting a stale review (see $work)" >&2
