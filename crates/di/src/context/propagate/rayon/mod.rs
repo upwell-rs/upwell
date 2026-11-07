@@ -2,8 +2,8 @@
 //!
 //! rayon has no per-job hook, so each function binds the closures it hands to the pool, and
 //! [`ParallelIteratorExt::current`] binds every fold and reduction of a parallel iterator.
-//! Outside every context they carry only the span and otherwise behave as the rayon function
-//! they wrap.
+//! Outside every context they carry only the span and run the work with any context of the
+//! worker masked, and otherwise behave as the rayon function they wrap.
 //!
 //! # Shared pools
 //!

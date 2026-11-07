@@ -146,3 +146,36 @@ async fn pool_jobs_never_see_each_others_contexts() {
         "no worker keeps a context after its jobs"
     );
 }
+
+#[tokio::test]
+async fn a_job_captured_outside_every_context_never_sees_a_waiting_workers_context() {
+    let chain = chain().await;
+    let (captured, request) = captured(&chain).await;
+    let pool = pool(1);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let unbound = CapturedContext::active().bind(move || {
+        sender.send(sees_nothing()).expect("the test waits");
+    });
+
+    let yielded = captured.run(|| {
+        context_rayon::install(&pool, || {
+            ::rayon::spawn(unbound);
+
+            let yielded = ::rayon::yield_now();
+
+            assert!(sees(&request), "the waiting job keeps its own context");
+
+            yielded
+        })
+    });
+
+    assert_eq!(
+        yielded,
+        Some(::rayon::Yield::Executed),
+        "the worker ran the job while it waited"
+    );
+    assert!(
+        receiver.recv().expect("the job reports"),
+        "the context-free job ran without the waiting job's context"
+    );
+}

@@ -107,3 +107,20 @@ fn a_bound_fn_enters_the_context_on_every_call() {
             .all(|seen| seen.expect("the thread completes"))
     );
 }
+
+#[tokio::test]
+async fn work_captured_outside_every_context_masks_the_one_it_runs_in() {
+    let chain = chain().await;
+    let (captured, request) = captured(&chain).await;
+    let unbound = CapturedContext::active().bind(sees_nothing);
+    let unbound_fn = CapturedContext::active().bind_fn(|_: ()| sees_nothing());
+
+    let (masked, masked_fn, after) = captured.run(|| (unbound(), unbound_fn(()), sees(&request)));
+
+    assert!(masked, "a job captured outside every context sees none");
+    assert!(
+        masked_fn,
+        "a bound fn captured outside every context sees none"
+    );
+    assert!(after, "the worker's context is back once the job returns");
+}

@@ -141,3 +141,17 @@ fn a_carried_spawn_enters_the_spawners_span() {
     assert!(spawner.is_some(), "the subscriber enables the span");
     assert_eq!(spawned, spawner);
 }
+
+#[tokio::test]
+async fn a_future_captured_outside_every_context_masks_the_one_it_is_polled_in() {
+    let chain = chain().await;
+    let (captured, request) = captured(&chain).await;
+    let unbound = CapturedContext::active().enter(async { sees_nothing() });
+
+    let (masked, after) = captured
+        .enter(async move { (unbound.await, sees(&request)) })
+        .await;
+
+    assert!(masked, "a future captured outside every context sees none");
+    assert!(after, "the task's context is back once it completes");
+}

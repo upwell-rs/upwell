@@ -1,7 +1,7 @@
 //! Tokio's spawning functions, carrying the active invocation context and span.
 //!
 //! Each behaves as the tokio function it wraps; outside every context it carries only the
-//! span. Dropping the returned [`JoinHandle`] detaches the task rather than cancelling it,
+//! span and masks any context the work runs in. Dropping the returned [`JoinHandle`] detaches the task rather than cancelling it,
 //! and [`JoinHandle::abort`] does not stop a blocking task that already runs, so the task
 //! keeps the invocation's scope chain alive until it ends. Await request-bound work or manage
 //! its handle explicitly.

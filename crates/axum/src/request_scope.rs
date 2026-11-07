@@ -41,8 +41,8 @@
 //! # The invocation context
 //!
 //! [`RequestScopeLayer`] also runs the request, global middleware included, in its
-//! [`InvocationContext`]. The context starts with a pending request scope and no scope
-//! instance, because the scope opens later or not at all; the opening binds its container
+//! [`InvocationContext`](upwell_di::context::InvocationContext). The context starts with a
+//! pending request scope and no scope instance, because the scope opens later or not at all; the opening binds its container
 //! into the context, so code that runs after it in the request's task, middleware and the
 //! handler alike, sees the request scope. With eager components the scope opens before global
 //! middleware, so all of it runs in the scope. The context wraps the router's future, and the
@@ -64,7 +64,7 @@ use tower::{Layer, Service};
 use upwell_app::{Opening, ScopeEntry, ScopeOpener};
 use upwell_config::Cfg;
 use upwell_core::Scope;
-use upwell_di::context::{InvocationContext, TargetRef, bind_opened_scope};
+use upwell_di::context::{Entered, TargetRef, bind_opened_scope};
 use upwell_di::{FromContainer, ScopeContainer};
 
 use crate::config::AxumConfig;
@@ -198,8 +198,7 @@ impl<S> Layer<S> for RequestScopeLayer {
 impl<S: Service<Request>> Service<Request> for RequestScopeService<S> {
     type Response = S::Response;
     type Error = S::Error;
-    type Future =
-        TaskLocalFuture<Arc<RequestScopes>, TaskLocalFuture<InvocationContext, S::Future>>;
+    type Future = TaskLocalFuture<Arc<RequestScopes>, Entered<S::Future>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)

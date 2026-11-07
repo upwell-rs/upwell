@@ -2,13 +2,15 @@
 
 use std::future::Future;
 
-use futures::future::Either;
 use tracing::Instrument;
 
 use crate::context::{ContextError, InvocationContext};
 
 /// The invocation context and `tracing` span active where it was captured, to carry into
 /// work another executor runs. See the [module documentation](super).
+///
+/// Work captured outside every invocation runs with any context of the thread or task it lands
+/// on masked, so a pool worker waiting inside another invocation never lends it that one.
 #[must_use = "a captured context does nothing until work runs in it"]
 #[derive(Clone, Debug)]
 pub struct CapturedContext {
@@ -42,12 +44,8 @@ impl CapturedContext {
     /// `JoinSet`, a `LocalSet` or another executor.
     pub fn enter<F: Future>(self, future: F) -> impl Future<Output = F::Output> {
         let Self { context, span } = self;
-        let future = match context {
-            Some(context) => Either::Left(context.enter(future)),
-            None => Either::Right(future),
-        };
 
-        future.instrument(span)
+        InvocationContext::enter_or_mask(context, future).instrument(span)
     }
 
     /// Runs `body` inside the captured context and span on the calling thread, then restores
@@ -55,10 +53,7 @@ impl CapturedContext {
     pub fn run<R>(self, body: impl FnOnce() -> R) -> R {
         let Self { context, span } = self;
 
-        span.in_scope(|| match context {
-            Some(context) => context.enter_sync(body),
-            None => body(),
-        })
+        span.in_scope(|| InvocationContext::enter_sync_or_mask(context, body))
     }
 
     /// Runs `body` inside a copy of the captured context, keeping the capture for more work.
