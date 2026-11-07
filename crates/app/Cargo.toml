@@ -37,6 +37,7 @@ upwell-config = { workspace = true }
 upwell-dirs = { workspace = true }
 upwell-macros = { workspace = true }
 tokio = { workspace = true }
+pin-project-lite = { workspace = true }
 futures = { workspace = true }
 linkme = { workspace = true }
 serde = { workspace = true }

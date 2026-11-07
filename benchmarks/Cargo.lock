@@ -2452,6 +2452,7 @@ dependencies = [
  "arc-swap",
  "futures",
  "linkme",
+ "pin-project-lite",
  "serde",
  "thiserror",
  "tokio",

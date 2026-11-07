@@ -107,6 +107,7 @@ xattr = "1.6.1"
 wasmtime = { version = "=36.0.13", default-features = false, features = ["std", "runtime", "component-model", "cranelift"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
+pin-project-lite = "0.2"
 tokio-util = "0.7"
 tower = { version = "0.5", features = ["util"] }
 # Trailing-slash path normalization for the axum server (applied outside the router so it rewrites

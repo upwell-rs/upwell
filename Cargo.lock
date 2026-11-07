@@ -4376,6 +4376,7 @@ dependencies = [
  "clap",
  "futures",
  "linkme",
+ "pin-project-lite",
  "serde",
  "serde_json",
  "tempfile",
