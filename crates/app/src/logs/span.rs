@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use tracing::{Level, Span};
-use upwell_core::Scope;
+use upwell_core::{Scope, ScopeId};
 
 use super::render::{self, Rendered};
 use super::{LogOptions, SCOPE_LOG_TARGET, ScopeLogSink};
@@ -72,12 +72,23 @@ impl Drop for InstanceLogs {
 }
 
 /// A sink for an instance of `S` with the value `scope`.
-pub(crate) fn new_sink<S: Scope>(scope: &S, options: &LogOptions) -> Arc<ScopeLogSink> {
+fn new_sink<S: Scope>(scope: &S, options: &LogOptions) -> Arc<ScopeLogSink> {
     Arc::new(ScopeLogSink::new(
         S::ID,
         render::collect(scope).into(),
         options,
     ))
+}
+
+/// A sink for an instance of the scope `id` whose value is not at hand yet; [`describe_sink`]
+/// supplies it before the instance runs.
+pub(crate) fn deferred_sink(id: ScopeId, options: &LogOptions) -> Arc<ScopeLogSink> {
+    Arc::new(ScopeLogSink::deferred(id, options))
+}
+
+/// Gives `sink` the loggable params of `scope`, unless it has them already.
+pub(crate) fn describe_sink<S: Scope>(sink: &ScopeLogSink, scope: &S) {
+    sink.describe(|| render::collect(scope).into());
 }
 
 /// The `upwell.scope` span of an instance. It is at error level so a filter that hides

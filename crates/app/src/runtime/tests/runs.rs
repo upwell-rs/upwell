@@ -88,3 +88,20 @@ async fn a_scope_run_is_a_future_that_can_be_joined_and_boxed() {
     );
     assert_eq!(boxed.await.expect("the run succeeds"), 9);
 }
+
+/// Awaits any scope run through its concrete execution type, which exists only when the run is
+/// generic over the future it drives instead of boxing it.
+async fn await_run<F: std::future::Future<Output = crate::Result<u8>>>(run: ScopeRun<F>) -> u8 {
+    run.await.expect("the run succeeds")
+}
+
+#[tokio::test]
+async fn a_scope_run_drives_its_execution_without_boxing_it() {
+    let (runtime, _registry) = build_runtime(HashMap::new()).await;
+    let sessions = runtime.opener::<Session>().expect("session is declared");
+
+    assert_eq!(
+        await_run(sessions.builder(Session).run(|| async { 4 })).await,
+        4
+    );
+}
