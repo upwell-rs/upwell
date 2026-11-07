@@ -199,7 +199,7 @@ impl ScopeLayouts {
         planning
             .parallelism
             .map(pending, pending.len(), |pending| {
-                match pending.carried(&changed) {
+                match pending.carried(&changed, planning.selection) {
                     Some(carried) => {
                         debug_assert_eq!(
                             carried.as_ref(),
@@ -248,14 +248,20 @@ impl<'a> PlanBase<'a> {
 }
 
 impl PendingPlan<'_> {
-    /// The base plan this signature keeps, unless selection of a type it read changed.
-    fn carried(&self, changed: &HashSet<TypeId>) -> Option<&Arc<EntryPlan>> {
+    /// The base plan this signature keeps, unless selection of a type it read changed, or the
+    /// base planned without walking for invocation-context edges that `selection` now has.
+    fn carried(
+        &self,
+        changed: &HashSet<TypeId>,
+        selection: &ProviderSelectionModel,
+    ) -> Option<&Arc<EntryPlan>> {
         self.base.filter(|base| {
-            !self
-                .layout
-                .entry_reads(base, &self.targets)
-                .iter()
-                .any(|read| changed.contains(read))
+            (base.walked_accessors() || !selection.has_contextual_edges())
+                && !self
+                    .layout
+                    .entry_reads(base, &self.targets)
+                    .iter()
+                    .any(|read| changed.contains(read))
         })
     }
 
