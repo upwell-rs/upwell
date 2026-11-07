@@ -90,10 +90,16 @@ impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
     where
         W: ScopeWork<Targets>,
     {
+        let sink = OnceLock::new();
+
+        if self.logs.capture {
+            sink.get_or_init(|| logs::new_sink(&self.params, &self.logs));
+        }
+
         ScopeRun {
             ready: Some((self, work)),
             running: None,
-            sink: OnceLock::new(),
+            sink,
             targets: PhantomData,
         }
     }
@@ -154,15 +160,17 @@ async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
 ) -> crate::Result<W::Output> {
     use tracing::Instrument;
 
-    let (view, parent) = builder.target()?;
-    let plan = run_plan::<S, W, Targets>(&view)?;
+    let (view, parent, plan) = match prepare::<S, P, W, Targets>(&builder) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            if let Some(sink) = &sink {
+                sink.close();
+            }
+
+            return Err(error);
+        }
+    };
     let context = builder.opener.context(scope_run_target!(S::ID));
-    let sink = sink.or_else(|| {
-        builder
-            .logs
-            .capture
-            .then(|| logs::new_sink(&builder.params, &builder.logs))
-    });
     let (seeds, instance_logs) = builder.into_parts(sink);
     let instance = async {
         let container = open_planned_in(&view, S::ID, parent, Some(&plan), seeds).await?;
@@ -181,6 +189,16 @@ async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
     instance_logs.finish();
 
     outcome
+}
+
+/// The generation, parent container and plan `builder`'s run opens with.
+fn prepare<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
+    builder: &ScopeBuilder<'_, S, P>,
+) -> crate::Result<(RuntimeView, Arc<ScopeContainer>, Arc<EntryPlan>)> {
+    let (view, parent) = builder.target()?;
+    let plan = run_plan::<S, W, Targets>(&view)?;
+
+    Ok((view, parent, plan))
 }
 
 /// The plan `view` keeps for work `W` into scope `S`, made on the first run.
