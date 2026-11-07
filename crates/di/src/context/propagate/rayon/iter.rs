@@ -51,7 +51,8 @@ impl<I: ParallelIterator> ParallelIterator for WithContext<I> {
     }
 }
 
-/// A consumer whose folders and reducers run inside a captured context.
+/// A consumer whose folders and reducers run inside a captured context, from the folder's
+/// creation (where `fold` and `reduce` call their identity) to its completion.
 struct ContextConsumer<C> {
     base: C,
     context: CapturedContext,
@@ -81,10 +82,10 @@ impl<T, C: Consumer<T>> Consumer<T> for ContextConsumer<C> {
     }
 
     fn into_folder(self) -> Self::Folder {
-        ContextFolder {
-            base: self.base.into_folder(),
-            context: self.context,
-        }
+        let Self { base, context } = self;
+        let base = context.run_in(|| base.into_folder());
+
+        ContextFolder { base, context }
     }
 
     fn full(&self) -> bool {
