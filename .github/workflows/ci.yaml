@@ -247,6 +247,9 @@ jobs:
           [[ "$(cargo nextest --version)" == "cargo-nextest 0.9.150 "* ]]
           critical_filter="$(just --evaluate critical_filter)"
           cargo nextest run --archive-file "${{ github.workspace }}/nextest-archive/nextest-linux.tar.zst" --workspace-remap "${{ github.workspace }}" --profile ci-critical --filterset "$critical_filter"
+      - name: Show disk usage after tests
+        if: ${{ always() }}
+        run: df -h /
       - name: Validate JUnit report
         if: ${{ always() }}
         run: python .github/scripts/validate-junit.py target/nextest/ci-critical/junit.xml nextest-critical
@@ -296,6 +299,9 @@ jobs:
           [[ "$(cargo nextest --version)" == "cargo-nextest 0.9.150 "* ]]
           critical_filter="$(just --evaluate critical_filter)"
           cargo nextest run --archive-file "${{ github.workspace }}/nextest-archive/nextest-linux.tar.zst" --workspace-remap "${{ github.workspace }}" --profile ci-extended --filterset "all() - ($critical_filter)"
+      - name: Show disk usage after tests
+        if: ${{ always() }}
+        run: df -h /
       - name: Validate JUnit report
         if: ${{ always() }}
         run: python .github/scripts/validate-junit.py target/nextest/ci-extended/junit.xml nextest-extended
