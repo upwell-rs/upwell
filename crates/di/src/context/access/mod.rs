@@ -79,10 +79,13 @@ fn instance_of(innermost: Arc<ScopeContainer>, scope: ScopeId) -> Option<Arc<Sco
 
 /// Extracts `H` from `container`, mapping the DI error to a [`ScopedError`].
 async fn extract<H: FromContainer>(container: &Arc<ScopeContainer>) -> Result<H, ScopedError> {
-    container
-        .extract::<H>()
-        .await
-        .map_err(ScopedError::resolution::<H>)
+    let dependency = H::dependency();
+
+    container.extract::<H>().await.map_err(|error| {
+        let provided = container.reaches_provider(dependency.ty.type_id, dependency.qualifier);
+
+        ScopedError::resolution::<H>(error, provided)
+    })
 }
 
 #[cfg(test)]

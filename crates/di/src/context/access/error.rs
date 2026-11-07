@@ -54,12 +54,15 @@ impl ScopedError {
         }
     }
 
-    /// The error for a resolution of `H` that failed with `error`.
-    pub(super) fn resolution<H: FromContainer>(error: Error) -> Self {
+    /// The error for a resolution of `H` that failed with `error`. A missing component is
+    /// `H`'s own absence only when nothing on the chain provides its target (`provided` is
+    /// false); otherwise building the target failed on a missing dependency of its own, which
+    /// is kept as the source.
+    pub(super) fn resolution<H: FromContainer>(error: Error, provided: bool) -> Self {
         let type_name = (H::dependency().ty.type_name)();
 
         match error {
-            Error::MissingComponent(_) => Self::Unavailable { type_name },
+            Error::MissingComponent(_) if !provided => Self::Unavailable { type_name },
             source => Self::Resolution {
                 type_name,
                 source: Box::new(source),
