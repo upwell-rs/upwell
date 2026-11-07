@@ -11,6 +11,7 @@ use upwell_app::{
 use upwell_core::ItemSource;
 
 use super::PreparedAxum;
+use super::entries::join_http_paths;
 use crate::controller::{ControllerDescriptor, HttpRouteDescriptor};
 
 /// One route the protocol mounts itself rather than through a controller, reported beside the
@@ -356,20 +357,6 @@ fn project_mounted_route(
         ToolingEndpoint::Owner,
         ToolingEndpoint::Resource(&route_id),
     );
-}
-
-fn join_http_paths(global: &str, controller: &str, route: &str) -> String {
-    let segments = [global, controller, route]
-        .into_iter()
-        .flat_map(|path| path.split('/'))
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-
-    if segments.is_empty() {
-        String::from("/")
-    } else {
-        format!("/{}", segments.join("/"))
-    }
 }
 
 #[cfg(feature = "ws")]

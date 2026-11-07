@@ -27,13 +27,13 @@ static SINGLETON_DEFERRED_TRANSIENT: [DependencyDescriptor; 1] = [dependency(
 fn validate_rejects_singleton_depending_on_request() {
     let request = scoped!(
         "ReqComp",
-        &Request,
+        Request::KEY,
         &[],
         TypeDescriptor::of::<i64>("ReqComp"),
     );
     let singleton = scoped!(
         "RootComp",
-        &Singleton,
+        Singleton::KEY,
         &SINGLETON_DEP_ON_REQUEST,
         TypeDescriptor::of::<i16>("RootComp"),
     );
@@ -50,13 +50,13 @@ fn validate_rejects_singleton_depending_on_request() {
 fn validate_allows_request_depending_on_connection() {
     let connection = scoped!(
         "ConnComp",
-        &Connection,
+        Connection::KEY,
         &[],
         TypeDescriptor::of::<i32>("ConnComp"),
     );
     let request = scoped!(
         "ReqComp",
-        &Request,
+        Request::KEY,
         &REQUEST_DEP_ON_CONNECTION,
         TypeDescriptor::of::<i64>("ReqComp"),
     );
@@ -73,13 +73,13 @@ fn validate_allows_request_depending_on_connection() {
 fn validate_rejects_transient_depending_on_connection() {
     let connection = scoped!(
         "ConnComp",
-        &Connection,
+        Connection::KEY,
         &[],
         TypeDescriptor::of::<i32>("ConnComp"),
     );
     let transient = scoped!(
         "TransComp",
-        &Transient,
+        Transient::KEY,
         &REQUEST_DEP_ON_CONNECTION,
         TypeDescriptor::of::<i64>("TransComp"),
     );
@@ -99,13 +99,13 @@ fn validate_rejects_transient_depending_on_connection() {
 fn validate_rejects_deferred_transient_target() {
     let transient = scoped!(
         "TransientDeferred",
-        &Transient,
+        Transient::KEY,
         &[],
         TypeDescriptor::of::<u32>("TransientDeferred"),
     );
     let singleton = scoped!(
         "DeferredConsumer",
-        &Singleton,
+        Singleton::KEY,
         &SINGLETON_DEFERRED_TRANSIENT,
         TypeDescriptor::of::<u64>("DeferredConsumer"),
     );

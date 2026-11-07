@@ -36,12 +36,7 @@ fn builds_and_consumes_a_structured_failure_probe() {
     assert_eq!(result.target.binary_name, "tooling_probe_fixture");
     assert_eq!(result.probe.evidence.status.code, Some(1));
     assert_eq!(failure.diagnostics[0].code, "upwell/tooling-panic");
-    assert!(
-        result
-            .build
-            .target_directory
-            .starts_with(workspace.join("target/upwell"))
-    );
+    assert!(result.build.target_directory.ends_with("upwell/build"));
 
     for bytes in [
         result.probe.evidence.stdout.as_slice(),

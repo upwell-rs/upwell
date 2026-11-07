@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use tempfile::TempDir;
-use upwell_core::{ScopeId, StaticScope};
+use upwell_core::{Scope, ScopeId};
 use upwell_di::{Component as _, ScopeContainer};
 
 use super::fixture::{
@@ -24,13 +24,11 @@ use crate::{App, RetirementReason};
 /// A child boundary opened directly over a pinned root, standing in for a protocol scope.
 struct PinnedScope;
 
-impl StaticScope for PinnedScope {
+impl Scope for PinnedScope {
     const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/pinned");
     const RANK: u8 = 50;
     const NAME: &'static str = "Pinned";
 }
-
-static PINNED_SCOPE: PinnedScope = PinnedScope;
 
 async fn retiring_app(controls: RetirementControls) -> (TempDir, App<()>) {
     let built = build_auth_app_from(
@@ -136,7 +134,7 @@ async fn pinned_views_and_open_scopes_keep_using_retired_instances() {
     let (dir, app) = retiring_app(RetirementControls::default()).await;
     let old_view = app.runtime().view();
     let old_scope = ScopeContainer::open_child(
-        &PINNED_SCOPE,
+        PinnedScope::KEY,
         Arc::clone(old_view.root()),
         Arc::clone(old_view.scopes()),
         &[],

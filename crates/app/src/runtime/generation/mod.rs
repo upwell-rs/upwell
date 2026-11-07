@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use upwell_core::{ResolverCtx, RuntimeGenerationId};
+use upwell_di::context::{InvocationContext, TargetRef};
 use upwell_di::{ComponentDescriptor, EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
@@ -137,6 +138,14 @@ impl PreparedRuntimeGeneration {
             held_live_cells: HeldLiveCells::default(),
             commit_actions: CommitActions::default(),
         }
+    }
+
+    /// A context for `target` on this candidate's root, for hooks that run against the
+    /// candidate before it publishes.
+    pub(crate) fn context(&self, target: TargetRef) -> InvocationContext {
+        let root: Arc<ScopeContainer> = Arc::clone(&self.root);
+
+        InvocationContext::new(target, root)
     }
 
     /// Attaches the live cells this generation's retained consumers hold, and the

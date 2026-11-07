@@ -10,6 +10,9 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true }

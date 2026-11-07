@@ -1,5 +1,5 @@
 use upwell_core::{
-    Cardinality, DependencyDescriptor, ResolutionMode, ScopeId, StaticScope, TypeDescriptor,
+    Cardinality, DependencyDescriptor, ResolutionMode, Scope, ScopeId, ScopeKey, TypeDescriptor,
 };
 
 use super::*;
@@ -16,7 +16,7 @@ const SELECTED_TRAIT: TypeDescriptor = TypeDescriptor::of::<dyn Send>("SelectedT
 /// A standalone request branch with the same display label as [`MessageScope`].
 struct HttpScope;
 
-impl StaticScope for HttpScope {
+impl Scope for HttpScope {
     const ID: ScopeId = HTTP_ID;
     const RANK: u8 = 1;
     const NAME: &'static str = "Request";
@@ -25,7 +25,7 @@ impl StaticScope for HttpScope {
 /// A connection boundary reachable by websocket messages.
 struct ConnectionScope;
 
-impl StaticScope for ConnectionScope {
+impl Scope for ConnectionScope {
     const ID: ScopeId = CONNECTION_ID;
     const RANK: u8 = 2;
     const NAME: &'static str = "Connection";
@@ -34,7 +34,7 @@ impl StaticScope for ConnectionScope {
 /// A websocket message boundary sharing a display label with [`HttpScope`].
 struct MessageScope;
 
-impl StaticScope for MessageScope {
+impl Scope for MessageScope {
     const ID: ScopeId = MESSAGE_ID;
     const RANK: u8 = 1;
     const NAME: &'static str = "Request";
@@ -43,7 +43,7 @@ impl StaticScope for MessageScope {
 /// A provider scope with a rank reachable under legacy validation only.
 struct SiblingScope;
 
-impl StaticScope for SiblingScope {
+impl Scope for SiblingScope {
     const ID: ScopeId = SIBLING_ID;
     const RANK: u8 = 2;
     const NAME: &'static str = "Sibling";
@@ -75,7 +75,7 @@ fn component(
     id: &'static str,
     name: &'static str,
     ty: TypeDescriptor,
-    scope: &'static dyn Scope,
+    scope: ScopeKey,
     factories: fn() -> &'static [ComponentFactoryDescriptor],
 ) -> ComponentDescriptor {
     ComponentDescriptor {
@@ -86,7 +86,7 @@ fn component(
 
 fn reaches(consumer: ScopeId, dependency: ScopeId) -> bool {
     consumer == dependency
-        || dependency == Singleton.id()
+        || dependency == Singleton::ID
         || (consumer == MESSAGE_ID && dependency == CONNECTION_ID)
 }
 
@@ -120,14 +120,14 @@ fn topology_rejects_equal_label_sibling_dependency() {
         "http-consumer",
         "HttpConsumer",
         TypeDescriptor::of::<u8>("HttpConsumer"),
-        &HttpScope,
+        HttpScope::KEY,
         dependency_factory,
     );
     let dependency = component(
         "message-dependency",
         "Dependency",
         TypeDescriptor::of::<u16>("Dependency"),
-        &MessageScope,
+        MessageScope::KEY,
         no_dependency_factory,
     );
     let registry = ComponentRegistry {
@@ -148,14 +148,14 @@ fn topology_accepts_declared_ancestor_dependency() {
         "message-consumer",
         "MessageConsumer",
         TypeDescriptor::of::<u8>("MessageConsumer"),
-        &MessageScope,
+        MessageScope::KEY,
         dependency_factory,
     );
     let dependency = component(
         "connection-dependency",
         "Dependency",
         TypeDescriptor::of::<u16>("Dependency"),
-        &ConnectionScope,
+        ConnectionScope::KEY,
         no_dependency_factory,
     );
     let registry = ComponentRegistry {
@@ -172,14 +172,14 @@ fn topology_rejects_higher_rank_unreachable_sibling() {
         "http-consumer",
         "HttpConsumer",
         TypeDescriptor::of::<u8>("HttpConsumer"),
-        &HttpScope,
+        HttpScope::KEY,
         dependency_factory,
     );
     let dependency = component(
         "sibling-dependency",
         "Dependency",
         TypeDescriptor::of::<u16>("Dependency"),
-        &SiblingScope,
+        SiblingScope::KEY,
         no_dependency_factory,
     );
     let registry = ComponentRegistry {
@@ -200,21 +200,21 @@ fn topology_reports_registered_trait_providers_in_unreachable_sibling_scopes() {
         "http-consumer",
         "HttpConsumer",
         TypeDescriptor::of::<u8>("HttpConsumer"),
-        &HttpScope,
+        HttpScope::KEY,
         provider_dependency_factory,
     );
     let message_provider = component(
         "message-provider",
         "MessageProvider",
         TypeDescriptor::of::<u16>("MessageProvider"),
-        &MessageScope,
+        MessageScope::KEY,
         no_dependency_factory,
     );
     let sibling_provider = component(
         "sibling-provider",
         "SiblingProvider",
         TypeDescriptor::of::<u32>("SiblingProvider"),
-        &SiblingScope,
+        SiblingScope::KEY,
         no_dependency_factory,
     );
     let registry = ComponentRegistry {
@@ -261,7 +261,7 @@ fn topology_keeps_truly_absent_trait_provider_as_missing_dependency() {
         "http-consumer",
         "HttpConsumer",
         TypeDescriptor::of::<u8>("HttpConsumer"),
-        &HttpScope,
+        HttpScope::KEY,
         provider_dependency_factory,
     );
     let registry = ComponentRegistry {

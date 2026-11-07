@@ -1,20 +1,24 @@
 use std::any::TypeId;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use upwell_core::{DependencyDescriptor, ScopeId, Singleton, StaticScope};
+use upwell_core::{DependencyDescriptor, Scope, ScopeId, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, ComponentDescriptor, ComponentFactoryRole, ProviderSelectionModel,
     SelectedDependency,
 };
 
-use crate::scope::{PreparedScopeTopology, SeedDestination};
+use super::scope_snapshot::ScopeLayoutSnapshot;
+use crate::entry::{EntryDescriptor, EntryTable};
+use crate::scope::{PreparedScopeTopology, ScopeLayouts, SeedDestination};
 
 /// Immutable callback-free input for prepared-state tooling projection.
 pub(crate) struct ProjectionSnapshot {
     components: Vec<ComponentSnapshot>,
     candidates: Vec<CandidateSnapshot>,
+    entries: Vec<EntrySnapshot>,
     root_plan: Vec<ConstructionPlanEntry>,
     scope_plans: HashMap<ScopeId, Vec<ConstructionPlanEntry>>,
+    scope_layouts: HashMap<ScopeId, ScopeLayoutSnapshot>,
 }
 
 impl ProjectionSnapshot {
@@ -79,8 +83,10 @@ impl ProjectionSnapshot {
         Ok(Self {
             components,
             candidates: Vec::new(),
+            entries: Vec::new(),
             root_plan,
             scope_plans,
+            scope_layouts: HashMap::new(),
         })
     }
 
@@ -94,6 +100,39 @@ impl ProjectionSnapshot {
         self
     }
 
+    /// Captures every prepared entry with the selected target of each injected dependency,
+    /// and the construction facts of every scope layout.
+    pub(crate) fn with_entries(
+        mut self,
+        selection: &ProviderSelectionModel,
+        topology: &PreparedScopeTopology,
+        entries: &EntryTable,
+        layouts: &ScopeLayouts,
+    ) -> upwell_di::Result<Self> {
+        self.entries =
+            entries
+                .iter()
+                .map(|(id, entry)| {
+                    let plan = layouts.get(&entry.scope.id()).zip(layouts.entry(id)).map(
+                        |(layout, plan)| EntryPlanFacts {
+                            builds: plan
+                                .components(layout)
+                                .map(|component| component.id)
+                                .collect(),
+                            reads_seeds: plan.seeds_read(layout).map(|seed| seed.id).collect(),
+                        },
+                    );
+
+                    EntrySnapshot::capture(selection, topology, *entry, plan)
+                })
+                .collect::<upwell_di::Result<_>>()?;
+
+        self.scope_layouts =
+            ScopeLayoutSnapshot::capture_all(&self.components, &self.entries, layouts);
+
+        Ok(self)
+    }
+
     pub(crate) fn components(&self) -> &[ComponentSnapshot] {
         &self.components
     }
@@ -102,8 +141,16 @@ impl ProjectionSnapshot {
         &self.candidates
     }
 
+    pub(crate) fn entries(&self) -> &[EntrySnapshot] {
+        &self.entries
+    }
+
     pub(crate) fn root_plan(&self) -> &[ConstructionPlanEntry] {
         &self.root_plan
+    }
+
+    pub(crate) fn scope_layout(&self, scope: &ScopeId) -> Option<&ScopeLayoutSnapshot> {
+        self.scope_layouts.get(scope)
     }
 
     pub(crate) fn scope_plan(&self, scope: &ScopeId) -> Option<&[ConstructionPlanEntry]> {
@@ -264,6 +311,54 @@ impl DependencySnapshot {
         Ok(Self {
             descriptor,
             selected,
+        })
+    }
+}
+
+/// Callback-derived facts for one prepared entry.
+#[derive(Clone)]
+pub(crate) struct EntrySnapshot {
+    pub(crate) descriptor: EntryDescriptor,
+    pub(crate) targets: Vec<DependencySnapshot>,
+    /// What the entry's plan does when it opens its scope. `None` for an entry into the root
+    /// scope, which opens nothing.
+    pub(crate) plan: Option<EntryPlanFacts>,
+}
+
+/// What one prepared entry's plan does when it opens its scope.
+#[derive(Clone)]
+pub(crate) struct EntryPlanFacts {
+    /// The IDs of the components it builds, in construction order.
+    pub(crate) builds: Vec<&'static str>,
+    /// The IDs of the seeds it reads, directly or through what it builds or lazily reaches.
+    pub(crate) reads_seeds: Vec<&'static str>,
+}
+
+impl EntrySnapshot {
+    /// Selects each target the way a component living in the entry's scope would: provider
+    /// selection only reads the consumer's scope, so a factoryless stand-in named by the
+    /// entry key carries it.
+    fn capture(
+        selection: &ProviderSelectionModel,
+        topology: &PreparedScopeTopology,
+        descriptor: EntryDescriptor,
+        plan: Option<EntryPlanFacts>,
+    ) -> upwell_di::Result<Self> {
+        let key = descriptor.key.as_str();
+        let consumer = ComponentDescriptor::manual(
+            key,
+            key,
+            TypeDescriptor::of::<EntryDescriptor>("EntryDescriptor"),
+            descriptor.scope,
+        );
+
+        Ok(Self {
+            descriptor,
+            targets: (descriptor.targets)()
+                .into_iter()
+                .map(|target| DependencySnapshot::capture(selection, topology, consumer, target))
+                .collect::<upwell_di::Result<_>>()?,
+            plan,
         })
     }
 }

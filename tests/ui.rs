@@ -14,3 +14,24 @@ fn invalid_transition_recipes_fail_to_compile() {
 
     cases.compile_fail("tests/ui/recipes/*.rs");
 }
+
+#[test]
+fn invalid_entries_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/entries/*.rs");
+}
+
+#[test]
+fn eager_components_outside_scopes_below_the_root_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/construction/*.rs");
+}
+
+#[test]
+fn invalid_scope_declarations_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/scopes/*.rs");
+}

@@ -110,7 +110,7 @@ fn stomp_registers_every_message_seed_at_the_message_destination() {
     ] {
         assert_eq!(
             descriptor.scope.id(),
-            <upwell_axum::WebsocketMessage as upwell_axum::StaticScope>::ID
+            <upwell_axum::WebsocketMessage as upwell_axum::Scope>::ID
         );
         assert!(
             descriptor

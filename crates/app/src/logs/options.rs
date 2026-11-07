@@ -1,0 +1,43 @@
+//! How an instance captures its logs.
+
+use std::num::NonZeroUsize;
+
+use tracing::level_filters::LevelFilter;
+
+/// The records a subscriber's buffer holds unless [`LogOptions::buffer`] says otherwise.
+pub const DEFAULT_LOG_BUFFER: NonZeroUsize = NonZeroUsize::new(1024).expect("1024 is not zero");
+
+/// How one scope instance captures its logs, set on its builder.
+///
+/// Capture is off by default. Asking for it, with `capture_logs` or by taking a stream from a
+/// run, creates the instance's sink; an instance without one adds no per-event work.
+#[derive(Clone, Copy, Debug)]
+pub struct LogOptions {
+    /// Whether the instance captures logs.
+    pub capture: bool,
+    /// The capture level, or `None` to take whatever the subscriber's filter admits. A level
+    /// stricter than the filter narrows capture; a more verbose one only widens it as far as
+    /// the filter on the [`ScopeLogLayer`](super::ScopeLogLayer) lets events through.
+    pub level: Option<LevelFilter>,
+    /// The records each subscriber's buffer holds. When it is full, new records are dropped and
+    /// reported as [`ScopeLog::Lagged`](super::ScopeLog::Lagged). Never zero; clamped to what a channel
+    /// allows. Delivery is always bounded.
+    pub buffer: NonZeroUsize,
+}
+
+impl LogOptions {
+    /// Capture off, the default level and buffer.
+    pub const fn new() -> Self {
+        Self {
+            capture: false,
+            level: None,
+            buffer: DEFAULT_LOG_BUFFER,
+        }
+    }
+}
+
+impl Default for LogOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}

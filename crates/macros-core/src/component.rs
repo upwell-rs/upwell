@@ -11,8 +11,8 @@
 //! overridden ([`ComponentExt::defers_factory`] — as a service is, by a `#[handlers]` `#[init]`).
 
 use proc_macro2::TokenStream;
-use quote::quote;
-use syn::{GenericArgument, ItemStruct, LitStr, PathArguments, Type};
+use quote::{quote, quote_spanned};
+use syn::{GenericArgument, Ident, ItemStruct, LitStr, PathArguments, Type};
 
 use crate::attr::ComponentArgs;
 use crate::extend::{ComponentContext, ComponentExt};
@@ -71,6 +71,7 @@ pub fn expand<Ext: ComponentExt>(
         .scope
         .clone()
         .unwrap_or_else(|| paths.core("scope::Singleton"));
+    let construction = Construction::lower(args.eager.as_ref(), &scope_path, paths);
     let registrations_slice = args
         .factory_slice
         .clone()
@@ -115,6 +116,7 @@ pub fn expand<Ext: ComponentExt>(
         &registrations_slice,
         emit_default,
         &condition.root,
+        &construction.policy,
         paths,
     );
     let component = paths.core("Component");
@@ -133,6 +135,7 @@ pub fn expand<Ext: ComponentExt>(
     // The extension's appended surface (nothing for `#[component]`; the service header, RPC
     // slice, and client for `#[service]`).
     let ext = &args.ext;
+    let construction_check = &construction.check;
 
     // The framework-generated surface is server-only (the DI `Component` impl, field-injection
     // factory, `linkme` registration, providers, hooks). It is gated out on wasm; the extension
@@ -162,6 +165,8 @@ pub fn expand<Ext: ComponentExt>(
         const _: () = {
             #condition_items
 
+            #construction_check
+
             #factory
 
             #explicit
@@ -181,6 +186,38 @@ pub fn expand<Ext: ComponentExt>(
 
         #ext
     })
+}
+
+/// The lowered `eager` key: the descriptor's construction policy, and for an eager
+/// component a compile-time check that its scope lies below the root.
+struct Construction {
+    policy: TokenStream,
+    check: TokenStream,
+}
+
+impl Construction {
+    fn lower(eager: Option<&Ident>, scope_path: &syn::Path, paths: &Paths) -> Self {
+        let policy = paths.core("ScopedConstruction");
+        let scope_trait = paths.core("Scope");
+        let Some(eager) = eager else {
+            return Self {
+                policy: quote!(#policy::OnDemand),
+                check: quote!(),
+            };
+        };
+
+        Self {
+            policy: quote_spanned!(eager.span()=> #policy::Eager),
+            check: quote_spanned! {eager.span()=>
+                const _: () = ::core::assert!(
+                    !<#scope_path as #scope_trait>::IS_TRANSIENT
+                        && <#scope_path as #scope_trait>::RANK != ::core::primitive::u8::MAX,
+                    "`eager` applies only to scopes below the root: a singleton is built when \
+                     the application starts and a transient on every resolution",
+                );
+            },
+        }
+    }
 }
 
 /// Reports a malformed `#[when]` while keeping the item, so its lowered `#[when]` markers still

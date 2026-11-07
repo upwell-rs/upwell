@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use upwell_core::{Singleton as SingletonScope, TypeDescriptor};
+use upwell_core::{Scope, Singleton as SingletonScope, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentDescriptor, Injectable, RootResolver,
     root_resolver_descriptor,
@@ -31,7 +31,7 @@ pub(crate) static HOOK_MANAGER_DESCRIPTOR: ComponentDescriptor = ComponentDescri
     HOOK_MANAGER_ID,
     HOOK_MANAGER_NAME,
     TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-    &SingletonScope,
+    SingletonScope::KEY,
 );
 
 /// Rejects a factory-less root singleton that nothing seeded before any factory runs.
@@ -72,10 +72,10 @@ pub(crate) fn seed_directories(
     registry
         .components
         .push(ComponentDescriptor::of::<DirectoriesManager>());
-    instances.push(BoxedComponent {
-        ty: TypeDescriptor::of::<DirectoriesManager>(<DirectoriesManager as Component>::NAME),
-        value: Box::new(dirs.clone()),
-    });
+    instances.push(BoxedComponent::stored(
+        TypeDescriptor::of::<DirectoriesManager>(<DirectoriesManager as Component>::NAME),
+        dirs.clone(),
+    ));
 
     seed_dirs!(
         dirs; registry; instances;
@@ -92,16 +92,16 @@ fn seed_builtins(
     instances: &mut Vec<BoxedComponent>,
 ) {
     registry.components.push(SHUTDOWN_HANDLE_DESCRIPTOR);
-    instances.push(BoxedComponent {
-        ty: TypeDescriptor::of::<ShutdownHandle>(<ShutdownHandle as Component>::NAME),
-        value: Box::new(shutdown.handle()),
-    });
+    instances.push(BoxedComponent::stored(
+        TypeDescriptor::of::<ShutdownHandle>(<ShutdownHandle as Component>::NAME),
+        shutdown.handle(),
+    ));
 
     registry.components.push(root_resolver_descriptor());
-    instances.push(BoxedComponent {
-        ty: TypeDescriptor::of::<RootResolver>(<RootResolver as Component>::NAME),
-        value: Box::new(Injectable::into_stored(root_resolver.clone())),
-    });
+    instances.push(BoxedComponent::stored(
+        TypeDescriptor::of::<RootResolver>(<RootResolver as Component>::NAME),
+        Injectable::into_stored(root_resolver.clone()),
+    ));
 }
 
 /// Seeds one `Dir<K>` as a singleton instance.
@@ -113,10 +113,10 @@ fn seed_dir<K: DirKind>(
     registry
         .components
         .push(ComponentDescriptor::of::<Dir<K>>());
-    instances.push(BoxedComponent {
-        ty: TypeDescriptor::of::<Dir<K>>(<Dir<K> as Component>::NAME),
-        value: Box::new(dirs.dir::<K>()),
-    });
+    instances.push(BoxedComponent::stored(
+        TypeDescriptor::of::<Dir<K>>(<Dir<K> as Component>::NAME),
+        dirs.dir::<K>(),
+    ));
 }
 
 /// Seeds every framework singleton available before the protocol's pre-build step: the
@@ -134,10 +134,10 @@ pub(super) fn seed_framework(
     seed_builtins(shutdown, root_resolver, registry, instances);
 
     registry.components.push(RUNTIME_RELOADER_DESCRIPTOR);
-    instances.push(BoxedComponent {
-        ty: TypeDescriptor::of::<RuntimeReloader>(crate::builtins::reloader::RUNTIME_RELOADER_NAME),
-        value: Box::new(Injectable::into_stored(runtime_reloader.clone())),
-    });
+    instances.push(BoxedComponent::stored(
+        TypeDescriptor::of::<RuntimeReloader>(crate::builtins::reloader::RUNTIME_RELOADER_NAME),
+        Injectable::into_stored(runtime_reloader.clone()),
+    ));
     registry.components.push(HOOK_MANAGER_DESCRIPTOR);
 }
 
@@ -151,8 +151,8 @@ pub(super) fn seed_hook_manager(
         .flat_map(|component| (component.hooks)().iter().copied())
         .collect();
 
-    instances.push(BoxedComponent {
-        ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-        value: Box::new(Injectable::into_stored(HookManager::new(hooks))),
-    });
+    instances.push(BoxedComponent::stored(
+        TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
+        Injectable::into_stored(HookManager::new(hooks)),
+    ));
 }

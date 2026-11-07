@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: `eager` applies only to scopes below the root: a singleton is built when the application starts and a transient on every resolution
+ --> tests/ui/construction/eager_transient_alias.rs:7:36
+  |
+7 | #[component(scope = PerResolution, eager)]
+  |                                    ^^^^^ evaluation of `_::_` failed here

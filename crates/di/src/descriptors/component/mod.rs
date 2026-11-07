@@ -1,27 +1,36 @@
 use std::ops::Deref;
 use std::{any::Any, fmt, sync::Arc};
 
-use upwell_core::{ConditionDescriptor, DependencyDescriptor, Scope, Singleton, TypeDescriptor};
+use upwell_core::{
+    ConditionDescriptor, DependencyDescriptor, Scope, ScopeKey, Singleton, TypeDescriptor,
+};
 use upwell_hooks::{HookDescriptor, no_hooks};
 
+mod construction;
 mod context;
 mod factory;
 mod live;
+mod placement;
+mod planned;
 mod provider;
+mod resolve;
 mod snapshot;
 mod store;
 
+pub use construction::ScopedConstruction;
 pub use context::ComponentConstructionContext;
-pub(crate) use context::SharedStore;
+pub(crate) use context::{ComponentConstructionParts, HandleStorage, SharedStore};
 pub use factory::{
     ComponentFactories, ComponentFactory, ComponentFactoryDescriptor, ComponentFactoryRole,
-    DeclaredScope, Registration,
+    DeclaredScope, ReadyComponentFactory, Registration,
 };
 pub use live::{Dep, Live, LiveCell, LiveRebind, LiveRef};
+pub(crate) use planned::Running;
 pub use provider::{ProviderDescriptor, ProviderOrder, ProviderOrderDirection};
 pub use snapshot::GenerationSnapshot;
 pub(crate) use store::ScopeStore;
-pub use store::{BoxedComponent, from_boxed};
+pub(crate) use store::SlotStore;
+pub use store::{BoxedComponent, StoredValue, from_boxed};
 
 /// Metadata trait for types registerable as components.
 ///
@@ -57,7 +66,7 @@ pub trait ServiceComponent: Component {
 /// is keyed under; cloning a handle happens on every resolution, so it must be
 /// cheap.
 ///
-/// A scope does not box the handle directly — it boxes [`Stored`](Self::Stored),
+/// A scope does not store the handle directly — it stores [`Stored`](Self::Stored),
 /// the *slot* a handle is derived from. For `Arc<T>` and `Dep<T>` the slot is a
 /// shared [`Live<T>`]: an `Arc<T>` snapshots it (one fixed instance), a `Dep<T>`
 /// clones it (so a later swap is observed), and both find the *same* slot because
@@ -70,14 +79,28 @@ pub trait Injectable: Clone + Send + Sync + 'static {
     /// object (`dyn Trait + Send + Sync`) can key its providers.
     type Target: ?Sized + 'static;
 
-    /// The value actually held in a scope's box for this handle. `Arc<T>` and
-    /// `Dep<T>` both store a shared `Live<T>`, so they alias one swappable slot;
-    /// by-value handles store themselves.
+    /// The value actually held in a scope's storage for this handle. `Arc<T>` and
+    /// `Dep<T>` both store a `Live<T>`, so they alias one slot; by-value handles store
+    /// themselves.
+    ///
+    /// The root stores a swappable `Live<T>`, so every `Dep<T>` read from it shares the cell
+    /// a transition republishes. A scope below the root stores a fixed one
+    /// ([`into_fixed`](Self::into_fixed)): `Arc<T>` reads its instance directly, and each
+    /// `Dep<T>` read from it gets a cell of its own, because nothing republishes that
+    /// instance.
     type Stored: Clone + Send + Sync + 'static;
 
     /// Wraps a freshly built handle into its stored slot. Called once, when the
     /// instance is first inserted into a scope.
     fn into_stored(self) -> Self::Stored;
+
+    /// Wraps a freshly built handle stored in a scope below the root. No transition
+    /// rebinds such an instance, so a handle may store it without a swappable cell.
+    /// Defaults to [`into_stored`](Self::into_stored).
+    #[doc(hidden)]
+    fn into_fixed(self) -> Self::Stored {
+        self.into_stored()
+    }
 
     /// Derives this handle from a stored slot. Called on every resolution — a
     /// snapshot for `Arc<T>`, a shared clone for `Dep<T>`, a plain clone otherwise.
@@ -161,7 +184,8 @@ pub trait Wired {}
 ///
 /// `factories` returns the component's `{Type}Factories` slice (the field-injection
 /// default plus any `#[init]`/`factory =` contributions); deps live on each factory,
-/// not here. There is exactly one `ComponentDescriptor` per type.
+/// not here. A component registers one `ComponentDescriptor`; one that builds in several scopes
+/// is expanded into one placement per scope when the registry resolves it.
 ///
 /// `Copy` so the registry can own a flat `Vec<ComponentDescriptor>` holding both
 /// link-time-collected descriptors and ones synthesized at runtime for
@@ -179,13 +203,17 @@ pub struct ComponentDescriptor {
     pub id: &'static str,
     pub name: &'static str,
     pub ty: TypeDescriptor,
-    pub scope: &'static dyn Scope,
+    pub scope: ScopeKey,
     /// Optional root condition. Provider mappings inherit this component's eligibility.
     pub condition: Option<&'static ConditionDescriptor>,
     pub factories: fn() -> &'static [ComponentFactoryDescriptor],
     /// The component's `{Type}Hooks` slice (its `#[hook]` methods). Empty for a type
     /// that declares none — and for every manually-seeded instance.
     pub hooks: fn() -> &'static [HookDescriptor],
+    /// When an instance of the component's scope builds it: on demand (the default) or on
+    /// every opening of the scope. Only scopes below the root take
+    /// [`ScopedConstruction::Eager`].
+    pub construction: ScopedConstruction,
     /// Hidden typed generation adapter. Set for generated/typed descriptors
     /// ([`of`](Self::of) and macro-generated literals);
     /// `None` for raw [`manual`](Self::manual) descriptors, which are never
@@ -193,6 +221,11 @@ pub struct ComponentDescriptor {
     /// [`without_retention`](Self::without_retention) keeps it for live-cell access only.
     #[doc(hidden)]
     pub generation_snapshot: Option<GenerationSnapshot>,
+    /// Set on one placement of a component that builds in several scopes: the scope the
+    /// component declared, which factories without a scope of their own inherit. `None`
+    /// on every descriptor that has not been expanded into placements.
+    #[doc(hidden)]
+    pub declared_scope: Option<ScopeKey>,
 }
 
 /// The empty factory slice for a manually-provided instance: nothing to construct,
@@ -207,11 +240,13 @@ impl ComponentDescriptor {
             id: T::ID,
             name: T::NAME,
             ty: TypeDescriptor::of::<T>(T::NAME),
-            scope: &Singleton,
+            scope: Singleton::KEY,
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
+            construction: ScopedConstruction::OnDemand,
             generation_snapshot: Some(GenerationSnapshot::of::<T>()),
+            declared_scope: None,
         }
     }
 
@@ -223,7 +258,7 @@ impl ComponentDescriptor {
         id: &'static str,
         name: &'static str,
         ty: TypeDescriptor,
-        scope: &'static dyn Scope,
+        scope: ScopeKey,
     ) -> Self {
         Self {
             id,
@@ -233,7 +268,9 @@ impl ComponentDescriptor {
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
+            construction: ScopedConstruction::OnDemand,
             generation_snapshot: None,
+            declared_scope: None,
         }
     }
 
@@ -272,6 +309,7 @@ impl fmt::Debug for ComponentDescriptor {
             .field("ty", &self.ty)
             .field("scope", &self.scope.name())
             .field("condition", &self.condition)
+            .field("construction", &self.construction)
             .field("dependencies", &self.dependencies())
             .finish_non_exhaustive()
     }

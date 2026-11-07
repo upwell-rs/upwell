@@ -8,37 +8,43 @@ async fn fresh_target_resolves_from_its_declared_scope_ancestry() {
         id: "target-provider",
         name: "TargetProvider",
         ty: TypeDescriptor::of::<TargetProvider>("TargetProvider"),
-        scope: &FreshTargetScope,
+        scope: FreshTargetScope::KEY,
         condition: None,
         factories: target_provider_factories,
         hooks: upwell_hooks::no_hooks,
+        construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        declared_scope: None,
     };
     let owner_provider = ComponentDescriptor {
         id: "owner-provider",
         name: "OwnerProvider",
         ty: TypeDescriptor::of::<OwnerProvider>("OwnerProvider"),
-        scope: &FreshOwnerScope,
+        scope: FreshOwnerScope::KEY,
         condition: None,
         factories: owner_provider_factories,
         hooks: upwell_hooks::no_hooks,
+        construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        declared_scope: None,
     };
     let fresh_target = ComponentDescriptor {
         id: "fresh-target",
         name: "FreshTarget",
         ty: TypeDescriptor::of::<FreshTarget>("FreshTarget"),
-        scope: &FreshTargetScope,
+        scope: FreshTargetScope::KEY,
         condition: None,
         factories: fresh_target_factories,
         hooks: upwell_hooks::no_hooks,
+        construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        declared_scope: None,
     };
     let target_seed = ComponentDescriptor::manual(
         "target-seed",
         "TargetSeed",
         TypeDescriptor::of::<TargetSeed>("TargetSeed"),
-        &FreshTargetScope,
+        FreshTargetScope::KEY,
     );
     let components = [target_provider, owner_provider, fresh_target, target_seed]
         .into_iter()
@@ -58,7 +64,7 @@ async fn fresh_target_resolves_from_its_declared_scope_ancestry() {
             .expect("root builds");
     let seed = boxed_component("TargetSeed", Arc::new(TargetSeed("target-seed")));
     let target_scope = ScopeContainer::open_child(
-        &FreshTargetScope,
+        FreshTargetScope::KEY,
         root,
         Arc::clone(&registry),
         &[target_seed, target_provider],
@@ -67,7 +73,7 @@ async fn fresh_target_resolves_from_its_declared_scope_ancestry() {
     .await
     .expect("target scope opens");
     let owner_scope = ScopeContainer::open_child(
-        &FreshOwnerScope,
+        FreshOwnerScope::KEY,
         target_scope,
         Arc::clone(&registry),
         &[owner_provider],
@@ -123,35 +129,39 @@ async fn fresh_reconstructs_a_transient_against_the_requesting_scope() {
                 .await?
                 .ok_or(Error::MissingComponent("RootBound"))?;
 
-            Ok(BoxedComponent {
-                ty: TypeDescriptor::of::<TransientLeaf>("TransientLeaf"),
-                value: Box::new(Injectable::into_stored(TransientLeaf { bound })),
-            })
+            Ok(BoxedComponent::stored(
+                TypeDescriptor::of::<TransientLeaf>("TransientLeaf"),
+                Injectable::into_stored(TransientLeaf { bound }),
+            ))
         })
     }
 
     static TRANSIENT_LEAF_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
         id: "static",
         construct: transient_leaf_factory,
+        construct_ready: None,
         dependencies: no_dependencies,
         role: ComponentFactoryRole::Explicit,
+        scope: None,
     }];
 
     let bound = ComponentDescriptor::manual(
         "root-bound",
         "RootBound",
         TypeDescriptor::of::<RootBound>("RootBound"),
-        &Singleton,
+        Singleton::KEY,
     );
     let transient_leaf = ComponentDescriptor {
         id: "transient-leaf",
         name: "TransientLeaf",
         ty: TypeDescriptor::of::<TransientLeaf>("TransientLeaf"),
-        scope: &Transient,
+        scope: Transient::KEY,
         condition: None,
         factories: || &TRANSIENT_LEAF_FACTORY,
         hooks: upwell_hooks::no_hooks,
+        construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        declared_scope: None,
     };
     let components = [(bound.ty.type_id, bound)].into_iter().collect();
     let transients = [(transient_leaf.ty.type_id, transient_leaf)]

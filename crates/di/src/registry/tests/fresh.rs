@@ -45,13 +45,13 @@ static CONNECTION_TARGET_DEP_ON_SHARED: [DependencyDescriptor; 1] = [dependency(
 fn validate_rejects_fresh_target_with_shorter_lived_scope() {
     let request = scoped!(
         "RequestFresh",
-        &Request,
+        Request::KEY,
         &[],
         TypeDescriptor::of::<u128>("RequestFresh"),
     );
     let singleton = scoped!(
         "FreshConsumer",
-        &Singleton,
+        Singleton::KEY,
         &SINGLETON_FRESH_REQUEST,
         TypeDescriptor::of::<i8>("FreshConsumer"),
     );
@@ -70,19 +70,19 @@ fn validate_rejects_fresh_target_with_shorter_lived_scope() {
 fn validate_selects_nested_fresh_dependencies_from_target_scope() {
     let provider = scoped!(
         "ConnectionProvider",
-        &Connection,
+        Connection::KEY,
         &[],
         TypeDescriptor::of::<usize>("ConnectionProvider"),
     );
     let target = scoped!(
         "ConnectionFreshTarget",
-        &Connection,
+        Connection::KEY,
         &CONNECTION_TARGET_DEP_ON_SHARED,
         TypeDescriptor::of::<i128>("ConnectionFreshTarget"),
     );
     let consumer = scoped!(
         "RequestFreshConsumer",
-        &Request,
+        Request::KEY,
         &REQUEST_FRESH_CONNECTION_TARGET,
         TypeDescriptor::of::<isize>("RequestFreshConsumer"),
     );
@@ -100,8 +100,7 @@ fn validate_selects_nested_fresh_dependencies_from_target_scope() {
             &registry.components,
             &selection,
             &|consumer_scope, dependency_scope| {
-                if consumer_scope.id() == Connection.id()
-                    && dependency_scope.id() == Connection.id()
+                if consumer_scope.id() == Connection::ID && dependency_scope.id() == Connection::ID
                 {
                     selected_from_target_scope.set(true);
                 }
@@ -121,7 +120,7 @@ fn validate_selects_nested_fresh_dependencies_from_target_scope() {
 fn validate_rejects_fresh_collection_with_accessible_factoryless_provider() {
     let consumer = scoped!(
         "FreshCollectionConsumer",
-        &Singleton,
+        Singleton::KEY,
         &SINGLETON_FRESH_SHARED_COLLECTION,
         TypeDescriptor::of::<u64>("FreshCollectionConsumer"),
     );
@@ -129,7 +128,7 @@ fn validate_rejects_fresh_collection_with_accessible_factoryless_provider() {
         "manual-provider",
         "ManualProvider",
         TypeDescriptor::of::<u8>("ManualProvider"),
-        &Singleton,
+        Singleton::KEY,
     );
     let registry = ComponentRegistry {
         components: vec![consumer, manual],
@@ -149,7 +148,7 @@ fn validate_rejects_fresh_collection_with_accessible_factoryless_provider() {
 fn validate_rejects_fresh_keyed_with_accessible_factoryless_provider() {
     let consumer = scoped!(
         "FreshKeyedConsumer",
-        &Singleton,
+        Singleton::KEY,
         &SINGLETON_FRESH_SHARED_KEYED,
         TypeDescriptor::of::<u64>("FreshKeyedConsumer"),
     );
@@ -157,7 +156,7 @@ fn validate_rejects_fresh_keyed_with_accessible_factoryless_provider() {
         "manual-provider",
         "ManualProvider",
         TypeDescriptor::of::<u8>("ManualProvider"),
-        &Singleton,
+        Singleton::KEY,
     );
     let registry = ComponentRegistry {
         components: vec![consumer, manual],
@@ -188,13 +187,13 @@ fn validate_allows_lazy_dependency_on_transient_target() {
     }];
     let transient = scoped!(
         "TransientLazy",
-        &Transient,
+        Transient::KEY,
         &[],
         TypeDescriptor::of::<u32>("TransientLazy"),
     );
     let singleton = scoped!(
         "LazyConsumer",
-        &Singleton,
+        Singleton::KEY,
         &SINGLETON_LAZY_TRANSIENT,
         TypeDescriptor::of::<u8>("LazyConsumer"),
     );

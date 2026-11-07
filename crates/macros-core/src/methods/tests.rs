@@ -71,3 +71,85 @@ fn a_rejected_marker_keeps_the_stripped_impl_block() {
         "the markers are stripped: {item}"
     );
 }
+
+#[test]
+fn a_scoped_init_registers_its_scope_under_a_name_of_its_own() {
+    let expanded = expansion(syn::parse_quote! {
+        impl Store {
+            #[init(scope = Connection)]
+            fn from_connection() -> Self { Self }
+        }
+    });
+
+    for needle in [
+        "__upwell_init_from_connection",
+        "< Connection as",
+        "Scope > :: KEY",
+    ] {
+        assert!(
+            expanded.contains(needle),
+            "a scoped init emits `{needle}`: {expanded}"
+        );
+    }
+}
+
+#[test]
+fn an_unscoped_init_keeps_the_inherited_scope_and_the_uniqueness_guard() {
+    let expanded = expansion(syn::parse_quote! {
+        impl Store {
+            #[init]
+            fn build() -> Self { Self }
+        }
+    });
+
+    assert!(
+        expanded.contains("async fn init"),
+        "the fixed-name wrapper stays the uniqueness guard: {expanded}"
+    );
+    assert!(
+        expanded.contains("scope : :: core :: option :: Option :: None"),
+        "the factory inherits the component scope: {expanded}"
+    );
+}
+
+#[test]
+fn bound_init_parameters_are_wrapped_and_stripped() {
+    let expanded = expansion(syn::parse_quote! {
+        impl Store {
+            #[init]
+            fn build(
+                #[config("a.b")] cfg: Cfg<Settings>,
+                #[qualifier = "main"] backend: Arc<dyn Backend>,
+            ) -> Self { Self }
+        }
+    });
+
+    for needle in ["# [config", "# [qualifier"] {
+        assert!(
+            !expanded.contains(needle),
+            "`{needle}` is stripped: {expanded}"
+        );
+    }
+
+    for needle in ["resolve_path", "resolve_qualified"] {
+        assert!(
+            expanded.contains(needle),
+            "the wrapper calls `{needle}`: {expanded}"
+        );
+    }
+}
+
+#[test]
+fn an_unknown_init_argument_is_rejected_at_the_argument() {
+    let expanded = expansion(syn::parse_quote! {
+        impl Store {
+            #[init(priority = 1)]
+            fn build() -> Self { Self }
+        }
+    });
+
+    assert!(
+        expanded.contains("unknown `#[init]` argument"),
+        "an unknown argument is a compile error: {expanded}"
+    );
+}

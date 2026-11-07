@@ -1,15 +1,20 @@
 use upwell_config::{
     ConditionFactSource, ConditionFacts, ConfigBinding, ConfigManager, ConfigProperties,
 };
-use upwell_core::{Descriptor, Singleton as SingletonScope, TypeDescriptor};
-use upwell_di::{BoxedComponent, Component, ComponentDescriptor, Injectable, ProviderDescriptor};
+use upwell_core::{Descriptor, EntryKey, Scope, Singleton as SingletonScope, TypeDescriptor};
+use upwell_di::{
+    BoxedComponent, Component, ComponentDescriptor, Injectable, ProviderDescriptor,
+    UnplannedConstruction,
+};
 use upwell_dirs::DirectoriesManager;
 
 use super::App;
+use crate::entry::{EntryDescriptor, EntryTargets};
 use crate::host::ExecutionMode;
 use crate::plugin::{EarlyPluginCatalog, Plugin, PluginCatalog, PluginWithOptions};
 use crate::protocol::ProtocolDefinition;
 use crate::registry::AppRegistry;
+use crate::scope::ScopeDeclaration;
 
 /// Assembles an [`App`] from an explicit set of components and a protocol definition.
 ///
@@ -113,20 +118,20 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
             T::ID,
             T::NAME,
             TypeDescriptor::of::<T>(T::NAME),
-            &SingletonScope,
+            SingletonScope::KEY,
         ));
 
-        self.instances.push(BoxedComponent {
-            ty: TypeDescriptor::of::<T>(T::NAME),
-            value: Box::new(Injectable::into_stored(value.into_handle())),
-        });
+        self.instances.push(BoxedComponent::stored(
+            TypeDescriptor::of::<T>(T::NAME),
+            Injectable::into_stored(value.into_handle()),
+        ));
 
         self
     }
 
-    /// Merges every link-time-registered component and provider descriptor (and the
-    /// protocol's own variants) into the app, and enables
-    /// config auto-discovery.
+    /// Merges every link-time-registered component, provider, `#[entry]` and `#[scope]`
+    /// descriptor (and the protocol's own variants) into the app, and enables config
+    /// auto-discovery.
     pub fn auto_discover(mut self) -> Self {
         let discovered = AppRegistry::collect();
 
@@ -134,6 +139,14 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
 
         for provider in discovered.providers {
             self.registry.add_provider(provider);
+        }
+
+        for entry in discovered.entries {
+            self.registry.add_entry(entry);
+        }
+
+        for scope in discovered.scopes {
+            self.registry.add_scope(scope);
         }
 
         self.auto_discovery_enabled = true;
@@ -180,6 +193,60 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
     /// [`ProviderDescriptor::of`].
     pub fn provider_descriptor(mut self, descriptor: &'static ProviderDescriptor) -> Self {
         self.registry.add_provider(*descriptor);
+
+        self
+    }
+
+    /// Registers an entry into scope `S` that injects `T`, a tuple of injectable types, under
+    /// the stable identity `key`.
+    ///
+    /// Preparation fails when `S` is not opened by the active protocol, or when a target
+    /// cannot be resolved from `S`.
+    pub fn scope_entry<S: Scope, T: EntryTargets>(self, key: EntryKey) -> Self {
+        self.entry_descriptor(EntryDescriptor::new::<S, T>(key))
+    }
+
+    /// Fails resolutions that build, on demand, a component the entry their scope was opened
+    /// for does not declare, to surface drift between declared entries and what the
+    /// application resolves, for example in tests.
+    ///
+    /// An entry declares what it injects, including what its lazy and deferred parameters
+    /// reach. Scopes opened without an entry, such as connection scopes, build on demand as
+    /// usual.
+    pub fn deny_unplanned(mut self) -> Self {
+        self.registry.unplanned = UnplannedConstruction::Deny;
+
+        self
+    }
+
+    /// Registers the entry `E` declares, such as the marker type an `#[entry]` function
+    /// generates. An entry that discovery also registers is kept once.
+    pub fn entry<E>(self) -> Self
+    where
+        E: Descriptor<EntryDescriptor>,
+    {
+        self.entry_descriptor(<E as Descriptor<EntryDescriptor>>::DESCRIPTOR)
+    }
+
+    /// Registers an entry descriptor, for entries assembled without a typed target tuple.
+    pub fn entry_descriptor(mut self, descriptor: EntryDescriptor) -> Self {
+        self.registry.add_entry(descriptor);
+
+        self
+    }
+
+    /// Registers the scope `S` declares, such as a `#[scope]` type, beside the protocol's
+    /// topology. A scope that discovery also registers is kept once.
+    pub fn scope<S>(self) -> Self
+    where
+        S: Descriptor<ScopeDeclaration>,
+    {
+        self.scope_declaration(<S as Descriptor<ScopeDeclaration>>::DESCRIPTOR)
+    }
+
+    /// Registers a scope declaration, for scopes declared without `#[scope]`.
+    pub fn scope_declaration(mut self, declaration: ScopeDeclaration) -> Self {
+        self.registry.add_scope(declaration);
 
         self
     }

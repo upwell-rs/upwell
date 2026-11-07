@@ -3,18 +3,22 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use upwell_core::{Resolver, ResolverCtx, ResolverSet, Scope};
+use upwell_core::{Resolver, ResolverCtx, ResolverSet, ScopeKey};
 
 use crate::descriptors::{Component, Injectable, component::ScopeStore};
 
 mod candidate;
 mod hot_update;
 mod live;
+mod on_demand;
 mod open;
 mod order;
+mod params;
 mod resolve;
 mod resolver_slot;
 mod scope_registry;
+mod seed;
+mod selected;
 mod snapshot;
 mod transient;
 
@@ -22,7 +26,8 @@ pub use order::topological_sort;
 pub(crate) use resolver_slot::ScopeResolverSlot;
 pub use scope_registry::ScopeRegistry;
 pub(crate) use transient::{
-    construct_fresh_boxed, construct_transient, construct_transient_provider,
+    construct_fresh_boxed, construct_planned_transient, construct_transient,
+    construct_transient_provider,
 };
 
 /// One scope's constructed instances, layered over an optional parent scope.
@@ -36,12 +41,13 @@ pub(crate) use transient::{
 /// resolving components by type — used by hooks and config-targeted resolution) plus
 /// any *external* resolvers (the config store) threaded in at build.
 pub struct ScopeContainer {
-    scope: &'static dyn Scope,
+    scope: ScopeKey,
     store: ScopeStore,
     parent: Option<Arc<ScopeContainer>>,
     registry: Arc<ScopeRegistry>,
     resolver_base: ResolverSet,
     resolvers: std::sync::OnceLock<ResolverSet>,
+    source: ComponentSource,
     slot: ScopeResolverSlot,
     generation_lease: Option<Arc<dyn Any + Send + Sync>>,
     drop_guard: std::sync::OnceLock<Box<dyn Any + Send + Sync>>,
@@ -49,7 +55,11 @@ pub struct ScopeContainer {
 
 impl ResolverCtx for ScopeContainer {
     fn resolver(&self, kind: TypeId) -> Option<&dyn Any> {
-        self.resolvers().resolver(kind)
+        if kind == TypeId::of::<ComponentSource>() {
+            return Some(&self.source);
+        }
+
+        self.resolver_base.resolver(kind)
     }
 }
 
@@ -79,26 +89,42 @@ impl ComponentSource {
 
 impl ScopeContainer {
     /// The scope this container holds.
-    pub fn scope(&self) -> &'static dyn Scope {
+    pub fn scope(&self) -> ScopeKey {
         self.scope
     }
 
-    /// The external resolvers threaded into this scope (config store, …), shared with
-    /// child scopes.
+    /// The external resolvers threaded into this scope (config store, …) plus this scope's
+    /// own [`ComponentSource`], built on first call.
+    ///
+    /// The container answers [`ResolverCtx`] lookups without this set, and child scopes
+    /// inherit [`inherited_resolvers`](Self::inherited_resolvers), so opening a scope never
+    /// copies the set.
     pub fn resolvers(&self) -> &ResolverSet {
         self.resolvers.get_or_init(|| {
-            let container = self
-                .slot
-                .resolve()
-                .expect("built scope resolver slot remains attached");
             let mut resolvers = self.resolver_base.clone();
 
             resolvers.insert(Arc::new(ComponentSource {
-                container: Arc::downgrade(&container),
+                container: self.source.container.clone(),
             }));
 
             resolvers
         })
+    }
+
+    /// The external resolvers a scope opened under this one, or a context built over it,
+    /// starts from. Every container answers its own [`ComponentSource`] itself.
+    pub(crate) fn inherited_resolvers(&self) -> ResolverSet {
+        self.resolver_base.clone()
+    }
+
+    /// The instances this scope holds.
+    pub(crate) fn store(&self) -> &ScopeStore {
+        &self.store
+    }
+
+    /// This scope's own [`ComponentSource`].
+    pub(crate) fn source(&self) -> &ComponentSource {
+        &self.source
     }
 
     pub(crate) fn registry(&self) -> Arc<ScopeRegistry> {
@@ -132,7 +158,17 @@ impl ScopeContainer {
         })
     }
 
-    pub(crate) fn can_access(&self, scope: &'static dyn Scope) -> bool {
+    /// The instance this scope opened under, `None` for the root.
+    pub(crate) fn parent(&self) -> Option<&Arc<ScopeContainer>> {
+        self.parent.as_ref()
+    }
+
+    /// The root container at the top of this scope's chain, while it is alive.
+    pub(crate) fn root_handle(&self) -> Option<Arc<ScopeContainer>> {
+        self.root_container().source.container.upgrade()
+    }
+
+    pub(crate) fn can_access(&self, scope: ScopeKey) -> bool {
         if scope.is_transient() || self.scope.id() == scope.id() {
             return true;
         }

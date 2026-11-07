@@ -95,6 +95,7 @@ pub(super) fn exchange(
         let candidate = std::ffi::CString::new(candidate.as_os_str().as_bytes())
             .map_err(|error| ExchangeError::Io(std::io::Error::other(error)))?;
         // SAFETY: both paths are valid nul-terminated strings and the syscall borrows them only.
+        #[allow(unsafe_code)]
         let result = unsafe {
             libc::syscall(
                 libc::SYS_renameat2,
@@ -125,6 +126,7 @@ pub(super) fn exchange(
         let candidate_c = std::ffi::CString::new(candidate.as_os_str().as_bytes())
             .map_err(|error| ExchangeError::Io(std::io::Error::other(error)))?;
         // SAFETY: both paths are valid nul-terminated strings and the call borrows them only.
+        #[allow(unsafe_code)]
         let result =
             unsafe { libc::renamex_np(manifest.as_ptr(), candidate_c.as_ptr(), libc::RENAME_SWAP) };
         if result != 0 {
@@ -226,6 +228,7 @@ fn same_file(left: &File, right: &File) -> std::io::Result<bool> {
     Ok(left.dev() == right.dev() && left.ino() == right.ino())
 }
 
+#[allow(unsafe_code)]
 pub(super) fn copy_metadata(source: &File, destination: &File) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     {
@@ -327,6 +330,7 @@ pub(super) fn verify_metadata(source: &File, destination: &File) -> std::io::Res
 }
 
 #[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
 fn acl(file: &File) -> std::io::Result<Vec<u8>> {
     use std::ffi::{CStr, c_char, c_int, c_void};
     use std::os::fd::AsRawFd as _;

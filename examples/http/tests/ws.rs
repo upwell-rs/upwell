@@ -16,6 +16,8 @@ use upwell::prelude::*;
 use upwell::{component, methods};
 use upwell_test_utils::{TestEnvironment, TestServer, deadline};
 
+mod context_report;
+
 app! {
     /// Generated host for WebSocket integration tests.
     app WebsocketTestApplication {
@@ -86,6 +88,23 @@ impl Sock {
         Greeting { message, count }
     }
 
+    /// Reports the invocation context of a handler injecting nothing: its message scope never
+    /// opens, so the connection scope is the innermost one.
+    #[message("context")]
+    async fn context(&self, _msg: Who) -> String {
+        context_report::describe()
+    }
+
+    /// Reports the invocation context of a handler injecting a message-scoped component.
+    #[message("context-scoped")]
+    async fn context_scoped(
+        &self,
+        _msg: Who,
+        Inject(_ticket): Inject<Arc<MessageTicket>>,
+    ) -> String {
+        context_report::describe()
+    }
+
     /// Mixes the JSON payload with an injected, message-scoped `MessageTicket`.
     #[message("ticket")]
     async fn ticket(&self, msg: Who, Inject(ticket): Inject<Arc<MessageTicket>>) -> Ticketed {
@@ -96,6 +115,42 @@ impl Sock {
             ticket: ticket.id,
         }
     }
+}
+
+#[test]
+fn mounted_message_handlers_register_entries_in_the_message_scope() {
+    let environment = TestEnvironment::new("upwell-http-ws-entries-");
+    let prepared = WebsocketTestApplication::builder()
+        .expect("app builder")
+        .config_source(environment.config())
+        .directories(environment.directories())
+        .register_ws::<JsonWs>("/ws")
+        .prepare()
+        .expect("app prepares");
+
+    let entries = prepared
+        .entries()
+        .entries()
+        .iter()
+        .filter(|entry| entry.key.namespace() == "ws")
+        .map(|entry| {
+            (
+                entry.key.as_str(),
+                entry.scope.id(),
+                (entry.targets)().len(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        entries,
+        [
+            ("ws/sock.context", WebsocketMessage::ID, 0),
+            ("ws/sock.context_scoped", WebsocketMessage::ID, 1),
+            ("ws/sock.greet", WebsocketMessage::ID, 0),
+            ("ws/sock.ticket", WebsocketMessage::ID, 1),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -211,6 +266,46 @@ async fn ws_controller_dispatches_and_injects() {
         }
 
         other => panic!("expected remote ws error, got {other:?}"),
+    }
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn ws_handlers_run_in_the_message_context() {
+    let environment = TestEnvironment::new("upwell-http-ws-context-");
+    let app = WebsocketTestApplication::builder()
+        .expect("app builder")
+        .config_source(environment.config())
+        .directories(environment.directories())
+        .register_ws::<JsonWs>("/ws")
+        .build()
+        .await
+        .expect("app builds");
+    let server = TestServer::start_with_guard(app, environment).await;
+    let (mut socket, _response) = deadline(
+        "raw WebSocket connect",
+        tokio_tungstenite::connect_async(format!("ws://{}/ws", server.address())),
+    )
+    .await
+    .expect("ws connect");
+
+    for (id, destination, expected) in [
+        (1, "context", "message:connection"),
+        (2, "context-scoped", "message:message"),
+    ] {
+        let frame = format!(r#"{{"dest":"{destination}","id":{id},"payload":{{"who":"me"}}}}"#);
+
+        deadline(
+            "send context frame",
+            socket.send(Message::Text(frame.into())),
+        )
+        .await
+        .expect("send context frame");
+
+        let reply = next_json(&mut socket).await;
+
+        assert_eq!(reply["ok"], expected, "{destination}");
     }
 
     server.shutdown().await;

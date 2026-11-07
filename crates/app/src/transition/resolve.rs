@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
-use upwell_core::StaticScope;
+use upwell_core::Scope;
 use upwell_di::{
     ComponentDescriptor, DependencyDemand, EffectiveGraph, EffectiveNodeRole, EffectiveTarget,
     NodeAction, PlannedNode, TransitionPlan,

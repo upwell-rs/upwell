@@ -38,6 +38,7 @@ impl LocalDescriptor {
 }
 
 impl Drop for LocalDescriptor {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
         // SAFETY: this wrapper is constructed only from LocalAlloc-returning APIs.
         unsafe { LocalFree(self.0) };
@@ -46,11 +47,13 @@ impl Drop for LocalDescriptor {
 
 struct OwnedDirectory(HANDLE);
 
-// Windows directory handles may be closed from any thread. Access to the collection
-// that owns them is synchronized by `Dir`.
+// SAFETY: a Windows directory handle is a kernel object reference that may be used and closed
+// from any thread, and `OwnedDirectory` has no other state.
+#[allow(unsafe_code)]
 unsafe impl Send for OwnedDirectory {}
 
 impl Drop for OwnedDirectory {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
         // SAFETY: this wrapper is constructed only from successful CreateFileW calls.
         unsafe { CloseHandle(self.0) };
@@ -131,6 +134,7 @@ fn private_sddl(user_sid: &str) -> String {
     format!("O:{user_sid}D:P(A;OICI;FA;;;{user_sid})(A;OICI;FA;;;SY)")
 }
 
+#[allow(unsafe_code)]
 fn create_private_directory(
     path: &Path,
     security_attributes: &SECURITY_ATTRIBUTES,
@@ -151,6 +155,7 @@ fn create_private_directory(
     Err(error)
 }
 
+#[allow(unsafe_code)]
 fn open_directory(path: &Path) -> io::Result<OwnedDirectory> {
     let encoded_path = wide_null(path.as_os_str());
     // SAFETY: path is NUL-terminated. The returned owned handle is closed by its
@@ -205,6 +210,7 @@ fn open_directory(path: &Path) -> io::Result<OwnedDirectory> {
     Ok(handle)
 }
 
+#[allow(unsafe_code)]
 fn descriptor_from_sddl(sddl: &str) -> io::Result<LocalDescriptor> {
     let encoded_sddl: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
     let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
@@ -241,6 +247,7 @@ fn apply_dacl(path: &Path, sddl: &str) -> io::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(unsafe_code)]
 fn apply_security(path: &Path, sddl: &str, security_information: u32) -> io::Result<()> {
     let descriptor = descriptor_from_sddl(sddl)?;
     let encoded_path = wide_null(path.as_os_str());
@@ -261,6 +268,7 @@ fn apply_security(path: &Path, sddl: &str, security_information: u32) -> io::Res
     Ok(())
 }
 
+#[allow(unsafe_code)]
 fn verify_private_acl(path: &Path, expected_sddl: &str) -> io::Result<()> {
     let encoded_path = wide_null(path.as_os_str());
     let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
@@ -305,6 +313,7 @@ fn verify_private_acl(path: &Path, expected_sddl: &str) -> io::Result<()> {
     Ok(())
 }
 
+#[allow(unsafe_code)]
 fn descriptor_to_sddl(descriptor: PSECURITY_DESCRIPTOR) -> io::Result<String> {
     let mut encoded: PWSTR = ptr::null_mut();
     let mut length = 0u32;
@@ -329,7 +338,9 @@ fn descriptor_to_sddl(descriptor: PSECURITY_DESCRIPTOR) -> io::Result<String> {
         ));
     }
 
-    // The reported length includes the trailing NUL for this API.
+    // SAFETY: the call above succeeded, so `encoded` points to `length` initialized UTF-16 units
+    // (including the trailing NUL) that stay allocated until the `LocalFree` below. The reported
+    // length includes the trailing NUL for this API.
     let units = unsafe { std::slice::from_raw_parts(encoded, length as usize) };
     let units = units.strip_suffix(&[0]).unwrap_or(units);
     let result = String::from_utf16(units)
@@ -340,6 +351,7 @@ fn descriptor_to_sddl(descriptor: PSECURITY_DESCRIPTOR) -> io::Result<String> {
     result
 }
 
+#[allow(unsafe_code)]
 fn current_user_sid_string() -> io::Result<String> {
     let mut token: HANDLE = ptr::null_mut();
     // SAFETY: token points to writable storage; the pseudo process handle is valid.
@@ -355,10 +367,11 @@ fn current_user_sid_string() -> io::Result<String> {
     result
 }
 
+#[allow(unsafe_code)]
 fn token_user_sid_string(token: HANDLE) -> io::Result<String> {
     let mut required = 0u32;
-    // The first call obtains the required size and is expected to fail with
-    // ERROR_INSUFFICIENT_BUFFER.
+    // SAFETY: a null buffer of length zero is the documented size query, `required` is writable
+    // storage, and the call is expected to fail with ERROR_INSUFFICIENT_BUFFER.
     unsafe {
         GetTokenInformation(token, TokenUser, ptr::null_mut(), 0, &mut required);
     }
@@ -397,6 +410,7 @@ fn token_user_sid_string(token: HANDLE) -> io::Result<String> {
     sid_to_string(user.User.Sid)
 }
 
+#[allow(unsafe_code)]
 fn sid_to_string(sid: PSID) -> io::Result<String> {
     let mut value: PWSTR = ptr::null_mut();
     // SAFETY: sid is supplied by a successful Windows security API.
@@ -404,6 +418,8 @@ fn sid_to_string(sid: PSID) -> io::Result<String> {
         return Err(io::Error::last_os_error());
     }
 
+    // SAFETY: a successful ConvertSidToStringSidW returns a NUL-terminated string, so the scan stops
+    // at the terminator without leaving the allocation.
     let len = unsafe {
         let mut len = 0;
         while *value.add(len) != 0 {

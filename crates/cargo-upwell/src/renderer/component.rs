@@ -271,6 +271,7 @@ fn constrain_compiler_process(
 }
 
 #[cfg(windows)]
+#[allow(unsafe_code)]
 fn constrain_compiler_process(
     child: &std::process::Child,
     memory_bytes: usize,
@@ -316,9 +317,11 @@ fn constrain_compiler_process(
             std::io::Error::last_os_error(),
         ));
     }
-    // SAFETY: snapshot is closed below and entry is initialized with its required size.
+    // SAFETY: flags request a snapshot of every thread, and the returned handle is closed on every
+    // path below.
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
     if snapshot == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+        // SAFETY: job was created above, is still open, and this error path closes it exactly once.
         unsafe { CloseHandle(job) };
         return Err(ComponentRenderError::CompilerIo(
             std::io::Error::last_os_error(),
@@ -336,6 +339,7 @@ fn constrain_compiler_process(
             if !thread.is_null() {
                 // SAFETY: thread is a valid suspended thread handle.
                 found = unsafe { ResumeThread(thread) } != u32::MAX;
+                // SAFETY: thread was opened above and is closed exactly once.
                 unsafe { CloseHandle(thread) };
                 break;
             }
@@ -346,6 +350,7 @@ fn constrain_compiler_process(
     // SAFETY: snapshot is no longer needed.
     unsafe { CloseHandle(snapshot) };
     if !found {
+        // SAFETY: job was created above, is still open, and this error path closes it exactly once.
         unsafe { CloseHandle(job) };
         return Err(ComponentRenderError::CompilerIo(
             std::io::Error::last_os_error(),
@@ -362,7 +367,10 @@ struct CompilerProcessGuard(windows_sys::Win32::Foundation::HANDLE);
 impl Drop for CompilerProcessGuard {
     fn drop(&mut self) {
         // SAFETY: this guard uniquely owns the valid job handle.
-        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+        #[allow(unsafe_code)]
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0)
+        };
     }
 }
 
@@ -379,6 +387,7 @@ fn configure_compiler_limits(
 }
 
 #[cfg(unix)]
+#[allow(unsafe_code)]
 fn apply_worker_memory_limit() -> Result<(), ComponentRenderError> {
     #[cfg(test)]
     return Ok(());
@@ -430,6 +439,7 @@ type RlimitResource = libc::__rlimit_resource_t;
 type RlimitResource = libc::c_int;
 
 #[cfg(all(unix, not(test)))]
+#[allow(unsafe_code)]
 fn clamped_limit(
     resource: RlimitResource,
     requested: libc::rlim_t,
@@ -472,6 +482,7 @@ fn worker_memory_limit() -> Result<usize, ComponentRenderError> {
         })
 }
 
+#[allow(unsafe_code)]
 fn compile_component(
     engine: &Engine,
     bytes: &[u8],
@@ -574,6 +585,7 @@ fn compiler_executable() -> Result<std::path::PathBuf, ComponentRenderError> {
 }
 
 #[cfg(all(target_os = "macos", not(test)))]
+#[allow(unsafe_code)]
 fn macos_process_virtual_bytes() -> Result<u64, ComponentRenderError> {
     let mut info = std::mem::MaybeUninit::<libc::proc_taskinfo>::uninit();
     // SAFETY: info is correctly sized writable storage and getpid identifies this worker.
@@ -592,6 +604,7 @@ fn macos_process_virtual_bytes() -> Result<u64, ComponentRenderError> {
         ));
     }
 
+    // SAFETY: proc_pidinfo reported writing a full proc_taskinfo, which is checked above.
     Ok(unsafe { info.assume_init() }.pti_virtual_size)
 }
 

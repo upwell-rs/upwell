@@ -133,6 +133,7 @@ pub mod registry;
 pub mod run;
 pub mod schedule;
 pub mod scheduler;
+mod target;
 
 pub use descriptor::{JOBS, JobCall, JobDescriptor, JobOutcome};
 pub use error::JobError;
@@ -154,6 +155,7 @@ pub use schedule::{
     JobOptions, JobTimezone, OverlapPolicy, Schedule, ScheduleError, ScheduleInfo, ScheduleKind,
 };
 pub use scheduler::{JobHandle, JobScheduler};
+pub use target::JobTarget;
 
 /// The `#[jobs]` impl-block macro and its `#[job]` method marker, owned by
 /// `upwell-jobs-macros` and re-exported here (the plugin crate owns its macros).

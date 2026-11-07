@@ -4346,6 +4346,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "trybuild",
  "upwell-app",
  "upwell-axum",
@@ -4373,6 +4375,8 @@ dependencies = [
  "arc-swap",
  "clap",
  "futures",
+ "linkme",
+ "pin-project-lite",
  "serde",
  "serde_json",
  "tempfile",
@@ -4593,6 +4597,7 @@ dependencies = [
  "tracing",
  "tsify",
  "upwell",
+ "upwell-di",
  "upwell-test-utils",
  "utoipa",
  "wasm-bindgen",
@@ -4664,6 +4669,7 @@ dependencies = [
 name = "upwell-macros-core"
 version = "0.20.0"
 dependencies = [
+ "heck",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -4679,6 +4685,7 @@ dependencies = [
  "directories",
  "futures",
  "inventory",
+ "libc",
  "linkme",
  "postcard",
  "serde",

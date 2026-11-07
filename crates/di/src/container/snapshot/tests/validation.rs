@@ -6,7 +6,7 @@ use super::*;
 async fn snapshot_rejects_a_non_singleton_descriptor() {
     let descriptor = ComponentDescriptor::of::<SharedService>()
         .with_identity("snapshot-shared", "SharedService")
-        .with_scope(&SnapshotRequestScope);
+        .with_scope(SnapshotRequestScope::KEY);
     let typed = ComponentDescriptor::of::<SharedService>();
     let root = root_with(
         &[typed],
@@ -36,10 +36,7 @@ async fn snapshot_requires_the_component_in_the_local_store() {
 #[tokio::test]
 async fn snapshot_storage_mismatch_is_redacted() {
     let descriptor = ComponentDescriptor::of::<SharedService>();
-    let mismatched = BoxedComponent {
-        ty: descriptor.ty,
-        value: Box::new(ByValueService { label: "wrong" }),
-    };
+    let mismatched = BoxedComponent::stored(descriptor.ty, ByValueService { label: "wrong" });
     let root = root_with(&[descriptor], vec![mismatched]).await;
 
     let error = root
@@ -71,10 +68,10 @@ async fn snapshot_output_type_is_validated() {
     descriptor.generation_snapshot =
         Some(crate::descriptors::component::GenerationSnapshot::for_test(
             |_| {
-                Ok(BoxedComponent {
-                    ty: TypeDescriptor::of::<ByValueService>("ByValueService"),
-                    value: Box::new(Injectable::into_stored(ByValueService { label: "alien" })),
-                })
+                Ok(BoxedComponent::stored(
+                    TypeDescriptor::of::<ByValueService>("ByValueService"),
+                    Injectable::into_stored(ByValueService { label: "alien" }),
+                ))
             },
             |_| true,
         ));
@@ -101,10 +98,10 @@ async fn snapshot_output_payload_is_validated() {
     descriptor.generation_snapshot =
         Some(crate::descriptors::component::GenerationSnapshot::for_test(
             |active| {
-                Ok(BoxedComponent {
-                    ty: active.ty,
-                    value: Box::new(ByValueService { label: "alien" }),
-                })
+                Ok(BoxedComponent::stored(
+                    active.ty,
+                    ByValueService { label: "alien" },
+                ))
             },
             |candidate| candidate.downcast_ref::<Live<SharedService>>().is_some(),
         ));

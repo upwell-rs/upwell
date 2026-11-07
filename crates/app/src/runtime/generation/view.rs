@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use upwell_core::RuntimeGenerationId;
+use upwell_di::context::{ContextRuntime, InvocationContext, TargetRef};
 use upwell_di::{ComponentDescriptor, EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
@@ -70,9 +71,26 @@ impl RuntimeView {
         &self.generation.condition
     }
 
+    /// A context for `target` pinned to this generation, with no scope instance, for entry
+    /// points that open none, such as lifecycle hooks and job runs. It allocates one handle to
+    /// the view; a serve loop takes its contexts from its
+    /// [`ScopeOpener::context`](crate::ScopeOpener::context) instead, which allocates nothing.
+    #[doc(hidden)]
+    pub fn context(&self, target: TargetRef) -> InvocationContext {
+        let runtime: Arc<dyn ContextRuntime> = Arc::new(self.clone());
+
+        InvocationContext::new(target, runtime)
+    }
+
     /// The hook manager pinned by this generation. Hook receivers resolve through this
     /// generation's root, so an old pinned view keeps invoking through its own manager.
     pub fn hooks(&self) -> &HookManager {
         &self.generation.hooks
+    }
+}
+
+impl ContextRuntime for RuntimeView {
+    fn root(&self) -> Option<Arc<ScopeContainer>> {
+        Some(Arc::clone(RuntimeView::root(self)))
     }
 }

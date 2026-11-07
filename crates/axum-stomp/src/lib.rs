@@ -35,9 +35,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[cfg(not(target_family = "wasm"))]
-use upwell_axum::AppRuntime;
-
-#[cfg(not(target_family = "wasm"))]
 use upwell_axum::WsHandlerFn;
 
 /// A STOMP frame body: opaque bytes with an optional `content-type`. Handlers usually receive a
@@ -73,8 +70,8 @@ impl StompBody {
 ///
 /// On wasm this is a fieldless tag: it names the protocol for a `#[topics(protocol = Stomp)]` set
 /// and the generated client's `MessageSend<Stomp>`/`TopicSubscribe<Stomp>` bounds. On the server its
-/// `cfg`-gated fields hold the `/app/**` handler table, the shared [`Broker`], the runtime, and the
-/// endpoint config; the [`WebsocketProtocol`](crate::ws::WebsocketProtocol) impl and serve loop live
+/// `cfg`-gated fields hold the `/app/**` handler table, the shared [`Broker`] and the endpoint
+/// config; the [`WebsocketProtocol`](crate::ws::WebsocketProtocol) impl and serve loop live
 /// in [`crate::ws::stomp`].
 pub struct Stomp {
     /// The `/app/**` destination → `#[message]` handler table.
@@ -84,11 +81,6 @@ pub struct Stomp {
     /// The shared broker for `/topic/**` fan-out (one per endpoint, cloned from the DI bus).
     #[cfg(not(target_family = "wasm"))]
     pub(crate) broker: Arc<server::Broker>,
-
-    /// The runtime, kept to open per-message
-    /// [`WebsocketMessage`](upwell_axum::WebsocketMessage) scopes while serving.
-    #[cfg(not(target_family = "wasm"))]
-    pub(crate) runtime: AppRuntime,
 
     /// Heart-beat/version/authenticator policy for this endpoint.
     #[cfg(not(target_family = "wasm"))]

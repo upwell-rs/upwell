@@ -7,12 +7,14 @@
 
 use std::ffi::OsStr;
 
+use tracing_subscriber::filter::{FilterExt, filter_fn};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer, Registry, fmt};
 
 use crate::builtins::config::{LogFormat, LoggingConfig, SpanEvents};
+use crate::logs::{SCOPE_LOG_TARGET, ScopeLogLayer};
 
 /// A type-erased subscriber layer that can be composed onto the framework subscriber, e.g.
 /// per-run job log capture. Boxed so callers in other crates can hand in a layer the
@@ -57,6 +59,7 @@ pub(crate) fn init_tracing_resolved(
     })?;
     let mut layers = vec![fmt_layer(config)?.with_filter(filter).boxed()];
 
+    layers.push(scope_log_layer(config, None)?);
     layers.extend(extra);
 
     Registry::default()
@@ -82,12 +85,43 @@ pub fn init_tracing_with_layers(
     // Filter only console formatting. Extension layers enforce their own capture policies and may
     // intentionally observe events that are more verbose than terminal output.
     let mut layers: Vec<BoxedLayer> = vec![fmt_layer(config)?.with_filter(filter).boxed()];
+
+    layers.push(scope_log_layer(config, rust_log.as_deref())?);
     layers.extend(extra);
 
     Registry::default()
         .with(layers)
         .try_init()
         .map_err(|_| InitTracingError::AlreadyInstalled)
+}
+
+/// The scope log capture layer. Events pass the same filter as the console output, so capture
+/// defaults to the level the subscriber logs at. A separate filter adds an error-level default
+/// for the `upwell.scope` routing span before parsing the user's directives. More specific
+/// directives retain tracing-subscriber's precedence, without widening captured events.
+fn scope_log_layer(
+    config: &LoggingConfig,
+    rust_log: Option<&OsStr>,
+) -> Result<BoxedLayer, InitTracingError> {
+    let events = env_filter(config, rust_log)?;
+    let directives = rust_log
+        .and_then(OsStr::to_str)
+        .unwrap_or(config.level.as_str());
+    let routing_directives = format!("{SCOPE_LOG_TARGET}=error,{directives}");
+    let routing_filter =
+        EnvFilter::try_new(&routing_directives).map_err(|source| InitTracingError::Filter {
+            filter: directives.to_owned(),
+            source,
+        })?;
+    let routing = filter_fn(|metadata| {
+        metadata.is_span()
+            && metadata.target() == SCOPE_LOG_TARGET
+            && metadata.name() == crate::logs::SCOPE_SPAN_NAME
+    })
+    .and(routing_filter);
+    let filter = events.or(routing);
+
+    Ok(ScopeLogLayer::new().with_filter(filter).boxed())
 }
 
 fn env_filter(
@@ -144,31 +178,4 @@ fn fmt_span(events: SpanEvents) -> FmtSpan {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::builtins::config::LoggingConfig;
-
-    #[test]
-    fn rust_log_overrides_configured_level_and_targets() {
-        let config = LoggingConfig {
-            level: "invalid[".to_owned(),
-            ..LoggingConfig::default()
-        };
-
-        let result = env_filter(&config, Some(OsStr::new("warn,upwell=trace")));
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn configured_level_is_used_without_rust_log() {
-        let config = LoggingConfig {
-            level: "invalid[".to_owned(),
-            ..LoggingConfig::default()
-        };
-
-        let result = env_filter(&config, None);
-
-        assert!(matches!(result, Err(InitTracingError::Filter { .. })));
-    }
-}
+mod tests;

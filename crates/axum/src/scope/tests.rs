@@ -1,4 +1,5 @@
-use upwell_core::{Scope, StaticScope};
+use upwell_app::ScopeParent;
+use upwell_core::Scope;
 
 use super::{HttpRequest, SCOPE_TOPOLOGY};
 
@@ -9,12 +10,10 @@ use super::{WebsocketConnection, WebsocketMessage};
 fn http_request_has_stable_identity_and_root_parent() {
     let topology = SCOPE_TOPOLOGY.prepare().expect("Axum topology is valid");
 
-    assert_eq!(HttpRequest.name(), "HttpRequest");
-    assert!(
-        topology
-            .parent_of(&<HttpRequest as StaticScope>::ID)
-            .expect("HTTP request boundary exists")
-            .is_root()
+    assert_eq!(HttpRequest::NAME, "HttpRequest");
+    assert_eq!(
+        topology.parents_of(&HttpRequest::ID),
+        Some(&[ScopeParent::Root][..])
     );
 }
 
@@ -24,23 +23,20 @@ fn websocket_scopes_are_distinct_and_messages_descend_from_connections() {
     let topology = SCOPE_TOPOLOGY.prepare().expect("Axum topology is valid");
 
     assert_ne!(
-        <HttpRequest as StaticScope>::ID,
-        <WebsocketConnection as StaticScope>::ID
+        <HttpRequest as Scope>::ID,
+        <WebsocketConnection as Scope>::ID
     );
+    assert_ne!(<HttpRequest as Scope>::ID, <WebsocketMessage as Scope>::ID);
     assert_ne!(
-        <HttpRequest as StaticScope>::ID,
-        <WebsocketMessage as StaticScope>::ID
+        <WebsocketConnection as Scope>::ID,
+        <WebsocketMessage as Scope>::ID
     );
-    assert_ne!(
-        <WebsocketConnection as StaticScope>::ID,
-        <WebsocketMessage as StaticScope>::ID
-    );
-    assert!(topology.is_ancestor(
-        &<WebsocketConnection as StaticScope>::ID,
-        &<WebsocketMessage as StaticScope>::ID
+    assert!(topology.is_reachable(
+        &<WebsocketMessage as Scope>::ID,
+        &<WebsocketConnection as Scope>::ID
     ));
     assert!(!topology.is_reachable(
-        &<HttpRequest as StaticScope>::ID,
-        &<WebsocketConnection as StaticScope>::ID
+        &<HttpRequest as Scope>::ID,
+        &<WebsocketConnection as Scope>::ID
     ));
 }

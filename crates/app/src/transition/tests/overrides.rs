@@ -178,12 +178,10 @@ async fn duplicate_generation_overrides_are_rejected() {
 #[tokio::test]
 async fn generation_overrides_must_replace_retained_singletons() {
     let fixture = hook_override_fixture().await;
-    let reconstructed_override = BoxedComponent {
-        ty: TypeDescriptor::of::<Replaceable>("Replaceable"),
-        value: Box::new(Injectable::into_stored(Arc::new(Replaceable {
-            label: "override",
-        }))),
-    };
+    let reconstructed_override = BoxedComponent::stored(
+        TypeDescriptor::of::<Replaceable>("Replaceable"),
+        Injectable::into_stored(Arc::new(Replaceable { label: "override" })),
+    );
 
     let Err(error) = fixture
         .resolved

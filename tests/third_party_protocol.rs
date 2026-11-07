@@ -2,21 +2,21 @@ use std::cell::Cell;
 
 use upwell::{
     AppError, AppRegistry, AppRuntime, PreparedProtocol, ProtocolDefinition, ProtocolId,
-    ProtocolRuntime, ScopeBoundary, ScopeId, ScopeParent, ScopeTopology, Serve, ShutdownSignal,
-    StaticScope, ValidationContext, app,
+    ProtocolRuntime, Scope, ScopeBoundary, ScopeId, ScopeParent, ScopeTopology, Serve,
+    ShutdownSignal, ValidationContext, app,
 };
 
 /// A third-party session boundary declared entirely through facade APIs.
 pub struct SessionScope;
 
-impl StaticScope for SessionScope {
+impl Scope for SessionScope {
     const ID: ScopeId = upwell::namespaced_id!(ScopeId, "third-party/session");
     const RANK: u8 = 200;
     const NAME: &'static str = "Session";
 }
 
 const SESSION_BOUNDARIES: [ScopeBoundary; 1] =
-    [ScopeBoundary::new(&SessionScope, ScopeParent::Root)];
+    [ScopeBoundary::new::<SessionScope>(&[ScopeParent::Root])];
 
 /// A third-party protocol definition using only the public facade.
 #[derive(Default)]

@@ -17,6 +17,7 @@ mod probe;
 mod projection;
 mod relationship;
 mod resources;
+mod scope_snapshot;
 mod snapshot;
 mod source;
 
@@ -167,6 +168,10 @@ fn plugin_id(id: &str) -> String {
 
 fn scope_id(id: &str) -> String {
     format!("scope:{id}")
+}
+
+fn entry_id(key: upwell_core::EntryKey) -> String {
+    format!("entry:{key}")
 }
 
 fn type_id(rust_type: &str) -> String {

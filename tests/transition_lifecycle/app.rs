@@ -18,10 +18,12 @@ use upwell::config::Toml;
 use upwell::{
     App, AppError, Cfg, CfgNext, Component, ComponentRetired, ComponentRetirement, ConfigManager,
     ConfigReload, HookOutcome, NodeAction, PendingTransition, RetirementReason,
-    RuntimeTransitionReport, Shutdown, TransitionAborted, TransitionCommitted, TransitionDecision,
-    TransitionProposal, TransitionVerdict, component, config, injectable, methods, when,
+    RuntimeTransitionReport, Shutdown, Startup, TransitionAborted, TransitionCommitted,
+    TransitionDecision, TransitionProposal, TransitionVerdict, component, config, injectable,
+    methods, when,
 };
 use upwell_config::ResolverChain;
+use upwell_di::context::InvocationContext;
 
 /// The trait both providers implement and the gate consumes.
 #[injectable]
@@ -70,12 +72,37 @@ static EVENTS: Mutex<Vec<Event>> = Mutex::new(Vec::new());
 static FREEZE: Mutex<Option<&'static str>> = Mutex::new(None);
 static GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// The invocation context each hook ran in, while a test collects them. Off by default, because
+/// a held context pins its generation.
+static CONTEXTS: Mutex<Option<Vec<InvocationContext>>> = Mutex::new(None);
+
 pub async fn lock() -> tokio::sync::MutexGuard<'static, ()> {
     GUARD.lock().await
 }
 
 fn record(event: Event) {
     EVENTS.lock().expect("events").push(event);
+}
+
+/// Starts collecting the invocation context of each hook that runs.
+pub fn collect_contexts() {
+    *CONTEXTS.lock().expect("contexts") = Some(Vec::new());
+}
+
+/// Stops collecting, and returns the contexts collected since [`collect_contexts`].
+pub fn collected_contexts() -> Vec<InvocationContext> {
+    CONTEXTS
+        .lock()
+        .expect("contexts")
+        .take()
+        .expect("contexts are being collected")
+}
+
+/// Collects the active invocation context, when a test is collecting them.
+fn note_context() {
+    if let Some(contexts) = CONTEXTS.lock().expect("contexts").as_mut() {
+        contexts.push(InvocationContext::capture().expect("a hook runs in a context"));
+    }
 }
 
 /// Drains every event recorded since the last call.
@@ -111,6 +138,7 @@ impl Authenticator for DefaultAuthenticator {
 impl DefaultAuthenticator {
     #[hook(ComponentRetired)]
     async fn retired(&self, retirement: ComponentRetirement) {
+        note_context();
         record(Event::Retired {
             retirement,
             scheme: self.scheme(),
@@ -141,6 +169,7 @@ impl Authenticator for CustomAuthenticator {
 impl CustomAuthenticator {
     #[hook(ComponentRetired)]
     async fn retired(&self, retirement: ComponentRetirement) {
+        note_context();
         record(Event::Retired {
             retirement,
             scheme: self.scheme(),
@@ -172,6 +201,7 @@ impl AuthGate {
 impl AuthGate {
     #[hook(TransitionProposal)]
     async fn propose(&self, pending: PendingTransition) -> TransitionVerdict {
+        note_context();
         record(Event::Proposal {
             components: actions(&pending),
             scheme: self.scheme(),
@@ -182,6 +212,7 @@ impl AuthGate {
 
     #[hook(ComponentRetired)]
     async fn retired(&self, retirement: ComponentRetirement) {
+        note_context();
         record(Event::Retired {
             retirement,
             scheme: self.scheme(),
@@ -190,6 +221,7 @@ impl AuthGate {
 
     #[hook(Shutdown)]
     async fn shutdown(&self) {
+        note_context();
         record(Event::Shutdown {
             component: Self::ID,
             scheme: self.scheme(),
@@ -206,6 +238,8 @@ impl ChangeFreeze {
     #[hook(TransitionDecision, always)]
     async fn decide(&self, pending: PendingTransition) -> TransitionVerdict {
         let frozen = *FREEZE.lock().expect("freeze");
+
+        note_context();
 
         record(Event::Decision {
             components: actions(&pending),
@@ -230,6 +264,7 @@ impl AuthWatcher {
         &self,
         #[config("auth")] next: CfgNext<AuthConfig>,
     ) -> Result<HookOutcome, AppError> {
+        note_context();
         record(Event::ConfigReload {
             mode: next.mode.clone(),
         });
@@ -244,13 +279,20 @@ pub struct TransitionAudit;
 
 #[methods]
 impl TransitionAudit {
+    #[hook(Startup)]
+    async fn started(&self) {
+        note_context();
+    }
+
     #[hook(TransitionCommitted)]
     async fn committed(&self, report: RuntimeTransitionReport) {
+        note_context();
         record(Event::Committed(report));
     }
 
     #[hook(TransitionAborted)]
     async fn aborted(&self, report: RuntimeTransitionReport) {
+        note_context();
         record(Event::Aborted(report));
     }
 }

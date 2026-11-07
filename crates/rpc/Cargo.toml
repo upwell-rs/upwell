@@ -10,6 +10,9 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[lints]
+workspace = true
+
 [features]
 default = []
 client = ["dep:async-trait", "dep:upwell-client", "upwell-rpc-macros/client"]
@@ -55,6 +58,9 @@ postcard = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
 
 [build-dependencies]
 upwell-build = { workspace = true }

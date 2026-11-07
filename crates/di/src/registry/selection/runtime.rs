@@ -3,7 +3,7 @@
 use std::any::TypeId;
 use std::collections::BTreeMap;
 
-use upwell_core::{ResolutionMode, Scope, ScopeId};
+use upwell_core::{ResolutionMode, ScopeId, ScopeKey};
 
 use super::rules::{keyed_results, provider_matches, select_provider_where};
 use super::{
@@ -17,8 +17,8 @@ impl ProviderSelectionModel {
         trait_id: TypeId,
         qualifier: Option<&str>,
         resolution: ResolutionMode,
-        consumer: &dyn Scope,
-        can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
+        consumer: ScopeKey,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> Option<ProviderSelection> {
         self.select_one(
             resolution,
@@ -33,8 +33,8 @@ impl ProviderSelectionModel {
         &self,
         trait_id: TypeId,
         resolution: ResolutionMode,
-        consumer: &dyn Scope,
-        can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
+        consumer: ScopeKey,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> Vec<ProviderSelection> {
         self.select_collection(
             resolution,
@@ -51,8 +51,8 @@ impl ProviderSelectionModel {
         &'a self,
         trait_id: TypeId,
         resolution: ResolutionMode,
-        consumer: &'a dyn Scope,
-        can_access: impl Fn(&dyn Scope, &'static dyn Scope) -> bool + 'a,
+        consumer: ScopeKey,
+        can_access: impl Fn(ScopeKey, ScopeKey) -> bool + 'a,
     ) -> impl Iterator<Item = ProviderDescriptor> + 'a {
         self.collection_providers(
             resolution,
@@ -67,8 +67,8 @@ impl ProviderSelectionModel {
         &self,
         trait_id: TypeId,
         resolution: ResolutionMode,
-        consumer: &dyn Scope,
-        can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
+        consumer: ScopeKey,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> Vec<ProviderSelection> {
         self.select_keyed(
             resolution,
@@ -81,17 +81,17 @@ impl ProviderSelectionModel {
 
     pub(crate) fn visible_groups(
         &self,
-        consumer: &dyn Scope,
+        consumer: ScopeKey,
         providers: &[ProviderDescriptor],
-        can_access: &(impl Fn(&dyn Scope, &'static dyn Scope) -> bool + ?Sized),
+        can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
         include: impl Fn(&ProviderDescriptor) -> bool,
     ) -> BTreeMap<(u8, ScopeId), Vec<ProviderDescriptor>> {
         let mut groups = BTreeMap::new();
 
         for provider in providers.iter().filter(|provider| include(provider)) {
-            let dependency_scope = self.components[&provider.concrete_ty.type_id].scope;
-
-            if can_access(consumer, dependency_scope) {
+            if let Some(dependency_scope) =
+                self.accessible_scope(provider.concrete_ty.type_id, consumer, can_access)
+            {
                 groups
                     .entry((dependency_scope.rank(), dependency_scope.id()))
                     .or_insert_with(Vec::new)
@@ -106,9 +106,9 @@ impl ProviderSelectionModel {
         &self,
         resolution: ResolutionMode,
         qualifier: Option<&str>,
-        consumer: &dyn Scope,
+        consumer: ScopeKey,
         matching: &[ProviderDescriptor],
-        can_access: &(impl Fn(&dyn Scope, &'static dyn Scope) -> bool + ?Sized),
+        can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
     ) -> Option<ProviderSelection> {
         if resolution == ResolutionMode::Fresh {
             return self.select_from_visible_groups(
@@ -161,9 +161,9 @@ impl ProviderSelectionModel {
         &self,
         resolution: ResolutionMode,
         qualifier: Option<&str>,
-        consumer: &dyn Scope,
+        consumer: ScopeKey,
         matching: &[ProviderDescriptor],
-        can_access: &(impl Fn(&dyn Scope, &'static dyn Scope) -> bool + ?Sized),
+        can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
     ) -> Vec<ProviderSelection> {
         self.collection_providers(resolution, qualifier, consumer, matching, can_access)
             .map(|provider| ProviderSelection {
@@ -180,21 +180,20 @@ impl ProviderSelectionModel {
         &'a self,
         resolution: ResolutionMode,
         qualifier: Option<&'a str>,
-        consumer: &'a dyn Scope,
+        consumer: ScopeKey,
         matching: &'a [ProviderDescriptor],
-        can_access: impl Fn(&dyn Scope, &'static dyn Scope) -> bool + 'a,
+        can_access: impl Fn(ScopeKey, ScopeKey) -> bool + 'a,
     ) -> impl Iterator<Item = ProviderDescriptor> + 'a {
         matching
             .iter()
             .filter(move |provider| provider_matches(provider, qualifier))
             .filter(move |provider| {
-                let scope = self.components[&provider.concrete_ty.type_id].scope;
-
-                if resolution != ResolutionMode::Fresh && scope.is_transient() {
+                if resolution != ResolutionMode::Fresh && self.is_transient(provider) {
                     return resolution != ResolutionMode::Deferred;
                 }
 
-                can_access(consumer, scope)
+                self.accessible_scope(provider.concrete_ty.type_id, consumer, &can_access)
+                    .is_some()
             })
             .copied()
     }
@@ -203,9 +202,9 @@ impl ProviderSelectionModel {
         &self,
         resolution: ResolutionMode,
         qualifier: Option<&str>,
-        consumer: &dyn Scope,
+        consumer: ScopeKey,
         matching: &[ProviderDescriptor],
-        can_access: &(impl Fn(&dyn Scope, &'static dyn Scope) -> bool + ?Sized),
+        can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
     ) -> Vec<ProviderSelection> {
         let mut selected = BTreeMap::new();
 
@@ -246,10 +245,10 @@ impl ProviderSelectionModel {
 
     fn select_from_visible_groups(
         &self,
-        consumer: &dyn Scope,
+        consumer: ScopeKey,
         providers: &[ProviderDescriptor],
         qualifier: Option<&str>,
-        can_access: &(impl Fn(&dyn Scope, &'static dyn Scope) -> bool + ?Sized),
+        can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
         include: &impl Fn(&ProviderDescriptor) -> bool,
         stage: DependencySelectionStage,
     ) -> Option<ProviderSelection> {
@@ -260,11 +259,11 @@ impl ProviderSelectionModel {
                 .iter()
                 .filter(|provider| include(provider))
                 .filter_map(|provider| {
-                    let scope = self.components[&provider.concrete_ty.type_id].scope;
+                    let scope =
+                        self.accessible_scope(provider.concrete_ty.type_id, consumer, can_access)?;
                     let key = (scope.rank(), scope.id());
 
-                    (can_access(consumer, scope) && after.is_none_or(|after| key > after))
-                        .then_some(key)
+                    after.is_none_or(|after| key > after).then_some(key)
                 })
                 .min()?;
 
@@ -274,8 +273,8 @@ impl ProviderSelectionModel {
                         return false;
                     }
 
-                    let scope = self.components[&provider.concrete_ty.type_id].scope;
-                    can_access(consumer, scope) && (scope.rank(), scope.id()) == key
+                    self.accessible_scope(provider.concrete_ty.type_id, consumer, can_access)
+                        .is_some_and(|scope| (scope.rank(), scope.id()) == key)
                 })
             {
                 return Some(ProviderSelection {

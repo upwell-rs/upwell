@@ -3,12 +3,13 @@
 use std::any::TypeId;
 use std::sync::Arc;
 
-use upwell_core::Transient;
+use upwell_core::{Scope, Transient};
 
 use super::{ScopeContainer, ScopeRegistry, ScopeResolverSlot};
-use crate::descriptors::component::{ComponentConstructionContext, SharedStore};
+use crate::descriptors::component::{ComponentConstructionContext, Running, SharedStore};
 use crate::descriptors::{BoxedComponent, ComponentDescriptor, Injectable, ProviderDescriptor};
 use crate::error::Error;
+use crate::layout::TransientPlan;
 
 /// Constructs a fresh `Transient` instance whose `Injectable::Target` is `H`, if
 /// one is registered. A transient is rebuilt on every resolution and never stored,
@@ -22,7 +23,7 @@ async fn construct_transient_boxed(
     registry: &Arc<ScopeRegistry>,
     parent: Option<Arc<ScopeContainer>>,
     slot: ScopeResolverSlot,
-    store: SharedStore,
+    store: Option<SharedStore>,
     descriptor: ComponentDescriptor,
 ) -> crate::Result<BoxedComponent> {
     let factory = descriptor
@@ -31,11 +32,11 @@ async fn construct_transient_boxed(
 
     let externals = parent
         .as_ref()
-        .map(|p| p.resolvers().clone())
+        .map(|p| p.inherited_resolvers())
         .unwrap_or_default();
 
     let mut cx = ComponentConstructionContext::with_store(
-        &Transient,
+        Transient::KEY,
         parent,
         Arc::clone(registry),
         externals,
@@ -43,9 +44,43 @@ async fn construct_transient_boxed(
         store,
     );
 
-    let boxed = (factory.construct)(&mut cx).await?;
+    let boxed = factory.build(&mut cx).await?;
 
     Ok(boxed)
+}
+
+/// Constructs a transient from its prepared plan, resolving its dependencies through the
+/// plan's edges. Like on-demand construction, it is built in a throwaway context over the
+/// requesting scope's parent and in-progress store.
+///
+/// Also returns the pending slot the transient created when it captured a requesting scope
+/// handed in detached, which that scope has to adopt so its built container attaches it.
+pub(crate) async fn construct_planned_transient(
+    registry: &Arc<ScopeRegistry>,
+    parent: Option<Arc<ScopeContainer>>,
+    slot: ScopeResolverSlot,
+    store: Option<SharedStore>,
+    plan: Arc<TransientPlan>,
+) -> crate::Result<(BoxedComponent, Option<ScopeResolverSlot>)> {
+    let factory = plan.factory;
+    let externals = parent
+        .as_ref()
+        .map(|parent| parent.inherited_resolvers())
+        .unwrap_or_default();
+    let mut cx = ComponentConstructionContext::with_store(
+        Transient::KEY,
+        parent,
+        Arc::clone(registry),
+        externals,
+        slot,
+        store,
+    );
+
+    cx.set_running(Running::Transient(plan));
+
+    let boxed = factory.build(&mut cx).await?;
+
+    Ok((boxed, cx.take_captured()))
 }
 
 pub(crate) async fn construct_fresh_boxed(
@@ -71,7 +106,7 @@ pub(crate) async fn construct_fresh_boxed(
             .container_for_scope(descriptor.scope)
             .ok_or(Error::MissingComponent(descriptor.name))?
     };
-    let externals = target_scope.resolvers().clone();
+    let externals = target_scope.inherited_resolvers();
     let slot = owner.slot.clone();
     let mut cx = ComponentConstructionContext::new_with_slot(
         descriptor.scope,
@@ -81,14 +116,14 @@ pub(crate) async fn construct_fresh_boxed(
         slot,
     );
 
-    (factory.construct)(&mut cx).await
+    factory.build(&mut cx).await
 }
 
 pub(crate) async fn construct_transient<H: Injectable>(
     registry: &Arc<ScopeRegistry>,
     parent: Option<Arc<ScopeContainer>>,
     slot: ScopeResolverSlot,
-    store: SharedStore,
+    store: Option<SharedStore>,
 ) -> crate::Result<Option<H>> {
     let target = TypeId::of::<H::Target>();
     let Some(descriptor) = registry.transient(target) else {
@@ -103,7 +138,7 @@ pub(crate) async fn construct_transient_provider<H: Injectable>(
     registry: &Arc<ScopeRegistry>,
     parent: Option<Arc<ScopeContainer>>,
     slot: ScopeResolverSlot,
-    store: SharedStore,
+    store: Option<SharedStore>,
     provider: ProviderDescriptor,
 ) -> crate::Result<Option<H>> {
     let Some(descriptor) = registry.transient(provider.concrete_ty.type_id) else {

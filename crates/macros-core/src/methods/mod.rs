@@ -23,6 +23,7 @@ use crate::inject::registrations_slice_ident;
 use crate::paths::Paths;
 
 mod init;
+mod init_params;
 mod recipe;
 
 #[cfg(test)]
@@ -269,7 +270,7 @@ impl FactoryClaims {
         }
 
         let claimed = match marker {
-            FactoryMarker::Init => self.claim_init(method),
+            FactoryMarker::Init => self.claim_init(&attr, method),
             FactoryMarker::Recipe(kind) => self.claim_recipe(kind, &attr, method, self_ident),
         };
 
@@ -280,7 +281,7 @@ impl FactoryClaims {
         true
     }
 
-    fn claim_init(&mut self, method: &ImplItemFn) -> syn::Result<()> {
+    fn claim_init(&mut self, attr: &Attribute, method: &mut ImplItemFn) -> syn::Result<()> {
         if self.init.is_some() {
             return Err(syn::Error::new_spanned(
                 &method.sig,
@@ -288,7 +289,7 @@ impl FactoryClaims {
             ));
         }
 
-        self.init = Some(init::parse_init(method)?);
+        self.init = Some(init::parse_init(attr, method)?);
 
         Ok(())
     }

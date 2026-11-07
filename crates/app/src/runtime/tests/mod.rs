@@ -3,75 +3,113 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use upwell_config::{ConfigManager, ConfigReloader};
-use upwell_core::{ResolverSet, Scope, ScopeId, StaticScope, TypeDescriptor};
-use upwell_di::{BoxedComponent, EffectiveGraph, ScopeContainer, ScopeRegistry};
+use upwell_core::{EntryKey, ResolverSet, Scope, ScopeGenerations, ScopeId, Singleton};
+use upwell_di::{EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
 use super::*;
-use crate::test_support::{empty_condition, seed_hook_manager};
-use crate::{Error, ScopeBoundary, ScopeParent, ScopeTopology};
+use crate::test_support::{
+    empty_condition, hook_manager_descriptor, seed_hook_manager, seed_layouts,
+};
+use crate::{Error, OpensUnder, ScopeBoundary, ScopeParent, ScopeTopology};
 
 const SESSION_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/session");
 const REQUEST_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/request");
 const OTHER_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/other");
+const SHARED_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/shared");
 
 struct Session;
 struct Request;
 
-impl StaticScope for Session {
+/// A scope opened under either the root or a session.
+struct Shared;
+
+impl Scope for Session {
     const ID: ScopeId = SESSION_ID;
     const RANK: u8 = 100;
     const NAME: &'static str = "Session";
+    const GENERATIONS: ScopeGenerations = ScopeGenerations::Durable;
 }
 
-impl StaticScope for Request {
+impl Scope for Request {
     const ID: ScopeId = REQUEST_ID;
     const RANK: u8 = 50;
     const NAME: &'static str = "Request";
 }
 
-static SESSION: Session = Session;
-static REQUEST: Request = Request;
-static OTHER: TestScope = TestScope::new(OTHER_ID, "Other", 25);
-static REQUEST_ALIAS: TestScope = TestScope::new(REQUEST_ID, "Caller Metadata", 1);
-static BOUNDARIES: [ScopeBoundary; 2] = [
-    ScopeBoundary::new(&SESSION, ScopeParent::Root),
-    ScopeBoundary::new(&REQUEST, ScopeParent::Boundary(SESSION_ID)),
+impl Scope for Shared {
+    const ID: ScopeId = SHARED_ID;
+    const RANK: u8 = 40;
+    const NAME: &'static str = "Shared";
+}
+
+/// An undeclared scope, for rejecting openings of unknown boundaries.
+struct Other;
+
+/// A scope sharing [`Request`]'s stable identity under different metadata.
+struct RequestAlias;
+
+impl Scope for Other {
+    const ID: ScopeId = OTHER_ID;
+    const RANK: u8 = 25;
+    const NAME: &'static str = "Other";
+}
+
+impl Scope for RequestAlias {
+    const ID: ScopeId = REQUEST_ID;
+    const RANK: u8 = 1;
+    const NAME: &'static str = "Caller Metadata";
+}
+
+impl OpensUnder<Singleton> for Session {}
+impl OpensUnder<Session> for Request {}
+impl OpensUnder<Session> for RequestAlias {}
+impl OpensUnder<Singleton> for Shared {}
+impl OpensUnder<Session> for Shared {}
+
+static BOUNDARIES: [ScopeBoundary; 3] = [
+    ScopeBoundary::new::<Session>(&[ScopeParent::Root]),
+    ScopeBoundary::new::<Request>(&[ScopeParent::Boundary(SESSION_ID)]),
+    ScopeBoundary::new::<Shared>(&[ScopeParent::Root, ScopeParent::of::<Session>()]),
 ];
 
-/// A scope with test-controlled stable identity and metadata.
-#[derive(Debug)]
-struct TestScope {
-    id: ScopeId,
-    name: &'static str,
-    rank: u8,
-}
+/// A by-value seed declared for the session boundary.
+#[derive(Clone, Debug, PartialEq)]
+struct Visitor(u8);
 
-impl TestScope {
-    const fn new(id: ScopeId, name: &'static str, rank: u8) -> Self {
-        Self { id, name, rank }
+impl upwell_di::Injectable for Visitor {
+    type Target = Self;
+    type Stored = Self;
+
+    fn into_stored(self) -> Self {
+        self
+    }
+
+    fn from_stored(stored: &Self) -> Self {
+        stored.clone()
     }
 }
 
-impl Scope for TestScope {
-    fn id(&self) -> ScopeId {
-        self.id
-    }
-
-    fn rank(&self) -> u8 {
-        self.rank
-    }
-
-    fn name(&self) -> &'static str {
-        self.name
-    }
+fn key(value: &'static str) -> EntryKey {
+    EntryKey::new(value).expect("valid test entry key")
 }
 
-/// A fresh empty generation over the test topology, prepared against `base`, plus the
-/// scope registry its root was built from.
+fn visitor_destination() -> HashMap<TypeId, SeedDestination> {
+    HashMap::from([(
+        TypeId::of::<Visitor>(),
+        SeedDestination {
+            scope: SESSION_ID,
+            type_name: std::any::type_name::<Visitor>(),
+        },
+    )])
+}
+
+/// A fresh generation over the test topology holding only the hook manager, prepared against
+/// `base` with the plans of `entries`, plus the scope registry its root was built from.
 async fn prepared_generation(
     base: RuntimeGenerationId,
     seed_destinations: HashMap<TypeId, SeedDestination>,
+    entries: &[crate::EntryDescriptor],
 ) -> (PreparedRuntimeGeneration, Arc<ScopeRegistry>) {
     let registry = Arc::new(
         ScopeRegistry::new(HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
@@ -88,17 +126,30 @@ async fn prepared_generation(
     let topology = ScopeTopology::new(&BOUNDARIES)
         .prepare()
         .expect("test topology prepares");
-    let graph = EffectiveGraph::build(base, &upwell_di::ComponentRegistry::default(), |_, _| true)
-        .expect("empty graph validates");
+    let topology = Arc::new(topology);
+    let components = upwell_di::ComponentRegistry {
+        components: vec![hook_manager_descriptor()],
+        providers: Vec::new(),
+    };
+    let graph = EffectiveGraph::build(base, &components, |_, _| true)
+        .expect("the hook manager's graph validates");
+    let layouts = seed_layouts(
+        &topology,
+        &seed_destinations,
+        graph.provider_selection(),
+        entries,
+    );
     let generation = PreparedRuntimeGeneration::new(
         root,
         Arc::clone(&registry),
         RuntimeScopePlan::new(
-            Arc::new(topology),
+            Arc::clone(&topology),
             Arc::new(HashMap::from([
                 (SESSION_ID, Vec::new()),
                 (REQUEST_ID, Vec::new()),
+                (SHARED_ID, Vec::new()),
             ])),
+            Arc::new(layouts),
             Arc::new(seed_destinations),
         ),
         Arc::from([]),
@@ -112,10 +163,22 @@ async fn prepared_generation(
 async fn build_runtime(
     seed_destinations: HashMap<TypeId, SeedDestination>,
 ) -> (AppRuntime, Arc<ScopeRegistry>) {
+    build_runtime_with_entries(seed_destinations, &[]).await
+}
+
+/// A runtime over the test topology whose application registered `entries`.
+async fn build_runtime_with_entries(
+    seed_destinations: HashMap<TypeId, SeedDestination>,
+    entries: &[crate::EntryDescriptor],
+) -> (AppRuntime, Arc<ScopeRegistry>) {
     let (generation, registry) =
-        prepared_generation(RuntimeGenerationId::INITIAL, seed_destinations).await;
+        prepared_generation(RuntimeGenerationId::INITIAL, seed_destinations, entries).await;
+    let topology = ScopeTopology::new(&BOUNDARIES)
+        .prepare()
+        .expect("test topology prepares");
+    let entries = crate::EntryTable::new(entries, &topology).expect("test entries prepare");
     let reloader = ConfigReloader::new(ConfigManager::empty(), Vec::new());
-    let runtime = AppRuntime::new(Arc::from("test"), generation, reloader);
+    let runtime = AppRuntime::new(Arc::from("test"), generation, reloader, Arc::new(entries));
 
     (runtime, registry)
 }
@@ -123,16 +186,20 @@ async fn build_runtime(
 /// Publishes a fresh empty generation over the runtime's current one.
 async fn publish_next(runtime: &AppRuntime) -> RuntimeView {
     let transition = runtime.begin_transition().await;
-    let (candidate, _) = prepared_generation(transition.base().id(), HashMap::new()).await;
+    let (candidate, _) = prepared_generation(transition.base().id(), HashMap::new(), &[]).await;
 
     transition.publish(candidate).expect("candidate publishes")
 }
 
-fn seed<T: Send + Sync + 'static>() -> BoxedComponent {
-    BoxedComponent {
-        ty: TypeDescriptor::of::<T>(std::any::type_name::<T>()),
-        value: Box::new(()),
-    }
+/// Opens a session under the root of `runtime`'s current generation.
+async fn open_session(runtime: &AppRuntime) -> OpenScope<Session> {
+    runtime
+        .opener::<Session>()
+        .expect("session is declared")
+        .builder(Session)
+        .open_default()
+        .await
+        .expect("session opens")
 }
 
 fn expect_app_error<T>(result: crate::Result<T>, message: &str) -> Error {
@@ -142,5 +209,10 @@ fn expect_app_error<T>(result: crate::Result<T>, message: &str) -> Error {
     }
 }
 
+mod context;
+mod entry_scopes;
+mod logs;
 mod release;
+mod runs;
+mod scope_spans;
 mod scopes;

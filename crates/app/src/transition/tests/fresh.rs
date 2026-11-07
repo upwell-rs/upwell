@@ -1,6 +1,7 @@
 //! Factory-backed transients stay Fresh-resolvable in candidate registries.
 
 use super::*;
+use upwell_core::Scope;
 
 #[derive(Clone)]
 struct TransientSeed;
@@ -40,10 +41,10 @@ fn construct_transient_seed(
     _: &mut ComponentConstructionContext,
 ) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
     Box::pin(async {
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<TransientSeed>("TransientSeed"),
-            value: Box::new(Injectable::into_stored(TransientSeed)),
-        })
+        Ok(BoxedComponent::stored(
+            TypeDescriptor::of::<TransientSeed>("TransientSeed"),
+            Injectable::into_stored(TransientSeed),
+        ))
     })
 }
 
@@ -53,32 +54,36 @@ fn construct_fresh_holder(
     Box::pin(async {
         let fresh = <Fresh<TransientSeed> as FromContainer>::from_container(cx).await?;
 
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<FreshHolder>("FreshHolder"),
-            value: Box::new(Injectable::into_stored(std::sync::Arc::new(FreshHolder {
-                fresh,
-            }))),
-        })
+        Ok(BoxedComponent::stored(
+            TypeDescriptor::of::<FreshHolder>("FreshHolder"),
+            Injectable::into_stored(std::sync::Arc::new(FreshHolder { fresh })),
+        ))
     })
 }
 
 static TRANSIENT_SEED_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "seed",
     construct: construct_transient_seed,
+    construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
+    scope: None,
 }];
 static ACTIVE_HOLDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "holder-active",
     construct: construct_fresh_holder,
+    construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
+    scope: None,
 }];
 static CANDIDATE_HOLDER_FACTORY: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "holder-candidate",
     construct: construct_fresh_holder,
+    construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
+    scope: None,
 }];
 
 fn transient_seed_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -98,11 +103,13 @@ fn fresh_holder(factories: fn() -> &'static [ComponentFactoryDescriptor]) -> Com
         id: "fresh-holder",
         name: "FreshHolder",
         ty: TypeDescriptor::of::<FreshHolder>("FreshHolder"),
-        scope: &Singleton,
+        scope: Singleton::KEY,
         condition: None,
         factories,
         hooks: upwell_hooks::no_hooks,
+        construction: upwell_di::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        declared_scope: None,
     }
 }
 
@@ -111,11 +118,13 @@ fn transient_seed() -> ComponentDescriptor {
         id: "transient-seed",
         name: "TransientSeed",
         ty: TypeDescriptor::of::<TransientSeed>("TransientSeed"),
-        scope: &Transient,
+        scope: Transient::KEY,
         condition: None,
         factories: transient_seed_factories,
         hooks: upwell_hooks::no_hooks,
+        construction: upwell_di::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        declared_scope: None,
     }
 }
 

@@ -214,7 +214,7 @@ fn transition_recipes_are_singleton_only() {
     ];
 
     let transient = ComponentRegistry {
-        components: vec![descriptor_with_factories(|| &RECIPES).with_scope(&Transient)],
+        components: vec![descriptor_with_factories(|| &RECIPES).with_scope(Transient::KEY)],
         providers: Vec::new(),
     }
     .resolved_components()

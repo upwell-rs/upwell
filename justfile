@@ -22,10 +22,12 @@ critical_filter := '''
   | binary_id(=upwell-jobs)
   | binary_id(=upwell-macros-core)
   | binary_id(=upwell-rpc)
+  | binary_id(=upwell-rpc::allocation_contracts)
   | binary_id(=upwell-transport)
   | binary_id(=upwell-tooling-schema)
   | binary_id(=upwell-test-utils::process)
   | binary_id(=upwell-test-utils::temp)
+  | binary_id(=upwell::allocation_contracts)
   | binary_id(=upwell::app_commands)
   | binary_id(=upwell::app_definition)
   | binary_id(=upwell::axum_middleware)
@@ -48,6 +50,7 @@ critical_filter := '''
   | binary_id(=upwell::providers)
   | binary_id(=upwell::rpc_hardening)
   | binary_id(=upwell::scope_local_providers)
+  | binary_id(=upwell::scope_capture)
   | binary_id(=upwell::scopes)
   | binary_id(=upwell::status_codes)
   | binary_id(=upwell::streaming)
@@ -80,7 +83,7 @@ test-critical:
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest run \
         --workspace \
         --all-features \
@@ -93,7 +96,7 @@ test-extended:
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest run \
         --workspace \
         --all-features \
@@ -107,12 +110,15 @@ test-ui:
 test-doc:
     cargo test --doc --workspace --all-features --locked
 
+review pr worktree model="gpt-6.1-terra" effort="medium":
+    scripts/review/review-pr.sh {{ quote(pr) }} {{ quote(worktree) }} {{ quote(model) }} {{ quote(effort) }}
+
 test-config:
     #!/usr/bin/env bash
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest show-config version --profile ci-critical
     cargo nextest show-config version --profile ci-extended
     cargo nextest show-config test-groups \
@@ -131,7 +137,7 @@ test-archive archive:
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest archive \
         --workspace \
         --all-features \
@@ -149,7 +155,7 @@ _ci-test-critical archive workspace:
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest run \
         --archive-file '{{ archive }}' \
         --workspace-remap '{{ workspace }}' \
@@ -161,27 +167,46 @@ _ci-test-extended archive workspace:
     set -euo pipefail
 
     nextest_version="$(cargo nextest --version)"
-    [[ "$nextest_version" == "cargo-nextest 0.9.140 "* ]]
+    [[ "$nextest_version" == "cargo-nextest 0.9.150 "* ]]
     cargo nextest run \
         --archive-file '{{ archive }}' \
         --workspace-remap '{{ workspace }}' \
         --profile ci-extended \
         --filterset 'all() - ({{ critical_filter }})'
 
-bench *targets:
+# Criterion keeps reports and saved baselines in `benchmarks/criterion` (override with
+# `CRITERION_HOME`), outside `target/`, so `cargo clean` keeps the baselines. Arguments after
+
+# `--` go to Criterion: `just bench http_upwell -- --save-baseline before`.
+bench *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    targets=({{ targets }})
+    export CRITERION_HOME="${CRITERION_HOME:-{{ justfile_directory() }}/benchmarks/criterion}"
+    targets=()
+    criterion=()
+    forwarding=false
 
-    if [[ ${#targets[@]} -eq 0 ]]; then
-        cargo bench --manifest-path benchmarks/Cargo.toml --locked
-    else
-        args=()
+    for arg in {{ args }}; do
+        if [[ "$forwarding" == true ]]; then
+            criterion+=("$arg")
+        elif [[ "$arg" == "--" ]]; then
+            forwarding=true
+        else
+            targets+=(--bench "$arg")
+        fi
+    done
 
-        for target in "${targets[@]}"; do
-            args+=(--bench "$target")
-        done
+    cargo bench --manifest-path benchmarks/Cargo.toml --locked "${targets[@]}" -- "${criterion[@]}"
 
-        cargo bench --manifest-path benchmarks/Cargo.toml --locked "${args[@]}"
-    fi
+# Parallel worktrees: `just worktree add <slice> <branch> <base>`, `remove <slice> [--force]`,
+# `seed <slice>`, `list`. See scripts/worktree.sh.
+[positional-arguments]
+worktree *args:
+    scripts/worktree.sh "$@"
+
+bench-lock:
+    cargo metadata --manifest-path benchmarks/Cargo.toml --format-version 1 > /dev/null
+
+test-templates:
+    cargo nextest run -p cargo-upwell --test init --run-ignored only --no-tests=fail --locked

@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: a #[scope] parent must outrank the scope: `Outer` does not outrank `SameRank`
+ --> tests/ui/scopes/parent_does_not_outrank.rs:7:20
+  |
+7 | #[scope(parents = [Outer], rank = 200)]
+  |                    ^^^^^ evaluation of `_` failed here

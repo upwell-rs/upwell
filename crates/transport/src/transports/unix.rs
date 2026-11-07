@@ -80,6 +80,8 @@ fn ensure_private_parent(path: &Path) -> std::io::Result<()> {
     const UNSAFE_WRITE: u32 = 0o022;
     const STICKY: u32 = 0o1000;
 
+    // SAFETY: `geteuid` takes no arguments, touches no memory and cannot fail.
+    #[allow(unsafe_code)]
     let effective_uid = unsafe { libc::geteuid() };
     let mut current = PathBuf::new();
 

@@ -8,35 +8,35 @@ fn provider_introspection_uses_runtime_scope_and_order_semantics() {
         "message-consumer",
         "MessageConsumer",
         TypeDescriptor::of::<u8>("MessageConsumer"),
-        &MessageScope,
+        MessageScope::KEY,
         no_dependency_factory,
     );
     let local = component(
         "local-provider",
         "LocalProvider",
         TypeDescriptor::of::<u16>("LocalProvider"),
-        &MessageScope,
+        MessageScope::KEY,
         no_dependency_factory,
     );
     let ancestor = component(
         "ancestor-provider",
         "AncestorProvider",
         TypeDescriptor::of::<u32>("AncestorProvider"),
-        &ConnectionScope,
+        ConnectionScope::KEY,
         no_dependency_factory,
     );
     let root = component(
         "root-provider",
         "RootProvider",
         TypeDescriptor::of::<u64>("RootProvider"),
-        &Singleton,
+        Singleton::KEY,
         no_dependency_factory,
     );
     let local_primary = component(
         "local-primary-provider",
         "LocalPrimaryProvider",
         TypeDescriptor::of::<i16>("LocalPrimaryProvider"),
-        &MessageScope,
+        MessageScope::KEY,
         no_dependency_factory,
     );
     let components = vec![consumer, local, local_primary, ancestor, root];
@@ -179,6 +179,6 @@ fn provider_introspection_uses_runtime_scope_and_order_semantics() {
             scope: Some(scope),
             stage: Some(DependencySelectionStage::DirectConcrete),
         }] if selected.ty.type_id == root.ty.type_id
-            && *scope == Singleton.id()
+            && *scope == Singleton::ID
     ));
 }

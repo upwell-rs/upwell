@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use upwell_core::{
     ConditionDescriptor, ConditionPredicate, ConditionScalar, ConditionScalarKind,
     ConfigFactDescriptor, ConfigFactId, DescriptorSource, Resolver, ResolverCtxExt, ResolverSet,
-    RuntimeGenerationId, TypeDescriptor,
+    RuntimeGenerationId, Scope, TypeDescriptor,
 };
 use upwell_di::{
     ComponentDescriptor, ComponentRegistry, ConditionFactSnapshot, EffectiveGraph, ScopeContainer,
@@ -33,7 +33,7 @@ static GENERATION_COMPONENT: ComponentDescriptor = ComponentDescriptor::manual(
     "generation_component",
     "GenerationComponent",
     TypeDescriptor::of::<GenerationComponent>("GenerationComponent"),
-    &Singleton,
+    Singleton::KEY,
 )
 .with_condition(&GENERATION_CONDITION)
 .with_factories(unbuilt_factories!("static", Vec::new, Default));
@@ -54,9 +54,7 @@ fn condition_snapshot(enabled: bool) -> ConditionFactSnapshot {
 fn condition_registry() -> AppRegistry {
     AppRegistry {
         components: vec![GENERATION_COMPONENT],
-        providers: Vec::new(),
-        config_bindings: Vec::new(),
-        condition_facts: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -109,7 +107,12 @@ async fn prepared_with_hooks(
     PreparedRuntimeGeneration::new(
         root,
         registry,
-        RuntimeScopePlan::new(topology, Arc::new(HashMap::new()), Arc::new(HashMap::new())),
+        RuntimeScopePlan::new(
+            topology,
+            Arc::new(HashMap::new()),
+            Arc::default(),
+            Arc::new(HashMap::new()),
+        ),
         Arc::from([]),
         graph,
         condition,

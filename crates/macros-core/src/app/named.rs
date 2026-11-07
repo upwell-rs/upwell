@@ -276,19 +276,7 @@ pub(super) fn expand(input: NamedApp) -> TokenStream {
     #[cfg(not(feature = "tooling"))]
     let tooling = TokenStream::new();
 
-    let builder = builder::expand_with_paths(
-        &assembly.name.value,
-        &assembly.protocol.value,
-        &assembly.services,
-        &assembly.components,
-        &assembly.configs,
-        &assembly.config_manager,
-        &assembly.directories_manager,
-        &assembly.middleware,
-        &assembly.guards,
-        &assembly.error_handler,
-        &paths,
-    );
+    let builder = builder::expand_with_paths(&assembly, &paths);
 
     quote! {
         #(#attributes)*

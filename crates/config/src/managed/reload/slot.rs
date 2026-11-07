@@ -98,13 +98,11 @@ impl<T: ConfigProperties> ReloadableConfig for ConfigSlot<T> {
             type_id: TypeId::of::<T>(),
             path: path.clone(),
             value: staged,
-            seed: Arc::new(move || BoxedComponent {
-                ty: TypeDescriptor::of::<T>(T::NAME),
-                value: Box::new(Cfg::from_shared(
-                    replacement.clone(),
-                    path.clone(),
-                    seed_snapshot.clone(),
-                )),
+            seed: Arc::new(move || {
+                BoxedComponent::stored(
+                    TypeDescriptor::of::<T>(T::NAME),
+                    Cfg::from_shared(replacement.clone(), path.clone(), seed_snapshot.clone()),
+                )
             }),
         };
 
@@ -126,13 +124,11 @@ impl<T: ConfigProperties> ReloadableConfig for ConfigSlot<T> {
             type_id: TypeId::of::<T>(),
             path: path.clone(),
             value: value.clone(),
-            seed: Arc::new(move || BoxedComponent {
-                ty: TypeDescriptor::of::<T>(T::NAME),
-                value: Box::new(Cfg::from_shared(
-                    value.clone(),
-                    path.clone(),
-                    snapshot.clone(),
-                )),
+            seed: Arc::new(move || {
+                BoxedComponent::stored(
+                    TypeDescriptor::of::<T>(T::NAME),
+                    Cfg::from_shared(value.clone(), path.clone(), snapshot.clone()),
+                )
             }),
         }
     }

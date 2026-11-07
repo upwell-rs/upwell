@@ -29,10 +29,10 @@ fn recorder(label: &'static str, log: &Arc<Mutex<Vec<&'static str>>>) -> DropRec
 #[tokio::test]
 async fn retained_guard_drops_once_after_the_container_instances() {
     let log = Arc::new(Mutex::new(Vec::new()));
-    let instance = BoxedComponent {
-        ty: TypeDescriptor::of::<DropRecorder>("DropRecorder"),
-        value: Box::new(recorder("instance", &log)),
-    };
+    let instance = BoxedComponent::stored(
+        TypeDescriptor::of::<DropRecorder>("DropRecorder"),
+        recorder("instance", &log),
+    );
     let root = ScopeContainer::build_root(&[], vec![instance], ResolverSet::new(), registry())
         .await
         .expect("root builds");

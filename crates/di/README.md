@@ -59,7 +59,7 @@ static CACHE: ComponentDescriptor = ComponentDescriptor::of::<Cache>()
 
 ## Internal role
 
-This is the engine the application layer drives. `upwell-dirs` implements [`Component`]/[`Injectable`] for its `Dir<K>` and `DirectoriesManager` against these traits. `upwell-config` seeds itself as an external resolver reachable via the [`ResolverCtx`], and `upwell-app` plus the protocol crates (`upwell-rpc`, `upwell-axum`) build [`ScopeContainer`]s, seed framework singletons (including the [`HookManager`](upwell_hooks::HookManager)), and resolve components through this crate.
+This is the engine the application layer drives. `upwell-dirs` implements [`Component`]/[`Injectable`] for its `Dir<K>` and `DirectoriesManager` against these traits. `upwell-config` seeds itself as an external resolver reachable via the [`ResolverCtx`], and `upwell-app` plus the protocol crates (`upwell-rpc`, `upwell-axum`) build [`ScopeContainer`]s, seed framework singletons (including the [`HookManager`](upwell_hooks::HookManager)), and resolve components through this crate. `upwell-app` plans a [`SlotLayout`] for each protocol-owned scope when a generation is prepared and opens scopes from it, so their dependency edges are resolved once instead of on every opening.
 
 ## Feature flags
 

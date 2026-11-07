@@ -94,10 +94,7 @@ pub(crate) fn generation_snapshot_adapter<T: Component>(
     let candidate_stored = <T::Handle as Injectable>::snapshot_stored(stored)
         .ok_or(crate::Error::SnapshotHandleUnsupported { component: T::ID })?;
 
-    Ok(BoxedComponent {
-        ty: active.ty,
-        value: Box::new(candidate_stored),
-    })
+    Ok(BoxedComponent::stored(active.ty, candidate_stored))
 }
 
 /// The live cell a typed component's stored slot holds, when its handle stores one.

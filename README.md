@@ -66,7 +66,7 @@ Pick what you need with features (`cli` and `di-check` are enabled by default):
 | `yaml` | YAML config sources alongside TOML |
 | `watch` | reload config on file change |
 | `serde` | serialize redacted runtime transition reports for tooling and telemetry |
-| `tracing-subscriber` | the `init_tracing` helper |
+| `tracing-subscriber` | the `init_tracing` helper and the `ScopeLogLayer` scope log capture |
 | `wasm-ts` | opt into the newer `tsify` `Ts<T>` wasm ABI for the browser client |
 | `di-check` *(default)* | compile-time DI graph validation |
 

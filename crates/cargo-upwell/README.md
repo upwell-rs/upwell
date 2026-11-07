@@ -60,6 +60,11 @@ interface, built-in renderers and sandboxed WASM renderer support. The probe con
 argument, `UPWELL_TOOLING_PROBE_*` environment, response file) is defined by the schema crate and
 implemented by `upwell-app`'s tooling module.
 
+The built-in templates live in the external `upwell-template-*` repositories, pinned by the
+`TEMPLATE_TAG` tag in `src/init/catalog.rs`. They still target the released 0.20 API, so the
+end-to-end tests in `tests/init.rs` that generate and build projects from them are ignored, and
+run neither in CI nor in `just test`. Run them with `just test-templates`.
+
 ## Feature flags
 
 None.

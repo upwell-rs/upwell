@@ -19,10 +19,11 @@
 
 use std::sync::{Arc, OnceLock, Weak};
 
-use upwell_core::TypeDescriptor;
+use upwell_core::{Scope, TypeDescriptor};
 
 use crate::construct::FromContainer;
 use crate::container::ScopeContainer;
+use crate::context::{InvocationContext, TargetRef};
 use crate::descriptors::{Component, Injectable};
 use crate::error::Error;
 
@@ -58,6 +59,13 @@ impl RootResolver {
     /// The live root, or `None` if it was never attached or has been dropped.
     fn root(&self) -> Option<Arc<ScopeContainer>> {
         self.root.get()?.upgrade()
+    }
+
+    /// A context for `target` holding this root, which stays alive with it, or `None` if
+    /// the root was never attached or has been dropped.
+    #[doc(hidden)]
+    pub fn context(&self, target: TargetRef) -> Option<InvocationContext> {
+        Some(InvocationContext::new(target, self.root()?))
     }
 
     /// Resolves the component of type `C` as its handle through the root scope.
@@ -108,7 +116,7 @@ pub const fn root_resolver_descriptor() -> crate::ComponentDescriptor {
         ROOT_RESOLVER_ID,
         ROOT_RESOLVER_NAME,
         TypeDescriptor::of::<RootResolver>(ROOT_RESOLVER_NAME),
-        &upwell_core::Singleton,
+        upwell_core::Singleton::KEY,
     )
 }
 

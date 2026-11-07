@@ -1,6 +1,5 @@
 //! End-to-end tests for the error-response status code, driven over the
-//! in-memory transport so they are fast and deterministic. Each test maps to a
-//! user story / success criterion from `specs/003-response-status-codes/`.
+//! in-memory transport so they are fast and deterministic.
 #![cfg(feature = "daemon")]
 
 mod common;

@@ -6,13 +6,13 @@ use super::*;
 fn validate_rejects_duplicate_provider_qualifier_in_one_scope() {
     let first = scoped!(
         "FirstQ",
-        &Singleton,
+        Singleton::KEY,
         &[],
         TypeDescriptor::of::<u8>("FirstQ")
     );
     let second = scoped!(
         "SecondQ",
-        &Singleton,
+        Singleton::KEY,
         &[],
         TypeDescriptor::of::<u16>("SecondQ")
     );
@@ -34,13 +34,13 @@ fn validate_rejects_duplicate_provider_qualifier_in_one_scope() {
 fn validate_allows_duplicate_provider_qualifier_across_scopes() {
     let first = scoped!(
         "FirstQ",
-        &Singleton,
+        Singleton::KEY,
         &[],
         TypeDescriptor::of::<u8>("FirstQ")
     );
     let second = scoped!(
         "SecondQ",
-        &Request,
+        Request::KEY,
         &[],
         TypeDescriptor::of::<u16>("SecondQ")
     );
@@ -70,19 +70,19 @@ fn validate_allows_deferred_trait_with_scoped_provider_beside_transient_primary(
     }];
     let consumer = scoped!(
         "DeferredTraitConsumer",
-        &Singleton,
+        Singleton::KEY,
         &SINGLETON_DEFERRED_SHARED,
         TypeDescriptor::of::<u64>("DeferredTraitConsumer"),
     );
     let scoped_provider = scoped!(
         "ScopedProvider",
-        &Singleton,
+        Singleton::KEY,
         &[],
         TypeDescriptor::of::<u8>("ScopedProvider"),
     );
     let transient_provider = scoped!(
         "TransientProvider",
-        &Transient,
+        Transient::KEY,
         &[],
         TypeDescriptor::of::<u16>("TransientProvider"),
     );
@@ -115,25 +115,25 @@ static SINGLETON_DEFERRED_SHARED: [DependencyDescriptor; 1] = [dependency(
 fn validate_rejects_ambiguous_deferred_candidates() {
     let consumer = scoped!(
         "AmbiguousDeferredConsumer",
-        &Singleton,
+        Singleton::KEY,
         &SINGLETON_DEFERRED_SHARED,
         TypeDescriptor::of::<u64>("AmbiguousDeferredConsumer"),
     );
     let first = scoped!(
         "FirstScoped",
-        &Singleton,
+        Singleton::KEY,
         &[],
         TypeDescriptor::of::<u8>("FirstScoped")
     );
     let second = scoped!(
         "SecondScoped",
-        &Singleton,
+        Singleton::KEY,
         &[],
         TypeDescriptor::of::<u16>("SecondScoped"),
     );
     let transient = scoped!(
         "TransientPrimary",
-        &Transient,
+        Transient::KEY,
         &[],
         TypeDescriptor::of::<u32>("TransientPrimary"),
     );
@@ -175,25 +175,25 @@ fn validate_selects_deferred_candidates_scope_locally() {
     }];
     let consumer = scoped!(
         "RequestDeferredConsumer",
-        &Request,
+        Request::KEY,
         &REQUEST_DEFERRED_SHARED,
         TypeDescriptor::of::<u64>("RequestDeferredConsumer"),
     );
     let local = scoped!(
         "LocalProvider",
-        &Request,
+        Request::KEY,
         &[],
         TypeDescriptor::of::<u8>("LocalProvider"),
     );
     let parent = scoped!(
         "ParentProvider",
-        &Singleton,
+        Singleton::KEY,
         &[],
         TypeDescriptor::of::<u16>("ParentProvider"),
     );
     let transient = scoped!(
         "TransientPrimary",
-        &Transient,
+        Transient::KEY,
         &[],
         TypeDescriptor::of::<u32>("TransientPrimary"),
     );
@@ -226,25 +226,25 @@ fn validate_walks_deferred_candidates_in_scope_chain_order() {
     }];
     let consumer = scoped!(
         "ChainConsumer",
-        &Request,
+        Request::KEY,
         &REQUEST_DEFERRED_CHAIN,
         TypeDescriptor::of::<u64>("ChainConsumer"),
     );
     let connection = scoped!(
         "ConnectionProvider",
-        &Connection,
+        Connection::KEY,
         &[],
         TypeDescriptor::of::<u8>("ConnectionProvider"),
     );
     let singleton = scoped!(
         "SingletonProvider",
-        &Singleton,
+        Singleton::KEY,
         &[],
         TypeDescriptor::of::<u16>("SingletonProvider"),
     );
     let transient = scoped!(
         "TransientPrimary",
-        &Transient,
+        Transient::KEY,
         &[],
         TypeDescriptor::of::<u32>("TransientPrimary"),
     );
@@ -286,25 +286,25 @@ fn validate_groups_deferred_candidates_by_scope_identity_not_rank() {
     }];
     let consumer = scoped!(
         "SiblingConsumer",
-        &Request,
+        Request::KEY,
         &REQUEST_DEFERRED_SIBLINGS,
         TypeDescriptor::of::<u64>("SiblingConsumer"),
     );
     let sibling_a = scoped!(
         "SiblingAProvider",
-        &SiblingA,
+        SiblingA::KEY,
         &[],
         TypeDescriptor::of::<u8>("SiblingAProvider"),
     );
     let sibling_b = scoped!(
         "SiblingBProvider",
-        &SiblingB,
+        SiblingB::KEY,
         &[],
         TypeDescriptor::of::<u16>("SiblingBProvider"),
     );
     let transient = scoped!(
         "TransientPrimary",
-        &Transient,
+        Transient::KEY,
         &[],
         TypeDescriptor::of::<u32>("TransientPrimary"),
     );
@@ -328,13 +328,13 @@ fn validate_groups_deferred_candidates_by_scope_identity_not_rank() {
 fn a_deferred_dependency_only_a_transient_provides_names_the_transient_cause() {
     let consumer = scoped!(
         "TransientOnlyConsumer",
-        &Singleton,
+        Singleton::KEY,
         &SINGLETON_DEFERRED_SHARED,
         TypeDescriptor::of::<u64>("TransientOnlyConsumer"),
     );
     let transient = scoped!(
         "OnlyTransient",
-        &Transient,
+        Transient::KEY,
         &[],
         TypeDescriptor::of::<u32>("OnlyTransient"),
     );

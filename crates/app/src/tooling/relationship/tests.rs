@@ -3,7 +3,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use upwell_config::{ConfigManager, Toml};
-use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, TypeDescriptor};
+use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, Scope, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, ComponentConstructionContext, ComponentDescriptor, ComponentFactoryDescriptor,
     ComponentFactoryRole, ProviderDescriptor, Singleton,
@@ -60,15 +60,19 @@ fn aggregate_dependencies() -> Vec<DependencyDescriptor> {
 static PROVIDER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: fake_factory,
+    construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
+    scope: None,
 }];
 
 static CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "static",
     construct: fake_factory,
+    construct_ready: None,
     dependencies: aggregate_dependencies,
     role: ComponentFactoryRole::Explicit,
+    scope: None,
 }];
 
 fn provider_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -87,22 +91,26 @@ static PROVIDER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     id: "aggregate-provider",
     name: "AggregateProvider",
     ty: TypeDescriptor::of::<AggregateProvider>("AggregateProvider"),
-    scope: &Singleton,
+    scope: Singleton::KEY,
     condition: None,
     factories: provider_factories,
     hooks: upwell_hooks::no_hooks,
+    construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
+    declared_scope: None,
 };
 
 static CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     id: "aggregate-consumer",
     name: "AggregateConsumer",
     ty: TypeDescriptor::of::<AggregateConsumer>("AggregateConsumer"),
-    scope: &Singleton,
+    scope: Singleton::KEY,
     condition: None,
     factories: consumer_factories,
     hooks: upwell_hooks::no_hooks,
+    construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
+    declared_scope: None,
 };
 
 static PROVIDER: ProviderDescriptor = ProviderDescriptor {

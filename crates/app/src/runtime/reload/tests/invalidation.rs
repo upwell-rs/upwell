@@ -13,7 +13,7 @@ use serde::Deserialize;
 use upwell_config::{ConfigBinding, ConfigProperties, ConfigReload};
 use upwell_core::{
     Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, RuntimeGenerationId,
-    TypeDescriptor,
+    Scope, TypeDescriptor,
 };
 use upwell_di::{ComponentDescriptor, Singleton};
 use upwell_hooks::{HOOK_MANAGER_NAME, HookDescriptor, HookManager};
@@ -114,11 +114,13 @@ macro_rules! planned_component {
                 id: $id,
                 name: stringify!($ty),
                 ty: TypeDescriptor::of::<$ty>(stringify!($ty)),
-                scope: &Singleton,
+                scope: Singleton::KEY,
                 condition: None,
                 factories: unbuilt_factories!("static", $deps),
                 hooks: planned_component!(@hooks $($hooks)?),
+                construction: upwell_di::ScopedConstruction::OnDemand,
                 generation_snapshot: None,
+                declared_scope: None,
             }
         }
     };

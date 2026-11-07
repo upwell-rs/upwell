@@ -271,7 +271,7 @@ fn reject_duplicate_ids(nodes: &[Node]) -> syn::Result<()> {
 
 /// A `const` assertion that `scope` is the singleton scope, failing at the scope argument.
 fn singleton_assertion(scope: &syn::Path, paths: &Paths) -> TokenStream {
-    let static_scope = paths.core("StaticScope");
+    let static_scope = paths.core("Scope");
     let singleton = paths.core("scope::Singleton");
 
     quote_spanned! {scope.span()=>

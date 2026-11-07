@@ -126,3 +126,38 @@ fn provider_declaration_rejects_duplicate_traits() {
 
     assert!(error.to_string().contains("duplicate trait"));
 }
+
+#[test]
+fn eager_requires_a_scope_below_the_root() {
+    let args = syn::parse_str::<ComponentArgs<NoExt>>("scope = Request, eager")
+        .expect("an eager request-scoped component parses");
+    let on_demand = syn::parse_str::<ComponentArgs<NoExt>>("scope = Request")
+        .expect("a request-scoped component parses");
+
+    let unscoped = parse_error("eager");
+    let singleton = parse_error("eager, scope = Singleton");
+    let transient = parse_error("scope = transient, eager");
+    let manual = parse_error("scope = Request, eager, default_factory = false");
+
+    assert!(args.eager.is_some());
+    assert!(
+        on_demand.eager.is_none(),
+        "components build on demand by default"
+    );
+    assert!(
+        unscoped
+            .to_string()
+            .contains("`eager` requires `scope = ..`")
+    );
+    assert!(
+        singleton
+            .to_string()
+            .contains("only to scopes below the root")
+    );
+    assert!(
+        transient
+            .to_string()
+            .contains("only to scopes below the root")
+    );
+    assert!(manual.to_string().contains("`default_factory = false`"));
+}

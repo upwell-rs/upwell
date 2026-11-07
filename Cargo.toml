@@ -107,6 +107,7 @@ xattr = "1.6.1"
 wasmtime = { version = "=36.0.13", default-features = false, features = ["std", "runtime", "component-model", "cranelift"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
+pin-project-lite = "0.2"
 tokio-util = "0.7"
 tower = { version = "0.5", features = ["util"] }
 # Trailing-slash path normalization for the axum server (applied outside the router so it rewrites
@@ -144,6 +145,13 @@ syn = { version = "2", features = ["full"] }
 trybuild = "1"
 quote = "1"
 proc-macro2 = "1"
+heck = "0.5"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
 
 [package]
 name = "upwell"
@@ -156,6 +164,9 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+
+[lints]
+workspace = true
 
 [features]
 default = ["cli", "di-check"]
@@ -360,3 +371,7 @@ required-features = ["cli", "tooling"]
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 upwell-test-utils = { workspace = true }
+# The context tests inspect the invocation contexts protocols and hooks establish.
+upwell-di = { workspace = true, features = ["test-support"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
