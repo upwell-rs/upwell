@@ -110,8 +110,8 @@ test-ui:
 test-doc:
     cargo test --doc --workspace --all-features --locked
 
-review pr worktree model="gpt-6.1-terra" effort="medium":
-    scripts/review/review-pr.sh {{ quote(pr) }} {{ quote(worktree) }} {{ quote(model) }} {{ quote(effort) }}
+review pr worktree model="gpt-6.1-terra" effort="medium" provider="codex" focus="":
+    scripts/review/review-pr.sh {{ quote(pr) }} {{ quote(worktree) }} {{ quote(model) }} {{ quote(effort) }} {{ quote(provider) }} {{ quote(focus) }}
 
 test-config:
     #!/usr/bin/env bash
