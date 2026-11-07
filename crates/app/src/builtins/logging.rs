@@ -99,7 +99,7 @@ pub fn init_tracing_with_layers(
 /// defaults to the level the subscriber logs at. A separate filter adds an error-level default
 /// for the `upwell.scope` routing span before parsing the user's directives. More specific
 /// directives retain tracing-subscriber's precedence, without widening captured events.
-fn scope_log_layer(
+pub(crate) fn scope_log_layer(
     config: &LoggingConfig,
     rust_log: Option<&OsStr>,
 ) -> Result<BoxedLayer, InitTracingError> {

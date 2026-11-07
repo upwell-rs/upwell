@@ -123,9 +123,7 @@ async fn probe_of(scope: &upwell::OpenScope<AuditRun>) -> bool {
 
 #[tokio::test]
 async fn construction_during_an_open_sees_the_opening_instances_sink() {
-    let _guard = tracing::dispatcher::set_default(&Dispatch::new(
-        Registry::default().with(ScopeLogLayer::new()),
-    ));
+    let _guard = install();
     let app = app("user-scopes-open-sink").await;
     let audits = app.runtime().opener::<AuditRun>().expect("declared");
     let captured = audits
@@ -146,6 +144,7 @@ async fn construction_during_an_open_sees_the_opening_instances_sink() {
 
 #[tokio::test]
 async fn a_non_capturing_open_sees_the_enclosing_runs_capture() {
+    let _guard = install();
     let app = app("user-scopes-open-nested").await;
     let audits = app.runtime().opener::<AuditRun>().expect("declared");
 
@@ -172,6 +171,7 @@ async fn a_non_capturing_open_sees_the_enclosing_runs_capture() {
 
 #[tokio::test]
 async fn a_non_capturing_open_when_needed_sees_the_enclosing_runs_capture() {
+    let _guard = install();
     let app = app("user-scopes-open-when-needed").await;
     let audits = app.runtime().opener::<AuditRun>().expect("declared");
 

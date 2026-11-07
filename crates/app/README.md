@@ -114,8 +114,9 @@ instance opened under it.
 
 `ScopeLogs::current()` uses that same resolution, so it reports where events made at that point
 are delivered: `is_capturing()` is true when they are captured, including by an enclosing
-capturing instance that a non-capturing one passes its events to, and outside an invocation it
-needs a `ScopeLogLayer`, as capture does. It no longer reads a task-local of its own.
+capturing instance that a non-capturing one passes its events to, and it needs a
+`ScopeLogLayer` whose filter admits the routing span, as capture does: an explicit
+`upwell::scope=off` disables capture, and what `ScopeLogs` reports, on every path. It no longer reads a task-local of its own.
 
 ### Scope log filtering
 
