@@ -62,6 +62,7 @@ impl SlotLayout {
 
         layout.selected = selected;
         layout.eager = layout.eager_closure(selection, &can_reach);
+        layout.accessed = layout.accessed_closure(selection, &can_reach);
         layout.read = layout.slots_factories_read();
 
         Ok(layout)
@@ -142,11 +143,13 @@ impl SlotLayout {
         let constructs = slots.iter().any(|spec| spec.factory.is_some());
         let eager = vec![false; slots.len()].into_boxed_slice();
         let read = eager.clone();
+        let accessed = eager.clone();
 
         Ok(Self {
             scope,
             slots: slots.into_boxed_slice(),
             eager,
+            accessed,
             read,
             by_type,
             by_trait,

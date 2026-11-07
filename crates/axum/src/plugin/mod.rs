@@ -288,7 +288,7 @@ impl PreparedProtocol for PreparedAxum {
             router = applier(runtime, router);
         }
 
-        if requests.builds_eagerly() {
+        if requests.may_open_at_once() {
             router = router.layer(axum::middleware::from_fn(open_eager_scope));
         }
 

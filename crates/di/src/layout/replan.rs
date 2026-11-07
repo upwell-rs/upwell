@@ -3,8 +3,7 @@
 //!
 //! [`SlotLayout::plan_entry`] reads a layout's slot indexes, provider aliases and the shape
 //! of each slot's dependency edges, plus the provider selection of the types its targets and
-//! its included slots' unplanned edges name, and of every type its walk for invocation-context
-//! edges consulted in any scope. A plan made from one layout is the plan another
+//! its included slots' unplanned edges name. A plan made from one layout is the plan another
 //! layout makes from the same targets when both layouts agree on that shape
 //! ([`plans_entries_like`](SlotLayout::plans_entries_like)) and selection agrees on every type
 //! the plan read ([`entry_reads`](SlotLayout::entry_reads)).
@@ -20,11 +19,12 @@ impl SlotLayout {
     /// agrees on the types a plan reads.
     ///
     /// Both layouts must hold the same component types at the same slots, with the same
-    /// eager set, provider aliases and dependency edges of the same shape. Edges into the root,
-    /// ancestors and transients may differ, since no entry plan follows them.
+    /// eager and accessed sets, provider aliases and dependency edges of the same shape. Edges
+    /// into the root, ancestors and transients may differ, since no entry plan follows them.
     pub fn plans_entries_like(&self, other: &SlotLayout) -> bool {
         self.scope.id() == other.scope.id()
             && self.eager == other.eager
+            && self.accessed == other.accessed
             && self.slots.len() == other.slots.len()
             && self
                 .slots
@@ -34,9 +34,8 @@ impl SlotLayout {
     }
 
     /// The types whose provider selection `plan`, planned from `targets` on this layout,
-    /// read: every target other than a config binding, every edge a slot the plan builds or
-    /// declares resolves through its own handle, and every type the walk for
-    /// invocation-context edges consulted in any scope. Sorted and deduplicated.
+    /// read: every target other than a config binding, and every edge a slot the plan
+    /// builds or declares resolves through its own handle. Sorted and deduplicated.
     pub fn entry_reads(&self, plan: &EntryPlan, targets: &[DependencyDescriptor]) -> Box<[TypeId]> {
         let mut reads: Vec<TypeId> = targets
             .iter()
@@ -59,7 +58,6 @@ impl SlotLayout {
             );
         }
 
-        reads.extend_from_slice(plan.accessor_reads());
         reads.sort_unstable();
         reads.dedup();
 

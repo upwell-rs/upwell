@@ -1027,18 +1027,34 @@ labels (both breaking changes to the core vocabulary). The edge:
   an accessor never makes a dependency silently optional;
 - is reported by selection diagnostics as `invocation-context` and by tooling as `current`.
 
-Entry planning follows these edges statically. `SlotLayout::plan_entry` walks the components the
-entry's targets reach, in any scope (already-built singletons and ancestors included), and every
-`Current` edge among them declares the slots of the entry's scope it resolves to, with their
-dependencies there. The plan never builds them: the value is built at `Current::get`, on
-demand. A declared accessor read has three effects: the scope opens for the entry even when the
-plan builds nothing (`EntryPlan::is_accessed`, so a deferred RPC call or WebSocket message scope
-opens at once), the seeds those slots read are captured (such as `RequestMeta`), and building them
-on demand is not an undeclared construction under `deny_unplanned`. In a slot layout such an edge
-plans to `DepRef::Contextual`, which an entry never builds with its consumer. The walk is per
-entry, derived from the descriptors when the generation is prepared, and adds nothing to the
-invocation context. A `Scoped<S, T>` edge does not carry `S`, so it is planned like `Current<T>`
-in the scope that provides `T`; carrying the pinned scope on the edge is a follow-up.
+Planning accounts for these edges per scope, not per entry. When a generation is prepared, each
+scope's `SlotLayout` computes its accessed set: the slots of that scope every `Current`/`Scoped`
+edge in the registry resolves to (whatever scope its consumer lives in, already-built singletons
+and enclosing or nested scopes included), with their dependencies there. Then:
+
+- every entry plan of the scope declares the accessed set without building it, so building those
+  slots on demand at `Current::get` is never an undeclared construction under `deny_unplanned`;
+- every opening of the scope (an entry's, an everything opening, an eager-only opening) captures
+  the seeds the accessed set reads, such as `RequestMeta`, so a late injection needs no extra
+  check, whether the injected owner is already built or not;
+- a scope with a non-empty accessed set opens at once: an RPC call or WebSocket message scope is
+  not deferred (`EntryPlan::is_accessed`), and HTTP installs its at-once opening whenever a
+  registered component declares an accessor and opens routed requests while the current
+  generation's request layout is accessed;
+- the set is part of the layout, so the old-versus-new layout comparison plans every entry of the
+  scope again when a reload changes it (an accessor component enabled or disabled anywhere).
+
+In a slot layout an accessor edge plans to `DepRef::Contextual`, which is never built with its
+consumer: the value is built at `Current::get`, on demand. A `Scoped<S, T>` edge does not carry `S`,
+so it is marked in every scope that provides `T`; carrying the pinned scope on the edge is a
+follow-up.
+
+The trade-off is precision: in an application where an accessor targets a scope, every entry of
+that scope opens it at once and captures the seeds the accessed values read, whether or not that
+entry reaches the accessor. Applications without accessors plan, open and capture exactly as before.
+An earlier per-entry walk was replaced because it had to be repeated at every decision point
+(built-value injection, eager components, eager-only openings, reload carry-over) and could not
+declare targets in enclosing scopes.
 
 When a protocol never opens the scope an invocation waits for, an accessor that cannot find its
 target on the open chain fails with `ScopedError::ScopeNotActive` naming that scope, never a
