@@ -68,3 +68,23 @@ async fn a_new_generation_plans_work_again() {
     assert_eq!(run_plans(&first), 1);
     assert_eq!(run_plans(&second), 1);
 }
+
+#[tokio::test]
+async fn a_scope_run_is_a_future_that_can_be_joined_and_boxed() {
+    use futures::FutureExt;
+
+    let (runtime, _registry) = build_runtime(HashMap::new()).await;
+    let sessions = runtime.opener::<Session>().expect("session is declared");
+    let runs = (0..3).map(|index| sessions.builder(Session).run(move || async move { index }));
+    let joined = futures::future::join_all(runs).await;
+    let boxed = sessions.builder(Session).run(|| async { 9 }).boxed();
+
+    assert_eq!(
+        joined
+            .into_iter()
+            .map(|run| run.expect("the run succeeds"))
+            .collect::<Vec<_>>(),
+        [0, 1, 2]
+    );
+    assert_eq!(boxed.await.expect("the run succeeds"), 9);
+}
