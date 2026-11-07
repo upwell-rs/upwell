@@ -50,7 +50,9 @@ impl SlotLayout {
             reads.extend(
                 spec.dependencies
                     .iter()
-                    .filter(|dependency| matches!(dependency.source, DepRef::Unplanned))
+                    .filter(|dependency| {
+                        matches!(dependency.source, DepRef::Unplanned | DepRef::Contextual)
+                    })
                     .map(|dependency| dependency.target),
             );
         }
@@ -106,7 +108,7 @@ fn sources_plan_alike(left: &DepRef, right: &DepRef) -> bool {
                 })
         }
 
-        (DepRef::Unplanned, DepRef::Unplanned) => true,
+        (DepRef::Unplanned, DepRef::Unplanned) | (DepRef::Contextual, DepRef::Contextual) => true,
 
         (left, right) => !is_followed(left) && !is_followed(right),
     }
@@ -116,6 +118,6 @@ fn sources_plan_alike(left: &DepRef, right: &DepRef) -> bool {
 fn is_followed(source: &DepRef) -> bool {
     matches!(
         source,
-        DepRef::Local(_) | DepRef::Many(_) | DepRef::Unplanned
+        DepRef::Local(_) | DepRef::Many(_) | DepRef::Unplanned | DepRef::Contextual
     )
 }

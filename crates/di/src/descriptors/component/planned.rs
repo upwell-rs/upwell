@@ -125,7 +125,9 @@ impl ComponentConstructionContext {
                     .as_ref()
                     .and_then(|parent| parent.read_enclosing::<H>(source)),
             ),
-            DepRef::Transient(_) | DepRef::Many(_) | DepRef::Unplanned => Planned::Unavailable,
+            DepRef::Transient(_) | DepRef::Many(_) | DepRef::Unplanned | DepRef::Contextual => {
+                Planned::Unavailable
+            }
         }
     }
 

@@ -16,7 +16,8 @@ use crate::registry::scopes::scope_allows_with;
 ///
 /// Planned once per runtime generation from the entry's targets. A slot the plan leaves out
 /// is built on demand, when something resolves it from the open scope. The plan also holds the
-/// slots the entry declares: those it builds and those its lazy targets reach. Under
+/// slots the entry declares: those it builds, those its lazy targets reach, and those the
+/// invocation-context accessors reachable from it read. Under
 /// [`UnplannedConstruction::Deny`] an on-demand build outside them is reported.
 ///
 /// Its parameters pre-resolve the targets it injects to the sources they read, so extracting
@@ -27,6 +28,7 @@ pub struct EntryPlan {
     scope: ScopeKey,
     builds: Box<[bool]>,
     declared: Arc<[bool]>,
+    accessed: bool,
     unplanned: UnplannedConstruction,
     params: Box<[EntryParam]>,
     positions: Arc<SlotPositions>,
@@ -35,7 +37,8 @@ pub struct EntryPlan {
 /// Whether a scope opened for an entry may build, on demand, a slot the entry does not
 /// declare.
 ///
-/// An entry declares the slots its plan builds and those its lazy targets reach. A scope
+/// An entry declares the slots its plan builds, those its lazy targets reach and those the
+/// invocation-context accessors reachable from it read. A scope
 /// opened without an entry builds on demand under either policy.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
@@ -56,6 +59,7 @@ impl EntryPlan {
             scope: layout.scope(),
             builds: layout.eager().into(),
             declared: layout.eager().into(),
+            accessed: false,
             unplanned: UnplannedConstruction::Allow,
             params: Box::default(),
             positions: Arc::new(SlotPositions::of(layout, layout.eager())),
@@ -132,6 +136,12 @@ impl EntryPlan {
         !self.builds.contains(&true)
     }
 
+    /// Whether an invocation-context accessor the entry reaches resolves from a slot of this
+    /// scope, so the scope must be open while the entry runs even when it builds nothing.
+    pub fn is_accessed(&self) -> bool {
+        self.accessed
+    }
+
     /// The components this entry builds, in `layout`'s construction order. `layout` is the
     /// layout the plan was made from.
     pub fn components<'a>(
@@ -175,11 +185,13 @@ impl SlotLayout {
             can_access: &can_access,
         };
         let builds = self.built_up_front(&selector, targets);
-        let declared = self.declared(&selector, targets, &builds);
+        let accessed = self.accessed(&selector, targets);
+        let declared = self.declared(&selector, targets, &builds, &accessed);
 
         EntryPlan {
             scope: self.scope,
             declared,
+            accessed: accessed.contains(&true),
             unplanned,
             params: self.plan_params(targets, selection),
             positions: Arc::new(SlotPositions::of(self, &builds)),
@@ -232,15 +244,20 @@ impl SlotLayout {
         eager
     }
 
-    /// The slots `builds` holds and those the lazy targets of `targets` resolve to here, with
-    /// their dependencies.
+    /// The slots `builds` and `accessed` hold and those the lazy targets of `targets` resolve
+    /// to here, with their dependencies.
     fn declared(
         &self,
         selector: &EagerSelection<'_>,
         targets: &[DependencyDescriptor],
         builds: &[bool],
+        accessed: &[bool],
     ) -> Arc<[bool]> {
-        let mut declares = builds.to_vec();
+        let mut declares: Vec<bool> = builds
+            .iter()
+            .zip(accessed)
+            .map(|(builds, accessed)| *builds || *accessed)
+            .collect();
 
         for target in targets {
             if target.config || is_built_up_front(target) {
@@ -345,6 +362,8 @@ impl SlotLayout {
                     );
                 }
 
+                DepRef::Contextual => {}
+
                 source => self.include_source(selector, source, included),
             }
         }
@@ -369,7 +388,8 @@ impl SlotLayout {
             | DepRef::Ancestor { .. }
             | DepRef::Transient(_)
             | DepRef::Absent
-            | DepRef::Unplanned => {}
+            | DepRef::Unplanned
+            | DepRef::Contextual => {}
         }
     }
 }
