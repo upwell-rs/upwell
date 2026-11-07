@@ -116,6 +116,7 @@ pub struct ProviderSelectionModel {
     by_trait: HashMap<TypeId, Vec<ProviderDescriptor>>,
     by_concrete: HashMap<TypeId, Vec<ProviderDescriptor>>,
     ordinals: HashMap<TypeId, HashMap<TypeId, usize>>,
+    contextual: bool,
 }
 
 impl ProviderSelectionModel {
@@ -163,11 +164,18 @@ impl ProviderSelectionModel {
         }
 
         Ok(Self {
+            contextual: components.iter().any(declares_contextual_edge),
             components: placed,
             by_trait,
             by_concrete,
             ordinals,
         })
+    }
+
+    /// Whether any component's factory declares an invocation-context edge (`Current<T>`,
+    /// `Scoped<S, T>`). Entry planning walks for such edges only when one exists.
+    pub fn has_contextual_edges(&self) -> bool {
+        self.contextual
     }
 
     pub(crate) fn providers_for_trait(&self, trait_id: TypeId) -> &[ProviderDescriptor] {
@@ -311,3 +319,13 @@ impl ProviderSelectionModel {
 
 #[cfg(test)]
 mod tests;
+
+/// Whether `component`'s effective factory declares an invocation-context edge.
+fn declares_contextual_edge(component: &ComponentDescriptor) -> bool {
+    match component.effective_factory() {
+        Ok(Some(factory)) => (factory.dependencies)()
+            .iter()
+            .any(|dependency| dependency.resolution == upwell_core::ResolutionMode::Current),
+        Ok(None) | Err(_) => false,
+    }
+}

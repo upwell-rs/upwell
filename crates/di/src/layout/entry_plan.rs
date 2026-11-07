@@ -29,6 +29,7 @@ pub struct EntryPlan {
     builds: Box<[bool]>,
     declared: Arc<[bool]>,
     accessed: bool,
+    accessor_reads: Option<Arc<[TypeId]>>,
     unplanned: UnplannedConstruction,
     params: Box<[EntryParam]>,
     positions: Arc<SlotPositions>,
@@ -60,6 +61,7 @@ impl EntryPlan {
             builds: layout.eager().into(),
             declared: layout.eager().into(),
             accessed: false,
+            accessor_reads: None,
             unplanned: UnplannedConstruction::Allow,
             params: Box::default(),
             positions: Arc::new(SlotPositions::of(layout, layout.eager())),
@@ -136,6 +138,18 @@ impl EntryPlan {
         !self.builds.contains(&true)
     }
 
+    /// The types the walk for invocation-context edges consulted, sorted.
+    pub(crate) fn accessor_reads(&self) -> &[TypeId] {
+        self.accessor_reads.as_deref().unwrap_or_default()
+    }
+
+    /// Whether planning walked for invocation-context edges, which it does only when some
+    /// component of the generation declares one. A plan made without the walk does not hold
+    /// for a generation that declares such an edge.
+    pub fn walked_accessors(&self) -> bool {
+        self.accessor_reads.is_some()
+    }
+
     /// Whether an invocation-context accessor the entry reaches resolves from a slot of this
     /// scope, so the scope must be open while the entry runs even when it builds nothing.
     pub fn is_accessed(&self) -> bool {
@@ -186,12 +200,13 @@ impl SlotLayout {
         };
         let builds = self.built_up_front(&selector, targets);
         let accessed = self.accessed(&selector, targets);
-        let declared = self.declared(&selector, targets, &builds, &accessed);
+        let declared = self.declared(&selector, targets, &builds, &accessed.slots);
 
         EntryPlan {
             scope: self.scope,
             declared,
-            accessed: accessed.contains(&true),
+            accessed: accessed.slots.contains(&true),
+            accessor_reads: accessed.reads,
             unplanned,
             params: self.plan_params(targets, selection),
             positions: Arc::new(SlotPositions::of(self, &builds)),

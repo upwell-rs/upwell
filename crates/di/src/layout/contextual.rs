@@ -12,6 +12,7 @@
 
 use std::any::TypeId;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use upwell_core::{DependencyDescriptor, ResolutionMode};
 
@@ -20,15 +21,33 @@ use super::entry_plan::EagerSelection;
 use crate::descriptors::ComponentDescriptor;
 use crate::registry::ProviderSelectionModel;
 
+/// What the walk over the invocation-context edges an entry reaches found.
+pub(super) struct Accessed {
+    /// The slots of the scope those edges resolve to, with their dependencies there.
+    pub(super) slots: Box<[bool]>,
+    /// Every type whose providers or placements the walk consulted, sorted: a later
+    /// generation must plan the entry again when the selection of any of them changes.
+    /// `None` when no component declares such an edge, so nothing was walked.
+    pub(super) reads: Option<Arc<[TypeId]>>,
+}
+
 impl SlotLayout {
     /// The slots of this scope the invocation-context edges reachable from `targets` resolve
-    /// to, with every slot of this scope they depend on.
+    /// to, with every slot of this scope they depend on, and the types the walk read.
     pub(super) fn accessed(
         &self,
         selector: &EagerSelection<'_>,
         targets: &[DependencyDescriptor],
-    ) -> Box<[bool]> {
+    ) -> Accessed {
         let mut accessed = vec![false; self.slots.len()].into_boxed_slice();
+
+        if !selector.selection.has_contextual_edges() {
+            return Accessed {
+                slots: accessed,
+                reads: None,
+            };
+        }
+
         let mut visited = HashSet::new();
         let mut pending: Vec<TypeId> = targets
             .iter()
@@ -60,7 +79,14 @@ impl SlotLayout {
             }
         }
 
-        accessed
+        let mut reads: Vec<TypeId> = visited.into_iter().collect();
+
+        reads.sort_unstable();
+
+        Accessed {
+            slots: accessed,
+            reads: Some(reads.into()),
+        }
     }
 }
 
