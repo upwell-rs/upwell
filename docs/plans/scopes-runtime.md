@@ -862,12 +862,17 @@ watcher.await?;
     work without the propagation machinery.
   - **Masked context** (work captured outside every invocation, run by a propagation primitive):
     no capture applies, and `ScopeLogs` is not capturing.
+  - **Entered context without a scope instance** (a job's or a lifecycle hook's): the span
+    decides, since there is no chain to check it against.
   - **Entered context:** the span's sink applies when its instance is on the context's scope
     chain, or opens under the context's innermost instance (so events made while an instance
     opens under the current invocation, eager construction included, stay captured). Otherwise
     the innermost capturing instance on the context's chain applies: a closure bound in
     invocation A and run inside B logs to A, and a task carried out of a `run` sees and logs to
     that run.
+  - `ScopeBuilder::run` opens its instance inside its own context, pending under the instance's
+    parent, and binds the container before the work runs, so the run's constructors log to the
+    run wherever it was started.
   - `ScopeLogs::current()` therefore reports where events made there are delivered: a
     non-capturing open inside a capturing run sees the run's capture (as its events reach it),
     and outside an invocation `is_capturing()` needs the layer, as capture does. It replaced the

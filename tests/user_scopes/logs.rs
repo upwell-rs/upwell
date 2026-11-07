@@ -7,10 +7,12 @@ use tracing::instrument::WithSubscriber;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::SubscriberExt;
 
-use upwell::logs::{LogField, ScopeLog, ScopeLogLayer, ScopeLogs};
+use upwell::logs::{LogField, ScopeLog, ScopeLogLayer, ScopeLogStream, ScopeLogs};
 use upwell::scope;
 use upwell::scope::Root;
 use upwell::{ScopeOpener, component, methods};
+use upwell_app::HookTarget;
+use upwell_di::context::{InvocationContext, InvocationTarget, TargetRef};
 
 use super::app;
 
@@ -39,6 +41,68 @@ impl CaptureProbe {
             capturing: logs.is_capturing(),
         }
     }
+}
+
+/// Logs from its constructor and records whether `ScopeLogs` captured there.
+#[component(scope = AuditRun, default_factory = false)]
+struct LoudProbe {
+    capturing: bool,
+}
+
+#[methods]
+impl LoudProbe {
+    #[init]
+    fn new(logs: ScopeLogs, _run: Arc<AuditRun>) -> Self {
+        tracing::info!("constructing");
+
+        Self {
+            capturing: logs.is_capturing(),
+        }
+    }
+}
+
+/// A target standing in for a job run.
+#[derive(Debug)]
+struct Job;
+
+impl InvocationTarget for Job {}
+
+fn install() -> tracing::dispatcher::DefaultGuard {
+    tracing::dispatcher::set_default(&Dispatch::new(
+        Registry::default().with(ScopeLogLayer::new()),
+    ))
+}
+
+async fn messages(stream: ScopeLogStream) -> Vec<String> {
+    stream
+        .filter_map(|item| async move {
+            match item {
+                ScopeLog::Record(record) => Some(record.message),
+                _ => None,
+            }
+        })
+        .collect()
+        .await
+}
+
+/// Runs a capturing audit whose work injects a [`LoudProbe`] inside `context`, returning
+/// whether the probe's constructor saw a capture and what the run captured.
+async fn probed_run_in(
+    audits: &ScopeOpener<AuditRun>,
+    context: InvocationContext,
+) -> (bool, Vec<String>) {
+    context
+        .enter(async {
+            let run = audits
+                .builder(audit(1))
+                .capture_logs()
+                .run(|probe: Arc<LoudProbe>| async move { probe.capturing });
+            let stream = run.logs();
+            let capturing = run.await.expect("the run succeeds");
+
+            (capturing, messages(stream).await)
+        })
+        .await
 }
 
 fn audit(account: u64) -> AuditRun {
@@ -200,4 +264,74 @@ async fn parallel_runs_capture_their_own_events_and_loggable_params() {
 
         assert_eq!(records[1].target, "dependency::crate");
     }
+}
+
+#[tokio::test]
+async fn a_run_started_by_a_job_captures_its_constructors() {
+    let _guard = install();
+    let app = app("user-scopes-job-run").await;
+    let audits = app.runtime().opener::<AuditRun>().expect("declared");
+    let job = audits.context(TargetRef::from_static(&Job));
+
+    let (capturing, messages) = probed_run_in(&audits, job).await;
+
+    assert!(capturing, "the constructor sees the run's capture");
+    assert!(messages.iter().any(|message| message == "constructing"));
+}
+
+#[tokio::test]
+async fn a_run_started_by_a_lifecycle_hook_captures_its_constructors() {
+    static STARTUP: HookTarget = HookTarget { kind: "startup" };
+
+    let _guard = install();
+    let app = app("user-scopes-hook-run").await;
+    let audits = app.runtime().opener::<AuditRun>().expect("declared");
+    let hook = audits.context(TargetRef::from_static(&STARTUP));
+
+    let (capturing, messages) = probed_run_in(&audits, hook).await;
+
+    assert!(capturing, "the constructor sees the run's capture");
+    assert!(messages.iter().any(|message| message == "constructing"));
+}
+
+#[tokio::test]
+async fn a_run_started_inside_another_run_keeps_its_construction_events() {
+    let _guard = install();
+    let app = app("user-scopes-nested-run").await;
+    let audits = app.runtime().opener::<AuditRun>().expect("declared");
+    let outer =
+        audits
+            .builder(audit(1))
+            .capture_logs()
+            .run(|opener: ScopeOpener<AuditRun>| async move {
+                let inner = opener
+                    .builder(audit(2))
+                    .capture_logs()
+                    .run(|probe: Arc<LoudProbe>| async move { probe.capturing });
+                let inner_stream = inner.logs();
+                let capturing = inner.await.expect("the inner run succeeds");
+
+                (capturing, inner_stream)
+            });
+    let outer_stream = outer.logs();
+
+    let (capturing, inner_stream) = outer.await.expect("the outer run succeeds");
+
+    assert!(
+        capturing,
+        "the inner constructor sees the inner run's capture"
+    );
+    assert!(
+        messages(inner_stream)
+            .await
+            .iter()
+            .any(|message| message == "constructing")
+    );
+    assert!(
+        !messages(outer_stream)
+            .await
+            .iter()
+            .any(|message| message == "constructing"),
+        "the outer run never sees the inner run's construction"
+    );
 }
