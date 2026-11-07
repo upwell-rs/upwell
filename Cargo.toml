@@ -147,6 +147,12 @@ quote = "1"
 proc-macro2 = "1"
 heck = "0.5"
 
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
 [package]
 name = "upwell"
 description = "A typed Rust application framework with dependency injection, protocol composition, lifecycle management, and generated clients."
@@ -158,6 +164,9 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+
+[lints]
+workspace = true
 
 [features]
 default = ["cli", "di-check"]

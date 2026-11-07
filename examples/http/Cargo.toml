@@ -11,6 +11,9 @@ publish = false
 # client: `wasm-pack build examples/http --target web` builds the generated `{Controller}Client`s,
 # with the server code `cfg`-gated out. `cdylib` is required by wasm-pack; `rlib` lets the binary
 # depend on the library.
+[lints]
+workspace = true
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 

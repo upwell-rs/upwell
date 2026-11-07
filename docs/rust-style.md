@@ -173,6 +173,9 @@ the owner rule applies. Where this file is silent, rustfmt and the Rust API Guid
   change their visibility unless the API change was requested.
 - No `unsafe` unless no safe implementation exists. Put it behind a safe abstraction that is isolated from
   business logic. Every `unsafe` block has a `SAFETY:` note.
+  Workspace lints enforce it: `unsafe_code` warns until the narrowest item or statement carries
+  `#[allow(unsafe_code)]`, and `clippy::undocumented_unsafe_blocks` denies a missing `SAFETY:` note.
+  Prefer a safe wrapper crate over a new allow.
 - No unstable features. Do not run code before `main`. Prefer `linkme` for registration. The `inventory`
   backend exists as an intentional seam, so do not add new uses of it outside that seam.
 - Do not call `catch_unwind` in first-party code.

@@ -87,6 +87,7 @@ pub const fn key_from_bytes(bytes: &'static [u8]) -> EntryKey {
     }
 
     // SAFETY: the bytes were just checked to be ASCII, which is always valid UTF-8.
+    #[allow(unsafe_code)]
     let value = unsafe { core::str::from_utf8_unchecked(bytes) };
 
     match EntryKey::new(value) {
