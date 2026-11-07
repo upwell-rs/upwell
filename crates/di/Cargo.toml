@@ -20,6 +20,9 @@ serde = ["dep:serde"]
 # Expose the invocation context's inspection helpers (`target`, `scope_key`, `is_scope`, ...) to
 # the tests of crates that establish contexts. Never enabled outside dev-dependencies.
 test-support = []
+# Carry the invocation context into rayon pools (`context::rayon`). Binding closures with
+# `CapturedContext::bind` works with any pool without it.
+rayon = ["dep:rayon"]
 
 [dependencies]
 upwell-core = { workspace = true }
@@ -32,6 +35,7 @@ futures = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }

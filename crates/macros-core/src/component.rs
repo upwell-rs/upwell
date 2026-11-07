@@ -118,7 +118,7 @@ pub fn expand<Ext: ComponentExt>(
         &condition.root,
         &construction.policy,
         paths,
-    );
+    )?;
     let component = paths.core("Component");
     let declared_scope = paths.core("DeclaredScope");
 

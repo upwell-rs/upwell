@@ -1,96 +1,12 @@
-use std::collections::HashMap;
 use std::pin::pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
-use upwell_core::{ResolverSet, Scope, ScopeId};
+use upwell_core::Scope;
 
-use super::*;
-use crate::container::{ScopeContainer, ScopeRegistry};
+use super::fixtures::{Custom, Entry, Message, Request, chain, child, context, innermost, runtime};
+use super::{ContextError, InvocationContext, TargetRef, bind_opened_scope};
 use crate::test_support;
-
-/// A request-like scope opened under the root.
-struct Request;
-
-/// A message-like scope opened under [`Request`].
-struct Message;
-
-impl Scope for Request {
-    const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/context-request");
-    const RANK: u8 = 1;
-    const NAME: &'static str = "Request";
-}
-
-impl Scope for Message {
-    const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/context-message");
-    const RANK: u8 = 2;
-    const NAME: &'static str = "Message";
-}
-
-/// The entry points the tests establish contexts for.
-#[derive(Debug, PartialEq, Eq)]
-enum Entry {
-    Http,
-    Connection,
-    Message,
-    Rpc,
-    Hook,
-}
-
-impl InvocationTarget for Entry {}
-
-/// A target a third-party protocol defines, carrying data.
-#[derive(Debug, PartialEq, Eq)]
-struct Custom {
-    name: &'static str,
-}
-
-impl InvocationTarget for Custom {}
-
-/// A root and a request instance under it.
-struct Chain {
-    root: Arc<ScopeContainer>,
-    request: Arc<ScopeContainer>,
-}
-
-async fn chain() -> Chain {
-    let registry = Arc::new(
-        ScopeRegistry::new(HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
-            .expect("empty scope registry validates"),
-    );
-    let root =
-        ScopeContainer::build_root(&[], Vec::new(), ResolverSet::new(), Arc::clone(&registry))
-            .await
-            .expect("root builds");
-    let request = child::<Request>(&root).await;
-
-    Chain { root, request }
-}
-
-async fn child<S: Scope>(parent: &Arc<ScopeContainer>) -> Arc<ScopeContainer> {
-    ScopeContainer::open_child(
-        S::KEY,
-        Arc::clone(parent),
-        parent.registry(),
-        &[],
-        Vec::new(),
-    )
-    .await
-    .expect("an empty child scope opens")
-}
-
-/// The chain's root as the runtime a context runs on.
-fn runtime(chain: &Chain) -> Arc<dyn ContextRuntime> {
-    Arc::clone(&chain.root) as Arc<dyn ContextRuntime>
-}
-
-fn context(chain: &Chain, entry: &'static Entry) -> InvocationContext {
-    InvocationContext::new(TargetRef::from_static(entry), runtime(chain))
-}
-
-fn innermost() -> Result<Arc<ScopeContainer>, ContextError> {
-    InvocationContext::with_current(InvocationContext::scope)?
-}
 
 #[tokio::test]
 async fn lookups_outside_every_context_fail_with_a_typed_error() {

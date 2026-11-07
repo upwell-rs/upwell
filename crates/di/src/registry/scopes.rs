@@ -35,15 +35,17 @@ impl ComponentRegistry {
 
 /// Requires the scope of every target one dependency edge of `consumer` resolves to to be
 /// accessible from the consumer's scope. `lookup` finds a registered component by type.
+///
+/// Three kinds of edge are exempt: config edges resolve against external bindings, dynamic
+/// edges are runtime-provided, and invocation-context edges (`Current<T>`, `Scoped<S, T>`)
+/// retain nothing, so they cannot hold a shorter-lived value captive.
 pub(super) fn check_scope(
     selection: &selection::ProviderSelectionModel,
     consumer: &ComponentDescriptor,
     dep: &upwell_core::DependencyDescriptor,
     can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
 ) -> crate::Result<()> {
-    // Config edges resolve against external bindings; dynamic edges are runtime-provided.
-    // Neither participates in the scope rule.
-    if dep.dynamic || dep.config {
+    if dep.dynamic || dep.config || dep.resolution == ResolutionMode::Current {
         return Ok(());
     }
 

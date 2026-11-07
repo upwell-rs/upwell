@@ -1,0 +1,5 @@
+error: `#[qualifier]` is not supported on a `Current<..>` or `Scoped<..>` field: an accessor resolves its target's unqualified provider from the active invocation; inject the qualified provider directly instead
+ --> tests/ui/access/qualified_scoped.rs:8:5
+  |
+8 |     #[qualifier = "admin"]
+  |     ^^^^^^^^^^^^^^^^^^^^^^

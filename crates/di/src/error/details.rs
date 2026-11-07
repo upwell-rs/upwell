@@ -151,7 +151,8 @@ impl fmt::Display for ScopeViolation {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "scope violation: component '{}' ({}) depends on '{}' ({}), which is shorter-lived",
+            "scope violation: component '{}' ({}) depends on '{}' ({}), which is shorter-lived; \
+             wrap it in `Current<..>` to read it from the active invocation on each call instead",
             self.component, self.component_scope, self.dependency, self.dependency_scope
         )
     }

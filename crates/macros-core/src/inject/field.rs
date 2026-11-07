@@ -36,7 +36,7 @@ pub(super) struct ReadyField {
 
 impl ReadyField {
     /// A field built the same way on both paths, without awaiting.
-    fn same(value: &TokenStream) -> Self {
+    pub(super) fn same(value: &TokenStream) -> Self {
         Self {
             read: None,
             value: value.clone(),
@@ -45,7 +45,7 @@ impl ReadyField {
 
     /// A field whose dependency `source` yields `Option<T>`, `None` meaning not ready.
     /// `value` builds the field from the read binding.
-    fn read(binding: &syn::Ident, source: TokenStream, value: TokenStream) -> Self {
+    pub(super) fn read(binding: &syn::Ident, source: TokenStream, value: TokenStream) -> Self {
         Self {
             read: Some(quote! {
                 let ::core::option::Option::Some(#binding) = #source else {
@@ -62,23 +62,37 @@ impl ReadyField {
 ///
 /// `index` is the position the field's dependency edge takes in the factory's declared
 /// edges, so a planned edge is read by position instead of by type.
-pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> FieldPlan {
+///
+/// Multi-valued edges (`Vec`, `HashMap`) resolve every provider of a trait and never fail, so
+/// they take no missing-provider fallback. A single edge peels its wrappers: `Option<..>`
+/// marks it optional and `Dynamic<..>` runtime-provided, and the remaining type is the
+/// `Injectable` handle to resolve. Only a required concrete single edge is asserted
+/// `Provided` eagerly; the lazy `Wired` bound covers trait objects too.
+///
+/// # Errors
+///
+/// An attribute the field's kind does not support, such as `#[qualifier]` on an accessor.
+pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> syn::Result<FieldPlan> {
     let had_default = field.attrs.iter().any(|a| a.path().is_ident("default"));
     field.attrs.retain(|a| !a.path().is_ident("default"));
 
     if had_default {
         let value = quote!(::core::default::Default::default());
 
-        return FieldPlan {
+        return Ok(FieldPlan {
             ready: ReadyField::same(&value),
             value,
             dependency: None,
             check: None,
             wired: None,
-        };
+        });
     }
 
-    // `#[qualifier = ".."]` selects a specific provider for a single trait edge.
+    let qualifier_attr = field
+        .attrs
+        .iter()
+        .find(|a| a.path().is_ident("qualifier"))
+        .cloned();
     let field_qualifier = field.attrs.iter().find_map(|a| {
         if a.path().is_ident("qualifier")
             && let Meta::NameValue(nv) = &a.meta
@@ -93,11 +107,13 @@ pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> Fiel
     });
     field.attrs.retain(|a| !a.path().is_ident("qualifier"));
 
-    // `#[config]` (sole-binding shorthand) or `#[config("app.db.reader")]` (path)
-    // marks a config-binding injection.
-    let config_attr = field.attrs.iter().find(|a| a.path().is_ident("config"));
+    let config_attr = field
+        .attrs
+        .iter()
+        .find(|a| a.path().is_ident("config"))
+        .cloned();
     let is_config = config_attr.is_some();
-    let config_path: Option<LitStr> = config_attr.and_then(|a| match &a.meta {
+    let config_path: Option<LitStr> = config_attr.as_ref().and_then(|a| match &a.meta {
         Meta::List(list) => syn::parse2::<LitStr>(list.tokens.clone()).ok(),
         _ => None,
     });
@@ -111,8 +127,6 @@ pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> Fiel
     let dependency_descriptor = paths.core("DependencyDescriptor");
     let resolution_mode = paths.core("ResolutionMode");
     let from_container = paths.core("FromContainer");
-    let config_store = paths.core("ConfigStore");
-    let resolver_ctx_ext = paths.core("ResolverCtxExt");
 
     let dependency_observation = paths.core("DependencyObservation");
     let dep = |handle: &syn::Type,
@@ -168,13 +182,13 @@ pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> Fiel
 
         let value = quote!(cx.fresh::<#handle>(#qualifier));
 
-        return FieldPlan {
+        return Ok(FieldPlan {
             ready: ReadyField::same(&value),
             value,
             dependency: Some(dependency),
             check: None,
             wired: None,
-        };
+        });
     }
 
     if let Some(target) = attr::deferred_inner(ty) {
@@ -190,13 +204,13 @@ pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> Fiel
 
         let value = quote!(cx.deferred::<#target>(#qualifier)?);
 
-        return FieldPlan {
+        return Ok(FieldPlan {
             ready: ReadyField::same(&value),
             value,
             dependency: Some(dependency),
             check: None,
             wired: None,
-        };
+        });
     }
 
     if let Some(handle) = attr::lazy_inner(ty) {
@@ -224,74 +238,30 @@ pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> Fiel
             ),
         };
 
-        return FieldPlan {
+        return Ok(FieldPlan {
             value,
             ready,
             dependency: Some(dependency),
             check: None,
             wired: None,
-        };
+        });
     }
 
-    // A `#[config]` / `#[config("path")]` field is a config binding injected as
-    // `Cfg<T>`, keyed by property path. Config edges are validated against the
-    // registered bindings (not the component graph), so they emit no di-check
-    // assertion.
+    if attr::is_context_accessor(ty) {
+        return super::accessor::plan(
+            ty,
+            qualifier_attr.as_ref(),
+            config_attr.as_ref(),
+            &binding,
+            &index,
+            paths,
+        );
+    }
+
     if is_config {
-        let handle = ty.clone();
-        let dep_name_str = match attr::cfg_inner(&handle) {
-            Some(inner) => inner.to_token_stream().to_string(),
-            None => handle.to_token_stream().to_string(),
-        };
-        let dep_name = LitStr::new(&dep_name_str, handle.span());
-
-        // Config lives outside the container in a `ConfigStore` resolver, reached through
-        // the construction context's resolver set. `get_resolver` is called by UFCS so the
-        // generated code needs no `use` of the extension trait.
-        let (resolved, qualifier) = match &config_path {
-            Some(path) => (
-                quote!(
-                    #resolver_ctx_ext::get_resolver::<#config_store>(cx)
-                        .and_then(|store| store.resolve_path::<#handle>(#path))
-                ),
-                quote!(::core::option::Option::Some(#path)),
-            ),
-            None => (
-                quote!(
-                    #resolver_ctx_ext::get_resolver::<#config_store>(cx)
-                        .and_then(|store| store.resolve_sole::<#handle>())
-                ),
-                none.clone(),
-            ),
-        };
-
-        let dependency = quote! {
-            #dependency_descriptor {
-                name: #dep_name,
-                ty: #type_descriptor::of::<<#handle as #injectable>::Target>(#dep_name),
-                cardinality: #cardinality::One,
-                optional: false,
-                dynamic: false,
-                qualifier: #qualifier,
-                config: true,
-                resolution: #resolution_mode::Eager,
-                observation: #dependency_observation::Live,
-            }
-        };
-
-        let value = quote!(#resolved.ok_or(#error::MissingComponent(#dep_name))?);
-
-        return FieldPlan {
-            ready: ReadyField::same(&value),
-            value,
-            dependency: Some(dependency),
-            check: None,
-            wired: None,
-        };
+        return Ok(super::config::plan(ty, config_path.as_ref(), paths));
     }
 
-    // Multi-valued edges resolve every provider of a trait and never fail (empty
-    // `Vec`/`HashMap` is valid), so they take no `Injectable`-missing fallback.
     if let Some(item) = attr::vec_inner(ty) {
         let dependency = dep(
             &item,
@@ -301,7 +271,7 @@ pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> Fiel
             none.clone(),
         );
 
-        return FieldPlan {
+        return Ok(FieldPlan {
             value: quote!(cx.dep_all::<#item>(#index).await?),
             ready: ReadyField::read(
                 &binding,
@@ -311,7 +281,7 @@ pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> Fiel
             dependency: Some(dependency),
             check: None,
             wired: None,
-        };
+        });
     }
 
     if let Some(value) = attr::hashmap_value(ty) {
@@ -323,7 +293,7 @@ pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> Fiel
             none.clone(),
         );
 
-        return FieldPlan {
+        return Ok(FieldPlan {
             value: quote!(cx.dep_keyed::<#value>(#index).await?),
             ready: ReadyField::read(
                 &binding,
@@ -333,11 +303,9 @@ pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> Fiel
             dependency: Some(dependency),
             check: None,
             wired: None,
-        };
+        });
     }
 
-    // Single edge. Peel the wrappers: `Option<…>` marks it optional, `Dynamic<…>`
-    // runtime-provided; the remaining type is the `Injectable` handle to resolve.
     let (optional, after_option) = match attr::option_inner(ty) {
         Some(inner) => (true, inner),
         None => (false, ty.clone()),
@@ -378,21 +346,18 @@ pub(super) fn plan_field(field: &mut Field, index: usize, paths: &Paths) -> Fiel
         qualifier,
     );
 
-    // A required, concrete single edge is `Provided`-checkable; trait-object,
-    // optional, and dynamic edges are not asserted in the per-macro path.
     let handle_is_trait = matches!(&handle, syn::Type::TraitObject(_))
         || matches!(attr::arc_inner_type(&handle), Ok(inner) if matches!(inner, syn::Type::TraitObject(_)));
     let target = quote!(<#handle as #injectable>::Target);
 
-    // Eager concrete-only assert; lazy `Wired` includes trait objects too.
     let check = (!optional && !dynamic && !handle_is_trait).then(|| target.clone());
     let wired = (!optional && !dynamic).then_some(target);
 
-    FieldPlan {
+    Ok(FieldPlan {
         value,
         ready,
         dependency: Some(dependency),
         check,
         wired,
-    }
+    })
 }

@@ -1,0 +1,5 @@
+error: `#[config]` is not supported on a `Current<..>` or `Scoped<..>` field: config bindings are injected as `Cfg<T>`
+ --> tests/ui/access/config_current.rs:8:5
+  |
+8 |     #[config]
+  |     ^^^^^^^^^
