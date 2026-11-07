@@ -78,11 +78,11 @@ pub use runtime::{
     AppConditionState, AppRuntime, ComponentRetired, ComponentRetirement,
     ComponentTransitionReport, DisplacedGeneration, EntryScope, HookTarget, OpenScope, Opening,
     OpensUnder, PendingTransition, PhaseTiming, RetirementContext, RetirementReason,
-    RuntimeTransitionReport, RuntimeView, ScopeBuilder, ScopeEntry, ScopeOpener, ScopeRun, ScopeRunTarget,
-    ScopeWork, TransitionAborted, TransitionAttemptId, TransitionCommitted, TransitionDecision,
-    TransitionFailure, TransitionHookContext, TransitionHookOutcome, TransitionHookReport,
-    TransitionOutcome, TransitionOutcomeContext, TransitionPhase, TransitionProposal,
-    TransitionRejection, TransitionVerdict,
+    RuntimeTransitionReport, RuntimeView, ScopeBuilder, ScopeEntry, ScopeOpener, ScopeRun,
+    ScopeRunTarget, ScopeWork, TransitionAborted, TransitionAttemptId, TransitionCommitted,
+    TransitionDecision, TransitionFailure, TransitionHookContext, TransitionHookOutcome,
+    TransitionHookReport, TransitionOutcome, TransitionOutcomeContext, TransitionPhase,
+    TransitionProposal, TransitionRejection, TransitionVerdict,
 };
 pub use scope::{
     PreparedScopeTopology, SCOPES, ScopeBoundary, ScopeDeclaration, ScopeParent, ScopeTopology,
