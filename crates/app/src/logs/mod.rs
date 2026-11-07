@@ -16,10 +16,13 @@ mod field;
 #[cfg(feature = "tracing-subscriber")]
 mod layer;
 mod options;
+#[cfg_attr(not(feature = "tracing-subscriber"), allow(dead_code))]
 mod record;
 mod render;
+#[cfg_attr(not(feature = "tracing-subscriber"), allow(dead_code))]
 mod sink;
 mod span;
+#[cfg_attr(not(feature = "tracing-subscriber"), allow(dead_code))]
 mod stream;
 
 pub use current::ScopeLogs;
