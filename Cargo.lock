@@ -4398,6 +4398,7 @@ dependencies = [
  "futures",
  "linkme",
  "pin-project-lite",
+ "rayon",
  "serde",
  "serde_json",
  "tempfile",

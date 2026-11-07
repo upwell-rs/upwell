@@ -297,7 +297,8 @@ impl<S: Scope> OpenScope<S> {
     /// The instance's `upwell.scope` span, to instrument the work that runs in it. Events made
     /// inside it reach the instance's log only when it was opened with
     /// [`capture_logs`](ScopeBuilder::capture_logs); the span is disabled when no subscriber
-    /// enables it.
+    /// enables it. Inside an unrelated invocation's context, events follow that invocation
+    /// instead, unless the instance opened under it; see [`ScopeLogLayer`](crate::logs::ScopeLogLayer).
     pub fn span(&self) -> Span {
         self.span.clone()
     }

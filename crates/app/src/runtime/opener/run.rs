@@ -121,6 +121,8 @@ impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
     ///
     /// The work, its targets' resolution included, runs in an invocation context of its own
     /// whose innermost scope is the instance, and inside the instance's `upwell.scope` span.
+    /// Work it carries into other tasks, threads or pools with Upwell's propagation primitives
+    /// keeps logging to the instance, and sees it through [`ScopeLogs`](crate::logs::ScopeLogs).
     ///
     /// `work` is planned like an entry whose targets are its parameters: the instance builds
     /// what they need, and under [`deny_unplanned`](crate::AppBuilder::deny_unplanned) anything
@@ -196,20 +198,18 @@ async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
         logs::describe_sink(sink, &builder.params);
     }
 
-    let (seeds, instance_logs) = builder.into_parts(sink);
+    let (seeds, instance_logs) = builder.into_parts(&parent, sink);
     let instance = async {
         let container = open_planned_in(&view, S::ID, parent, Some(&plan), seeds).await?;
+
+        logs::retain_sink(&container, instance_logs.sink());
 
         context
             .with_scope(Arc::clone(&container))
             .enter(work.call(&container))
             .await
     };
-    let outcome = logs::with_current_sink(
-        instance_logs.sink().map(Arc::clone),
-        instance.instrument(instance_logs.span().clone()),
-    )
-    .await;
+    let outcome = instance.instrument(instance_logs.span().clone()).await;
 
     instance_logs.finish();
 

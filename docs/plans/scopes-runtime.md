@@ -725,8 +725,9 @@ Protocol scopes keep request data in three tiers, so scope params stay cheap and
 
 ### Built-in log routing
 
-Routing rides on `tracing`'s own span stack, not on the DI context, so it covers every `tracing`
-event made inside a scope instance, including events from third-party crates.
+The `upwell.scope` span names the instance an event was made in, so routing covers every
+`tracing` event, including events from third-party crates. The invocation context decides whether
+that instance applies (#480): logs read the DI context, and propagation knows nothing about logs.
 
 **Mechanism**
 
@@ -736,7 +737,8 @@ event made inside a scope instance, including events from third-party crates.
 2. The span's extensions hold the instance's log sink.
 3. Upwell's `ScopeLogLayer` (a `tracing_subscriber::Layer`, installed by `init_tracing` or added to
    a user's own subscriber) handles each event by walking the event's span stack to the innermost
-   span with a sink, and pushing an owned `LogRecord` into it.
+   span with a sink, letting the invocation context decide whether it applies (see "Context
+   decides membership" below), and pushing an owned `LogRecord` into the sink that does.
 4. Capture tees: every event still reaches the user's normal output.
 
 **Capture is off by default, and costs nothing until someone asks**
@@ -779,10 +781,12 @@ watcher.await?;
 
 **Guarantees**
 
-- **Isolation:** an event only reaches the sink of the innermost capturing scope on its span stack,
-  so parallel instances never see each other's records.
+- **Isolation:** an event only reaches the sink of the innermost capturing scope its span stack
+  and invocation context agree on, so parallel instances never see each other's records, and work
+  captured outside every invocation never logs into a capture it happens to run inside.
 - **Completeness:** depends on propagation. Work spawned without the propagation primitives loses
-  the span, so its events reach only the global output: uncaptured, never misrouted.
+  the span and the context, so its events reach only the global output: uncaptured, never
+  misrouted.
 - **Levels:** capture sees only events the layer's filter enables. A per-run capture level narrows
   it; going more verbose than the filter needs a more verbose filter on the layer, because
   enabling a callsite for one layer enables it for every layer.
@@ -846,18 +850,42 @@ watcher.await?;
 - `on_event` walks the event's span stack to the innermost span holding a sink and offers an
   owned `LogRecord` to every subscriber with `try_send`; a full buffer counts the record as
   dropped. The stream yields `Lagged(n)` once the buffered records have been read.
-- `ScopeLogs` is task-local access, like `tracing`'s current span: it is the capturing instance
-  of the current task, meant for `run` work and entries, not a per-component property. Code that
-  runs while an instance opens (its eager components, an `open*` call) sees that instance's sink,
-  and an open without capture hides an enclosing one. A component built lazily, via
-  `open_on_demand`, or as an ancestor while a child instance opens, sees the sink of the task
-  that resolves it, not of its own scope. Routing construction to the owning scope's sink (a sink
-  stored on the container and restored around factories) is a follow-up (#470); it costs a
-  restore on the construction hot path and interacts with protocol identity (#353).
-- Across spawned tasks routing follows the span, not the invocation context. Work spawned with
-  Upwell's propagation primitives (track C) carries the span; a plain `tokio::spawn` loses it and
-  its events reach only the console. `ScopeLogs` follows the task the same way, through a
-  task-local set around the instance.
+- **Context decides membership (#480).** Scope logs keep no ambient state of their own: there is
+  no log task-local. A capturing instance retains its sink in its container's single drop-guard
+  slot, set once right after the container opens (only builder-opened, non-root instances; a
+  root's slot holds its generation's guard), and the sink keeps a weak link to the instance it
+  opens under. `ScopeLogLayer` and `ScopeLogs::current()` resolve the same way from the innermost
+  capturing `upwell.scope` span and the invocation context (read through a borrowing,
+  `#[doc(hidden)]` `upwell_di::context::with_context_state`, which reports absent, masked or the
+  entered context's scope chain):
+  - **No context set at all** on the task or thread: the span decides, exactly as before. Logs
+    work without the propagation machinery.
+  - **Masked context** (work captured outside every invocation, run by a propagation primitive):
+    no capture applies, and `ScopeLogs` is not capturing.
+  - **Entered context:** the span's sink applies when its instance is on the context's scope
+    chain, or opens under the context's innermost instance (so events made while an instance
+    opens under the current invocation, eager construction included, stay captured). Otherwise
+    the innermost capturing instance on the context's chain applies: a closure bound in
+    invocation A and run inside B logs to A, and a task carried out of a `run` sees and logs to
+    that run.
+  - `ScopeLogs::current()` therefore reports where events made there are delivered: a
+    non-capturing open inside a capturing run sees the run's capture (as its events reach it),
+    and outside an invocation `is_capturing()` needs the layer, as capture does. It replaced the
+    log task-local, whose answers could disagree with delivery.
+  - A closed sink, whose instance finished, never applies. While no sink is open anywhere an
+    event costs one atomic read.
+- **Cost of the rule:** an `OpenScope` span entered by hand inside an unrelated invocation's
+  context routes to that invocation, not to the hand-entered instance, unless the instance opened
+  under the invocation's innermost one. Run work inside the instance's own context (`run`, or a
+  protocol's `EntryScope::establish`) to capture into it.
+- A component sees the log of the code that resolves it: while its instance opens, that
+  instance's. A component built lazily, via `open_on_demand`, or as an ancestor while a child
+  instance opens, sees the log the resolving code routes to, not necessarily its own scope's.
+  Routing construction to the owning scope's sink is a follow-up (#470); it interacts with
+  protocol identity (#353).
+- **Follow-up:** the container has one retained-value slot. If an instance ever needs a second
+  retained value, replace the single slot with a small fixed struct of named optional fields
+  (still static, no extension map).
 - **Seam for the end-of-scope hook (#406):** an instance's work ends in `InstanceLogs::finish`,
   which closes the sink and ends every stream. The hook runs after the work and immediately
   before that call, so its events are still captured.

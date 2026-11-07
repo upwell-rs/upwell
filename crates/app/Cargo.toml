@@ -52,8 +52,9 @@ clap = { workspace = true, optional = true }
 upwell-tooling-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
-# Inspect the invocation contexts the runtime establishes.
-upwell-di = { workspace = true, features = ["test-support"] }
+# Inspect the invocation contexts the runtime establishes, and carry them into rayon pools.
+upwell-di = { workspace = true, features = ["test-support", "rayon"] }
+rayon = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
