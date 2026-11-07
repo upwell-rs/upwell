@@ -115,3 +115,47 @@ async fn an_open_instance_that_does_not_capture_has_an_ended_stream() {
 
     assert!(messages(scope.logs()).await.is_empty());
 }
+
+#[tokio::test]
+async fn a_run_that_fails_to_open_ends_its_log_streams() {
+    let _guard = install();
+    let (runtime, _registry) = build_runtime(HashMap::new()).await;
+    let (foreign, _) = build_runtime(HashMap::new()).await;
+    let foreign_session = open_session(&foreign).await;
+    let requests = runtime.opener::<Request>().expect("request is declared");
+    let mut run = Box::pin(
+        requests
+            .builder(Request)
+            .under(&foreign_session)
+            .run(|| async {}),
+    );
+    let stream = run.logs();
+
+    assert!(run.as_mut().await.is_err());
+
+    let drained = tokio::time::timeout(std::time::Duration::from_secs(5), messages(stream))
+        .await
+        .expect("the stream of a run that failed to open ends");
+
+    assert!(drained.is_empty());
+    drop(run);
+}
+
+#[tokio::test]
+async fn a_run_that_captures_by_option_hands_out_the_sink_it_captures_with() {
+    let _guard = install();
+    let (runtime, _registry) = build_runtime(HashMap::new()).await;
+    let sessions = runtime.opener::<Session>().expect("session is declared");
+    let mut run = Box::pin(sessions.builder(Session).capture_logs().run(|| async {
+        tokio::task::yield_now().await;
+        tracing::info!("late");
+    }));
+
+    assert!(futures::poll!(run.as_mut()).is_pending());
+
+    let stream = run.logs();
+
+    run.as_mut().await.expect("the run succeeds");
+
+    assert_eq!(messages(stream).await, ["late"]);
+}

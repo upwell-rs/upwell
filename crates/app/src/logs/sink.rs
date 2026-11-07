@@ -74,7 +74,7 @@ impl ScopeLogSink {
     }
 
     /// Ends every stream once it has drained, and refuses new subscribers' records.
-    pub(super) fn close(&self) {
+    pub(crate) fn close(&self) {
         let closed = self
             .subscribers
             .lock()
