@@ -9,7 +9,9 @@ use std::sync::Arc;
 use upwell::axum::axum::Router;
 use upwell::axum::axum::body::{self, Body};
 use upwell::axum::axum::extract::Request as RawRequest;
-use upwell::axum::axum::http::StatusCode;
+use upwell::axum::axum::http::{HeaderValue, StatusCode};
+use upwell::axum::axum::middleware::{Next, from_fn};
+use upwell::axum::axum::response::Response;
 use upwell::axum::prelude::*;
 use upwell::axum::tower::ServiceExt;
 use upwell::axum::{Axum, RequestMeta};
@@ -52,6 +54,44 @@ impl Desk {
     }
 }
 
+/// The response header middleware reports the user its desk read in.
+const SEEN: &str = "x-seen";
+
+/// A request-scoped desk reading the request's identity on each call, which only middleware
+/// injects.
+#[component(scope = HttpRequest)]
+struct RequestDesk {
+    identity: Current<Arc<Identity>>,
+}
+
+/// A request-scoped component that reads nothing of the request.
+#[component(scope = HttpRequest)]
+struct Unrelated {}
+
+/// Middleware injecting the request desk and reporting the user it reads.
+async fn read_desk(
+    Inject(desk): Inject<Arc<RequestDesk>>,
+    request: RawRequest,
+    next: Next,
+) -> Response {
+    let user = desk
+        .identity
+        .get()
+        .await
+        .expect("the middleware's desk reads the identity")
+        .user
+        .clone()
+        .unwrap_or_default();
+    let mut response = next.run(request).await;
+
+    response.headers_mut().insert(
+        SEEN,
+        HeaderValue::from_str(&user).expect("the user is a header value"),
+    );
+
+    response
+}
+
 /// A type nothing provides.
 struct Absent;
 
@@ -84,6 +124,9 @@ impl DeskController {
         Json(desk.user().await.expect("the desk reads the identity"))
     }
 
+    #[get("/unrelated")]
+    async fn unrelated(&self, Inject(_unrelated): Inject<Arc<Unrelated>>) {}
+
     #[get("/probe")]
     async fn probe(&self, Inject(probe): Inject<Arc<Probe>>) -> Json<(bool, bool)> {
         let broken = probe.broken.get().await;
@@ -105,6 +148,8 @@ fn app() -> AppBuilder<Axum> {
         .component::<Desk>()
         .component::<Broken>()
         .component::<Probe>()
+        .component::<RequestDesk>()
+        .component::<Unrelated>()
 }
 
 async fn router(app: AppBuilder<Axum>) -> Router {
@@ -166,4 +211,33 @@ async fn a_target_that_fails_to_build_keeps_its_source_apart_from_an_absent_one(
         absent_is_none,
         "an optional target nothing provides is none"
     );
+}
+
+/// What middleware injecting [`RequestDesk`] reported for a request to a route that injects
+/// only [`Unrelated`].
+async fn seen_by_middleware(app: AppBuilder<Axum>) -> String {
+    let router = router(app.layer(from_fn(read_desk))).await;
+    let request = RawRequest::builder()
+        .uri("/desk/unrelated")
+        .header(USER, "ada")
+        .body(Body::empty())
+        .expect("the request is valid");
+    let response = router
+        .oneshot(request)
+        .await
+        .expect("the router is infallible");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    response
+        .headers()
+        .get(SEEN)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn middleware_injecting_an_accessor_owner_the_route_never_reaches_captures_the_head() {
+    assert_eq!(seen_by_middleware(app()).await, "ada");
 }

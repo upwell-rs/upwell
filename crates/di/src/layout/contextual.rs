@@ -88,6 +88,29 @@ impl SlotLayout {
             reads: Some(reads.into()),
         }
     }
+
+    /// The slots of this scope resolving `dependency` reads: those it resolves to here with
+    /// every slot they depend on, and those the invocation-context edges reachable from it
+    /// resolve to, as an entry injecting it would declare them.
+    pub(crate) fn read_by(
+        &self,
+        selector: &EagerSelection<'_>,
+        dependency: &DependencyDescriptor,
+    ) -> Box<[bool]> {
+        let mut read = self
+            .accessed(selector, std::slice::from_ref(dependency))
+            .slots;
+
+        self.for_each_selected_slot(
+            selector,
+            dependency.ty.type_id,
+            dependency.qualifier,
+            dependency.cardinality,
+            |target| self.include(selector, target, &mut read),
+        );
+
+        read
+    }
 }
 
 /// The dependency edges of every factory that can build `target`: each placement of the
