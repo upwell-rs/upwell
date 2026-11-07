@@ -873,6 +873,11 @@ watcher.await?;
   - `ScopeBuilder::run` opens its instance inside its own context, pending under the instance's
     parent, and binds the container before the work runs, so the run's constructors log to the
     run wherever it was started.
+  - `ScopeLogs::current()` finds the current span's sink in a per-thread stack the layer keeps
+    of the capturing spans entered there (`on_enter`/`on_exit`). It mirrors `tracing`'s span
+    stack and decides nothing, but it locks no span extensions, so a formatter that holds them
+    while rendering a value that asks for the log cannot deadlock, and it needs no concrete
+    `Registry`, so it works with every `LookupSpan` subscriber the layer supports.
   - `ScopeLogs::current()` therefore reports where events made there are delivered: a
     non-capturing open inside a capturing run sees the run's capture (as its events reach it),
     and `is_capturing()` needs a layer that took the routing span, as capture does. It replaced the

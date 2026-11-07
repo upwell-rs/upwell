@@ -63,24 +63,15 @@ impl FromContainer for ScopeLogs {
 
 impl upwell_di::Provided<ScopeLogs> for upwell_di::Wiring {}
 
-/// The sink of the innermost capturing `upwell.scope` span the calling code runs in, read from
-/// the default subscriber's span registry.
+/// The sink of the innermost capturing `upwell.scope` span entered on this thread, as the
+/// layer recorded it. Locks no span and works with every subscriber the layer supports.
 #[cfg(feature = "tracing-subscriber")]
 fn span_sink() -> Option<Arc<ScopeLogSink>> {
-    use tracing_subscriber::registry::{LookupSpan, Registry};
-
     if !super::sink::any_open() {
         return None;
     }
 
-    tracing::Span::current()
-        .with_subscriber(|(id, dispatch)| {
-            let span = dispatch.downcast_ref::<Registry>()?.span(id)?;
-
-            span.scope()
-                .find_map(|span| span.extensions().get::<Arc<ScopeLogSink>>().cloned())
-        })
-        .flatten()
+    super::entered::innermost()
 }
 
 /// Without a layer no span holds a sink.

@@ -13,6 +13,8 @@
 //! call, so the events it makes are still captured.
 
 mod current;
+#[cfg(feature = "tracing-subscriber")]
+mod entered;
 mod field;
 #[cfg(feature = "tracing-subscriber")]
 mod layer;
