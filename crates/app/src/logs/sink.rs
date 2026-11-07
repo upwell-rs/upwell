@@ -110,17 +110,54 @@ impl ScopeLogSink {
         }
 
         let record = LogRecord::from_event(event, self.scope, Arc::clone(&self.params));
-        let mut guard = self.subscribers.lock().expect("sink lock not poisoned");
-        let Some(subscribers) = guard.as_mut() else {
-            return;
-        };
+        let targets = self.targets();
 
-        subscribers.retain(|subscriber| subscriber.offer(&record));
-        self.watchers.store(subscribers.len(), Ordering::Release);
+        if targets.is_empty() {
+            return;
+        }
+
+        let gone = targets
+            .iter()
+            .filter(|target| !target.offer(&record))
+            .count();
+
+        drop(targets);
+
+        if gone > 0 {
+            self.prune();
+        }
+    }
+
+    /// The subscribers' ends, cloned so records are sent and readers woken without the lock:
+    /// a woken reader may call back into the sink.
+    fn targets(&self) -> Vec<Subscriber> {
+        let guard = self.subscribers.lock().expect("sink lock not poisoned");
+
+        guard
+            .as_ref()
+            .map(|subscribers| subscribers.iter().map(Subscriber::share).collect())
+            .unwrap_or_default()
+    }
+
+    /// Drops the subscribers that went away.
+    fn prune(&self) {
+        let mut guard = self.subscribers.lock().expect("sink lock not poisoned");
+
+        if let Some(subscribers) = guard.as_mut() {
+            subscribers.retain(|subscriber| !subscriber.sender.is_closed());
+            self.watchers.store(subscribers.len(), Ordering::Release);
+        }
     }
 }
 
 impl Subscriber {
+    fn share(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+            lag: Arc::clone(&self.lag),
+        }
+    }
+
     /// Hands `record` to the subscriber without waiting. False once it went away.
     fn offer(&self, record: &LogRecord) -> bool {
         match self.sender.try_send(record.clone()) {
