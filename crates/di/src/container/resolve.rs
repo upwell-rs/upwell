@@ -174,7 +174,8 @@ impl ScopeContainer {
             | DepRef::Transient(_)
             | DepRef::Many(_)
             | DepRef::Absent
-            | DepRef::Unplanned => None,
+            | DepRef::Unplanned
+            | DepRef::Contextual => None,
         }
     }
 

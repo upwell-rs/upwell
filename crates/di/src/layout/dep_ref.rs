@@ -45,6 +45,10 @@ pub(crate) enum DepRef {
     /// An edge resolved through its own handle (config, dynamic, lazy, deferred or fresh),
     /// kept so planned edges stay at their declared positions.
     Unplanned,
+    /// An invocation-context edge (`Current<T>`, `Scoped<S, T>`), resolved from the active
+    /// invocation on each read. An entry declares what it reaches but never builds it with its
+    /// consumer.
+    Contextual,
 }
 
 /// One provider of a collection or keyed dependency.
@@ -127,6 +131,6 @@ impl PlannedDependency {
     }
 
     fn is_planned(&self) -> bool {
-        !matches!(self.source, DepRef::Unplanned)
+        !matches!(self.source, DepRef::Unplanned | DepRef::Contextual)
     }
 }

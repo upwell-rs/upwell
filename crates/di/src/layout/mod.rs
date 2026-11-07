@@ -5,6 +5,7 @@
 //! each eager dependency edge to a [`DepRef`] once, so opening the scope builds its slots
 //! without selecting providers.
 
+mod contextual;
 mod dep_ref;
 mod entry_params;
 mod entry_plan;
