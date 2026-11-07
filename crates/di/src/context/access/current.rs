@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use upwell_core::DependencyDescriptor;
 
-use super::{ScopedError, current_dependency, extract, innermost};
+use super::{Active, ScopedError, active, current_dependency, extract};
 use crate::construct::FromContainer;
 use crate::descriptors::ComponentConstructionContext;
 
@@ -39,12 +39,22 @@ impl<T: FromContainer> Current<T> {
     /// # Errors
     ///
     /// [`ScopedError::Context`] outside every invocation context or in one without a scope
-    /// instance, [`ScopedError::Unavailable`] when nothing on the chain provides `T`, and
+    /// instance, [`ScopedError::ScopeNotActive`] when the scope the invocation runs in was never
+    /// opened and nothing open provides `T`, [`ScopedError::Unavailable`] when nothing on the
+    /// chain provides `T`, and
     /// [`ScopedError::Resolution`] when building it fails.
     pub async fn get(&self) -> Result<T, ScopedError> {
-        let scope = innermost()?;
+        let Active {
+            innermost,
+            unopened,
+        } = active()?;
 
-        extract::<T>(&scope).await
+        match (extract::<T>(&innermost).await, unopened) {
+            (Err(ScopedError::Unavailable { .. }), Some(scope)) => {
+                Err(ScopedError::not_opened(scope))
+            }
+            (value, _) => value,
+        }
     }
 }
 

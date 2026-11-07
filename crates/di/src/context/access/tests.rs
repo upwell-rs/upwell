@@ -172,3 +172,22 @@ fn a_missing_pinned_scope_names_its_id_and_name() {
     assert!(message.contains(Message::ID.as_str()), "{message}");
     assert!(message.contains(Message::NAME), "{message}");
 }
+
+#[tokio::test]
+async fn a_scope_the_invocation_never_opened_is_reported_as_not_active() {
+    let chain = chain().await;
+    let under_root = context(&chain, &Entry::Rpc)
+        .with_pending_scope(Request::KEY, Some(Arc::clone(&chain.root)));
+    let without_parent = context(&chain, &Entry::Http).with_pending_scope(Request::KEY, None);
+
+    let missing = under_root.enter(read(IDENTITY)).await;
+    let scopeless = without_parent.enter(read(IDENTITY)).await;
+
+    for result in [missing, scopeless] {
+        assert!(matches!(
+            result,
+            Err(ScopedError::ScopeNotActive { scope, name })
+                if scope == Request::ID && name == Request::NAME
+        ));
+    }
+}
