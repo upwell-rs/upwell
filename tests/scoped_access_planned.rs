@@ -14,7 +14,7 @@ use upwell::axum::prelude::*;
 use upwell::axum::tower::ServiceExt;
 use upwell::axum::{Axum, RequestMeta};
 use upwell::context::{Current, ScopedError};
-use upwell::{AppBuilder, component, methods};
+use upwell::{AppBuilder, DiError, Dynamic, component, methods};
 
 /// The header the request's identity comes from.
 const USER: &str = "x-user";
@@ -52,6 +52,27 @@ impl Desk {
     }
 }
 
+/// A type nothing provides.
+struct Absent;
+
+/// A request-scoped component whose construction fails: nothing provides its dynamic
+/// dependency.
+#[component(scope = HttpRequest)]
+struct Broken {
+    _absent: Dynamic<Arc<Absent>>,
+}
+
+/// A request-scoped component no application registers.
+#[component(scope = HttpRequest)]
+struct Unregistered {}
+
+/// A singleton reading a target that fails to build and one nothing provides.
+#[component]
+struct Probe {
+    broken: Current<Arc<Broken>>,
+    unregistered: Current<Option<Arc<Unregistered>>>,
+}
+
 /// A route injecting only the singleton.
 #[controller(path = "/desk")]
 struct DeskController;
@@ -62,6 +83,19 @@ impl DeskController {
     async fn user(&self, Inject(desk): Inject<Arc<Desk>>) -> Json<Option<String>> {
         Json(desk.user().await.expect("the desk reads the identity"))
     }
+
+    #[get("/probe")]
+    async fn probe(&self, Inject(probe): Inject<Arc<Probe>>) -> Json<(bool, bool)> {
+        let broken = probe.broken.get().await;
+        let unregistered = probe.unregistered.get().await;
+        let construction_failed = matches!(
+            broken,
+            Err(ScopedError::Resolution { source, .. })
+                if matches!(*source, DiError::MissingComponent(_))
+        );
+
+        Json((construction_failed, matches!(unregistered, Ok(None))))
+    }
 }
 
 fn app() -> AppBuilder<Axum> {
@@ -69,6 +103,8 @@ fn app() -> AppBuilder<Axum> {
         .controller::<DeskController>()
         .component::<Identity>()
         .component::<Desk>()
+        .component::<Broken>()
+        .component::<Probe>()
 }
 
 async fn router(app: AppBuilder<Axum>) -> Router {
@@ -77,9 +113,9 @@ async fn router(app: AppBuilder<Axum>) -> Router {
     app.protocol().router().clone()
 }
 
-async fn user(router: &Router) -> Option<String> {
+async fn get<T: serde::de::DeserializeOwned>(router: &Router, uri: &str) -> T {
     let request = RawRequest::builder()
-        .uri("/desk/user")
+        .uri(uri)
         .header(USER, "ada")
         .body(Body::empty())
         .expect("the request is valid");
@@ -98,6 +134,10 @@ async fn user(router: &Router) -> Option<String> {
     serde_json::from_slice(&body).expect("the body decodes")
 }
 
+async fn user(router: &Router) -> Option<String> {
+    get(router, "/desk/user").await
+}
+
 #[tokio::test]
 async fn an_accessor_reads_a_value_built_from_the_captured_head() {
     let router = router(app()).await;
@@ -110,4 +150,20 @@ async fn an_accessor_read_is_declared_under_deny_unplanned() {
     let router = router(app().deny_unplanned()).await;
 
     assert_eq!(user(&router).await.as_deref(), Some("ada"));
+}
+
+#[tokio::test]
+async fn a_target_that_fails_to_build_keeps_its_source_apart_from_an_absent_one() {
+    let router = router(app()).await;
+
+    let (construction_failed, absent_is_none) = get::<(bool, bool)>(&router, "/desk/probe").await;
+
+    assert!(
+        construction_failed,
+        "a missing dependency of the target is a resolution failure with its source"
+    );
+    assert!(
+        absent_is_none,
+        "an optional target nothing provides is none"
+    );
 }
