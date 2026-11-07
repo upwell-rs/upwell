@@ -12,7 +12,8 @@
 //!   scope chain or opens under the context's innermost instance, as an instance does while
 //!   it opens. Otherwise the innermost capturing instance on the context's chain applies.
 //!
-//! A sink whose instance finished no longer applies.
+//! A sink whose instance finished no longer applies, and neither does one whose routing span
+//! no layer took, such as under an explicit `upwell::scope=off`.
 
 use std::sync::Arc;
 
@@ -89,9 +90,10 @@ fn descends((ancestor, parent): (&Arc<ScopeContainer>, &Arc<ScopeContainer>)) ->
     ScopeChain::starting_at(parent).any(|instance| Arc::ptr_eq(instance, ancestor))
 }
 
-/// The sink `instance` retains, while it captures.
+/// The sink `instance` retains, while it captures: open, and attached to a routing span the
+/// layer took, so a filter that disables the span disables capture on this path too.
 fn retained(instance: &Arc<ScopeContainer>) -> Option<&Arc<ScopeLogSink>> {
     instance
         .drop_guard::<Arc<ScopeLogSink>>()
-        .filter(|sink| sink.is_open())
+        .filter(|sink| sink.is_open() && sink.is_attached())
 }

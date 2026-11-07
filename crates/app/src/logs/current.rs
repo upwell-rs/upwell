@@ -36,8 +36,8 @@ impl ScopeLogs {
 
     /// Whether events made where this log was taken are captured: by the instance itself, or
     /// by the enclosing capturing instance a non-capturing one passes its events to. Like
-    /// capture, it needs a [`ScopeLogLayer`](super::ScopeLogLayer) in the subscriber, except
-    /// inside a capturing instance's own invocation context.
+    /// capture, it needs a [`ScopeLogLayer`](super::ScopeLogLayer) whose filter admits the
+    /// instance's routing span, so an explicit `upwell::scope=off` reports no capture.
     pub fn is_capturing(&self) -> bool {
         self.sink.is_some()
     }
