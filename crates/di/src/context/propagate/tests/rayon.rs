@@ -96,6 +96,29 @@ async fn a_current_iterator_carries_the_context_onto_every_worker() {
 }
 
 #[tokio::test]
+async fn a_current_iterator_initializes_its_folds_inside_the_context() {
+    let chain = chain().await;
+    let (captured, request) = captured(&chain).await;
+    let pool = pool(2);
+
+    let folds = captured.clone().run(|| (0..64).into_par_iter().current());
+    let reductions = captured.run(|| (0..64).into_par_iter().current());
+    let folded = pool.install(|| {
+        folds
+            .fold(|| sees(&request), |seen, _| seen)
+            .all(|seen| seen)
+    });
+    let reduced = pool.install(|| {
+        reductions
+            .map(|_| true)
+            .reduce(|| sees(&request), |left, right| left && right)
+    });
+
+    assert!(folded, "every fold identity runs inside the context");
+    assert!(reduced, "every reduce identity runs inside the context");
+}
+
+#[tokio::test]
 async fn pool_jobs_never_see_each_others_contexts() {
     let chain = chain().await;
     let pool = pool(2);
