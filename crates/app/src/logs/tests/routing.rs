@@ -168,3 +168,44 @@ async fn an_instance_with_the_layer_is_attached() {
 
     assert!(logs.sink().expect("the instance captures").is_attached());
 }
+
+/// A value whose `Debug` rendering records on the current scope span, as a user formatter may.
+struct Reentrant(tracing::Span);
+
+impl std::fmt::Debug for Reentrant {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.record("params", "again");
+
+        formatter.write_str("reentrant")
+    }
+}
+
+#[test]
+fn a_formatter_recording_on_the_scope_span_does_not_deadlock_delivery() {
+    let dispatch = Dispatch::new(
+        Registry::default()
+            .with(ScopeLogLayer::new())
+            .with(tracing_subscriber::fmt::layer().with_writer(std::io::sink)),
+    );
+    let (done, finished) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let outcome = tracing::dispatcher::with_default(&dispatch, || {
+            let (logs, stream) = instance(1, &options());
+
+            logs.span()
+                .in_scope(|| tracing::info!(value = ?Reentrant(logs.span().clone()), "formatted"));
+            logs.finish();
+
+            futures::executor::block_on(records(stream))
+        });
+
+        done.send(outcome).expect("the test waits");
+    });
+
+    let records = finished
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("delivery does not deadlock");
+
+    assert_eq!(messages(&records), ["formatted"]);
+}
