@@ -5,7 +5,7 @@ use std::future::Future;
 use std::sync::{Arc, OnceLock};
 
 use tokio::task::futures::TaskLocalFuture;
-use upwell_core::{ScopeId, ScopeKey};
+use upwell_core::ScopeKey;
 
 use super::{ContextError, ContextRuntime, TargetRef};
 use crate::container::ScopeContainer;
@@ -41,7 +41,7 @@ enum ActiveScope {
 /// A scope instance an [`InvocationContext`] expects to open later.
 #[derive(Clone)]
 struct PendingScope {
-    scope: ScopeId,
+    scope: ScopeKey,
     parent: Option<Arc<ScopeContainer>>,
     opened: OnceLock<Arc<ScopeContainer>>,
 }
@@ -72,7 +72,7 @@ impl InvocationContext {
     pub fn with_pending_scope(self, scope: ScopeKey, parent: Option<Arc<ScopeContainer>>) -> Self {
         Self {
             scope: ActiveScope::Pending(PendingScope {
-                scope: scope.id(),
+                scope,
                 parent,
                 opened: OnceLock::new(),
             }),
@@ -123,6 +123,14 @@ impl InvocationContext {
         innermost
             .map(Arc::clone)
             .ok_or(ContextError::OutsideInvocationScope)
+    }
+
+    /// The scope this context waits for while it has not opened.
+    pub(crate) fn unopened_scope(&self) -> Option<ScopeKey> {
+        match &self.scope {
+            ActiveScope::Pending(pending) if pending.opened.get().is_none() => Some(pending.scope),
+            ActiveScope::None | ActiveScope::Open(_) | ActiveScope::Pending(_) => None,
+        }
     }
 
     /// The root this context resolves singletons from: the root of its scope chain, pinned
@@ -211,6 +219,6 @@ impl PendingScope {
             (None, _) => true,
         };
 
-        self.scope == container.scope().id() && parent_matches
+        self.scope.id() == container.scope().id() && parent_matches
     }
 }

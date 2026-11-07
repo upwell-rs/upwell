@@ -1,6 +1,6 @@
 //! Why a declared accessor could not resolve from the active invocation.
 
-use upwell_core::{Scope, ScopeId};
+use upwell_core::{Scope, ScopeId, ScopeKey};
 
 use crate::construct::FromContainer;
 use crate::context::ContextError;
@@ -14,8 +14,9 @@ pub enum ScopedError {
     /// No invocation context is active, or it has no open scope instance.
     #[error(transparent)]
     Context(#[from] ContextError),
-    /// The pinned scope has no instance on the active invocation's chain.
-    #[error("scope `{name}` (`{scope}`) has no instance in the active invocation")]
+    /// The pinned scope has no instance on the active invocation's chain, or the scope the
+    /// invocation runs in was never opened.
+    #[error("scope `{name}` (`{scope}`) has no open instance in the active invocation")]
     ScopeNotActive {
         /// The pinned scope's identity.
         scope: ScopeId,
@@ -42,9 +43,14 @@ pub enum ScopedError {
 impl ScopedError {
     /// The error for scope `S` having no instance on the active chain.
     pub(super) const fn scope_not_active<S: Scope>() -> Self {
+        Self::not_opened(S::KEY)
+    }
+
+    /// The error for `scope` having no open instance in the active invocation.
+    pub(super) const fn not_opened(scope: ScopeKey) -> Self {
         Self::ScopeNotActive {
-            scope: S::ID,
-            name: S::NAME,
+            scope: scope.id(),
+            name: scope.name(),
         }
     }
 

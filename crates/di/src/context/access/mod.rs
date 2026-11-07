@@ -19,7 +19,7 @@ pub use scoped::Scoped;
 
 use std::sync::Arc;
 
-use upwell_core::{DependencyDescriptor, ResolutionMode, ScopeId};
+use upwell_core::{DependencyDescriptor, ResolutionMode, ScopeId, ScopeKey};
 
 use super::InvocationContext;
 use crate::construct::FromContainer;
@@ -35,9 +35,33 @@ fn current_dependency<H: FromContainer>() -> DependencyDescriptor {
     dependency
 }
 
-/// The innermost scope instance of the active invocation.
+/// The active invocation's innermost open scope instance, and the scope it still waits for.
+struct Active {
+    innermost: Arc<ScopeContainer>,
+    unopened: Option<ScopeKey>,
+}
+
+/// The active invocation's scopes. Without an open instance, a scope the invocation waits for
+/// but that was never opened is reported as not active.
+fn active() -> Result<Active, ScopedError> {
+    InvocationContext::with_current(|context| {
+        let unopened = context.unopened_scope();
+
+        match context.scope() {
+            Ok(innermost) => Ok(Active {
+                innermost,
+                unopened,
+            }),
+            Err(error) => {
+                Err(unopened.map_or(ScopedError::Context(error), ScopedError::not_opened))
+            }
+        }
+    })?
+}
+
+/// The innermost open scope instance of the active invocation.
 fn innermost() -> Result<Arc<ScopeContainer>, ScopedError> {
-    Ok(InvocationContext::with_current(InvocationContext::scope)??)
+    active().map(|active| active.innermost)
 }
 
 /// The instance of scope `scope` on the chain from `innermost` up to the root.

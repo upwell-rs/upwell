@@ -1026,6 +1026,23 @@ labels (both breaking changes to the core vocabulary). The edge:
   an accessor never makes a dependency silently optional;
 - is reported by selection diagnostics as `invocation-context` and by tooling as `current`.
 
+Entry planning follows these edges statically. `SlotLayout::plan_entry` walks the components the
+entry's targets reach, in any scope (already-built singletons and ancestors included), and every
+`Current` edge among them declares the slots of the entry's scope it resolves to, with their
+dependencies there. The plan never builds them: the value is built at `Current::get`, on
+demand. A declared accessor read has three effects: the scope opens for the entry even when the
+plan builds nothing (`EntryPlan::is_accessed`, so a deferred RPC call or WebSocket message scope
+opens at once), the seeds those slots read are captured (such as `RequestMeta`), and building them
+on demand is not an undeclared construction under `deny_unplanned`. In a slot layout such an edge
+plans to `DepRef::Contextual`, which an entry never builds with its consumer. The walk is per
+entry, derived from the descriptors when the generation is prepared, and adds nothing to the
+invocation context. A `Scoped<S, T>` edge does not carry `S`, so it is planned like `Current<T>`
+in the scope that provides `T`; carrying the pinned scope on the edge is a follow-up.
+
+When a protocol never opens the scope an invocation waits for, an accessor that cannot find its
+target on the open chain fails with `ScopedError::ScopeNotActive` naming that scope, never a
+panic.
+
 The macro rejects `#[qualifier]` and `#[config]` on a `Current<..>` or `Scoped<..>` field with a
 compile error at the attribute: an accessor resolves its target's unqualified provider, so a
 qualifier would otherwise be dropped silently.
