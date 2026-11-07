@@ -2,19 +2,17 @@
 
 use std::any::TypeId;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::{Arc, OnceLock};
-use std::task::{Context, Poll, ready};
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 
-use futures::future::BoxFuture;
-use upwell_core::{DependencyDescriptor, Scope};
+use upwell_core::{DependencyDescriptor, Scope, ScopeId};
 use upwell_di::{EntryPlan, FromContainer, ScopeContainer};
 
 use super::builder::open_planned_in;
 use super::{OpensUnder, ScopeBuilder};
 use crate::entry::EntryTargets;
-use crate::logs::{self, ScopeLogSink, ScopeLogStream};
+use crate::logs::{self, LogOptions, ScopeLogSink, ScopeLogStream};
 use crate::runtime::{RuntimeView, scope_run_target};
 
 /// Work [`ScopeBuilder::run`] runs inside a scope instance: a closure whose parameters are the
@@ -54,14 +52,63 @@ mod sealed {
 /// Before that, [`logs`](Self::logs) subscribes to the instance's log, so a stream taken
 /// ahead of the run sees every record.
 #[must_use = "a scope run does nothing until it is awaited"]
-pub struct ScopeRun<'a, S: Scope, P: Scope, W: ScopeWork<Targets>, Targets> {
-    ready: Option<(ScopeBuilder<'a, S, P>, W)>,
-    running: Option<BoxFuture<'a, crate::Result<W::Output>>>,
-    sink: OnceLock<Arc<ScopeLogSink>>,
-    targets: PhantomData<fn() -> Targets>,
+pub struct ScopeRun<F> {
+    execution: F,
+    logs: Arc<RunLogs>,
 }
 
-impl<S: Scope, P: Scope, W: ScopeWork<Targets>, Targets> Unpin for ScopeRun<'_, S, P, W, Targets> {}
+/// The sink of one run, shared by its handle and its execution, so a stream taken from either
+/// side listens to what the instance captures.
+struct RunLogs {
+    scope: ScopeId,
+    options: LogOptions,
+    state: Mutex<RunLogState>,
+}
+
+/// Whether the execution started, and the sink it captures into.
+struct RunLogState {
+    started: bool,
+    sink: Option<Arc<ScopeLogSink>>,
+}
+
+impl RunLogs {
+    fn new(scope: ScopeId, options: LogOptions) -> Self {
+        Self {
+            scope,
+            options,
+            state: Mutex::new(RunLogState {
+                started: false,
+                sink: None,
+            }),
+        }
+    }
+
+    /// The sink to subscribe to: the run's own once it captures, a new one while the run has not
+    /// started, none after it started without capturing.
+    fn subscribable(&self) -> Option<Arc<ScopeLogSink>> {
+        let mut state = self.state.lock().expect("run log state lock not poisoned");
+
+        if state.sink.is_none() && !state.started {
+            state.sink = Some(logs::deferred_sink(self.scope, &self.options));
+        }
+
+        state.sink.clone()
+    }
+
+    /// Marks the execution started and returns the sink it captures into, made when the options
+    /// ask for capture and no stream was taken before.
+    fn start(&self) -> Option<Arc<ScopeLogSink>> {
+        let mut state = self.state.lock().expect("run log state lock not poisoned");
+
+        state.started = true;
+
+        if state.sink.is_none() && self.options.capture {
+            state.sink = Some(logs::deferred_sink(self.scope, &self.options));
+        }
+
+        state.sink.clone()
+    }
+}
 
 impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
     /// Prepares `work` to run in a fresh instance: awaiting the result opens the instance, runs
@@ -86,80 +133,54 @@ impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
     /// # Errors
     ///
     /// Awaiting it fails as [`open`](Self::open) does, and when a target fails to resolve.
-    pub fn run<W, Targets>(self, work: W) -> ScopeRun<'a, S, P, W, Targets>
+    pub fn run<W, Targets>(
+        self,
+        work: W,
+    ) -> ScopeRun<impl Future<Output = crate::Result<W::Output>> + use<'a, S, P, W, Targets>>
     where
         W: ScopeWork<Targets>,
     {
-        let sink = OnceLock::new();
-
-        if self.logs.capture {
-            sink.get_or_init(|| logs::new_sink(&self.params, &self.logs));
-        }
+        let logs = Arc::new(RunLogs::new(S::ID, self.logs));
 
         ScopeRun {
-            ready: Some((self, work)),
-            running: None,
-            sink,
-            targets: PhantomData,
+            execution: execute(self, work, Arc::clone(&logs)),
+            logs,
         }
     }
 }
 
-impl<S: Scope, P: Scope, W: ScopeWork<Targets>, Targets> ScopeRun<'_, S, P, W, Targets> {
+impl<F> ScopeRun<F> {
     /// A stream of the instance's log, from the first record when taken before the run is
     /// polled. It ends when the instance closes, so collecting it yields the whole log. Needs a
     /// [`ScopeLogLayer`](crate::logs::ScopeLogLayer) in the subscriber.
     pub fn logs(&self) -> ScopeLogStream {
-        let Some((builder, _)) = &self.ready else {
-            return self
-                .sink
-                .get()
-                .map_or_else(ScopeLogStream::ended, |sink| sink.subscribe());
-        };
-
-        self.sink
-            .get_or_init(|| logs::new_sink(&builder.params, &builder.logs))
-            .subscribe()
+        self.logs
+            .subscribable()
+            .map_or_else(ScopeLogStream::ended, |sink| sink.subscribe())
     }
 }
 
-impl<'a, S, P, W, Targets> Future for ScopeRun<'a, S, P, W, Targets>
-where
-    S: OpensUnder<P>,
-    P: Scope,
-    W: ScopeWork<Targets> + 'a,
-    Targets: 'a,
-{
-    type Output = crate::Result<W::Output>;
+impl<F: Future> Future for ScopeRun<F> {
+    type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
+        // SAFETY: `execution` is never moved out of the pinned `ScopeRun`, which has no `Drop`
+        // impl and no other access to the field, so projecting the pin to it upholds the pinning
+        // guarantee.
+        let execution = unsafe { self.map_unchecked_mut(|run| &mut run.execution) };
 
-        if let Some((builder, work)) = this.ready.take() {
-            let sink = this.sink.get().map(Arc::clone);
-
-            this.running = Some(Box::pin(execute(builder, work, sink)));
-        }
-
-        let running = this
-            .running
-            .as_mut()
-            .expect("a scope run is polled after it completed");
-        let outcome = ready!(running.as_mut().poll(cx));
-
-        this.running = None;
-
-        Poll::Ready(outcome)
+        execution.poll(cx)
     }
 }
 
 async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
     builder: ScopeBuilder<'_, S, P>,
     work: W,
-    sink: Option<Arc<ScopeLogSink>>,
+    run_logs: Arc<RunLogs>,
 ) -> crate::Result<W::Output> {
     use tracing::Instrument;
 
+    let sink = run_logs.start();
     let (view, parent, plan) = match prepare::<S, P, W, Targets>(&builder) {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -171,6 +192,11 @@ async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
         }
     };
     let context = builder.opener.context(scope_run_target!(S::ID));
+
+    if let Some(sink) = &sink {
+        logs::describe_sink(sink, &builder.params);
+    }
+
     let (seeds, instance_logs) = builder.into_parts(sink);
     let instance = async {
         let container = open_planned_in(&view, S::ID, parent, Some(&plan), seeds).await?;

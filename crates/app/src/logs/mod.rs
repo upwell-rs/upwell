@@ -36,7 +36,7 @@ pub use span::InstanceLogs;
 pub use stream::ScopeLogStream;
 
 pub(crate) use current::with_current_sink;
-pub(crate) use span::new_sink;
+pub(crate) use span::{deferred_sink, describe_sink};
 
 /// The name of the span every scope instance runs in.
 pub const SCOPE_SPAN_NAME: &str = "upwell.scope";

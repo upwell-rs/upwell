@@ -1,7 +1,7 @@
 //! The place one scope instance's captured events go.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use tokio::sync::{Semaphore, mpsc};
 use tracing::Event;
@@ -18,7 +18,7 @@ use super::{LogField, LogOptions, LogRecord, ScopeLogStream};
 /// record and counts it, so the logging thread never waits.
 pub struct ScopeLogSink {
     scope: ScopeId,
-    params: Arc<[LogField]>,
+    params: OnceLock<Arc<[LogField]>>,
     level: Option<LevelFilter>,
     buffer: usize,
     watchers: AtomicUsize,
@@ -38,13 +38,28 @@ impl ScopeLogSink {
     pub(super) fn new(scope: ScopeId, params: Arc<[LogField]>, options: &LogOptions) -> Self {
         Self {
             scope,
-            params,
+            params: OnceLock::from(params),
             level: options.level,
             buffer: options.buffer.get().min(Semaphore::MAX_PERMITS),
             watchers: AtomicUsize::new(0),
             attached: AtomicBool::new(false),
             subscribers: Mutex::new(Some(Vec::new())),
         }
+    }
+
+    /// A sink whose loggable params are not known yet: [`describe`](Self::describe) supplies
+    /// them before the instance emits its first event.
+    pub(super) fn deferred(scope: ScopeId, options: &LogOptions) -> Self {
+        let mut sink = Self::new(scope, Arc::from([]), options);
+
+        sink.params = OnceLock::new();
+
+        sink
+    }
+
+    /// Sets the loggable params of the instance unless they are set already.
+    pub(super) fn describe(&self, params: impl FnOnce() -> Arc<[LogField]>) {
+        self.params.get_or_init(params);
     }
 
     /// A stream of the records the instance captures from now on, ending when the instance
@@ -109,7 +124,8 @@ impl ScopeLogSink {
             return;
         }
 
-        let record = LogRecord::from_event(event, self.scope, Arc::clone(&self.params));
+        let params = self.params.get().map_or_else(|| Arc::from([]), Arc::clone);
+        let record = LogRecord::from_event(event, self.scope, params);
         let targets = self.targets();
 
         if targets.is_empty() {
