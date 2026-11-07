@@ -996,8 +996,9 @@ returns references into a container.
 
 The propagation modules mirror the executors they wrap instead of a `CapturedContext::spawn*`
 family, so the call site reads as the executor it targets. Each captures the context where it is
-called; outside every context it carries only the span and otherwise behaves as the function it
-wraps. `CapturedContext::capture()` is the strict form that fails with
+called; outside every context it carries only the span, masks any context the work happens to
+run in (a rayon worker waiting inside another invocation's nested work, say), and otherwise
+behaves as the function it wraps. `CapturedContext::capture()` is the strict form that fails with
 `ContextError::OutsideContext`. The capture is the task-local `InvocationContext` itself, so the
 `InvocationTarget` (and whether it is a static or a shared `TargetRef`) arrives unchanged.
 

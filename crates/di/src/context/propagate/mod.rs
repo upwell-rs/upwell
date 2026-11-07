@@ -12,7 +12,8 @@
 //!   `.current()` parallel-iterator adapter.
 //!
 //! Each function captures the context where it is called. Outside every context it carries
-//! only the span and otherwise behaves as the function it wraps. To require a context, or to
+//! only the span, runs the work with any context of the thread or task it lands on masked, and
+//! otherwise behaves as the function it wraps. To require a context, or to
 //! carry one into another executor (a `JoinSet`, a custom pool), capture it explicitly with
 //! [`CapturedContext::capture`] and use [`enter`](CapturedContext::enter),
 //! [`run`](CapturedContext::run), [`bind`](CapturedContext::bind) or
