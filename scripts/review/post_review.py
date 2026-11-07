@@ -1,10 +1,12 @@
-"""Posts a Codex review (structured JSON) to a PR as a GitHub review with inline comments.
+"""Posts a provider review (structured JSON) to a PR as a GitHub review with inline comments.
 
-Usage: post_review.py <pr> <head_sha> <model> <effort> <review.json>
+Usage: post_review.py <pr> <head_sha> <provider> <model> <effort> <review.json>
+With UPWELL_REVIEW_DRY_RUN=1 nothing is posted; a payload summary is printed instead.
 Findings whose line is not part of the PR diff (right side) go into the review body instead.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -49,7 +51,8 @@ def comment_body(finding):
 
 
 def main():
-    pr, head, model, effort, path = sys.argv[1:6]
+    pr, head, provider, model, effort, path = sys.argv[1:7]
+    label = {"codex": "Codex", "gemini": "Gemini"}[provider]
     with open(path, encoding="utf-8") as handle:
         review = json.load(handle)
 
@@ -69,7 +72,7 @@ def main():
         else:
             loose.append(finding)
 
-    header = f"## Independent review (Codex) of `{head[:8]}`\n\n**Verdict:** {review['verdict'].replace('_', ' ')}\n\n{review['summary']}"
+    header = f"## Independent review ({label}) of `{head[:8]}`\n\n**Verdict:** {review['verdict'].replace('_', ' ')}\n\n{review['summary']}"
     if loose:
         header += "\n\n### Findings outside the changed lines\n"
         for finding in loose:
@@ -79,12 +82,16 @@ def main():
     if review["unchecked"].strip():
         header += f"\n\n_Could not check:_ {review['unchecked']}"
     header += (
-        f"\n\n---\n_Reviewer: Codex CLI, model `{model}`, reasoning effort {effort}, read-only sandbox. "
+        f"\n\n---\n_Reviewer: {label}, provider `{provider}`, model `{model}`, reasoning effort {effort}, read-only sandbox. "
         "Replaces CodeRabbit while the organisation is on the Free tier. Each inline comment is a resolvable thread; "
         "the author answers and resolves it after pushing. This is not a bot approval._"
     )
 
     payload = {"commit_id": head, "event": "COMMENT", "body": header, "comments": inline}
+    if os.environ.get("UPWELL_REVIEW_DRY_RUN") == "1":
+        print(f"DRY RUN, not posted: verdict {review['verdict']}, {len(inline)} inline, {len(loose)} in the body")
+        print(header)
+        return
     out = gh("api", "-X", "POST", f"repos/{REPO}/pulls/{pr}/reviews", "--input", "-", stdin=json.dumps(payload))
     url = json.loads(out).get("html_url", "")
     print(f"posted review of #{pr} at {head[:8]}: {len(inline)} inline, {len(loose)} in the body, {url}")
