@@ -354,3 +354,114 @@ fn a_required_edge_into_a_scope_enclosing_the_consumer_on_some_chain_is_rejected
         Err(Error::ScopeViolation(_))
     ));
 }
+
+const SESSION_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/session");
+
+/// A scope that encloses [`HttpScope`] on some chain, as an application scope listing it among
+/// its children does.
+struct SessionScope;
+
+impl Scope for SessionScope {
+    const ID: ScopeId = SESSION_ID;
+    const RANK: u8 = 3;
+    const NAME: &'static str = "Session";
+}
+
+/// Whether the session encloses the HTTP scope on some chain; the sibling never does.
+fn session_encloses_http(ancestor: ScopeId, descendant: ScopeId) -> bool {
+    ancestor == SESSION_ID && descendant == HTTP_ID
+}
+
+/// The dependency placed in `scope`.
+fn placed_dependency(id: &'static str, scope: ScopeKey) -> ComponentDescriptor {
+    component(
+        id,
+        "Dependency",
+        TypeDescriptor::of::<u16>("Dependency"),
+        scope,
+        no_dependency_factory,
+    )
+}
+
+/// An HTTP consumer with an optional edge to a dependency placed in each of `scopes`, in order.
+fn registry_with_placements(scopes: &[ScopeKey]) -> ComponentRegistry {
+    let consumer = component(
+        "http-consumer",
+        "HttpConsumer",
+        TypeDescriptor::of::<u8>("HttpConsumer"),
+        HttpScope::KEY,
+        optional_dependency_factory,
+    );
+    let ids = ["dependency-a", "dependency-b"];
+    let components = std::iter::once(consumer)
+        .chain(
+            scopes
+                .iter()
+                .zip(ids)
+                .map(|(scope, id)| placed_dependency(id, *scope)),
+        )
+        .collect();
+
+    ComponentRegistry {
+        components,
+        providers: Vec::new(),
+    }
+}
+
+/// The per-edge fault of the HTTP consumer's optional edge in `registry`.
+fn optional_edge_fault(registry: &ComponentRegistry) -> Option<crate::DependencyFault> {
+    let components = registry.resolved_components().expect("components resolve");
+    let selection = registry
+        .provider_selection_model(&components)
+        .expect("selection model builds");
+    let dependency = DependencyDescriptor {
+        optional: true,
+        ..dependency(
+            "Dependency",
+            TypeDescriptor::of::<u16>("Dependency"),
+            Cardinality::One,
+            ResolutionMode::Eager,
+        )
+    };
+    let consumer = crate::DependencyConsumer {
+        id: "test/consumer",
+        scope: HttpScope::KEY,
+    };
+
+    selection
+        .dependency_fault(&dependency, consumer, reaches, session_encloses_http)
+        .expect("the edge has a per-edge outcome")
+}
+
+#[test]
+fn an_optional_edge_validates_when_any_placement_encloses_the_consumer_in_either_order() {
+    for scopes in [
+        [SessionScope::KEY, SiblingScope::KEY],
+        [SiblingScope::KEY, SessionScope::KEY],
+    ] {
+        let registry = registry_with_placements(&scopes);
+
+        assert!(
+            registry
+                .validate_with_scope_reachability(reaches, session_encloses_http)
+                .is_ok(),
+            "the session placement validates the edge, whatever the order"
+        );
+        assert_eq!(
+            optional_edge_fault(&registry),
+            None,
+            "as an entry parameter too"
+        );
+    }
+}
+
+#[test]
+fn an_optional_edge_with_no_placement_enclosing_the_consumer_is_rejected() {
+    let registry = registry_with_placements(&[SiblingScope::KEY]);
+
+    assert!(matches!(
+        registry.validate_with_scope_reachability(reaches, session_encloses_http),
+        Err(Error::ScopeViolation(_))
+    ));
+    assert!(optional_edge_fault(&registry).is_some());
+}

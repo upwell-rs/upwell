@@ -1,5 +1,7 @@
 //! Scope validation: each dependency's scope must be reachable from its consumer's.
 
+use std::any::TypeId;
+
 use upwell_core::{Cardinality, ResolutionMode, Scope, ScopeId, ScopeKey, Singleton};
 
 use super::ComponentRegistry;
@@ -47,7 +49,8 @@ impl ComponentRegistry {
 /// retain nothing, so they cannot hold a shorter-lived value captive.
 ///
 /// An optional edge may also name a target the consumer cannot reach on every chain, when the
-/// target's scope encloses the consumer's on at least one (`may_enclose(target, consumer)`): an
+/// scope of some placement of the target encloses the consumer's on at least one
+/// (`may_enclose(placement, consumer)`): an
 /// HTTP request that may open under the root or under an application's session takes the
 /// session's component as `Option<Arc<T>>`, which is `None` on a chain without the session. An
 /// enclosing scope outlives the consumer, so it cannot hold a value captive. A scope that never
@@ -64,14 +67,15 @@ pub(super) fn check_scope(
     }
 
     let dep_scopes = match selection.component_from(dep.ty.type_id, consumer.scope, can_access) {
-        Some(component) => vec![(component.scope, (dep.ty.type_name)())],
-        None => selected_dependency_scopes(selection, consumer, dep, can_access),
+        Some(component) => vec![(component.scope, (dep.ty.type_name)(), dep.ty.type_id)],
+        None => selected_dependency_targets(selection, consumer, dep, can_access),
     };
 
-    for (dep_scope, dep_name) in dep_scopes {
+    for (dep_scope, dep_name, target) in dep_scopes {
         if dep.resolution != ResolutionMode::Fresh
             && !can_access(consumer.scope, dep_scope)
-            && !(dep.optional && encloses_on_some_chain(dep_scope, consumer.scope, may_enclose))
+            && !(dep.optional
+                && any_placement_encloses(selection, target, consumer.scope, may_enclose))
         {
             return Err(Error::ScopeViolation(Box::new(
                 crate::error::ScopeViolation {
@@ -136,6 +140,19 @@ pub(super) fn selected_dependency_scopes(
     dependency: &upwell_core::DependencyDescriptor,
     can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
 ) -> Vec<(ScopeKey, &'static str)> {
+    selected_dependency_targets(model, consumer, dependency, can_access)
+        .into_iter()
+        .map(|(scope, name, _)| (scope, name))
+        .collect()
+}
+
+/// [`selected_dependency_scopes`], with the concrete type of each selected provider.
+fn selected_dependency_targets(
+    model: &selection::ProviderSelectionModel,
+    consumer: &ComponentDescriptor,
+    dependency: &upwell_core::DependencyDescriptor,
+    can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
+) -> Vec<(ScopeKey, &'static str, TypeId)> {
     let selected = match dependency.cardinality {
         Cardinality::One => model
             .select_runtime_one(
@@ -173,19 +190,25 @@ pub(super) fn selected_dependency_scopes(
             Some((
                 component.scope,
                 (selection.provider.concrete_ty.type_name)(),
+                selection.provider.concrete_ty.type_id,
             ))
         })
         .collect()
 }
 
-/// Whether `scope` is open around `consumer` on at least one chain `consumer` opens in, neither
-/// of them transient.
-fn encloses_on_some_chain(
-    scope: ScopeKey,
+/// Whether any placement of the component `target` is open around `consumer` on at least one
+/// chain `consumer` opens in, neither scope transient. That placement is the one such a chain
+/// resolves, so the edge can be present whatever order the placements were registered in.
+fn any_placement_encloses(
+    selection: &selection::ProviderSelectionModel,
+    target: TypeId,
     consumer: ScopeKey,
     may_enclose: &impl Fn(ScopeId, ScopeId) -> bool,
 ) -> bool {
-    !scope.is_transient() && !consumer.is_transient() && may_enclose(scope.id(), consumer.id())
+    !consumer.is_transient()
+        && selection.placements(target).iter().any(|placement| {
+            !placement.scope.is_transient() && may_enclose(placement.scope.id(), consumer.id())
+        })
 }
 
 /// The enclosure of a model without a topology: no scope encloses another beyond what scope
