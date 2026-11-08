@@ -36,6 +36,7 @@ use upwell::{
 };
 use upwell_config::ResolverChain;
 
+mod ends;
 mod generations;
 mod routing;
 mod validation;
@@ -163,6 +164,14 @@ impl Sessions {
 }
 
 impl Sessions {
+    /// Drops the cache's handle to the session of `user`.
+    fn forget(&self, user: &str) {
+        self.open
+            .lock()
+            .expect("the session cache is healthy")
+            .remove(user);
+    }
+
     /// The cached session of `user`.
     fn get(&self, user: &str) -> Option<OpenScope<Session>> {
         self.open
