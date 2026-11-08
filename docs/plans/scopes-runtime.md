@@ -949,8 +949,9 @@ watcher.await?;
     does the same on demand. A raw Tokio runtime dropped without either may still cancel them.
   - **Failures:** the hook manager isolates panics and errors; each is traced as
     `scope end hook failed` on `upwell::scope` with the owner and category, never the message or
-    payload. No `catch_unwind` is added. `Failed` is a framework failure; a work's own `Err`
-    counts as `Completed`.
+    payload. No `catch_unwind` is added. `Failed` is a framework failure. `run` is `()`-only;
+    a `try_run` work that returns `Err` ends as `Errored { error_type }`, recording only the
+    type name, never the value.
   - **Decoupled:** logs and context propagation know nothing of hooks.
 
 Delivery is always bounded and drops the newest record when a buffer is full, counting it in

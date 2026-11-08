@@ -1,5 +1,5 @@
-//! The work a scope instance runs: [`ScopeWork`] for [`ScopeBuilder::run`] and [`TryScopeWork`]
-//! for [`ScopeBuilder::try_run`].
+//! The work a scope instance runs: [`ScopeWork`] for [`ScopeBuilder::run`](super::ScopeBuilder::run) and [`TryScopeWork`]
+//! for [`ScopeBuilder::try_run`](super::ScopeBuilder::try_run).
 
 use std::any::TypeId;
 use std::future::Future;
@@ -11,14 +11,14 @@ use upwell_di::{FromContainer, ScopeContainer};
 use super::ScopeEndKind;
 use crate::entry::EntryTargets;
 
-/// Work [`ScopeBuilder::run`] runs inside a scope instance: a closure whose parameters are the
+/// Work [`ScopeBuilder::run`](super::ScopeBuilder::run) runs inside a scope instance: a closure whose parameters are the
 /// targets it injects, each a [`FromContainer`] type as an `#[init]` constructor takes, and
 /// whose future is the work and resolves to `()`.
 ///
 /// Implemented for closures of up to twelve parameters returning a future of `()`. The
 /// parameters declare the work's dependencies the way an entry's do, so the work is planned
 /// like one. Work that returns a value or a `Result` runs through
-/// [`ScopeBuilder::try_run`] and [`TryScopeWork`].
+/// [`ScopeBuilder::try_run`](super::ScopeBuilder::try_run) and [`TryScopeWork`].
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not work `ScopeBuilder::run` can run",
     label = "`run` takes a closure of injectable targets returning a future of `()`",
@@ -36,7 +36,7 @@ pub trait ScopeWork<Targets>: Send + sealed::Sealed<Targets> {
     fn call(self, scope: &Arc<ScopeContainer>) -> impl Future<Output = crate::Result<()>> + Send;
 }
 
-/// Work [`ScopeBuilder::try_run`] runs inside a scope instance: as [`ScopeWork`], but its
+/// Work [`ScopeBuilder::try_run`](super::ScopeBuilder::try_run) runs inside a scope instance: as [`ScopeWork`], but its
 /// future resolves to a `Result`.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not work `ScopeBuilder::try_run` can run",
@@ -71,7 +71,7 @@ mod sealed {
     pub trait Sealed<Targets> {}
 }
 
-/// What [`execute`] needs of either kind of work, so one execution serves `run` and `try_run`.
+/// What the run execution needs of either kind of work, so one execution serves `run` and `try_run`.
 pub(super) trait Planned<Targets>: Send {
     type Output;
 

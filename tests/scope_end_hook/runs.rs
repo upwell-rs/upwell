@@ -104,7 +104,7 @@ async fn an_observer_cannot_delay_the_run_or_keep_its_components_alive() {
     let before = DROPS.load(Ordering::SeqCst);
 
     opener(&app)
-        .builder(ended(GATED))
+        .builder(ended(GATED_RUN))
         .run(|_probe: Arc<DropProbe>| async {})
         .await
         .expect("the run returns while its observer still waits");
@@ -114,9 +114,9 @@ async fn an_observer_cannot_delay_the_run_or_keep_its_components_alive() {
         1,
         "the instance's components dropped before the observer finished"
     );
-    assert!(ends_of(GATED).is_empty());
+    assert!(ends_of(GATED_RUN).is_empty());
 
-    RELEASE.notify_one();
+    RELEASE_RUN.notify_one();
 
-    assert_eq!(end_of(GATED).await.kind, ScopeEndKind::Completed);
+    assert_eq!(end_of(GATED_RUN).await.kind, ScopeEndKind::Completed);
 }

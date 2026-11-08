@@ -31,8 +31,11 @@ use upwell::{AnyScopeEnded, ScopeEnd, ScopeEnded, ScopeOpener, component, method
 /// The tag whose end the failing observer panics on.
 const PANICKING: u64 = 900;
 
-/// The tag whose end the gated observer waits on until [`RELEASE`] opens.
-const GATED: u64 = 901;
+/// The tag whose end the gated observer waits on until [`RELEASE_RUN`] opens.
+const GATED_RUN: u64 = 901;
+
+/// The tag whose end the gated observer waits on until [`RELEASE_DRAIN`] opens.
+const GATED_DRAIN: u64 = 902;
 
 /// Every end the any-scope hook saw.
 static ENDS: Mutex<Vec<ScopeEnd>> = Mutex::new(Vec::new());
@@ -46,8 +49,20 @@ static TYPED_SIBLING: Mutex<Vec<ScopeEnd>> = Mutex::new(Vec::new());
 /// Counts [`DropProbe`]s that dropped.
 static DROPS: AtomicUsize = AtomicUsize::new(0);
 
-/// Opens when the test lets the gated observer finish.
-static RELEASE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+/// Opens when the run test lets its gated observer finish.
+static RELEASE_RUN: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Opens when the drain test lets its gated observer finish.
+static RELEASE_DRAIN: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// The gate a tag's observer waits on, if the tag is gated.
+fn gate(tag: u64) -> Option<&'static tokio::sync::Notify> {
+    match tag {
+        GATED_RUN => Some(&RELEASE_RUN),
+        GATED_DRAIN => Some(&RELEASE_DRAIN),
+        _ => None,
+    }
+}
 
 /// An instance tagged by its test. The secret is not loggable.
 #[scope(parents = [Root])]
@@ -108,8 +123,8 @@ impl Recorder {
     async fn ended(&self, end: ScopeEnd) {
         let tag = tag_of(&end);
 
-        if tag == GATED {
-            RELEASE.notified().await;
+        if let Some(gate) = gate(tag) {
+            gate.notified().await;
         }
 
         tracing::info!("observed end");

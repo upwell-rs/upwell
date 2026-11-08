@@ -41,7 +41,7 @@ pub use work::{ScopeWork, TryScopeWork};
 
 /// Declares that scope `Self` may open under scope `P`.
 ///
-/// Implement it for every parent the scope's topology lists, with [`Singleton`] standing for
+/// Implement it for every parent the scope's topology lists, with [`Singleton`](upwell_core::Singleton) standing for
 /// the application root. [`ScopeBuilder::under`] requires it, so opening a scope under a
 /// parent its topology does not list fails to compile.
 pub trait OpensUnder<P: Scope>: Scope {}

@@ -200,7 +200,7 @@ impl AppRuntime {
     /// generation; builds the candidate root over a candidate
     /// [`ConfigStore`](upwell_config::ConfigStore) with a generation-local
     /// [`HookManager`]; runs the affected config-reload hooks and then
-    /// [`TransitionDecision`] hooks against that candidate; and
+    /// [`TransitionDecision`](crate::TransitionDecision) hooks against that candidate; and
     /// commits. A proposal rejection constructs nothing; a decision rejection drops the
     /// constructed candidate.
     ///
