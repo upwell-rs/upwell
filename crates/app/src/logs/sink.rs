@@ -1,6 +1,6 @@
 //! The place one scope instance's captured events go.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use tokio::sync::{Semaphore, mpsc};
@@ -14,6 +14,28 @@ use super::{LogField, LogOptions, LogRecord, ScopeLogStream};
 
 /// How many sinks are open in the process, so an event costs one atomic read while none is.
 static OPEN_SINKS: AtomicUsize = AtomicUsize::new(0);
+
+/// The next identity [`LayerId::register`] hands out.
+static NEXT_LAYER: AtomicU64 = AtomicU64::new(LayerId::UNREGISTERED.0 + 1);
+
+/// The identity of one [`ScopeLogLayer`](super::ScopeLogLayer) on one subscriber, so a sink
+/// takes events only from the layer that took its routing span, never from another
+/// subscriber's layer or a layer whose filter rejected the span.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct LayerId(u64);
+
+impl LayerId {
+    /// The identity of a layer never layered onto a subscriber, shared by every such layer.
+    pub(super) const UNREGISTERED: Self = Self(1);
+
+    /// No layer: the sink's routing span was never taken.
+    const NONE: u64 = 0;
+
+    /// A fresh identity, for a layer being layered onto a subscriber.
+    pub(super) fn register() -> Self {
+        Self(NEXT_LAYER.fetch_add(1, Ordering::Relaxed))
+    }
+}
 
 /// The sink of one scope instance, shared by its span and its subscribers.
 ///
@@ -30,7 +52,7 @@ pub struct ScopeLogSink {
     level: Option<LevelFilter>,
     buffer: usize,
     watchers: AtomicUsize,
-    attached: AtomicBool,
+    attached: AtomicU64,
     open: AtomicBool,
     subscribers: Mutex<Option<Vec<Subscriber>>>,
 }
@@ -54,7 +76,7 @@ impl ScopeLogSink {
             level: options.level,
             buffer: options.buffer.get().min(Semaphore::MAX_PERMITS),
             watchers: AtomicUsize::new(0),
-            attached: AtomicBool::new(false),
+            attached: AtomicU64::new(LayerId::NONE),
             open: AtomicBool::new(true),
             subscribers: Mutex::new(Some(Vec::new())),
         }
@@ -98,7 +120,12 @@ impl ScopeLogSink {
     /// [`ScopeLogLayer`](super::ScopeLogLayer) is installed, or its filter rejects the span:
     /// the instance then captures nothing.
     pub fn is_attached(&self) -> bool {
-        self.attached.load(Ordering::Acquire)
+        self.attached.load(Ordering::Acquire) != LayerId::NONE
+    }
+
+    /// Whether the layer `layer` took the sink when the instance's span opened.
+    pub(super) fn is_attached_to(&self, layer: LayerId) -> bool {
+        self.attached.load(Ordering::Acquire) == layer.0
     }
 
     /// Ends every stream once it has drained, and refuses new subscribers' records.
@@ -139,8 +166,9 @@ impl ScopeLogSink {
         self.watchers.load(Ordering::Acquire)
     }
 
-    pub(super) fn attach(&self) {
-        self.attached.store(true, Ordering::Release);
+    /// Records that `layer` took the sink with the instance's routing span.
+    pub(super) fn attach(&self, layer: LayerId) {
+        self.attached.store(layer.0, Ordering::Release);
     }
 
     /// Delivers `event` to every subscriber, unless nobody watches or the sink's capture level
