@@ -32,8 +32,8 @@ pub(crate) use generation::PreparedRuntimeGeneration;
 pub use generation::{AppConditionState, DisplacedGeneration, RuntimeView};
 use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransitionCoordinator};
 pub use opener::{
-    EntryScope, OpenScope, Opening, OpensUnder, ScopeBuilder, ScopeEntry, ScopeOpener, ScopeRun,
-    ScopeWork,
+    EntryScope, OpenScope, Opening, OpensUnder, ScopeBuilder, ScopeEnd, ScopeEndContext,
+    ScopeEndKind, ScopeEnded, ScopeEntry, ScopeOpener, ScopeRun, ScopeWork,
 };
 #[cfg(feature = "tooling")]
 pub(crate) use reload::{resolve_staged_transition, staged_condition_snapshot};

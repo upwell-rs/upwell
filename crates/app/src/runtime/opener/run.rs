@@ -11,7 +11,7 @@ use upwell_core::{DependencyDescriptor, Scope, ScopeId};
 use upwell_di::{EntryPlan, FromContainer, ScopeContainer};
 
 use super::builder::open_planned_in;
-use super::{OpensUnder, ScopeBuilder};
+use super::{OpensUnder, ScopeBuilder, ScopeEndKind};
 use crate::entry::EntryTargets;
 use crate::logs::{self, LogOptions, ScopeLogSink, ScopeLogStream};
 use crate::runtime::{RuntimeView, scope_run_target};
@@ -200,14 +200,14 @@ async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
         logs::describe_sink(sink, &builder.params);
     }
 
-    let (seeds, instance_logs) = builder.into_parts(&parent, sink);
+    let (seeds, instance_end) = builder.into_parts(&view, ScopeEndKind::Cancelled, &parent, sink);
     let opening = context
         .clone()
         .with_opening_scope(S::KEY, Arc::clone(&parent));
     let instance = async {
         let container = open_planned_in(&view, S::ID, parent, Some(&plan), seeds).await?;
 
-        logs::retain_sink(&container, instance_logs.sink());
+        logs::retain_sink(&container, instance_end.sink());
 
         context
             .with_scope(Arc::clone(&container))
@@ -216,10 +216,13 @@ async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
     };
     let outcome = opening
         .enter(instance)
-        .instrument(instance_logs.span().clone())
+        .instrument(instance_end.span().clone())
         .await;
 
-    instance_logs.finish();
+    instance_end.complete(match outcome {
+        Ok(_) => ScopeEndKind::Completed,
+        Err(_) => ScopeEndKind::Failed,
+    });
 
     outcome
 }

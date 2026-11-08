@@ -97,6 +97,16 @@ a job, an entry or `.run` work. Injected, it holds the runtime weakly. `.run` pl
 an entry whose targets are its parameters, once per parameter types and runtime generation, and
 closes the instance when the work finishes.
 
+### End-of-scope hook
+
+`#[hook(ScopeEnded)] async fn ended(&self, end: ScopeEnd)` on a singleton observes every scope
+instance ending. `ScopeEnd` carries the scope, how it ended (`Completed`, `Failed`, `Cancelled`
+for a run; `Released` when the last `OpenScope` or `EntryScope` handle, such as a protocol's
+request scope, drops) and the `#[log]` params. The hook is observer-only: it runs on a spawned
+Tokio task after the instance's work and before its log closes, so the events it makes are
+captured, and it cannot delay, veto or extend the instance. A failing or panicking hook is
+traced on `upwell::scope`, never propagated.
+
 ### Scope log routing
 
 The `upwell.scope` span names the instance an event was made in; the invocation context decides

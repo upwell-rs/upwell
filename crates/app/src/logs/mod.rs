@@ -9,8 +9,10 @@
 //! # Seam for the end-of-scope hook
 //!
 //! An instance's work ends in [`InstanceLogs::finish`], which closes the sink and so ends every
-//! stream. An end-of-scope hook runs after the instance's work and immediately before that
-//! call, so the events it makes are still captured.
+//! stream. The [`ScopeEnded`](crate::ScopeEnded) hook runs after the instance's work and before
+//! that call, on a task that owns the log until the hooks finish, so the events it makes are
+//! still captured. The logs know nothing of hooks: the instance's owner holds the log and
+//! decides when it finishes.
 
 mod current;
 #[cfg(feature = "tracing-subscriber")]
@@ -42,7 +44,7 @@ pub use span::InstanceLogs;
 pub use stream::ScopeLogStream;
 
 pub(crate) use route::retain_sink;
-pub(crate) use span::{deferred_sink, describe_sink};
+pub(crate) use span::{deferred_sink, describe_sink, loggable_params};
 
 /// The name of the span every scope instance runs in.
 pub const SCOPE_SPAN_NAME: &str = "upwell.scope";
