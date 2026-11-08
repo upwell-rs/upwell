@@ -26,20 +26,6 @@ async fn dropping_the_last_handle_ends_the_instance_once() {
 }
 
 #[tokio::test]
-async fn an_instance_that_never_opened_its_container_still_ends() {
-    let app = app("scope-end-deferred").await;
-    let scope = opener(&app)
-        .builder(ended(11))
-        .open_when_needed(None)
-        .await
-        .expect("the instance opens");
-
-    drop(scope);
-
-    assert_eq!(end_of(11).await.kind, ScopeEndKind::Released);
-}
-
-#[tokio::test]
 async fn a_deferred_entry_scope_that_never_opens_ends_when_dropped() {
     let app = app("scope-end-deferred-entry").await;
     let opener = opener(&app);
@@ -101,4 +87,32 @@ async fn the_container_keeps_the_instance_alive_after_its_handle_goes() {
     drop(container);
 
     assert_eq!(end_of(15).await.kind, ScopeEndKind::Released);
+}
+
+#[tokio::test]
+async fn a_deferred_entry_scope_whose_open_fails_ends_nothing() {
+    let app = app("scope-end-deferred-failed-open").await;
+    let opener = opener(&app);
+    let entry = opener
+        .entry(upwell::EntryKey::new("scope-end/nothing").expect("valid entry key"))
+        .expect("the entry exists");
+    let scope = opener
+        .builder(ended(16))
+        .seed(5_u32)
+        .open_when_needed(Some(&entry))
+        .await
+        .expect("the deferred instance is returned");
+
+    assert!(scope.container().await.is_err(), "no slot takes the seed");
+
+    drop(scope);
+    self::opener(&app)
+        .builder(ended(17))
+        .run(|| async {})
+        .await
+        .expect("the control run succeeds");
+
+    end_of(17).await;
+
+    assert!(ends_of(16).is_empty());
 }

@@ -14,7 +14,9 @@ use upwell::{ScopeOpener, component, methods};
 use upwell_app::HookTarget;
 use upwell_di::context::{InvocationContext, InvocationTarget, TargetRef};
 
-use super::{app, ok};
+use upwell_test_utils::ok;
+
+use super::app;
 
 /// A run whose account is loggable and whose token is not.
 #[scope(parents = [Root])]

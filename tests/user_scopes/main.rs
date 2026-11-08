@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use upwell::daemon::App;
 use upwell::scope::Root;
 use upwell::{AppError, ScopeOpener, component, entry, methods, scope};
+use upwell_test_utils::ok;
 
 /// Counts [`Unused`] builds across every test of this binary.
 static UNUSED_BUILDS: AtomicUsize = AtomicUsize::new(0);
@@ -102,11 +103,6 @@ impl CustomerClient {
     fn customer(&self) -> u64 {
         self.sync.customer
     }
-}
-
-/// A successful result of work that cannot fail.
-fn ok<T>(value: T) -> Result<T, std::convert::Infallible> {
-    Ok(value)
 }
 
 /// A built application with every `#[scope]` and component of this binary discovered.

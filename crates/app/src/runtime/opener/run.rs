@@ -100,7 +100,8 @@ impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
     /// parameter types runs on a runtime generation and reused after that.
     ///
     /// The work returns `()`; work that returns a value or a `Result` runs through
-    /// [`try_run`](Self::try_run). The instance ends as
+    /// [`try_run`](Self::try_run), where work that cannot fail returns
+    /// `Ok::<_, std::convert::Infallible>(value)`. The instance ends as
     /// [`Completed`](ScopeEndKind::Completed), or [`Failed`](ScopeEndKind::Failed) when it
     /// could not open or a target could not resolve, or [`Cancelled`](ScopeEndKind::Cancelled)
     /// when the run is dropped first.
