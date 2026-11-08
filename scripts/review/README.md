@@ -21,9 +21,9 @@ scripts/review/review-pr.sh <pr> <worktree> [model] [effort] [provider] [focus-f
 1. **Discovery** reads `pr.diff`, checks suspected defects against the code and prints every one as an `UPWELL_FINDING_DRAFT` line the moment it suspects it. It holds no final verification gate of its own: its final answer is only a done marker (`discovery-schema.json`: `status` `DISCOVERY_DONE`, the draft count, a summary of what it looked at and what it could not check). Drafts are saved to disk as they arrive and are never posted, so a run that dies half-way still leaves usable drafts.
 2. **Verification** is a new provider process (codex `--ephemeral`, a fresh `agy -p` or `copilot -p` session; never a resumed session) that has not seen the discovery conversation. It gets only the drafts (framed as untrusted claims, with ids `D1`..`Dn`), the PR metadata (number, title, head, base, merge base), `pr.diff`, the review rules for judging severity, and the same read-only worktree access and tool allow lists as discovery. For each draft it answers `keep`, `modify` (corrected `severity`, `path`, `line`, `title`, `body`, `suggestion`) or `drop`, each with a reason (`verify-schema.json`). It may not add findings.
 
-`verify_drafts.py apply` then validates the verifier's answer and refuses to post (exit 3) when a decision names an unknown or a repeated draft id, the answer breaks the schema, or a kept or modified finding targets a line that is not an added or context line of `pr.diff`. A draft without a decision is recorded as dropped ("not verified") rather than posted; an empty reason is recorded as "(no reason given)". A kept draft is posted verbatim (the verifier's echoed fields are ignored); a modified one uses the verifier's fields. Only this stage's output is posted.
+`verify_drafts.py apply` then validates the verifier's answer and refuses to post (exit 3) when a decision names an unknown or a repeated draft id, the answer breaks the schema, or a kept or modified finding targets a line that is not an added or context line of `pr.diff`. An answer that leaves out any draft id is refused too (exit 3, artifacts kept, and the `UPWELL_REVIEW_VERIFY_ONLY` resume command printed), so an omitted draft is never silently treated as dropped; an empty reason is recorded as "(no reason given)". A kept draft is posted verbatim (the verifier's echoed fields are ignored); a modified one uses the verifier's fields. Only this stage's output is posted.
 
-With zero drafts, verification is skipped and a NO_FINDINGS review is posted, but only when discovery returned a valid done marker (otherwise exit 3, since a run that answered in some other format may have put findings in its answer instead of drafts). A discovery answer that is not a valid done marker is only a warning when drafts exist.
+With zero drafts, verification is skipped and a NO_FINDINGS review is posted, but only when discovery returned a valid done marker that reports zero drafts (otherwise exit 3 with the reason printed and the run dir kept: a run that answered in some other format may have put findings in its answer instead of drafts, and a marker counting drafts that were never saved means they were lost). A discovery answer that is not a valid done marker is only a warning when drafts exist.
 
 The review footer names both stages: discovery provider, model and effort with the draft count, and verifier provider, model and effort with N kept, M modified and D dropped (or "skipped (no drafts)").
 
@@ -92,7 +92,7 @@ Each verification writes `verification.jsonl` to the run dir (one record per dra
 | 0 | posted (or dry run completed) |
 | 1 | bad arguments (missing focus or drafts file, empty drafts file in verification-only mode) |
 | 2 | worktree head differs from the PR head |
-| 3 | an answer is not valid (schema, unknown or repeated draft id, kept line outside the diff, no done marker without drafts) |
+| 3 | an answer is not valid (schema, unknown, repeated or missing draft id, kept line outside the diff, no done marker without drafts, a done marker counting drafts none were saved) |
 | 4 | worktree has uncommitted tracked changes |
 | 5 | PR head moved during the review, or the drafts belong to another PR or head |
 | 6 | PR base moved during the review |
@@ -110,7 +110,8 @@ Each verification writes `verification.jsonl` to the run dir (one record per dra
 - `review-pr.sh` runs the stages and the guards and calls the poster; `review-lib.sh` holds its provider invocation, lock and freshness functions.
 - `stream_drafts.py` tees the provider output to the log and collects drafts; `drafts.py` prints them.
 - `verify_drafts.py` prepares drafts for verification (head check, ids, prompt block) and turns the verifier's decisions into `review.json`, `verification.jsonl` and `stages.json`.
-- `validate_review.py` validates an answer against a schema; `diffmap.py` maps diffs to the commentable new-file lines.
+- `validate_review.py` validates an answer against a schema; `diffmap.py` maps diffs to the commentable new-file lines, decoding the paths git C-quotes (octal escapes, `\t`, `\"`, `\\`).
+- `test_review_tools.py` holds fixture tests of the fail-closed checks and the path decoding: `python3 -I scripts/review/test_review_tools.py`.
 - `post_review.py` posts the findings as one review. A finding on a changed line becomes an inline comment; any other finding goes into the review body.
 - `review-prompt.md` holds the review rules; `review-drafts-prompt.md` the discovery protocol; `verify-prompt.md` the verification rules; `review-extra-checklist.md` the discovery checklist for the gemini and copilot providers, with `review-gemini-checklist.md` and `review-copilot-checklist.md` their tool notes; `discovery-schema.json`, `verify-schema.json` and `review-schema.json` the answer schemas.
 
