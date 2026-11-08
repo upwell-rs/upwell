@@ -38,20 +38,36 @@ impl EndRecorder {
     }
 }
 
-/// The ends in `ends` once `count` of them arrived, awaited while the observers run on their own
-/// task.
-async fn ends_reaching(ends: &Mutex<Vec<ScopeEnd>>, count: usize) -> Vec<ScopeEnd> {
+/// Waits until `count` ends arrived in `ends`, while the observers run on their own task.
+async fn ends_reaching(ends: &Mutex<Vec<ScopeEnd>>, count: usize) {
     for _ in 0..2500 {
-        let seen = ends.lock().expect("the ends lock is healthy").clone();
+        let seen = ends.lock().expect("the ends lock is healthy").len();
 
-        if seen.len() >= count {
-            return seen;
+        if seen >= count {
+            return;
         }
 
         tokio::time::sleep(Duration::from_millis(2)).await;
     }
 
     panic!("fewer than {count} scope ends arrived");
+}
+
+/// Every end in `ends` once `count` arrived and every pending end hook of `runtime` ran, so a
+/// duplicate end delivered later is in the result too.
+async fn settled_ends(
+    runtime: &AppRuntime,
+    ends: &Mutex<Vec<ScopeEnd>>,
+    count: usize,
+) -> Vec<ScopeEnd> {
+    ends_reaching(ends, count).await;
+
+    assert!(
+        runtime.drain_scope_ends(Duration::from_secs(5)).await,
+        "every pending end hook ran"
+    );
+
+    ends.lock().expect("the ends lock is healthy").clone()
 }
 
 #[tokio::test]
@@ -65,12 +81,8 @@ async fn a_request_under_a_session_ends_once_and_the_session_only_when_released(
 
     assert_eq!(get(&router, "/session/view", Some("lee")).await, "lee@1");
 
-    let requests = ends_reaching(&REQUEST_ENDS, 1).await;
+    let requests = settled_ends(&runtime, &REQUEST_ENDS, 1).await;
 
-    assert!(
-        runtime.drain_scope_ends(Duration::from_secs(5)).await,
-        "every pending end hook ran"
-    );
     assert_eq!(requests.len(), 1, "the request ended once");
     assert_eq!(requests[0].kind, ScopeEndKind::Released);
     assert!(
@@ -83,7 +95,7 @@ async fn a_request_under_a_session_ends_once_and_the_session_only_when_released(
 
     sessions.forget("lee");
 
-    let ended = ends_reaching(&SESSION_ENDS, 1).await;
+    let ended = settled_ends(&runtime, &SESSION_ENDS, 1).await;
 
     assert_eq!(ended.len(), 1, "the session ended once");
     assert_eq!(ended[0].kind, ScopeEndKind::Released);
@@ -138,7 +150,7 @@ async fn run_and_try_run_open_under_a_chosen_parent_and_end_as_their_work_did() 
 
     assert!(matches!(failed, Err(RunError::Work(_))));
 
-    let ends = ends_reaching(&REQUEST_ENDS, 3).await;
+    let ends = settled_ends(&runtime, &REQUEST_ENDS, 3).await;
     let completed = ends
         .iter()
         .filter(|end| end.kind == ScopeEndKind::Completed)
