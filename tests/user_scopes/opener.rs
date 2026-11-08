@@ -8,7 +8,7 @@ use upwell::daemon::App;
 use upwell::{AppError, EntryKey, ScopeOpener};
 
 use super::{
-    Batch, BatchStep, CustomerClient, CustomerSync, Syncer, UNUSED_BUILDS, Unused, app, opener,
+    Batch, BatchStep, CustomerClient, CustomerSync, Syncer, UNUSED_BUILDS, Unused, app, ok, opener,
 };
 
 #[tokio::test]
@@ -59,7 +59,7 @@ async fn a_child_scope_runs_under_a_typed_parent_instance() {
     let customer = batches
         .builder(Batch)
         .under(&parent)
-        .run(|client: Arc<CustomerClient>| async move { client.customer() })
+        .try_run(|client: Arc<CustomerClient>| async move { ok(client.customer()) })
         .await
         .expect("the batch runs");
 
@@ -91,7 +91,7 @@ async fn an_opener_extracted_from_the_root_opens_instances() {
 
     let customer = sync
         .builder(CustomerSync { customer: 9 })
-        .run(|params: Arc<CustomerSync>| async move { params.customer })
+        .try_run(|params: Arc<CustomerSync>| async move { ok(params.customer) })
         .await
         .expect("the run reads the instance's value");
 
@@ -198,7 +198,7 @@ async fn a_run_declares_its_targets_under_deny_unplanned() {
 
     let customer = opener(&app)
         .builder(CustomerSync { customer: 2 })
-        .run(|client: Arc<CustomerClient>| async move { client.customer() })
+        .try_run(|client: Arc<CustomerClient>| async move { ok(client.customer()) })
         .await
         .expect("the run's parameters declare what it builds");
 
@@ -217,7 +217,7 @@ async fn a_run_survives_a_reload_of_the_runtime() {
 
     let customer = sync
         .builder(CustomerSync { customer: 6 })
-        .run(|client: Arc<CustomerClient>| async move { client.customer() })
+        .try_run(|client: Arc<CustomerClient>| async move { ok(client.customer()) })
         .await
         .expect("the run opens on the new generation");
 

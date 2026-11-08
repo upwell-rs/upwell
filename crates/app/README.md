@@ -86,22 +86,23 @@ struct CustomerClient {
 let synced = runtime
     .opener::<CustomerSync>()?
     .builder(CustomerSync { customer })
-    .run(|client: Arc<CustomerClient>| async move { client.sync().await })
+    .try_run(|client: Arc<CustomerClient>| async move { client.sync().await })
     .await?;
 ```
 
 Discovery collects every declaration; `AppBuilder::scope::<S>()` registers one explicitly. Inside
 an instance, components inject its value as `Arc<S>`. A unit scope stores nothing, so it has no
 value to inject. `ScopeOpener<S>` is itself injectable as a parameter: of an `#[init]` constructor,
-a job, an entry or `.run` work. Injected, it holds the runtime weakly. `.run` plans its closure like
+a job, an entry or `.run`/`.try_run` work. Injected, it holds the runtime weakly. `.run` (work
+returning `()`) and `.try_run` (work returning a `Result`) plan their closure like
 an entry whose targets are its parameters, once per parameter types and runtime generation, and
 closes the instance when the work finishes.
 
 ### End-of-scope hook
 
 `#[hook(ScopeEnded<Session>)] async fn ended(&self, end: ScopeEnd)` on a singleton observes every
-`Session` instance ending, and `#[hook(AnyScopeEnded)]` observes every scope's (read `end.scope`). `ScopeEnd` carries the scope, how it ended (`Completed`, `Failed`, `Cancelled`
-for a run; `Released` when the last `OpenScope` or `EntryScope` handle, such as a protocol's
+`Session` instance ending, and `#[hook(AnyScopeEnded)]` observes every scope's (read `end.scope`). `ScopeEnd` carries the scope, how it ended (`Completed`, `Errored { error_type }` for
+a `try_run` whose work returned `Err`, `Failed`, `Cancelled` for a run; `Released` when the last `OpenScope` or `EntryScope` handle, such as a protocol's
 request scope, drops, `into_container` included) and the `#[log]` params. The hook is observer-only: it runs on a spawned
 Tokio task after the instance's work and before its log closes, so the events it makes are
 captured, and it cannot delay, veto or extend the instance. A failing or panicking hook is

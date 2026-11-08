@@ -54,7 +54,7 @@ async fn a_run_nobody_watches_captures_nothing() {
 
     let seen = sessions
         .builder(Session)
-        .run(|logs: ScopeLogs| async move { logs.is_capturing() })
+        .try_run(|logs: ScopeLogs| async move { ok(logs.is_capturing()) })
         .await
         .expect("the run succeeds");
 
@@ -70,12 +70,12 @@ async fn the_work_subscribes_to_its_own_instance_through_scope_logs() {
     let stream = sessions
         .builder(Session)
         .capture_logs()
-        .run(|logs: ScopeLogs| async move {
+        .try_run(|logs: ScopeLogs| async move {
             let stream = logs.subscribe();
 
             tracing::info!("inside");
 
-            stream
+            ok(stream)
         })
         .await
         .expect("the run succeeds");

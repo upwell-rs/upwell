@@ -39,7 +39,7 @@ async fn work_with_the_same_targets_shares_one_plan() {
 
     sessions
         .builder(Session)
-        .run(|| async { 1 })
+        .run(|| async {})
         .await
         .expect("another closure with the same targets runs");
 
@@ -75,9 +75,16 @@ async fn a_scope_run_is_a_future_that_can_be_joined_and_boxed() {
 
     let (runtime, _registry) = build_runtime(HashMap::new()).await;
     let sessions = runtime.opener::<Session>().expect("session is declared");
-    let runs = (0..3).map(|index| sessions.builder(Session).run(move || async move { index }));
+    let runs = (0..3).map(|index| {
+        sessions
+            .builder(Session)
+            .try_run(move || async move { ok(index) })
+    });
     let joined = futures::future::join_all(runs).await;
-    let boxed = sessions.builder(Session).run(|| async { 9 }).boxed();
+    let boxed = sessions
+        .builder(Session)
+        .try_run(|| async { ok(9) })
+        .boxed();
 
     assert_eq!(
         joined
@@ -91,7 +98,11 @@ async fn a_scope_run_is_a_future_that_can_be_joined_and_boxed() {
 
 /// Awaits any scope run through its concrete execution type, which exists only when the run is
 /// generic over the future it drives instead of boxing it.
-async fn await_run<F: std::future::Future<Output = crate::Result<u8>>>(run: ScopeRun<F>) -> u8 {
+async fn await_run<
+    F: std::future::Future<Output = Result<u8, RunError<std::convert::Infallible>>>,
+>(
+    run: ScopeRun<F>,
+) -> u8 {
     run.await.expect("the run succeeds")
 }
 
@@ -101,7 +112,7 @@ async fn a_scope_run_drives_its_execution_without_boxing_it() {
     let sessions = runtime.opener::<Session>().expect("session is declared");
 
     assert_eq!(
-        await_run(sessions.builder(Session).run(|| async { 4 })).await,
+        await_run(sessions.builder(Session).try_run(|| async { ok(4) })).await,
         4
     );
 }

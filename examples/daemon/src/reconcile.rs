@@ -54,8 +54,11 @@ pub async fn reconcile_accounts(
 
         tasks.spawn(async move {
             runs.builder(AccountReconcile { account })
-                .run(|ledger: Arc<AccountLedger>| async move { ledger.reconcile() })
+                .try_run(|ledger: Arc<AccountLedger>| async move {
+                    Ok::<_, std::convert::Infallible>(ledger.reconcile())
+                })
                 .await
+                .map_err(AppError::from)
         });
     }
 

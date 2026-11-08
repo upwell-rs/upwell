@@ -91,7 +91,7 @@ async fn a_panicking_observer_neither_fails_the_run_nor_silences_the_others() {
     let app = app("scope-end-panic").await;
     let outcome = opener(&app)
         .builder(ended(PANICKING))
-        .run(|| async { 7 })
+        .try_run(|| async { Ok::<_, std::convert::Infallible>(7) })
         .await;
 
     assert_eq!(outcome.expect("the run succeeds"), 7);

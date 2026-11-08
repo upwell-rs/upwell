@@ -31,10 +31,10 @@ async fn an_explicit_scope_off_disables_capture_inside_a_run() {
     let _guard = tracing::dispatcher::set_default(&scope_off());
     let (runtime, _registry) = build_runtime(HashMap::new()).await;
     let opener = sessions(&runtime);
-    let run = opener.builder(Session).capture_logs().run(|| async {
+    let run = opener.builder(Session).capture_logs().try_run(|| async {
         tracing::info!(target: "myapp", "inside the run");
 
-        ScopeLogs::current().is_capturing()
+        ok(ScopeLogs::current().is_capturing())
     });
     let stream = run.logs();
 
@@ -72,13 +72,16 @@ async fn a_run_captured_under_one_subscriber_is_not_current_under_another() {
     let (runtime, _registry) = build_runtime(HashMap::new()).await;
     let opener = sessions(&runtime);
     let other = scope_off();
-    let run = opener.builder(Session).capture_logs().run(|| async move {
-        let inside = ScopeLogs::current().is_capturing();
-        let other =
-            tracing::dispatcher::with_default(&other, || ScopeLogs::current().is_capturing());
+    let run = opener
+        .builder(Session)
+        .capture_logs()
+        .try_run(|| async move {
+            let inside = ScopeLogs::current().is_capturing();
+            let other =
+                tracing::dispatcher::with_default(&other, || ScopeLogs::current().is_capturing());
 
-        (inside, other)
-    });
+            ok((inside, other))
+        });
 
     let (inside, other) = run.await.expect("the run succeeds");
 

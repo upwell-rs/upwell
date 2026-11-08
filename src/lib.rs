@@ -129,7 +129,7 @@ pub use upwell_app::{
     PluginResolutionPlan, PluginSlotId, PluginWithOptions, PreBuild, PreBuildContext, PreparedApp,
     PreparedProtocol, PreparedScopeTopology, ProtocolDefinition, ProtocolId,
     ProtocolPluginRegistrar, ProtocolRuntime, RelationKind, RelationTarget, ReplacementDecision,
-    ResolvedPlugin, RestartReason, RestartRequired, RetirementContext, RetirementReason,
+    ResolvedPlugin, RestartReason, RestartRequired, RetirementContext, RetirementReason, RunError,
     RuntimeReloader, RuntimeTransitionReport, RuntimeView, SCOPES, ScopeBoundary, ScopeBuilder,
     ScopeDeclaration, ScopeEnd, ScopeEndContext, ScopeEndKind, ScopeEnded, ScopeEntry, ScopeOpener,
     ScopeParent, ScopeRun, ScopeTopology, ScopeTopologyError, ScopeWork, Serve, ServerConfig,
@@ -137,11 +137,11 @@ pub use upwell_app::{
     TransitionAborted, TransitionAttemptId, TransitionCommitted, TransitionDecision,
     TransitionFailure, TransitionHookContext, TransitionHookOutcome, TransitionHookReport,
     TransitionOutcome, TransitionOutcomeContext, TransitionPhase, TransitionProposal,
-    TransitionRejection, TransitionVerdict, ValidationContext, build_host, build_host_context,
-    build_prepared_host, extend_late_plugins, prepare_host, prepare_host_context,
-    prepare_setup_host_context, rank_below, resolve_early_plugins, resolve_host_dependency,
-    resolve_host_plugin_catalog, retain_host_plugin_catalog, serve_host, setup_host,
-    setup_host_context,
+    TransitionRejection, TransitionVerdict, TryScopeWork, ValidationContext, build_host,
+    build_host_context, build_prepared_host, extend_late_plugins, prepare_host,
+    prepare_host_context, prepare_setup_host_context, rank_below, resolve_early_plugins,
+    resolve_host_dependency, resolve_host_plugin_catalog, retain_host_plugin_catalog, serve_host,
+    setup_host, setup_host_context,
 };
 
 /// Versioned protocol-neutral developer-tooling schema and prepared-state projection types.

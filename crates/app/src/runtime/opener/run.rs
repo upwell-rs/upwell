@@ -1,51 +1,19 @@
 //! Running planned work in a fresh scope instance: [`ScopeBuilder::run`].
 
-use std::any::TypeId;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use pin_project_lite::pin_project;
-use upwell_core::{DependencyDescriptor, Scope, ScopeId};
-use upwell_di::{EntryPlan, FromContainer, ScopeContainer};
+use upwell_core::{Scope, ScopeId};
+use upwell_di::{EntryPlan, ScopeContainer};
 
 use super::builder::open_planned_in;
-use super::{OpensUnder, ScopeBuilder, ScopeEndKind};
-use crate::entry::EntryTargets;
+use super::work::{Fallible, Planned, Unit};
+use super::{OpensUnder, RunError, ScopeBuilder, ScopeEndKind, ScopeWork, TryScopeWork};
 use crate::logs::{self, LogOptions, ScopeLogSink, ScopeLogStream};
 use crate::runtime::{RuntimeView, scope_run_target};
-
-/// Work [`ScopeBuilder::run`] runs inside a scope instance: a closure whose parameters are the
-/// targets it injects, each a [`FromContainer`] type as an `#[init]` constructor takes, and
-/// whose future is the work.
-///
-/// Implemented for closures of up to twelve parameters returning a future. The parameters
-/// declare the work's dependencies the way an entry's do, so the work is planned like one.
-pub trait ScopeWork<Targets>: Send + sealed::Sealed<Targets> {
-    /// What the work returns.
-    type Output;
-
-    /// The type that keys the work's plan: two kinds of work with the same targets plan
-    /// alike.
-    fn plan_key() -> TypeId;
-
-    /// The dependency edge of every target, in parameter order.
-    fn targets() -> Vec<DependencyDescriptor>;
-
-    /// Resolves the targets from `scope`, then runs the work.
-    fn call(
-        self,
-        scope: &Arc<ScopeContainer>,
-    ) -> impl Future<Output = crate::Result<Self::Output>> + Send;
-}
-
-/// Keeps [`ScopeWork`] implemented only for the closures this module covers, so how work is
-/// planned and called can change without breaking downstream implementations.
-mod sealed {
-    /// Implemented only alongside each `ScopeWork` impl in this module.
-    pub trait Sealed<Targets> {}
-}
 
 pin_project! {
     /// Work waiting to run in a fresh scope instance, made by [`ScopeBuilder::run`]. Awaiting it
@@ -116,8 +84,8 @@ impl RunLogs {
 
 impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
     /// Prepares `work` to run in a fresh instance: awaiting the result opens the instance, runs
-    /// the work there, returns its output and closes the instance once the work finishes
-    /// (anything the work still shares keeps it alive).
+    /// the work there and closes the instance once the work finishes (anything the work still
+    /// shares keeps it alive).
     ///
     /// The instance opens, and the work runs, its targets' resolution included, in an invocation
     /// context of its own: under the instance's parent while it opens, then with exactly this
@@ -131,9 +99,14 @@ impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
     /// else built on demand fails. The plan is made the first time work with the same
     /// parameter types runs on a runtime generation and reused after that.
     ///
+    /// The work returns `()`; work that returns a value or a `Result` runs through
+    /// [`try_run`](Self::try_run). The instance ends as
+    /// [`Completed`](ScopeEndKind::Completed), or [`Failed`](ScopeEndKind::Failed) when it
+    /// could not open or a target could not resolve, or [`Cancelled`](ScopeEndKind::Cancelled)
+    /// when the run is dropped first.
+    ///
     /// ```ignore
-    /// let synced = sync
-    ///     .builder(CustomerSync { customer })
+    /// sync.builder(CustomerSync { customer })
     ///     .run(|client: Arc<CustomerClient>| async move { client.sync().await })
     ///     .await?;
     /// ```
@@ -144,14 +117,57 @@ impl<'a, S: OpensUnder<P>, P: Scope> ScopeBuilder<'a, S, P> {
     pub fn run<W, Targets>(
         self,
         work: W,
-    ) -> ScopeRun<impl Future<Output = crate::Result<W::Output>> + use<'a, S, P, W, Targets>>
+    ) -> ScopeRun<impl Future<Output = crate::Result<()>> + use<'a, S, P, W, Targets>>
     where
         W: ScopeWork<Targets>,
     {
         let logs = Arc::new(RunLogs::new(S::ID, self.logs));
 
         ScopeRun {
-            execution: execute(self, work, Arc::clone(&logs)),
+            execution: execute(self, Unit(work), Arc::clone(&logs)),
+            logs,
+        }
+    }
+
+    /// As [`run`](Self::run), for work that returns a `Result`: its success is returned, its
+    /// failure comes back as [`RunError::Work`], and a failure to open the instance or resolve
+    /// a target as [`RunError::Scope`].
+    ///
+    /// The instance ends as [`Completed`](ScopeEndKind::Completed) when the work returned `Ok`,
+    /// and as [`Errored`](ScopeEndKind::Errored) when it returned `Err`, which records only the
+    /// error's type, never its value.
+    ///
+    /// ```ignore
+    /// let synced = sync
+    ///     .builder(CustomerSync { customer })
+    ///     .try_run(|client: Arc<CustomerClient>| async move { client.sync().await })
+    ///     .await?;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`RunError::Scope`] as [`run`](Self::run) fails, and [`RunError::Work`] with the work's
+    /// own error.
+    pub fn try_run<W, Targets>(
+        self,
+        work: W,
+    ) -> ScopeRun<
+        impl Future<Output = Result<W::Output, RunError<W::Error>>> + use<'a, S, P, W, Targets>,
+    >
+    where
+        W: TryScopeWork<Targets>,
+    {
+        let logs = Arc::new(RunLogs::new(S::ID, self.logs));
+        let execution = execute(self, Fallible(work), Arc::clone(&logs));
+
+        ScopeRun {
+            execution: async move {
+                match execution.await {
+                    Ok(Ok(output)) => Ok(output),
+                    Ok(Err(error)) => Err(RunError::Work(error)),
+                    Err(error) => Err(RunError::Scope(error)),
+                }
+            },
             logs,
         }
     }
@@ -176,7 +192,7 @@ impl<F: Future> Future for ScopeRun<F> {
     }
 }
 
-async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
+async fn execute<S: OpensUnder<P>, P: Scope, W: Planned<Targets>, Targets>(
     builder: ScopeBuilder<'_, S, P>,
     work: W,
     run_logs: Arc<RunLogs>,
@@ -220,8 +236,8 @@ async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
         .instrument(instance_end.span().clone())
         .await;
 
-    instance_end.complete(match outcome {
-        Ok(_) => ScopeEndKind::Completed,
+    instance_end.complete(match &outcome {
+        Ok(output) => W::ending(output),
         Err(_) => ScopeEndKind::Failed,
     });
 
@@ -229,7 +245,7 @@ async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
 }
 
 /// The generation, parent container and plan `builder`'s run opens with.
-fn prepare<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
+fn prepare<S: OpensUnder<P>, P: Scope, W: Planned<Targets>, Targets>(
     builder: &ScopeBuilder<'_, S, P>,
 ) -> crate::Result<(RuntimeView, Arc<ScopeContainer>, Arc<EntryPlan>)> {
     let (view, parent) = builder.target()?;
@@ -239,7 +255,7 @@ fn prepare<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
 }
 
 /// The plan `view` keeps for work `W` into scope `S`, made on the first run.
-fn run_plan<S: Scope, W: ScopeWork<Targets>, Targets>(
+fn run_plan<S: Scope, W: Planned<Targets>, Targets>(
     view: &RuntimeView,
 ) -> crate::Result<Arc<EntryPlan>> {
     let scope_plan = view.scope_plan();
@@ -255,51 +271,3 @@ fn run_plan<S: Scope, W: ScopeWork<Targets>, Targets>(
         )
         .ok_or(crate::Error::UndeclaredScopeOpen { scope: S::ID })
 }
-
-macro_rules! scope_work {
-    ($($target:ident),*) => {
-        impl<Work, Output, $($target),*> sealed::Sealed<($($target,)*)> for Work
-        where
-            Work: FnOnce($($target),*) -> Output + Send,
-        {
-        }
-
-        impl<Work, Output, $($target),*> ScopeWork<($($target,)*)> for Work
-        where
-            Work: FnOnce($($target),*) -> Output + Send,
-            Output: Future + Send,
-            $($target: FromContainer + Send + 'static,)*
-        {
-            type Output = Output::Output;
-
-            fn plan_key() -> TypeId {
-                TypeId::of::<($($target,)*)>()
-            }
-
-            fn targets() -> Vec<DependencyDescriptor> {
-                <($($target,)*) as EntryTargets>::targets()
-            }
-
-            #[allow(non_snake_case, unused_variables)]
-            async fn call(self, scope: &Arc<ScopeContainer>) -> crate::Result<Self::Output> {
-                $(let $target = scope.extract::<$target>().await?;)*
-
-                Ok(self($($target),*).await)
-            }
-        }
-    };
-}
-
-scope_work!();
-scope_work!(A);
-scope_work!(A, B);
-scope_work!(A, B, C);
-scope_work!(A, B, C, D);
-scope_work!(A, B, C, D, E);
-scope_work!(A, B, C, D, E, F);
-scope_work!(A, B, C, D, E, F, G);
-scope_work!(A, B, C, D, E, F, G, H);
-scope_work!(A, B, C, D, E, F, G, H, I);
-scope_work!(A, B, C, D, E, F, G, H, I, J);
-scope_work!(A, B, C, D, E, F, G, H, I, J, K);
-scope_work!(A, B, C, D, E, F, G, H, I, J, K, L);
