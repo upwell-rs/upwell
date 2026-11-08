@@ -242,7 +242,7 @@ pub fn entry(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// let synced = opener
 ///     .builder(CustomerSync { customer })
-///     .run(|client: Arc<CustomerClient>| async move { client.sync().await })
+///     .try_run(|client: Arc<CustomerClient>| async move { client.sync().await })
 ///     .await?;
 /// ```
 ///

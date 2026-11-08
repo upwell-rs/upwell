@@ -46,6 +46,11 @@ impl Worker {
     }
 }
 
+/// A successful result of work that cannot fail.
+fn ok<T>(value: T) -> Result<T, std::convert::Infallible> {
+    Ok(value)
+}
+
 async fn app() -> App {
     App::builder("multi-scope-runtime")
         .auto_discover()
@@ -63,7 +68,7 @@ async fn each_scope_builds_the_factory_declared_for_it() {
         .opener::<Left>()
         .expect("discovery declares the left scope")
         .builder(Left)
-        .run(|worker: Arc<Worker>| async move { worker.label.clone() })
+        .try_run(|worker: Arc<Worker>| async move { ok(worker.label.clone()) })
         .await
         .expect("the left run succeeds");
     let right = app
@@ -71,7 +76,7 @@ async fn each_scope_builds_the_factory_declared_for_it() {
         .opener::<Right>()
         .expect("discovery declares the right scope")
         .builder(Right)
-        .run(|worker: Arc<Worker>| async move { worker.label.clone() })
+        .try_run(|worker: Arc<Worker>| async move { ok(worker.label.clone()) })
         .await
         .expect("the right run succeeds");
 

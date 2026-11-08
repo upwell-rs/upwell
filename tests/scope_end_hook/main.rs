@@ -11,6 +11,7 @@ extern crate upwell as fork;
 mod handles;
 mod runs;
 mod shutdown;
+mod try_run;
 mod typed;
 
 use std::sync::atomic::{AtomicUsize, Ordering};

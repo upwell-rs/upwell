@@ -342,7 +342,7 @@ async fn sync_all(customers: Arc<CustomerRepo>, sync: ScopeOpener<CustomerSync>)
     let runs = customers.list().await?.into_iter().map(|customer| {
         sync.builder(CustomerSync::from(customer))
             .capture_logs()
-            .run(|client: Arc<CustomerClient>| async move { client.sync().await })
+            .try_run(|client: Arc<CustomerClient>| async move { client.sync().await })
     });
 
     futures::future::try_join_all(runs).await?;
@@ -360,8 +360,12 @@ async fn sync_all(customers: Arc<CustomerRepo>, sync: ScopeOpener<CustomerSync>)
   then one of:
   - `.open(&entry)`: opens the instance with a registered entry's plan and returns it; protocols
     run their handler in it.
-  - `.run(closure)`: a planned entry whose closure parameters declare its dependencies. The plan
-    is cached per scope and parameter-type tuple.
+  - `.run(closure)` / `.try_run(closure)`: a planned entry whose closure parameters declare its
+    dependencies. The plan is cached per scope and parameter-type tuple. `run` takes work
+    returning `()`; `try_run` takes work returning `Result<T, E>` and returns
+    `Result<T, RunError<E>>` (`Scope(Error)` or `Work(E)`). The instance ends `Completed`, or
+    `Errored { error_type }` when the work returned `Err` (only the type name, never the value),
+    or `Failed` when the framework could not open it or resolve a target.
   - `.enter(future)` (planned with the invocation context, #130): propagation only. The future
     will run inside the scope and reach its values through declared `Current<T>` dependencies.
 
@@ -755,7 +759,7 @@ rather than blocking the logging thread.
 ```rust
 let run = sync
     .builder(CustomerSync::from(customer))
-    .run(|client: Arc<CustomerClient>| async move { client.sync().await });
+    .try_run(|client: Arc<CustomerClient>| async move { client.sync().await });
 let mut logs = run.logs();
 
 let watcher = upwell::spawn(async move {
@@ -918,7 +922,8 @@ watcher.await?;
 - **End-of-scope hooks (#406):** two observer-only `#[hook]` kinds. `ScopeEnded<S>` fires when
   an instance of scope `S` ends (`#[hook(ScopeEnded<Session>)]`); `AnyScopeEnded` fires for every
   scope and reads `ScopeEnd::scope`. A hook takes a `ScopeEnd` (scope id and name, a
-  `ScopeEndKind` of `Completed`, `Failed`, `Cancelled` or `Released`, and the loggable params,
+  `ScopeEndKind` of `Completed`, `Errored { error_type }`, `Failed`, `Cancelled` or
+  `Released`, and the loggable params,
   never the container or any other field). Both fire for the same instance, typed first.
   - **Dispatch by type:** the kind's `TypeId` is already data in the hook descriptor, so the
     generic kind needs no new registration machinery; `ScopeEnded<NotAScope>` fails the `Scope`

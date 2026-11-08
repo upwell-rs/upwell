@@ -90,6 +90,11 @@ impl upwell_di::Injectable for Visitor {
     }
 }
 
+/// A successful result of work that cannot fail.
+fn ok<T>(value: T) -> Result<T, std::convert::Infallible> {
+    Ok(value)
+}
+
 fn key(value: &'static str) -> EntryKey {
     EntryKey::new(value).expect("valid test entry key")
 }

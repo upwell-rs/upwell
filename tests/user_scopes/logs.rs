@@ -14,7 +14,7 @@ use upwell::{ScopeOpener, component, methods};
 use upwell_app::HookTarget;
 use upwell_di::context::{InvocationContext, InvocationTarget, TargetRef};
 
-use super::app;
+use super::{app, ok};
 
 /// A run whose account is loggable and whose token is not.
 #[scope(parents = [Root])]
@@ -96,7 +96,7 @@ async fn probed_run_in(
             let run = audits
                 .builder(audit(1))
                 .capture_logs()
-                .run(|probe: Arc<LoudProbe>| async move { probe.capturing });
+                .try_run(|probe: Arc<LoudProbe>| async move { ok(probe.capturing) });
             let stream = run.logs();
             let capturing = run.await.expect("the run succeeds");
 
@@ -151,14 +151,14 @@ async fn a_non_capturing_open_sees_the_enclosing_runs_capture() {
     let inner_capturing = audits
         .builder(audit(1))
         .capture_logs()
-        .run(|opener: ScopeOpener<AuditRun>| async move {
+        .try_run(|opener: ScopeOpener<AuditRun>| async move {
             let inner = opener
                 .builder(audit(2))
                 .open_default()
                 .await
                 .expect("the inner opens");
 
-            probe_of(&inner).await
+            ok(probe_of(&inner).await)
         })
         .await
         .expect("the run succeeds");
@@ -178,7 +178,7 @@ async fn a_non_capturing_open_when_needed_sees_the_enclosing_runs_capture() {
     let inner_capturing = audits
         .builder(audit(1))
         .capture_logs()
-        .run(|opener: ScopeOpener<AuditRun>| async move {
+        .try_run(|opener: ScopeOpener<AuditRun>| async move {
             let inner = opener
                 .builder(audit(2))
                 .open_when_needed(None)
@@ -192,7 +192,7 @@ async fn a_non_capturing_open_when_needed_sees_the_enclosing_runs_capture() {
                 .await
                 .expect("the probe builds");
 
-            probe.capturing
+            ok(probe.capturing)
         })
         .await
         .expect("the run succeeds");
@@ -299,20 +299,18 @@ async fn a_run_started_inside_another_run_keeps_its_construction_events() {
     let _guard = install();
     let app = app("user-scopes-nested-run").await;
     let audits = app.runtime().opener::<AuditRun>().expect("declared");
-    let outer =
-        audits
-            .builder(audit(1))
-            .capture_logs()
-            .run(|opener: ScopeOpener<AuditRun>| async move {
-                let inner = opener
-                    .builder(audit(2))
-                    .capture_logs()
-                    .run(|probe: Arc<LoudProbe>| async move { probe.capturing });
-                let inner_stream = inner.logs();
-                let capturing = inner.await.expect("the inner run succeeds");
+    let outer = audits.builder(audit(1)).capture_logs().try_run(
+        |opener: ScopeOpener<AuditRun>| async move {
+            let inner = opener
+                .builder(audit(2))
+                .capture_logs()
+                .try_run(|probe: Arc<LoudProbe>| async move { ok(probe.capturing) });
+            let inner_stream = inner.logs();
+            let capturing = inner.await.expect("the inner run succeeds");
 
-                (capturing, inner_stream)
-            });
+            ok((capturing, inner_stream))
+        },
+    );
     let outer_stream = outer.logs();
 
     let (capturing, inner_stream) = outer.await.expect("the outer run succeeds");

@@ -171,14 +171,14 @@ async fn run_work_runs_in_a_context_on_its_instance() {
     let (target, scope, visitor) = sessions
         .builder(Session)
         .seed(Visitor(7))
-        .run(|visitor: Visitor| async move {
+        .try_run(|visitor: Visitor| async move {
             let context = captured();
 
-            (
+            ok((
                 context.target().downcast_ref::<ScopeRunTarget>().copied(),
                 context.scope_key(),
                 visitor,
-            )
+            ))
         })
         .await
         .expect("the run succeeds");

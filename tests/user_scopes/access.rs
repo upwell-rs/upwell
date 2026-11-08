@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use upwell::context::{Scoped, ScopedError};
 
-use super::{Batch, CustomerClient, CustomerSync, app, opener};
+use super::{Batch, CustomerClient, CustomerSync, app, ok, opener};
 
 #[tokio::test]
 async fn a_run_reads_its_own_instance_of_the_scope() {
@@ -13,12 +13,12 @@ async fn a_run_reads_its_own_instance_of_the_scope() {
 
     let seen = opener(&app)
         .builder(CustomerSync { customer: 11 })
-        .run(|_client: Arc<CustomerClient>| async move {
-            (
+        .try_run(|_client: Arc<CustomerClient>| async move {
+            ok((
                 CustomerSync::current().map(|sync| sync.customer).ok(),
                 CustomerSync::is_active(),
                 Batch::is_active(),
-            )
+            ))
         })
         .await
         .expect("the run succeeds");
@@ -42,18 +42,18 @@ async fn a_child_run_reads_its_parent_instance() {
     let seen = batches
         .builder(Batch)
         .under(&parent)
-        .run(|_client: Arc<CustomerClient>| async move {
+        .try_run(|_client: Arc<CustomerClient>| async move {
             let pinned = Scoped::<CustomerSync, Arc<CustomerSync>>::new()
                 .get()
                 .await
                 .map(|sync| sync.customer)
                 .ok();
 
-            (
+            ok((
                 CustomerSync::current().map(|sync| sync.customer).ok(),
                 pinned,
                 Batch::is_active(),
-            )
+            ))
         })
         .await
         .expect("the batch runs");

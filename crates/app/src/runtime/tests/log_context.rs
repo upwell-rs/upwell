@@ -130,14 +130,14 @@ async fn a_carried_tokio_task_sees_and_logs_into_the_run_it_was_spawned_in() {
     let _guard = install();
     let (runtime, _registry) = build_runtime(HashMap::new()).await;
     let opener = sessions(&runtime);
-    let run = opener.builder(Session).capture_logs().run(|| async {
-        context::tokio::spawn(async {
+    let run = opener.builder(Session).capture_logs().try_run(|| async {
+        ok(context::tokio::spawn(async {
             tracing::info!("child");
 
             ScopeLogs::current().is_capturing()
         })
         .await
-        .expect("the child completes")
+        .expect("the child completes"))
     });
     let stream = run.logs();
 
@@ -153,29 +153,32 @@ async fn a_bound_closure_logs_into_its_own_invocation_inside_another() {
     let (runtime, _registry) = build_runtime(HashMap::new()).await;
     let opener = sessions(&runtime);
     let other = opener.clone();
-    let first = opener.builder(Session).capture_logs().run(|| async move {
-        let bound = CapturedContext::capture()
-            .expect("the run is an invocation")
-            .bind(|| {
-                let seen = ScopeLogs::current().subscribe();
+    let first = opener
+        .builder(Session)
+        .capture_logs()
+        .try_run(|| async move {
+            let bound = CapturedContext::capture()
+                .expect("the run is an invocation")
+                .bind(|| {
+                    let seen = ScopeLogs::current().subscribe();
 
-                tracing::info!("from the first");
+                    tracing::info!("from the first");
 
-                seen
-            });
-        let second = other
-            .builder(Session)
-            .capture_logs()
-            .run(move || async move {
-                tracing::info!("in the second");
+                    seen
+                });
+            let second = other
+                .builder(Session)
+                .capture_logs()
+                .try_run(move || async move {
+                    tracing::info!("in the second");
 
-                bound()
-            });
-        let second_stream = second.logs();
-        let seen = second.await.expect("the second run succeeds");
+                    ok(bound())
+                });
+            let second_stream = second.logs();
+            let seen = second.await.expect("the second run succeeds");
 
-        (seen, second_stream)
-    });
+            ok((seen, second_stream))
+        });
     let first_stream = first.logs();
 
     let (seen, second_stream) = first.await.expect("the first run succeeds");
@@ -195,20 +198,23 @@ async fn an_entered_context_routes_past_the_span_of_an_unrelated_invocation() {
     let (runtime, _registry) = build_runtime(HashMap::new()).await;
     let opener = sessions(&runtime);
     let other = opener.clone();
-    let first = opener.builder(Session).capture_logs().run(|| async move {
-        let context = InvocationContext::capture().expect("the run is an invocation");
-        let second = other
-            .builder(Session)
-            .capture_logs()
-            .run(move || async move {
-                context.enter_sync(|| tracing::info!("the first's context, the second's span"));
-            });
-        let second_stream = second.logs();
+    let first = opener
+        .builder(Session)
+        .capture_logs()
+        .try_run(|| async move {
+            let context = InvocationContext::capture().expect("the run is an invocation");
+            let second = other
+                .builder(Session)
+                .capture_logs()
+                .run(move || async move {
+                    context.enter_sync(|| tracing::info!("the first's context, the second's span"));
+                });
+            let second_stream = second.logs();
 
-        second.await.expect("the second run succeeds");
+            second.await.expect("the second run succeeds");
 
-        second_stream
-    });
+            ok(second_stream)
+        });
     let first_stream = first.logs();
 
     let second_stream = first.await.expect("the first run succeeds");
@@ -299,10 +305,10 @@ async fn a_bound_closure_called_in_a_child_run_logs_to_the_invocation_it_was_bou
                 .builder(Request)
                 .under(&session)
                 .capture_logs()
-                .run(move || async move {
+                .try_run(move || async move {
                     tracing::info!("in the request");
 
-                    bound()
+                    ok(bound())
                 });
             let request_stream = request.logs();
             let seen = request.await.expect("the request run succeeds");
@@ -330,21 +336,24 @@ async fn a_span_entered_by_hand_in_an_unrelated_invocation_logs_to_the_invocatio
     let (runtime, _registry) = build_runtime(HashMap::new()).await;
     let opener = sessions(&runtime);
     let other = opener.clone();
-    let run = opener.builder(Session).capture_logs().run(|| async move {
-        let unrelated = other
-            .builder(Session)
-            .capture_logs()
-            .open_on_demand()
-            .await
-            .expect("the unrelated session opens");
-        let unrelated_stream = unrelated.logs();
+    let run = opener
+        .builder(Session)
+        .capture_logs()
+        .try_run(|| async move {
+            let unrelated = other
+                .builder(Session)
+                .capture_logs()
+                .open_on_demand()
+                .await
+                .expect("the unrelated session opens");
+            let unrelated_stream = unrelated.logs();
 
-        unrelated
-            .span()
-            .in_scope(|| tracing::info!("entered by hand"));
+            unrelated
+                .span()
+                .in_scope(|| tracing::info!("entered by hand"));
 
-        unrelated_stream
-    });
+            ok(unrelated_stream)
+        });
     let run_stream = run.logs();
 
     let unrelated_stream = run.await.expect("the run succeeds");

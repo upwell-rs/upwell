@@ -75,9 +75,15 @@ impl HookKind for AnyScopeEnded {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ScopeEndKind {
-    /// A run's work finished and its targets resolved, whatever the work itself returned: an
-    /// `Err` in the work's own output is a completed run.
+    /// A run's work finished and its targets resolved. A `try_run` whose work returned `Ok`
+    /// completes too.
     Completed,
+    /// A `try_run`'s work ran and returned `Err`. Only the error's type is recorded, never its
+    /// value or message, which may hold secrets.
+    Errored {
+        /// The `std::any::type_name` of the work's error type.
+        error_type: &'static str,
+    },
     /// A run's instance could not open or its work's targets could not resolve, a failure of
     /// the framework rather than of the work.
     Failed,
@@ -93,6 +99,7 @@ impl ScopeEndKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Completed => "completed",
+            Self::Errored { .. } => "errored",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
             Self::Released => "released",
