@@ -32,9 +32,9 @@ pub(crate) use generation::PreparedRuntimeGeneration;
 pub use generation::{AppConditionState, DisplacedGeneration, RuntimeView};
 use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransitionCoordinator};
 pub use opener::{
-    AnyScopeEnded, EntryScope, OpenScope, Opening, OpensUnder, RunError, ScopeBuilder, ScopeEnd,
-    ScopeEndContext, ScopeEndKind, ScopeEnded, ScopeEntry, ScopeOpener, ScopeRun, ScopeWork,
-    TryScopeWork,
+    AnyScopeEnded, EntryScope, OpenScope, Opening, OpensUnder, ParentScope, RunError, ScopeBuilder,
+    ScopeEnd, ScopeEndContext, ScopeEndKind, ScopeEnded, ScopeEntry, ScopeOpener, ScopeRun,
+    ScopeWork, TryScopeWork,
 };
 #[cfg(feature = "tooling")]
 pub(crate) use reload::{resolve_staged_transition, staged_condition_snapshot};

@@ -77,13 +77,13 @@ pub use registry::{AppConditionEvaluation, AppRegistry};
 pub use runtime::{
     AnyScopeEnded, AppConditionState, AppRuntime, ComponentRetired, ComponentRetirement,
     ComponentTransitionReport, DisplacedGeneration, EntryScope, HookTarget, OpenScope, Opening,
-    OpensUnder, PendingTransition, PhaseTiming, RetirementContext, RetirementReason, RunError,
-    RuntimeTransitionReport, RuntimeView, ScopeBuilder, ScopeEnd, ScopeEndContext, ScopeEndKind,
-    ScopeEnded, ScopeEntry, ScopeOpener, ScopeRun, ScopeRunTarget, ScopeWork, TransitionAborted,
-    TransitionAttemptId, TransitionCommitted, TransitionDecision, TransitionFailure,
-    TransitionHookContext, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,
-    TransitionOutcomeContext, TransitionPhase, TransitionProposal, TransitionRejection,
-    TransitionVerdict, TryScopeWork,
+    OpensUnder, ParentScope, PendingTransition, PhaseTiming, RetirementContext, RetirementReason,
+    RunError, RuntimeTransitionReport, RuntimeView, ScopeBuilder, ScopeEnd, ScopeEndContext,
+    ScopeEndKind, ScopeEnded, ScopeEntry, ScopeOpener, ScopeRun, ScopeRunTarget, ScopeWork,
+    TransitionAborted, TransitionAttemptId, TransitionCommitted, TransitionDecision,
+    TransitionFailure, TransitionHookContext, TransitionHookOutcome, TransitionHookReport,
+    TransitionOutcome, TransitionOutcomeContext, TransitionPhase, TransitionProposal,
+    TransitionRejection, TransitionVerdict, TryScopeWork,
 };
 pub use scope::{
     PreparedScopeTopology, SCOPES, ScopeBoundary, ScopeDeclaration, ScopeParent, ScopeTopology,
