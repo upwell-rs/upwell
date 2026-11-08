@@ -119,8 +119,11 @@ rm -f "$out"
 agy_settings='{"permissions":{"allow":["mcp(blast-radius/open_project)","mcp(blast-radius/find_symbol)","mcp(blast-radius/symbol_info)","mcp(blast-radius/blast_radius)","mcp(blast-radius/diff_blast)","mcp(blast-radius/call_slice)","mcp(blast-radius/module_graph)","mcp(blast-radius/dead_code)","mcp(codegraph/codegraph_explore)"]}}'
 filter=(python3 -I "$here/stream_drafts.py" "$provider" "$log" "$drafts" "$mirror" "$out")
 
-copilot_tools=(view glob rg)
+copilot_tools=(view glob rg
+    blast-radius-blast_radius blast-radius-find_symbol blast-radius-symbol_info blast-radius-call_slice
+    blast-radius-module_graph blast-radius-dead_code blast-radius-diff_blast codegraph-codegraph_explore)
 copilot_denied=(shell write memory url)
+copilot_disabled_mcps=(MCP_DOCKER playwright railway)
 
 set +e
 case "$provider" in
@@ -148,7 +151,14 @@ case "$provider" in
             copilot_args+=("--deny-tool=$denied")
         done
 
-        copilot -p "$(cat "$prompt")" "${copilot_args[@]}" 2>&1 9>&- | "${filter[@]}" 9>&-
+        for server in "${copilot_disabled_mcps[@]}"; do
+            copilot_args+=(--disable-mcp-server "$server")
+        done
+
+        (
+            cd "$worktree"
+            copilot -p "$(cat "$prompt")" "${copilot_args[@]}" 2>&1
+        ) 9>&- | "${filter[@]}" 9>&-
         statuses=("${PIPESTATUS[@]}")
         ;;
 esac
