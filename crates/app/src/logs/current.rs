@@ -32,8 +32,8 @@ pub struct ScopeLogs {
 impl ScopeLogs {
     /// The log of the instance the calling code runs in.
     pub fn current() -> Self {
-        let admits = admitted();
-        let span_sink = span_sink().filter(|sink| admits(sink));
+        let (span_sink, admits) = located();
+        let span_sink = span_sink.filter(|sink| admits(sink));
 
         Self {
             sink: route::route(span_sink, admits),
@@ -69,33 +69,21 @@ impl FromContainer for ScopeLogs {
 
 impl upwell_di::Provided<ScopeLogs> for upwell_di::Wiring {}
 
-/// The sink of the innermost capturing `upwell.scope` span entered on this thread, as the
-/// layer recorded it. Locks no span and works with every subscriber the layer supports.
+/// The sink of the innermost `upwell.scope` span the current default subscriber's layer saw
+/// entered on this thread, and which sinks the events made here reach: those that layer took.
+/// Locks no span and works with every subscriber the layer supports.
 #[cfg(feature = "tracing-subscriber")]
-fn span_sink() -> Option<Arc<ScopeLogSink>> {
-    if !super::sink::any_open() {
-        return None;
-    }
-
-    super::entered::innermost()
-}
-
-/// Without a layer no span holds a sink.
-#[cfg(not(feature = "tracing-subscriber"))]
-fn span_sink() -> Option<Arc<ScopeLogSink>> {
-    None
-}
-
-/// Which sinks the events made here reach: those the current default subscriber's layer took.
-#[cfg(feature = "tracing-subscriber")]
-fn admitted() -> impl Fn(&ScopeLogSink) -> bool {
+fn located() -> (Option<Arc<ScopeLogSink>>, impl Fn(&ScopeLogSink) -> bool) {
     let reach = super::reach::Reach::current();
+    let span_sink = super::sink::any_open()
+        .then(|| super::entered::innermost(reach))
+        .flatten();
 
-    move |sink| reach.admits(sink)
+    (span_sink, move |sink: &ScopeLogSink| reach.admits(sink))
 }
 
-/// Without a layer no sink is ever taken.
+/// Without a layer no span holds a sink, and no sink is ever taken.
 #[cfg(not(feature = "tracing-subscriber"))]
-fn admitted() -> impl Fn(&ScopeLogSink) -> bool {
-    ScopeLogSink::is_attached
+fn located() -> (Option<Arc<ScopeLogSink>>, impl Fn(&ScopeLogSink) -> bool) {
+    (None, ScopeLogSink::is_attached)
 }
