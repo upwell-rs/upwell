@@ -19,6 +19,15 @@
 //! no scope on its own. The placement is the `router.layer` call for [`open_eager_scope`] in
 //! `PreparedAxum::build`, inside the body limit and the request timeout.
 //!
+//! # The parent a request opens under
+//!
+//! A request's scope opens under the application root, unless the application registers a
+//! parent layer ([`AxumAppBuilder::parent_layer`](crate::AxumAppBuilder::parent_layer)) and it
+//! puts a [`RequestParent`] into the request's extensions, such as the caller's cached session
+//! scope: then the scope opens under that instance, on the generation it runs on. Parent layers
+//! run before global middleware and before [`open_eager_scope`], so every opening sees the
+//! parent. Without a parent layer the extensions are never searched for one.
+//!
 //! # When [`RequestMeta`] is captured
 //!
 //! Axum owns the request head and consumes it before a handler's body runs, so the seed cannot
@@ -71,7 +80,7 @@ use upwell_di::{FromContainer, ScopeContainer};
 use crate::config::AxumConfig;
 use crate::extract::InjectRejection;
 use crate::request_meta::RequestMeta;
-use crate::scope::HttpRequest;
+use crate::scope::{HttpRequest, RequestParent};
 use crate::target::HttpTarget;
 
 tokio::task_local! {
@@ -83,6 +92,18 @@ pub(crate) struct RequestScopes {
     opener: ScopeOpener<HttpRequest>,
     routes: RouteEntries,
     config: Cfg<AxumConfig>,
+    parents: ParentChoice,
+}
+
+/// Whether a request's scope may open under a parent other than the application root.
+#[derive(Clone, Copy)]
+pub(crate) enum ParentChoice {
+    /// No parent layer is registered: every request opens under the root, and nothing looks
+    /// for a [`RequestParent`].
+    Root,
+    /// A parent layer is registered: a request opens under the [`RequestParent`] in its
+    /// extensions, or under the root without one.
+    Chosen,
 }
 
 /// The entry of each controller route, by method and the path the router matches it under.
@@ -150,16 +171,20 @@ impl<'a> Head<'a> {
 }
 
 impl RequestScopeLayer {
+    /// The layer opening request scopes with `opener`, under the root or, as `parents` says,
+    /// under a [`RequestParent`] a parent layer set.
     pub(crate) fn new(
         opener: ScopeOpener<HttpRequest>,
         routes: RouteEntries,
         config: Cfg<AxumConfig>,
+        parents: ParentChoice,
     ) -> Self {
         Self {
             scopes: Arc::new(RequestScopes {
                 opener,
                 routes,
                 config,
+                parents,
             }),
         }
     }
@@ -230,8 +255,12 @@ async fn of_parts(parts: &mut Parts) -> Result<Arc<ScopeContainer>, InjectReject
         return Ok(scope);
     }
 
-    let matched = parts.extensions.get::<MatchedPath>();
-    let scope = open(Head::of_parts(parts), matched, WithoutEntry::Everything).await?;
+    let scope = open(
+        Head::of_parts(parts),
+        &parts.extensions,
+        WithoutEntry::Everything,
+    )
+    .await?;
 
     parts.extensions.insert(OpenedScope(Arc::clone(&scope)));
 
@@ -331,8 +360,12 @@ async fn open_request(
     request: &mut Request,
     without_entry: WithoutEntry,
 ) -> Result<Arc<ScopeContainer>, InjectRejection> {
-    let matched = request.extensions().get::<MatchedPath>();
-    let scope = open(Head::of_request(request), matched, without_entry).await?;
+    let scope = open(
+        Head::of_request(request),
+        request.extensions(),
+        without_entry,
+    )
+    .await?;
 
     request
         .extensions_mut()
@@ -341,25 +374,35 @@ async fn open_request(
     Ok(scope)
 }
 
-/// Opens the request's scope, capturing [`RequestMeta`] from `head` when the opening reads it.
+/// Opens the request's scope under the parent in `extensions`, or the root, capturing
+/// [`RequestMeta`] from `head` when the opening reads it.
 async fn open(
     head: Head<'_>,
-    matched: Option<&MatchedPath>,
+    extensions: &Extensions,
     without_entry: WithoutEntry,
 ) -> Result<Arc<ScopeContainer>, InjectRejection> {
     let scopes = REQUEST_SCOPES
         .try_with(Arc::clone)
         .map_err(|_| InjectRejection::MissingScope)?;
-    let entry = matched.and_then(|path| scopes.routes.get(head.method, path.as_str()));
+    let entry = extensions
+        .get::<MatchedPath>()
+        .and_then(|path| scopes.routes.get(head.method, path.as_str()));
     let opening = match (entry, without_entry) {
         (Some(entry), _) => Opening::Entry(entry),
         (None, WithoutEntry::Everything) => Opening::Everything,
         (None, WithoutEntry::Eager) => Opening::OnDemand,
     };
+    let parent = match scopes.parents {
+        ParentChoice::Root => None,
+        ParentChoice::Chosen => extensions.get::<RequestParent>(),
+    };
+    let builder = scopes.opener.builder(HttpRequest);
+    let builder = match parent {
+        Some(parent) => builder.under_parent(parent),
+        None => builder,
+    };
 
-    let opened = scopes
-        .opener
-        .builder(HttpRequest)
+    let opened = builder
         .open_with_bound_seed(opening, || head.capture())
         .await
         .map_err(InjectRejection::ScopeFailed)?;

@@ -98,6 +98,14 @@ returning `()`) and `.try_run` (work returning a `Result`) plan their closure li
 an entry whose targets are its parameters, once per parameter types and runtime generation, and
 closes the instance when the work finishes.
 
+A scope can also name `children`: scopes declared elsewhere, such as a protocol's request scope,
+that may also open under it. `#[scope(parents = [Root], generations = durable,
+children = [HttpRequest])] struct Session` lets an HTTP request open under a cached session, so
+session-scoped components are built once per session. The child keeps its own parents, so its
+components take the session's components optionally (`Option<Arc<T>>`). Code that picks the
+parent per opening holds a `ParentScope<S>` (made from an `OpenScope<P>` where `S: OpensUnder<P>`)
+and opens with `ScopeBuilder::under_parent`.
+
 ### End-of-scope hook
 
 `#[hook(ScopeEnded<Session>)] async fn ended(&self, end: ScopeEnd)` on a singleton observes every

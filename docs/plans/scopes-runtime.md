@@ -696,10 +696,51 @@ and the instance's value is that container's `S` slot. Plugins cannot contribute
 `PluginContributions::scope` follows the `entry` contribution when a plugin needs one. Protocol
 scopes keep their hand-written impls.
 
-A request scope opened under an app-chosen parent, such as a per-user `Session` scope the
-app caches and reuses across requests, fits this design: the parent is picked when the scope
-opens (`.under(&session)`), never by re-parenting an open scope. It needs app-declared
-parents for protocol scopes, so it follows #405.
+Status (#438, app-chosen parents): an application opens a protocol's request scope under a
+longer-lived scope it owns, such as a per-user `Session` it caches, so the chain becomes
+`Singleton -> Session -> HttpRequest` and session-scoped components are built once per session.
+The parent is picked when the request scope opens, never by re-parenting an open scope, which
+would leave components already built in the request resolved through the old chain.
+
+- **Declaring it.** `#[scope(parents = [Root], generations = durable, children = [HttpRequest])]`
+  (owner, 2026-11-08). From `children` the macro emits `impl OpensUnder<Session> for HttpRequest {}`
+  (allowed for a foreign child because `Session` is local) and a const check that the child ranks
+  below the scope, both spanned at the child, and records the child IDs on
+  `ScopeDeclaration::children`. A child named twice is rejected at its second mention, and a path
+  that is not a scope type fails the `Scope` bound there. `ScopeTopology::prepare_with` adds the
+  scope as a parent of each child after the child's declared parents; a child no boundary
+  declares is `ScopeTopologyError::MissingChild`, and a child that already lists the scope is
+  `DuplicateParent`. It is additive only: a protocol scope keeps its own parents. The extended
+  parent lists are interned for the process, so `ScopeBoundary` stays `Copy` and `const`
+  constructible, and preparing again reuses the list.
+- **Opening under it.** `upwell_app::ParentScope<S>` is an open instance that `S` may open under,
+  with the parent's scope type erased: `ParentScope::new(&OpenScope<P>)` requires
+  `S: OpensUnder<P>`, and `ScopeBuilder::under_parent(&parent)` opens under it on the parent's
+  generation, as `.under` does. The builder keeps its static parent type, so its opening methods
+  still require `S: OpensUnder<P>` for it (the root by default). Protocol-neutral; only HTTP uses
+  it so far.
+- **HTTP.** `upwell_axum::RequestParent` is `ParentScope<HttpRequest>`, put into a request's
+  extensions by a parent layer: `AxumAppBuilder::parent_layer(layer)` for a raw `tower::Layer`,
+  or `parent_middleware::<M>()` for a DI-resolved `AxumMiddleware` such as the session cache
+  holding its `ScopeOpener<Session>`. Parent layers are applied outside the global middleware and
+  outside the eager request-scope opening (#447), inside the body limit and the timeout, so eager
+  request components and `Current`/`Scoped` accessors see the session. The request-scope layer
+  reads `RequestParent` only when a parent layer is registered: without one no extension is
+  searched and every request opens under the root, as before; with one the cost is one extension
+  lookup per opening plus the parent hop when resolving through the chain.
+- **Planning.** `HttpRequest` now opens under the root or a session, so the session is not on
+  every chain. Scope validation lets an optional edge (`Option<Arc<T>>`) name a target in a
+  strictly longer-lived scope that is not reachable on every chain, since it cannot hold a value
+  captive; it is `None` on a chain without the session, and `Some` under one, through the
+  existing `shadowed_by` fallback for injected targets and dynamic resolution for factory edges.
+  Required edges are still rejected, so required dependencies on the session need an "only
+  parent" mode (follow-up).
+- **Generations.** A `Durable` session keeps its generation: a request under it runs on the
+  session's generation, `AppRuntime::generations_behind` reports how far behind the session is
+  after a reload, so the app's cache can evict it, and the displaced generation stays alive while
+  the session holds it.
+- RPC calls and WebSocket messages open under their connection; app-chosen parents for them
+  (how a session relates to a connection) are a follow-up.
 
 ### Request data in protocol scopes
 

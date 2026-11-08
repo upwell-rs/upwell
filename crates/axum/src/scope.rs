@@ -5,13 +5,21 @@
 //! upgraded socket opens one [`WebsocketConnection`] scope below the root and each inbound
 //! application message opens a [`WebsocketMessage`] child below that connection.
 
-use upwell_app::{OpensUnder, ScopeBoundary, ScopeParent, ScopeTopology};
+use upwell_app::{OpensUnder, ParentScope, ScopeBoundary, ScopeParent, ScopeTopology};
 #[cfg(feature = "ws")]
 use upwell_core::ScopeGenerations;
 use upwell_core::{Scope, ScopeId, Singleton};
 
 /// One inbound HTTP request.
 pub struct HttpRequest;
+
+/// The scope an [`HttpRequest`] opens under, put into the request's extensions by a parent
+/// layer ([`AxumAppBuilder::parent_layer`](crate::AxumAppBuilder::parent_layer)).
+///
+/// Made from an open instance of any scope that lists `HttpRequest` among its children, such as
+/// `#[scope(parents = [Root], generations = durable, children = [HttpRequest])]`:
+/// `RequestParent::new(&session)`. A request without one opens under the application root.
+pub type RequestParent = ParentScope<HttpRequest>;
 
 /// One live upgraded WebSocket connection.
 #[cfg(feature = "ws")]
