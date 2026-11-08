@@ -50,6 +50,24 @@ fn repeated_preparations_share_one_extended_parent_list() {
 }
 
 #[test]
+fn rejected_preparations_intern_no_parent_list() {
+    let before = interned_parent_lists();
+
+    for count in 2..20 {
+        let declared = vec![session(&[HTTP_ID]); count];
+        let error = prepare_with(&declared).expect_err("a scope declared twice");
+
+        assert_eq!(error, ScopeTopologyError::DuplicateId { id: SESSION_ID });
+    }
+
+    assert_eq!(
+        interned_parent_lists(),
+        before,
+        "a rejected preparation keeps none of the lists it extended"
+    );
+}
+
+#[test]
 fn a_child_no_boundary_declares_is_rejected() {
     let error = prepare_with(&[session(&[MISSING_ID])]).expect_err("an unknown child");
 

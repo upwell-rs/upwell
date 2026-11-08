@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 use upwell_core::{Scope, ScopeId, ScopeKey, Singleton};
 
+use super::validate::{TopologyNode, validate_sorted};
 use super::{PreparedScopeTopology, ScopeDeclaration, ScopeTopologyError};
 
 /// A parent a protocol-owned scope boundary may be opened under.
@@ -68,9 +69,10 @@ const fn same_id(left: ScopeId, right: ScopeId) -> bool {
     true
 }
 
-/// Every parent list preparation extended, kept for the life of the process so a boundary
-/// stays `Copy` and its parents `'static`. The lists are interned: a program declares a fixed
-/// set of scopes, so preparing again reuses the list it made before, and the set stays bounded.
+/// Every parent list a successful preparation extended, kept for the life of the process so a
+/// boundary stays `Copy` and its parents `'static`. A list is interned only once its whole
+/// topology validated, and only once per distinct list, so the set is bounded by the distinct
+/// valid extended lists the program's scope declarations can form.
 static EXTENDED_PARENTS: Mutex<Vec<&'static [ScopeParent]>> = Mutex::new(Vec::new());
 
 /// One openable scope and every parent it may be opened under.
@@ -125,16 +127,6 @@ impl ScopeBoundary {
     /// Returns whether this boundary declares `parent` as one of its opening parents.
     pub fn opens_under(&self, parent: ScopeParent) -> bool {
         self.parents.contains(&parent)
-    }
-
-    /// This boundary, also opened under `parent`.
-    fn with_parent(self, parent: ScopeParent) -> Self {
-        let parents: Vec<ScopeParent> = self.parents.iter().copied().chain([parent]).collect();
-
-        Self {
-            scope: self.scope,
-            parents: intern_parents(parents),
-        }
     }
 }
 
@@ -198,16 +190,23 @@ impl ScopeTopology {
         declared: impl IntoIterator<Item = &'d ScopeDeclaration>,
     ) -> Result<PreparedScopeTopology, ScopeTopologyError> {
         let declared: Vec<&ScopeDeclaration> = declared.into_iter().collect();
-        let mut boundaries: Vec<ScopeBoundary> = self
+        let mut drafts: Vec<DraftBoundary> = self
             .boundaries
             .iter()
             .copied()
             .chain(declared.iter().map(|declaration| declaration.boundary))
+            .map(DraftBoundary::new)
             .collect();
 
         for declaration in &declared {
-            add_to_children(&mut boundaries, declaration)?;
+            add_to_children(&mut drafts, declaration)?;
         }
+
+        drafts.sort_by_key(TopologyNode::id);
+        validate_sorted(&drafts)?;
+
+        let boundaries: Vec<ScopeBoundary> =
+            drafts.into_iter().map(DraftBoundary::finish).collect();
 
         PreparedScopeTopology::new(&boundaries)
     }
@@ -219,24 +218,79 @@ impl Default for ScopeTopology {
     }
 }
 
+/// A boundary whose parents application scopes may still extend, validated before its parent
+/// list is interned.
+struct DraftBoundary {
+    boundary: ScopeBoundary,
+    parents: Vec<ScopeParent>,
+}
+
+impl DraftBoundary {
+    fn new(boundary: ScopeBoundary) -> Self {
+        Self {
+            boundary,
+            parents: boundary.parents().to_vec(),
+        }
+    }
+
+    fn add_parent(&mut self, parent: ScopeParent) {
+        self.parents.push(parent);
+    }
+
+    /// The validated boundary, with its extended parents interned when any were added.
+    fn finish(self) -> ScopeBoundary {
+        if self.parents.len() == self.boundary.parents().len() {
+            return self.boundary;
+        }
+
+        ScopeBoundary {
+            scope: self.boundary.scope,
+            parents: intern_parents(self.parents),
+        }
+    }
+}
+
+impl TopologyNode for DraftBoundary {
+    fn id(&self) -> ScopeId {
+        self.boundary.id()
+    }
+
+    fn rank(&self) -> u8 {
+        self.boundary.rank()
+    }
+
+    fn parents(&self) -> &[ScopeParent] {
+        &self.parents
+    }
+}
+
 /// Adds the scope `declaration` declares as a parent of every boundary it names as a child.
 fn add_to_children(
-    boundaries: &mut [ScopeBoundary],
+    drafts: &mut [DraftBoundary],
     declaration: &ScopeDeclaration,
 ) -> Result<(), ScopeTopologyError> {
     let id = declaration.boundary.id();
     let parent = ScopeParent::Boundary(id);
 
     for child in declaration.children {
-        let boundary = boundaries
+        let draft = drafts
             .iter_mut()
-            .find(|boundary| boundary.id() == *child)
+            .find(|draft| TopologyNode::id(*draft) == *child)
             .ok_or(ScopeTopologyError::MissingChild { id, child: *child })?;
 
-        *boundary = boundary.with_parent(parent);
+        draft.add_parent(parent);
     }
 
     Ok(())
+}
+
+/// How many extended parent lists the process has interned.
+#[cfg(test)]
+pub(super) fn interned_parent_lists() -> usize {
+    EXTENDED_PARENTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .len()
 }
 
 /// The interned, `'static` copy of `parents`.
