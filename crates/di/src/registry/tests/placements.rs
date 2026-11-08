@@ -281,12 +281,12 @@ fn a_consumer_reaches_the_placement_in_its_own_scope() {
         components: vec![twin, in_a, in_b],
         providers: Vec::new(),
     }
-    .validate_with_scope_reachability(reach);
+    .validate_with_scope_reachability(reach, |_, _| false);
     let missed = ComponentRegistry {
         components: vec![twin, elsewhere],
         providers: Vec::new(),
     }
-    .validate_with_scope_reachability(reach);
+    .validate_with_scope_reachability(reach, |_, _| false);
 
     reached.expect("each consumer reaches the placement of its own scope");
     assert!(matches!(missed, Err(Error::ScopeViolation(_))));

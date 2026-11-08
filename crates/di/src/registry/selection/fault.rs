@@ -61,7 +61,7 @@ impl ProviderSelectionModel {
     ///
     /// Runs exactly the per-edge checks component validation runs, in the same order:
     /// provider existence and selection, deferred targets, forced-fresh targets, then the
-    /// target scopes. `can_reach` has the meaning of
+    /// target scopes. `can_reach` and `may_enclose` have the meaning of
     /// [`ComponentRegistry::validate_with_scope_reachability`](crate::ComponentRegistry::validate_with_scope_reachability).
     /// Like component validation, it emits provider-selection trace events, naming the
     /// consumer by its [`id`](DependencyConsumer::id). Failures with no per-edge meaning,
@@ -71,6 +71,7 @@ impl ProviderSelectionModel {
         dependency: &DependencyDescriptor,
         consumer: DependencyConsumer,
         can_reach: impl Fn(ScopeId, ScopeId) -> bool,
+        may_enclose: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<Option<DependencyFault>> {
         let can_access = |consumer, dependency| scope_allows_with(consumer, dependency, &can_reach);
         let is_component = |type_id| self.component(type_id).is_some();
@@ -83,7 +84,7 @@ impl ProviderSelectionModel {
         let checked = check_dependency(self, &is_component, &consumer, dependency, &can_access)
             .and_then(|()| check_deferred(self, &consumer, dependency, &can_access))
             .and_then(|()| check_fresh(self, &consumer, dependency, &can_access))
-            .and_then(|()| check_scope(self, &consumer, dependency, &can_access));
+            .and_then(|()| check_scope(self, &consumer, dependency, &can_access, &may_enclose));
 
         match checked {
             Ok(()) => Ok(None),

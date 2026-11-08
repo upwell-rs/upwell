@@ -736,8 +736,12 @@ would leave components already built in the request resolved through the old cha
   lookup per opening plus the parent hop when resolving through the chain.
 - **Planning.** `HttpRequest` now opens under the root or a session, so the session is not on
   every chain. Scope validation lets an optional edge (`Option<Arc<T>>`) name a target in a
-  strictly longer-lived scope that is not reachable on every chain, since it cannot hold a value
-  captive; it is `None` on a chain without the session, and `Some` under one, through the
+  scope that encloses the consumer on at least one chain, since an enclosing scope cannot hold
+  a value captive; a scope that never encloses it, such as a sibling, is still a
+  `ScopeViolation`, since the edge could never be present. The topology computes each
+  boundary's ancestors on any chain once at preparation (`PreparedScopeTopology::encloses`),
+  and the DI validation entry points take that relation beside reachability. The edge is `None`
+  on a chain without the session, and `Some` under one, through the
   existing `shadowed_by` fallback for injected targets and dynamic resolution for factory edges.
   Required edges are still rejected, so required dependencies on the session need an "only
   parent" mode (follow-up).

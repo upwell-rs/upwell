@@ -249,6 +249,7 @@ fn plan_effective_graph(
         RuntimeGenerationId::INITIAL,
         eligible,
         |consumer, dependency| topology.is_reachable(&consumer, &dependency),
+        |ancestor, descendant| topology.encloses(&ancestor, &descendant),
     )
     .map_err(Error::from)?;
     let selection = graph.provider_selection();

@@ -132,8 +132,13 @@ fn registry(custom: bool) -> ComponentRegistry {
 }
 
 fn graph(custom: bool) -> EffectiveGraph {
-    EffectiveGraph::build(RuntimeGenerationId::INITIAL, &registry(custom), |_, _| true)
-        .expect("fixture graph validates")
+    EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &registry(custom),
+        |_, _| true,
+        |_, _| false,
+    )
+    .expect("fixture graph validates")
 }
 
 fn action(plan: &TransitionPlan, component: &str) -> Option<NodeAction> {

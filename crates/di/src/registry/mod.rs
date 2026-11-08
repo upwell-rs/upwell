@@ -8,7 +8,7 @@ mod resolution;
 pub(crate) mod scopes;
 pub(crate) mod selection;
 
-use scopes::{scope_allows_by_rank, scope_allows_with};
+use scopes::{never_encloses, scope_allows_by_rank, scope_allows_with};
 
 pub use selection::{
     DependencyConsumer, DependencyFault, DependencySelectionReason, DependencySelectionStage,
@@ -141,23 +141,32 @@ impl ComponentRegistry {
         let components = self.resolved_components()?;
         let selection = self.provider_selection_model(&components)?;
 
-        self.validate_with_scope_access(&components, &selection, scope_allows_by_rank)
+        self.validate_with_scope_access(
+            &components,
+            &selection,
+            scope_allows_by_rank,
+            never_encloses,
+        )
     }
 
     /// Validates the component graph against caller-defined scope reachability.
     ///
-    /// The predicate receives the consumer and dependency stable scope IDs and
-    /// should return `true` only when the dependency's boundary is the consumer's
-    /// boundary or an ancestor reachable from it. Transient dependencies remain
-    /// universally constructible and do not invoke the predicate.
+    /// `can_reach` receives the consumer and dependency stable scope IDs and should return
+    /// `true` only when the dependency's boundary is the consumer's boundary or an ancestor on
+    /// every chain the consumer opens in. `may_enclose(ancestor, descendant)` returns whether
+    /// `ancestor` is open around `descendant` on at least one chain: an optional edge may name a
+    /// target there, which is absent on the other chains. Pass `|_, _| false` for a topology
+    /// whose every ancestor is on every chain. Transient dependencies remain universally
+    /// constructible and invoke neither predicate.
     pub fn validate_with_scope_reachability(
         &self,
         can_reach: impl Fn(ScopeId, ScopeId) -> bool,
+        may_enclose: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<()> {
         let components = self.resolved_components()?;
         let selection = self.provider_selection_model(&components)?;
 
-        self.validate_with_scope_reachability_using(&components, &selection, can_reach)
+        self.validate_with_scope_reachability_using(&components, &selection, can_reach, may_enclose)
     }
 
     /// Validates an effective component set with its retained provider selection model.
@@ -170,10 +179,14 @@ impl ComponentRegistry {
         components: &[ComponentDescriptor],
         selection: &selection::ProviderSelectionModel,
         can_reach: impl Fn(ScopeId, ScopeId) -> bool,
+        may_enclose: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<()> {
-        self.validate_with_scope_access(components, selection, |consumer, dependency| {
-            scope_allows_with(consumer, dependency, &can_reach)
-        })
+        self.validate_with_scope_access(
+            components,
+            selection,
+            |consumer, dependency| scope_allows_with(consumer, dependency, &can_reach),
+            may_enclose,
+        )
     }
 
     pub(crate) fn validate_with_scope_access(
@@ -181,6 +194,7 @@ impl ComponentRegistry {
         components: &[ComponentDescriptor],
         selection: &selection::ProviderSelectionModel,
         can_access: impl Fn(ScopeKey, ScopeKey) -> bool,
+        may_enclose: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<()> {
         self.validate_component_ids(components)?;
         Self::validate_construction(components)?;
@@ -189,7 +203,7 @@ impl ComponentRegistry {
         self.validate_provider_qualifiers(components)?;
         self.validate_deferred_dependencies_with(components, selection, &can_access)?;
         self.validate_fresh_dependencies_with(components, selection, &can_access)?;
-        self.validate_scopes_with(components, selection, &can_access)?;
+        self.validate_scopes_with(components, selection, &can_access, &may_enclose)?;
 
         Ok(())
     }

@@ -215,6 +215,8 @@ pub(crate) fn validate_targets(
     let configs = BoundConfigs::new(&registry.config_bindings);
     let can_reach =
         |consumer: ScopeId, dependency: ScopeId| topology.is_reachable(&consumer, &dependency);
+    let may_enclose =
+        |ancestor: ScopeId, descendant: ScopeId| topology.encloses(&ancestor, &descendant);
 
     for entry in &registry.entries {
         for target in (entry.targets)() {
@@ -224,7 +226,7 @@ pub(crate) fn validate_targets(
                     .map(|fault| config_error(entry, &target, fault))
             } else {
                 selection
-                    .dependency_fault(&target, consumer(entry), can_reach)?
+                    .dependency_fault(&target, consumer(entry), can_reach, may_enclose)?
                     .map(|fault| dependency_error(entry, &target, fault))
             };
 
