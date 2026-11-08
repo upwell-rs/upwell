@@ -378,3 +378,25 @@ async fn the_context_state_tells_absent_masked_and_entered_apart() {
     assert!(Arc::ptr_eq(&inside[0], &chain.request));
     assert!(Arc::ptr_eq(&inside[1], &chain.root));
 }
+
+#[tokio::test]
+async fn an_opening_scope_shows_its_parent_and_no_opening_binds_it() {
+    let chain = chain().await;
+    let sibling = child::<Message>(&chain.request).await;
+    let opening =
+        context(&chain, &Entry::Rpc).with_opening_scope(Message::KEY, Arc::clone(&chain.request));
+
+    opening
+        .enter(async {
+            assert!(Arc::ptr_eq(&innermost().expect("parent"), &chain.request));
+            assert!(
+                !bind_opened_scope(&sibling),
+                "an instance opened while the owner's constructs never takes its place"
+            );
+            assert!(Arc::ptr_eq(
+                &innermost().expect("still the parent"),
+                &chain.request
+            ));
+        })
+        .await;
+}

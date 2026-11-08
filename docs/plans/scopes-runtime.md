@@ -871,8 +871,13 @@ watcher.await?;
     invocation A and run inside B logs to A, and a task carried out of a `run` sees and logs to
     that run.
   - `ScopeBuilder::run` opens its instance inside its own context, pending under the instance's
-    parent, and binds the container before the work runs, so the run's constructors log to the
-    run wherever it was started.
+    parent (`with_opening_scope`, which no `bind_opened_scope` claims), so the run's
+    constructors log to the run wherever it was started, then runs the work in a context whose
+    innermost instance is exactly the opened container. A deferred `EntryScope` of the same
+    scope opened while the run's instance constructs cannot stand in for it. The protocols'
+    claimable `with_pending_scope` keeps that window: a second lazy opening of the same scope
+    under the same parent on the dispatching task binds first (follow-up: bind by the deferred
+    instance's identity rather than scope and parent).
   - `ScopeLogs::current()` finds the current span's sink in a per-thread stack the layer keeps
     of the capturing spans entered there (`on_enter`/`on_exit`). It mirrors `tracing`'s span
     stack and decides nothing, but it locks no span extensions, so a formatter that holds them
