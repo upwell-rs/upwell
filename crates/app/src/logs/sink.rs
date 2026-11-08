@@ -43,11 +43,13 @@ impl LayerId {
 /// one atomic read. Each subscriber has its own bounded buffer, and a full buffer drops the
 /// record and counts it, so the logging thread never waits.
 ///
-/// The sink knows the instance it opens under, so the instance's events made while it opens,
-/// before its container joins any invocation context, still belong to it.
+/// While its instance opens, the sink knows the instance it opens under, so the instance's
+/// events made then, before its container joins any invocation context, still belong to it.
+/// Once the instance opened, it belongs only to the contexts that run in it.
 pub struct ScopeLogSink {
     scope: ScopeId,
     parent: OnceLock<Weak<ScopeContainer>>,
+    opening: AtomicBool,
     params: OnceLock<Arc<[LogField]>>,
     level: Option<LevelFilter>,
     buffer: usize,
@@ -72,6 +74,7 @@ impl ScopeLogSink {
         Self {
             scope,
             parent: OnceLock::new(),
+            opening: AtomicBool::new(true),
             params: OnceLock::from(params),
             level: options.level,
             buffer: options.buffer.get().min(Semaphore::MAX_PERMITS),
@@ -155,8 +158,19 @@ impl ScopeLogSink {
         self.parent.get_or_init(|| Arc::downgrade(parent));
     }
 
-    /// The instance this sink's instance opens under, while it lives.
-    pub(super) fn parent(&self) -> Option<Arc<ScopeContainer>> {
+    /// Records that the sink's instance finished opening: its events no longer belong to it
+    /// merely because it opens under an invocation's innermost instance.
+    pub(super) fn opened(&self) {
+        self.opening.store(false, Ordering::Release);
+    }
+
+    /// The instance this sink's instance opens under, while it still opens and that instance
+    /// lives.
+    pub(super) fn opening_under(&self) -> Option<Arc<ScopeContainer>> {
+        if !self.opening.load(Ordering::Acquire) {
+            return None;
+        }
+
         self.parent.get().and_then(Weak::upgrade)
     }
 

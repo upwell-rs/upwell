@@ -106,11 +106,12 @@ the propagation machinery. Work captured outside every invocation (a `context::t
 `context::rayon` job spawned outside one) never logs into a capture it happens to run inside.
 Inside an invocation that runs in no scope instance (a job or a lifecycle hook), the span
 decides as well. Inside one that does, an event reaches the span's instance only when that
-instance is on the invocation's scope chain or opens under its innermost instance; otherwise it
-reaches the invocation's innermost capturing instance. Work carried with the propagation
-primitives therefore logs to the invocation it was captured in. One cost: an `OpenScope` span entered by hand inside
-an unrelated invocation routes to that invocation, not to the hand-entered instance, unless the
-instance opened under it.
+instance is on the invocation's scope chain or is still opening under its innermost instance, as
+its constructors do; otherwise it reaches the invocation's innermost capturing instance. Work
+carried with the propagation primitives therefore logs to the invocation it was captured in,
+even when it is called inside a child instance that opened under that invocation. One cost: an
+`OpenScope` span entered by hand inside an invocation that does not run in it routes to that
+invocation, not to the hand-entered instance, even when the instance opened under it.
 
 `ScopeLogs::current()` uses that same resolution, so it reports where events made at that point
 are delivered: `is_capturing()` is true when they are captured, including by an enclosing

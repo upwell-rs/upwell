@@ -237,14 +237,18 @@ fn masked_work_never_captures_while_work_without_any_context_keeps_span_routing(
     assert_eq!(masked, (false, Vec::new()));
 }
 
+/// A child's construction events reach it while it opens under the invocation; once it opened,
+/// its span entered by hand in the invocation logs to the invocation, as a closure bound there
+/// and called inside the child does.
 #[tokio::test]
-async fn an_instance_opening_under_the_invocation_captures_its_own_events() {
+async fn a_child_that_opened_under_the_invocation_no_longer_takes_its_events() {
     let _guard = install();
     let (runtime, _registry) = build_runtime(HashMap::new()).await;
-    let session = open_session(&runtime).await;
+    let session = capturing_session(&runtime).await;
+    let session_stream = session.logs();
     let requests = runtime.opener::<Request>().expect("request is declared");
 
-    let (capturing, stream) = call_in(&runtime, &session)
+    let request_stream = call_in(&runtime, &session)
         .enter(async {
             let request = requests
                 .builder(Request)
@@ -254,18 +258,68 @@ async fn an_instance_opening_under_the_invocation_captures_its_own_events() {
                 .await
                 .expect("the request opens");
             let stream = request.logs();
-            let capturing = request.span().in_scope(|| {
-                tracing::info!("in the request");
 
-                ScopeLogs::current().is_capturing()
-            });
+            request
+                .span()
+                .in_scope(|| tracing::info!("the request's span, the session's call"));
 
-            (capturing, stream)
+            stream
         })
         .await;
 
-    assert!(capturing, "the request's log is current inside its span");
-    assert_eq!(messages(stream).await, ["in the request"]);
+    drop(session);
+
+    assert_eq!(
+        messages(session_stream).await,
+        ["the request's span, the session's call"]
+    );
+    assert!(messages(request_stream).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_bound_closure_called_in_a_child_run_logs_to_the_invocation_it_was_bound_in() {
+    let _guard = install();
+    let (runtime, _registry) = build_runtime(HashMap::new()).await;
+    let session = capturing_session(&runtime).await;
+    let session_stream = session.logs();
+    let requests = runtime.opener::<Request>().expect("request is declared");
+
+    let (seen, request_stream) = call_in(&runtime, &session)
+        .enter(async {
+            let bound = CapturedContext::capture()
+                .expect("the call is an invocation")
+                .bind(|| {
+                    let seen = ScopeLogs::current().subscribe();
+
+                    tracing::info!("bound in the session");
+
+                    seen
+                });
+            let request = requests
+                .builder(Request)
+                .under(&session)
+                .capture_logs()
+                .run(move || async move {
+                    tracing::info!("in the request");
+
+                    bound()
+                });
+            let request_stream = request.logs();
+            let seen = request.await.expect("the request run succeeds");
+
+            (seen, request_stream)
+        })
+        .await;
+
+    drop(session);
+
+    assert_eq!(messages(request_stream).await, ["in the request"]);
+    assert_eq!(messages(session_stream).await, ["bound in the session"]);
+    assert_eq!(
+        messages(seen).await,
+        ["bound in the session"],
+        "ScopeLogs inside the bound closure is the session's"
+    );
 }
 
 /// The documented cost of routing by the context: a span entered by hand inside an unrelated
