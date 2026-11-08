@@ -65,3 +65,26 @@ async fn a_subscriber_that_disables_scope_capture_never_feeds_a_run_captured_und
 
     assert_eq!(messages(stream).await, ["kept"]);
 }
+
+#[tokio::test]
+async fn a_run_captured_under_one_subscriber_is_not_current_under_another() {
+    let _guard = install();
+    let (runtime, _registry) = build_runtime(HashMap::new()).await;
+    let opener = sessions(&runtime);
+    let other = scope_off();
+    let run = opener.builder(Session).capture_logs().run(|| async move {
+        let inside = ScopeLogs::current().is_capturing();
+        let other =
+            tracing::dispatcher::with_default(&other, || ScopeLogs::current().is_capturing());
+
+        (inside, other)
+    });
+
+    let (inside, other) = run.await.expect("the run succeeds");
+
+    assert!(inside, "the run's own subscriber shows its log");
+    assert!(
+        !other,
+        "a subscriber whose layer never took the run's span shows no log"
+    );
+}

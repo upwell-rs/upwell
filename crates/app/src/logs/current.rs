@@ -18,9 +18,12 @@ use crate::builtins::RuntimeReloader;
 /// invocation machinery entirely sees the log of the `upwell.scope` span it runs in. A
 /// component sees the log of the code that resolves it, which for a component built while its
 /// instance opens is that instance's; routing a lazily built component to its owning scope is
-/// a follow-up (#470). [`current`](Self::current) returns a snapshot of the sink at that
-/// moment: a handle moved into other work keeps its original sink. In an instance that does
-/// not capture, [`subscribe`](Self::subscribe) returns a stream that has already ended.
+/// a follow-up (#470). Only a capture the current default subscriber's
+/// [`ScopeLogLayer`](super::ScopeLogLayer) took is reported, so code running under another
+/// subscriber, whose events never reach it, sees no log. [`current`](Self::current) returns a
+/// snapshot of the sink at that moment: a handle moved into other work keeps its original sink.
+/// In an instance that does not capture, [`subscribe`](Self::subscribe) returns a stream that
+/// has already ended.
 #[derive(Clone)]
 pub struct ScopeLogs {
     sink: Option<Arc<ScopeLogSink>>,
@@ -29,8 +32,11 @@ pub struct ScopeLogs {
 impl ScopeLogs {
     /// The log of the instance the calling code runs in.
     pub fn current() -> Self {
+        let admits = admitted();
+        let span_sink = span_sink().filter(|sink| admits(sink));
+
         Self {
-            sink: route::route(span_sink(), ScopeLogSink::is_attached),
+            sink: route::route(span_sink, admits),
         }
     }
 
@@ -78,4 +84,18 @@ fn span_sink() -> Option<Arc<ScopeLogSink>> {
 #[cfg(not(feature = "tracing-subscriber"))]
 fn span_sink() -> Option<Arc<ScopeLogSink>> {
     None
+}
+
+/// Which sinks the events made here reach: those the current default subscriber's layer took.
+#[cfg(feature = "tracing-subscriber")]
+fn admitted() -> impl Fn(&ScopeLogSink) -> bool {
+    let reach = super::reach::Reach::current();
+
+    move |sink| reach.admits(sink)
+}
+
+/// Without a layer no sink is ever taken.
+#[cfg(not(feature = "tracing-subscriber"))]
+fn admitted() -> impl Fn(&ScopeLogSink) -> bool {
+    ScopeLogSink::is_attached
 }

@@ -894,9 +894,15 @@ watcher.await?;
     sink records which layer took it (an identity `ScopeLogLayer::on_layer` assigns), and a
     layer falls back to a chain instance's sink only when it took that sink itself, so events
     under another subscriber (`with_default`) never enter a capture that subscriber could not
-    see. `ScopeLogs::current()` has no layer to ask and accepts any layer's sink (follow-up:
-    tell it the current dispatcher's layer). While no sink is open anywhere an
-    event costs one atomic read.
+    see. `ScopeLogs::current()` asks the current default dispatcher for its layer
+    (`Dispatch::downcast_ref::<ScopeLogLayer>()`, which `Layered`, `Filtered`, boxed and `Vec`
+    layers forward) and accepts only that layer's sinks, so a capture entered under one
+    subscriber is not current under another. A `reload`-wrapped layer does not forward the
+    downcast and reports no capture (wrap its filter instead); with several scope log layers in
+    one subscriber, an unsupported setup in which each delivers, the first the downcast finds
+    decides. Inside a `tracing` dispatch (a formatter rendering an event) `get_default` yields
+    `Dispatch::none`, so there, as under an explicit `Dispatch::none` default, it accepts any
+    layer's sink. While no sink is open anywhere an event costs one atomic read.
 - **Cost of the rule:** an `OpenScope` span entered by hand inside an unrelated invocation's
   context routes to that invocation, not to the hand-entered instance, unless the instance opened
   under the invocation's innermost one. Run work inside the instance's own context (`run`, or a
