@@ -3,6 +3,42 @@ use upwell_core::{Scope, ScopeId, Singleton, Transient};
 
 use super::{ScopeBoundary, ScopeParent};
 
+/// What topology validation reads of a boundary, so a topology can be validated before its
+/// parent lists are made `'static`.
+pub(super) trait TopologyNode {
+    /// The boundary's stable identity.
+    fn id(&self) -> ScopeId;
+
+    /// The boundary's lifetime rank.
+    fn rank(&self) -> u8;
+
+    /// Every parent the boundary opens under.
+    fn parents(&self) -> &[ScopeParent];
+}
+
+impl TopologyNode for ScopeBoundary {
+    fn id(&self) -> ScopeId {
+        ScopeBoundary::id(self)
+    }
+
+    fn rank(&self) -> u8 {
+        ScopeBoundary::rank(self)
+    }
+
+    fn parents(&self) -> &[ScopeParent] {
+        ScopeBoundary::parents(self)
+    }
+}
+
+/// Validates identity-sorted `boundaries`: unique, unreserved identities, existing distinct
+/// parents, no cycles, and parents that outrank their children.
+pub(super) fn validate_sorted<B: TopologyNode>(boundaries: &[B]) -> Result<(), ScopeTopologyError> {
+    validate_ids(boundaries)?;
+    validate_parents(boundaries)?;
+    validate_cycles(boundaries)?;
+    validate_parent_ranks(boundaries)
+}
+
 /// A structural failure in a protocol-owned scope topology declaration.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
@@ -85,7 +121,7 @@ enum Visit {
     Done,
 }
 
-pub(super) fn validate_ids(boundaries: &[ScopeBoundary]) -> Result<(), ScopeTopologyError> {
+fn validate_ids<B: TopologyNode>(boundaries: &[B]) -> Result<(), ScopeTopologyError> {
     let root = Singleton::ID;
     let transient = Transient::ID;
 
@@ -104,7 +140,7 @@ pub(super) fn validate_ids(boundaries: &[ScopeBoundary]) -> Result<(), ScopeTopo
     Ok(())
 }
 
-pub(super) fn validate_parents(boundaries: &[ScopeBoundary]) -> Result<(), ScopeTopologyError> {
+fn validate_parents<B: TopologyNode>(boundaries: &[B]) -> Result<(), ScopeTopologyError> {
     for boundary in boundaries {
         let id = boundary.id();
         let parents = boundary.parents();
@@ -128,8 +164,8 @@ pub(super) fn validate_parents(boundaries: &[ScopeBoundary]) -> Result<(), Scope
     Ok(())
 }
 
-fn validate_parent(
-    boundaries: &[ScopeBoundary],
+fn validate_parent<B: TopologyNode>(
+    boundaries: &[B],
     id: ScopeId,
     parent: ScopeParent,
 ) -> Result<(), ScopeTopologyError> {
@@ -149,7 +185,7 @@ fn validate_parent(
 }
 
 /// Rejects any cycle through parent links. Requires every parent to exist.
-pub(super) fn validate_cycles(boundaries: &[ScopeBoundary]) -> Result<(), ScopeTopologyError> {
+fn validate_cycles<B: TopologyNode>(boundaries: &[B]) -> Result<(), ScopeTopologyError> {
     let mut visits = vec![Visit::Unvisited; boundaries.len()];
     let mut path = Vec::new();
 
@@ -160,8 +196,8 @@ pub(super) fn validate_cycles(boundaries: &[ScopeBoundary]) -> Result<(), ScopeT
     Ok(())
 }
 
-fn visit(
-    boundaries: &[ScopeBoundary],
+fn visit<B: TopologyNode>(
+    boundaries: &[B],
     index: usize,
     visits: &mut [Visit],
     path: &mut Vec<usize>,
@@ -204,9 +240,7 @@ fn visit(
     Ok(())
 }
 
-pub(super) fn validate_parent_ranks(
-    boundaries: &[ScopeBoundary],
-) -> Result<(), ScopeTopologyError> {
+fn validate_parent_ranks<B: TopologyNode>(boundaries: &[B]) -> Result<(), ScopeTopologyError> {
     for boundary in boundaries {
         for parent in boundary.parents() {
             let parent_rank = match parent {
@@ -235,7 +269,7 @@ pub(super) fn validate_parent_ranks(
 }
 
 /// The index of the boundary with `id` in identity-sorted `boundaries`.
-pub(super) fn find_index(boundaries: &[ScopeBoundary], id: &ScopeId) -> Option<usize> {
+pub(super) fn find_index<B: TopologyNode>(boundaries: &[B], id: &ScopeId) -> Option<usize> {
     boundaries
         .binary_search_by_key(id, |boundary| boundary.id())
         .ok()

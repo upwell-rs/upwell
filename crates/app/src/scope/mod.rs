@@ -6,6 +6,8 @@ mod prepared;
 mod registration;
 mod validate;
 
+#[cfg(test)]
+use declaration::interned_parent_lists;
 pub use declaration::{ScopeBoundary, ScopeParent, ScopeTopology};
 pub(crate) use plan::{
     EntryPlanning, Parallelism, PlanBase, ScopeLayouts, ScopePlan, SeedDestination,

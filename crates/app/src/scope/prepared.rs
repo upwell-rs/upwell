@@ -2,9 +2,7 @@ use std::collections::BTreeSet;
 
 use upwell_core::{Scope, ScopeId, Singleton};
 
-use super::validate::{
-    find_index, validate_cycles, validate_ids, validate_parent_ranks, validate_parents,
-};
+use super::validate::{find_index, validate_sorted};
 use super::{ScopeBoundary, ScopeParent, ScopeTopologyError};
 
 /// A validated, immutable scope topology ready for planning and runtime lookup.
@@ -24,10 +22,7 @@ impl PreparedScopeTopology {
         let mut boundaries = boundaries.to_vec();
 
         boundaries.sort_by_key(|boundary| boundary.id());
-        validate_ids(&boundaries)?;
-        validate_parents(&boundaries)?;
-        validate_cycles(&boundaries)?;
-        validate_parent_ranks(&boundaries)?;
+        validate_sorted(&boundaries)?;
 
         let common_ancestors = common_ancestors(&boundaries);
 
