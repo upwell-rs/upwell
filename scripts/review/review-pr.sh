@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Usage: review-pr.sh <pr-number> <worktree> [model] [effort] [provider] [focus-file]
 #
-# Runs an independent, read-only review of a PR checkout (provider codex or gemini) and posts it to the
+# Runs an independent, read-only review of a PR checkout (provider codex, gemini or copilot) and posts it to the
 # PR as a GitHub review with inline comments (resolvable threads). Requires `gh` and `mise` plus the
-# provider CLI (`codex`, or `agy` for gemini).
+# provider CLI (`codex`, `agy` for gemini, or `copilot`).
 # Output files (prompt, diff, drafts, structured review, log) go to $UPWELL_REVIEW_OUT, default
 # $TMPDIR/upwell-review. UPWELL_REVIEW_DRY_RUN=1 runs everything except the post and prints a summary.
 # Exit codes: 2 stale tree, 3 invalid output, 4 dirty tree, 5 head moved, 6 base moved, 7 checkout
@@ -20,9 +20,9 @@ here="$(cd "$(dirname "$0")" && pwd)"
 root="${UPWELL_REVIEW_OUT:-${TMPDIR:-/tmp}/upwell-review}"
 
 case "$provider" in
-    codex | gemini) ;;
+    codex | gemini | copilot) ;;
     *)
-        echo "unknown provider '$provider'; expected codex or gemini" >&2
+        echo "unknown provider '$provider'; expected codex, gemini or copilot" >&2
         exit 8
         ;;
 esac
@@ -96,7 +96,11 @@ mise exec -- git -C "$worktree" diff "$merge_base...$head_sha" > "$diff_file"
     printf '\nFINAL ANSWER FORMAT: reply with JSON only, matching the provided schema. `path` is repo-relative and `line` is a line number in the NEW version of the file that is part of the PR diff (prefer a changed line). Put a concrete failure scenario in `body`. Use verdict NO_FINDINGS with an empty findings list when you found nothing you could verify. `suggestion` may be an empty string. `unchecked` says what you could not check (for example, that you did not run the tests).\n'
 
     if [ "$provider" = "gemini" ]; then
-        cat "$here/review-gemini-checklist.md"
+        cat "$here/review-extra-checklist.md" "$here/review-gemini-checklist.md"
+    fi
+
+    if [ "$provider" = "copilot" ]; then
+        cat "$here/review-extra-checklist.md" "$here/review-copilot-checklist.md"
     fi
 
     if [ -n "$focus_file" ]; then
@@ -110,6 +114,9 @@ rm -f "$out"
 
 agy_settings='{"permissions":{"allow":["mcp(blast-radius/open_project)","mcp(blast-radius/find_symbol)","mcp(blast-radius/symbol_info)","mcp(blast-radius/blast_radius)","mcp(blast-radius/diff_blast)","mcp(blast-radius/call_slice)","mcp(blast-radius/module_graph)","mcp(blast-radius/dead_code)","mcp(codegraph/codegraph_explore)"]}}'
 filter=(python3 -I "$here/stream_drafts.py" "$provider" "$log" "$drafts" "$mirror" "$out")
+
+copilot_tools=(view glob rg)
+copilot_denied=(shell write memory url)
 
 set +e
 case "$provider" in
@@ -128,6 +135,18 @@ case "$provider" in
         ) | "${filter[@]}"
         statuses=("${PIPESTATUS[@]}")
         ;;
+    copilot)
+        copilot_args=(--model "$model" --reasoning-effort "$effort" --output-format json --no-ask-user
+            --disable-builtin-mcps --disable-client-telemetry --no-auto-update
+            -C "$worktree" --add-dir "$work" --available-tools "${copilot_tools[@]}")
+
+        for denied in "${copilot_denied[@]}"; do
+            copilot_args+=("--deny-tool=$denied")
+        done
+
+        copilot -p "$(cat "$prompt")" "${copilot_args[@]}" 2>&1 | "${filter[@]}"
+        statuses=("${PIPESTATUS[@]}")
+        ;;
 esac
 set -e
 
@@ -139,7 +158,7 @@ report_drafts() {
 }
 
 if [ "${statuses[0]}" -ne 0 ] || [ "${statuses[1]}" -ne 0 ]; then
-    echo "the $provider run failed (provider exit ${statuses[0]}, filter exit ${statuses[1]}); not posting (see $log; the full agy answer text, if any, is in $work/response.md)" >&2
+    echo "the $provider run failed (provider exit ${statuses[0]}, filter exit ${statuses[1]}); not posting (see $log; the full answer text, if any, is in $work/response.md)" >&2
     report_drafts
     exit 10
 fi

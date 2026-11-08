@@ -52,7 +52,7 @@ def comment_body(finding):
 
 def main():
     pr, head, provider, model, effort, path = sys.argv[1:7]
-    label = {"codex": "Codex", "gemini": "Gemini"}[provider]
+    label = {"codex": "Codex", "gemini": "Gemini", "copilot": "Copilot"}[provider]
     with open(path, encoding="utf-8") as handle:
         review = json.load(handle)
 
