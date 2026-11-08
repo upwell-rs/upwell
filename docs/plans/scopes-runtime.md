@@ -711,8 +711,10 @@ would leave components already built in the request resolved through the old cha
   scope as a parent of each child after the child's declared parents; a child no boundary
   declares is `ScopeTopologyError::MissingChild`, and a child that already lists the scope is
   `DuplicateParent`. It is additive only: a protocol scope keeps its own parents. The extended
-  parent lists are interned for the process, so `ScopeBoundary` stays `Copy` and `const`
-  constructible, and preparing again reuses the list.
+  topology is validated on owned parent lists first; only a valid one interns its extended lists
+  for the process, once per distinct list, so `ScopeBoundary` stays `Copy` and `const`
+  constructible and a rejected preparation keeps nothing. A repeated `#[scope]` argument is a
+  compile error at its second mention.
 - **Opening under it.** `upwell_app::ParentScope<S>` is an open instance that `S` may open under,
   with the parent's scope type erased: `ParentScope::new(&OpenScope<P>)` requires
   `S: OpensUnder<P>`, and `ScopeBuilder::under_parent(&parent)` opens under it on the parent's
@@ -724,7 +726,11 @@ would leave components already built in the request resolved through the old cha
   or `parent_middleware::<M>()` for a DI-resolved `AxumMiddleware` such as the session cache
   holding its `ScopeOpener<Session>`. Parent layers are applied outside the global middleware and
   outside the eager request-scope opening (#447), inside the body limit and the timeout, so eager
-  request components and `Current`/`Scoped` accessors see the session. The request-scope layer
+  request components and `Current`/`Scoped` accessors see the session. They are applied with
+  `Router::route_layer`, so a request no route matches takes the plain 404 path without
+  reaching them. Whether a request opens at once is decided on the generation it opens on
+  (`ScopeOpener::opens_at_once_under`): an old session's generation may still hold an
+  accessor or eager component the current one dropped. The request-scope layer
   reads `RequestParent` only when a parent layer is registered: without one no extension is
   searched and every request opens under the root, as before; with one the cost is one extension
   lookup per opening plus the parent hop when resolving through the chain.

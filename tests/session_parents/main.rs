@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
 use tempfile::TempDir;
+use upwell::axum::axum::Extension;
 use upwell::axum::axum::Router;
 use upwell::axum::axum::body::{self, Body};
 use upwell::axum::axum::extract::Request as RawRequest;
@@ -27,19 +28,25 @@ use upwell::axum::prelude::*;
 use upwell::axum::tower::ServiceExt;
 use upwell::axum::{AxumMiddleware, RequestParent};
 use upwell::config::Toml;
-use upwell::context::Scoped;
+use upwell::context::{Current, Scoped};
 use upwell::scope::Root;
 use upwell::{
     AppBuilder, AppRuntime, Cfg, ConfigManager, OpenScope, ScopeOpener, component, config, methods,
-    scope,
+    scope, when,
 };
 use upwell_config::ResolverChain;
+
+mod generations;
+mod routing;
 
 /// The header naming the caller whose session a request runs under.
 const USER: &str = "x-user";
 
 /// How many [`SessionClient`]s every session built, across this binary.
 static CLIENT_BUILDS: AtomicUsize = AtomicUsize::new(0);
+
+/// How many requests reached the [`Sessions`] parent middleware, across this binary.
+static PARENT_CALLS: AtomicUsize = AtomicUsize::new(0);
 
 /// The user the last [`EagerProbe`] saw, or `root` without a session.
 static EAGER_SAW: Mutex<Option<String>> = Mutex::new(None);
@@ -190,6 +197,8 @@ impl Sessions {
 
 impl AxumMiddleware for Sessions {
     async fn handle(&self, mut request: RawRequest, next: Next) -> Response {
+        PARENT_CALLS.fetch_add(1, Ordering::SeqCst);
+
         let user = request
             .headers()
             .get(USER)
@@ -241,6 +250,75 @@ impl ScopedController {
     }
 }
 
+/// Whether [`Watcher`] is enabled.
+#[config(path = "gate")]
+#[derive(Deserialize)]
+struct GateCfg {
+    accessor: bool,
+}
+
+/// A request-scoped value only an accessor reads.
+#[component(scope = HttpRequest)]
+struct RequestValue {
+    #[default]
+    label: String,
+}
+
+#[methods]
+impl RequestValue {
+    #[init]
+    fn new() -> Self {
+        Self {
+            label: String::from("request value"),
+        }
+    }
+}
+
+/// A singleton reading [`RequestValue`] through the invocation context, only while the gate
+/// is open. Disabling it leaves no accessor on the request scope in the next generation.
+#[component]
+#[when(GateCfg.accessor)]
+struct Watcher {
+    value: Current<Arc<RequestValue>>,
+}
+
+/// A session component keeping the [`Watcher`] of the generation its session opened on.
+#[component(scope = Session)]
+struct SessionWatcher {
+    watcher: Option<Arc<Watcher>>,
+}
+
+/// Routes building a session's [`SessionWatcher`] and reading through the watcher it kept.
+#[controller(path = "/watch")]
+struct WatchController;
+
+#[handlers]
+impl WatchController {
+    #[get("/warm")]
+    async fn warm(&self, Inject(watcher): Inject<Option<Arc<SessionWatcher>>>) -> String {
+        match watcher.and_then(|watcher| watcher.watcher.clone()) {
+            Some(_) => String::from("watching"),
+            None => String::from("unwatched"),
+        }
+    }
+
+    /// Reads through the session's watcher without injecting anything request-scoped, so only
+    /// an opening at once lets its accessor find the request scope.
+    #[get("/read")]
+    async fn read(&self, Extension(parent): Extension<RequestParent>) -> String {
+        let watcher = parent
+            .container()
+            .get::<SessionWatcher>()
+            .and_then(|session| session.watcher.clone())
+            .expect("the session kept its watcher");
+
+        match watcher.value.get().await {
+            Ok(value) => value.label.clone(),
+            Err(error) => format!("failed: {error}"),
+        }
+    }
+}
+
 /// A config directory holding `value`.
 fn config_dir(value: u32) -> TempDir {
     let dir = tempfile::Builder::new()
@@ -254,9 +332,22 @@ fn config_dir(value: u32) -> TempDir {
 }
 
 fn write_value(dir: &Path, value: u32) {
+    write_config(dir, value, Gate::Open);
+}
+
+/// Whether [`GateCfg`] enables [`Watcher`].
+#[derive(Clone, Copy)]
+enum Gate {
+    Open,
+    Closed,
+}
+
+fn write_config(dir: &Path, value: u32, gate: Gate) {
+    let accessor = matches!(gate, Gate::Open);
+
     fs::write(
         dir.join("application.toml"),
-        format!("[stamp]\nvalue = {value}\n"),
+        format!("[stamp]\nvalue = {value}\n\n[gate]\naccessor = {accessor}\n"),
     )
     .expect("write config");
 }
@@ -288,8 +379,8 @@ async fn build(builder: AppBuilder<Axum>) -> (Router, AppRuntime) {
     (app.protocol().router().clone(), runtime)
 }
 
-/// The body a GET to `uri` answers with, as `user` when one is given.
-async fn get(router: &Router, uri: &str, user: Option<&'static str>) -> String {
+/// The status and body a GET to `uri` answers with, as `user` when one is given.
+async fn send(router: &Router, uri: &str, user: Option<&'static str>) -> (StatusCode, String) {
     let mut request = RawRequest::builder()
         .uri(uri)
         .body(Body::empty())
@@ -306,14 +397,24 @@ async fn get(router: &Router, uri: &str, user: Option<&'static str>) -> String {
         .oneshot(request)
         .await
         .expect("the router is infallible");
-
-    assert_eq!(response.status(), StatusCode::OK, "GET {uri} succeeds");
-
+    let status = response.status();
     let body = body::to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("the body reads");
 
-    String::from_utf8(body.to_vec()).expect("the body is UTF-8")
+    (
+        status,
+        String::from_utf8(body.to_vec()).expect("the body is UTF-8"),
+    )
+}
+
+/// The body of a successful GET to `uri`, as `user` when one is given.
+async fn get(router: &Router, uri: &str, user: Option<&'static str>) -> String {
+    let (status, body) = send(router, uri, user).await;
+
+    assert_eq!(status, StatusCode::OK, "GET {uri} succeeds: {body}");
+
+    body
 }
 
 /// Middleware putting a [`RequestParent`] into every request, registered as plain global
@@ -331,144 +432,4 @@ async fn stray_parent(mut request: RawRequest, next: Next) -> Response {
         .insert(RequestParent::new(&session));
 
     next.run(request).await
-}
-
-#[tokio::test]
-async fn requests_open_under_their_session_or_the_root_in_one_app() {
-    let dir = config_dir(1);
-    let (router, _runtime) = build(with_sessions(dir.path())).await;
-
-    assert_eq!(get(&router, "/session/view", Some("ada")).await, "ada@1");
-    assert_eq!(get(&router, "/session/view", None).await, "root@1");
-    assert_eq!(get(&router, "/session/view", Some("bob")).await, "bob@1");
-    assert_eq!(get(&router, "/session/client", Some("ada")).await, "ada");
-    assert_eq!(get(&router, "/session/client", None).await, "root");
-}
-
-#[tokio::test]
-async fn a_session_builds_its_components_once_across_its_requests() {
-    let dir = config_dir(1);
-    let (router, runtime) = build(with_sessions(dir.path())).await;
-    let sessions = runtime
-        .root()
-        .get::<Sessions>()
-        .expect("the session cache is a singleton");
-
-    for _ in 0..3 {
-        assert_eq!(get(&router, "/session/view", Some("cy")).await, "cy@1");
-    }
-
-    assert_eq!(get(&router, "/session/client", Some("cy")).await, "cy");
-    assert_eq!(get(&router, "/session/view", Some("dan")).await, "dan@1");
-
-    let client = sessions
-        .get("cy")
-        .expect("the session is cached")
-        .container()
-        .get::<SessionClient>()
-        .expect("the session holds its client");
-
-    assert_eq!(client.user, "cy");
-    assert_eq!(
-        CLIENT_BUILDS.load(Ordering::SeqCst),
-        2,
-        "each session built its client once, whatever its requests injected"
-    );
-}
-
-#[tokio::test]
-async fn eager_request_components_and_scoped_accessors_see_the_session() {
-    let dir = config_dir(1);
-    let (router, _runtime) = build(
-        with_sessions(dir.path())
-            .controller::<ScopedController>()
-            .component::<EagerProbe>()
-            .component::<SessionReader>(),
-    )
-    .await;
-
-    assert_eq!(get(&router, "/scoped/read", Some("dee")).await, "dee");
-    assert_eq!(
-        EAGER_SAW
-            .lock()
-            .expect("the probe lock is healthy")
-            .as_deref(),
-        Some("dee"),
-        "the eager opening ran under the session"
-    );
-    assert_eq!(get(&router, "/scoped/read", None).await, "outside");
-    assert_eq!(
-        EAGER_SAW
-            .lock()
-            .expect("the probe lock is healthy")
-            .as_deref(),
-        Some("root")
-    );
-}
-
-#[tokio::test]
-async fn a_session_keeps_its_generation_after_a_reload() {
-    let dir = config_dir(1);
-    let (router, runtime) = build(with_sessions(dir.path())).await;
-    let sessions = runtime
-        .root()
-        .get::<Sessions>()
-        .expect("the session cache is a singleton");
-
-    assert_eq!(get(&router, "/session/view", Some("eve")).await, "eve@1");
-
-    write_value(dir.path(), 2);
-
-    let report = runtime.reload_config().await.expect("reload succeeds");
-
-    assert!(
-        report.is_committed(),
-        "a changed value commits a generation"
-    );
-
-    let session = sessions.get("eve").expect("the session is cached");
-
-    assert_eq!(
-        runtime.generations_behind(session.container()),
-        Some(1),
-        "the session reports how far behind it is"
-    );
-    assert_eq!(
-        get(&router, "/session/view", Some("eve")).await,
-        "eve@1",
-        "a request under the session runs on the session's generation"
-    );
-    assert_eq!(
-        get(&router, "/session/view", None).await,
-        "root@2",
-        "a request under the root runs on the current generation"
-    );
-    assert_eq!(
-        get(&router, "/session/view", Some("fay")).await,
-        "fay@2",
-        "a session opened after the reload runs on the current generation"
-    );
-}
-
-#[tokio::test]
-async fn without_a_parent_layer_a_request_parent_is_ignored() {
-    let dir = config_dir(1);
-    let (sessions_router, runtime) = build(with_sessions(dir.path())).await;
-    let sessions = runtime
-        .root()
-        .get::<Sessions>()
-        .expect("the session cache is a singleton");
-    let (router, _runtime) = build(
-        app(dir.path())
-            .layer(upwell::axum::axum::Extension(sessions))
-            .layer(axum_middleware::from_fn(stray_parent)),
-    )
-    .await;
-
-    assert_eq!(get(&sessions_router, "/session/view", None).await, "root@1");
-    assert_eq!(
-        get(&router, "/session/view", Some("gus")).await,
-        "root@1",
-        "the request opens under the root, as without the feature"
-    );
 }
