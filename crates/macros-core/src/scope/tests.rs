@@ -140,6 +140,29 @@ fn invalid_children_are_rejected() {
 }
 
 #[test]
+fn a_repeated_argument_is_rejected_at_its_second_mention() {
+    let unit = quote!(
+        struct Session;
+    );
+
+    assert!(
+        error(
+            quote!(
+                parents = [Root],
+                children = [HttpRequest],
+                children = [Call]
+            ),
+            unit.clone()
+        )
+        .contains("`children` is given more than once")
+    );
+    assert!(
+        error(quote!(parents = [Root], parents = [Session]), unit)
+            .contains("`parents` is given more than once")
+    );
+}
+
+#[test]
 fn a_generation_policy_path_is_emitted_verbatim() {
     let expanded = expand_str(
         quote!(parents = [Root], generations = my::POLICY),
