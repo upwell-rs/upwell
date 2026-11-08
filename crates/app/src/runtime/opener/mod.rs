@@ -16,19 +16,23 @@ use upwell_di::context::{ContextRuntime, InvocationContext, TargetRef};
 use super::{AppRuntime, RuntimeGeneration, RuntimeView};
 use crate::builtins::RuntimeReloader;
 use crate::entry::EntryId;
-use crate::logs::{InstanceLogs, ScopeLogStream};
+use crate::logs::ScopeLogStream;
 use tracing::Span;
 
 mod builder;
+mod end;
 mod entry_scope;
 mod inject;
 mod log_options;
 mod run;
 
 use builder::{Builds, open_in};
+use end::InstanceEnd;
 
 pub use builder::{Opening, ScopeBuilder};
+pub use end::{ScopeEnd, ScopeEndContext, ScopeEndKind, ScopeEnded};
 pub use entry_scope::EntryScope;
+
 pub use run::{ScopeRun, ScopeWork};
 
 /// Declares that scope `Self` may open under scope `P`.
@@ -72,7 +76,7 @@ pub struct ScopeEntry<S: Scope> {
 /// An open instance of scope `S`, usable as a typed parent for [`ScopeBuilder::under`].
 pub struct OpenScope<S: Scope> {
     container: Arc<ScopeContainer>,
-    logs: Option<Arc<InstanceLogs>>,
+    end: Option<Arc<InstanceEnd>>,
     span: Span,
     scope: PhantomData<fn() -> S>,
 }
@@ -283,12 +287,12 @@ impl<S: Scope> Copy for ScopeEntry<S> {}
 
 impl<S: Scope> OpenScope<S> {
     /// An open instance with the span of `logs`, and its sink when it captures.
-    fn new(container: Arc<ScopeContainer>, logs: InstanceLogs) -> Self {
-        let span = logs.span().clone();
+    fn new(container: Arc<ScopeContainer>, end: InstanceEnd) -> Self {
+        let span = end.span().clone();
 
         Self {
             container,
-            logs: logs.sink().is_some().then(|| Arc::new(logs)),
+            end: end.is_observed().then(|| Arc::new(end)),
             span,
             scope: PhantomData,
         }
@@ -307,9 +311,9 @@ impl<S: Scope> OpenScope<S> {
     /// to the instance goes. Already ended unless the instance was opened with
     /// [`capture_logs`](ScopeBuilder::capture_logs).
     pub fn logs(&self) -> ScopeLogStream {
-        self.logs
+        self.end
             .as_ref()
-            .and_then(|logs| logs.sink())
+            .and_then(|end| end.sink())
             .map_or_else(ScopeLogStream::ended, |sink| sink.subscribe())
     }
 
@@ -328,7 +332,7 @@ impl<S: Scope> Clone for OpenScope<S> {
     fn clone(&self) -> Self {
         Self {
             container: Arc::clone(&self.container),
-            logs: self.logs.clone(),
+            end: self.end.clone(),
             span: self.span.clone(),
             scope: PhantomData,
         }

@@ -216,7 +216,9 @@ impl PendingTransition {
 
 /// The dependency edge of a hook parameter the firing transition supplies at runtime, so it
 /// is `dynamic` and exempt from static graph validation.
-const fn event_dependency<T: 'static>(name: &'static str) -> DependencyDescriptor {
+pub(in crate::runtime) const fn event_dependency<T: 'static>(
+    name: &'static str,
+) -> DependencyDescriptor {
     DependencyDescriptor {
         name,
         ty: TypeDescriptor::of::<T>(name),
@@ -232,7 +234,7 @@ const fn event_dependency<T: 'static>(name: &'static str) -> DependencyDescripto
 
 /// The observers of one firing that did not complete, named by their owner's stable ID and
 /// paired with their redacted failure outcome.
-fn failed_observers(
+pub(in crate::runtime) fn failed_observers(
     observers: Vec<(TypeDescriptor, upwell_hooks::Result<()>)>,
     owners: &HookOwners,
 ) -> impl Iterator<Item = (&'static str, TransitionHookOutcome)> + '_ {

@@ -7,7 +7,7 @@ use tracing::{Level, Span};
 use upwell_core::{Scope, ScopeId};
 
 use super::render::{self, Rendered};
-use super::{LogOptions, SCOPE_LOG_TARGET, ScopeLogSink};
+use super::{LogField, LogOptions, SCOPE_LOG_TARGET, ScopeLogSink};
 
 thread_local! {
     static HANDOFF: RefCell<Option<Arc<ScopeLogSink>>> = const { RefCell::new(None) };
@@ -69,6 +69,11 @@ impl Drop for InstanceLogs {
     fn drop(&mut self) {
         self.finish();
     }
+}
+
+/// The loggable params of `scope`, rendered once.
+pub(crate) fn loggable_params<S: Scope>(scope: &S) -> Arc<[LogField]> {
+    render::collect(scope).into()
 }
 
 /// A sink for an instance of `S` with the value `scope`.

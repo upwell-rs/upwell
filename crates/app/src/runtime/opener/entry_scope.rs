@@ -9,9 +9,9 @@ use upwell_core::Scope;
 use upwell_di::context::{self, InvocationContext};
 use upwell_di::{BoxedComponent, Component, EntryPlan, FromContainer, ScopeContainer};
 
-use super::{Builds, open_in};
+use super::{Builds, InstanceEnd, open_in};
 use crate::entry::EntryId;
-use crate::logs::{InstanceLogs, ScopeLogSink, ScopeLogStream};
+use crate::logs::{ScopeLogSink, ScopeLogStream};
 use crate::runtime::RuntimeView;
 
 /// An instance of scope `S` opened for an entry by [`ScopeBuilder::open_when_needed`].
@@ -26,7 +26,7 @@ use crate::runtime::RuntimeView;
 pub struct EntryScope<S: Scope> {
     state: State,
     span: Span,
-    logs: Option<Arc<InstanceLogs>>,
+    end: Option<Arc<InstanceEnd>>,
     scope: PhantomData<fn() -> S>,
 }
 
@@ -63,7 +63,7 @@ impl<S: Scope> EntryScope<S> {
                 plan: None,
             },
             span: Span::none(),
-            logs: None,
+            end: None,
             scope: PhantomData,
         }
     }
@@ -72,14 +72,14 @@ impl<S: Scope> EntryScope<S> {
     pub(super) fn opened(
         container: Arc<ScopeContainer>,
         plan: Option<Arc<EntryPlan>>,
-        logs: InstanceLogs,
+        end: InstanceEnd,
     ) -> Self {
-        let span = logs.span().clone();
+        let span = end.span().clone();
 
         Self {
             state: State::Open { container, plan },
             span,
-            logs: logs.sink().is_some().then(|| Arc::new(logs)),
+            end: end.is_observed().then(|| Arc::new(end)),
             scope: PhantomData,
         }
     }
@@ -89,10 +89,10 @@ impl<S: Scope> EntryScope<S> {
         parent: Arc<ScopeContainer>,
         entry: EntryId,
         seeds: Vec<BoxedComponent>,
-        logs: InstanceLogs,
+        end: InstanceEnd,
     ) -> Self {
-        let span = logs.span().clone();
-        let sink = logs.sink().map(Arc::clone);
+        let span = end.span().clone();
+        let sink = end.sink().map(Arc::clone);
 
         Self {
             state: State::Deferred(Box::new(Deferred {
@@ -105,7 +105,7 @@ impl<S: Scope> EntryScope<S> {
                 container: OnceCell::new(),
             })),
             span,
-            logs: logs.sink().is_some().then(|| Arc::new(logs)),
+            end: end.is_observed().then(|| Arc::new(end)),
             scope: PhantomData,
         }
     }
@@ -121,9 +121,9 @@ impl<S: Scope> EntryScope<S> {
     /// A stream of the records the instance captures from now on. Already ended unless the
     /// instance was opened with [`capture_logs`](super::ScopeBuilder::capture_logs).
     pub fn logs(&self) -> ScopeLogStream {
-        self.logs
+        self.end
             .as_ref()
-            .and_then(|logs| logs.sink())
+            .and_then(|end| end.sink())
             .map_or_else(ScopeLogStream::ended, |sink| sink.subscribe())
     }
 

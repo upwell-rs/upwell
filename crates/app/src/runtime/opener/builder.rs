@@ -6,7 +6,9 @@ use std::sync::Arc;
 use upwell_core::{Scope, ScopeId, Singleton, TypeDescriptor};
 use upwell_di::{BoxedComponent, EntryPlan, Injectable, ScopeContainer};
 
-use super::{EntryScope, OpenScope, OpensUnder, ScopeEntry, ScopeOpener};
+use super::{
+    EntryScope, InstanceEnd, OpenScope, OpensUnder, ScopeEndKind, ScopeEntry, ScopeOpener,
+};
 use crate::entry::EntryId;
 use crate::logs::{InstanceLogs, LogOptions, ScopeLogSink};
 use crate::runtime::RuntimeView;
@@ -137,9 +139,9 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         let (view, parent) = self.target()?;
         let builds = match entry {
             Some(entry) if plans_nothing(&view, entry) => {
-                let (seeds, logs) = self.into_parts(&parent, None);
+                let (seeds, end) = self.into_parts(&view, ScopeEndKind::Released, &parent, None);
 
-                return Ok(EntryScope::deferred(view, parent, entry.id, seeds, logs));
+                return Ok(EntryScope::deferred(view, parent, entry.id, seeds, end));
             }
 
             Some(entry) => Builds::Entry(entry.id),
@@ -147,14 +149,14 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         };
         let plan =
             entry.and_then(|entry| view.scope_plan().layouts.shared_entry(entry.id).cloned());
-        let (seeds, logs) = self.into_parts(&parent, None);
+        let (seeds, end) = self.into_parts(&view, ScopeEndKind::Released, &parent, None);
         let container = open_in(view, S::ID, parent, builds, seeds)
-            .instrument(logs.span().clone())
+            .instrument(end.span().clone())
             .await?;
 
-        crate::logs::retain_sink(&container, logs.sink());
+        crate::logs::retain_sink(&container, end.sink());
 
-        Ok(EntryScope::opened(container, plan, logs))
+        Ok(EntryScope::opened(container, plan, end))
     }
 
     /// Opens the instance as `opening` says, adding the seed of type `T` from `source` only when
@@ -200,29 +202,32 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     ) -> crate::Result<OpenScope<S>> {
         use tracing::Instrument;
 
-        let (seeds, logs) = self.into_parts(&parent, None);
+        let (seeds, end) = self.into_parts(&view, ScopeEndKind::Released, &parent, None);
         let container = open_in(view, S::ID, parent, builds, seeds)
-            .instrument(logs.span().clone())
+            .instrument(end.span().clone())
             .await?;
 
-        crate::logs::retain_sink(&container, logs.sink());
+        crate::logs::retain_sink(&container, end.sink());
 
-        Ok(OpenScope::new(container, logs))
+        Ok(OpenScope::new(container, end))
     }
 
     /// Splits the builder into the seeds opening consumes, the instance's value first, and the
-    /// span and sink of the instance opening under `parent`. Every instance gets its span, which
+    /// end, with the span and sink, of the instance opening under `parent` on `view`. Every instance gets its span, which
     /// costs a callsite check when no subscriber enables it; the sink exists only when the
     /// builder captures logs or `sink` was made ahead.
     pub(super) fn into_parts(
         self,
+        view: &RuntimeView,
+        unfinished: ScopeEndKind,
         parent: &Arc<ScopeContainer>,
         sink: Option<Arc<ScopeLogSink>>,
-    ) -> (Vec<BoxedComponent>, InstanceLogs) {
+    ) -> (Vec<BoxedComponent>, InstanceEnd) {
         let logs = InstanceLogs::open(&self.params, &self.logs, sink);
+        let end = InstanceEnd::new(view, logs, &self.params, unfinished);
         let mut seeds = self.seeds;
 
-        if let Some(sink) = logs.sink() {
+        if let Some(sink) = end.sink() {
             sink.open_under(parent);
         }
 
@@ -230,7 +235,7 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
             seeds.insert(0, params_seed(self.params));
         }
 
-        (seeds, logs)
+        (seeds, end)
     }
 
     /// The generation the instance opens on and the container it opens under.

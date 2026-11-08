@@ -915,9 +915,25 @@ watcher.await?;
 - **Follow-up:** the container has one retained-value slot. If an instance ever needs a second
   retained value, replace the single slot with a small fixed struct of named optional fields
   (still static, no extension map).
-- **Seam for the end-of-scope hook (#406):** an instance's work ends in `InstanceLogs::finish`,
-  which closes the sink and ends every stream. The hook runs after the work and immediately
-  before that call, so its events are still captured.
+- **End-of-scope hook (#406):** `ScopeEnded` is an observer-only `#[hook]` kind. A hook takes a
+  `ScopeEnd` (scope id and name, a `ScopeEndKind` of `Completed`, `Failed`, `Cancelled` or
+  `Released`, and the loggable params, never the container or any other field). The instance's
+  owner holds an `InstanceEnd` next to its `InstanceLogs`; dropping it ends the instance. `run`
+  completes it with the run's outcome, a dropped or unwinding run ends as `Cancelled`, and an
+  `OpenScope` or `EntryScope` (a protocol's request or connection scope) ends as `Released` with
+  its last handle, after it released its container reference.
+  - **Never inline:** the hooks run on a task spawned on the ambient Tokio runtime that owns the
+    `InstanceLogs` until they finish. They cannot delay or veto the code that ended the instance,
+    cannot reach the instance to extend its lifetime or mutate it, and run after the work and
+    before the sink closes, so their events are captured and a log stream ends only afterwards.
+    Without a Tokio runtime the end is traced as skipped.
+  - **Failures:** the hook manager isolates panics and errors; each is traced as
+    `scope end hook failed` on `upwell::scope` with the owner and category, never the message or
+    payload. No `catch_unwind` is added.
+  - **Receivers are singletons** resolved through the generation the instance ran on, which the
+    task pins while it runs. Every hook sees every ending scope and filters on `ScopeEnd::scope`.
+  - **Decoupled:** logs know nothing of hooks and context propagation is untouched; only the
+    instance owner connects them.
 
 Delivery is always bounded and drops the newest record when a buffer is full, counting it in
 `Lagged(n)`. An explicit `LogBuffer { Bounded(NonZeroUsize), Unbounded }` choice is a possible later
