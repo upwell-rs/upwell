@@ -28,6 +28,13 @@ scope before its middleware. So it also runs for a request global middleware rej
 the request head as the client sent it, before middleware rewrites it. A request no route
 matches (a 404) runs none.
 
+A request's scope opens under the application root unless the application picks a parent: an
+application scope that lists `HttpRequest` among its `children`, such as a cached per-user
+`Session`. A parent layer (`AxumAppBuilder::parent_layer` for a raw `tower::Layer`, or
+`parent_middleware::<M>()` for a DI-backed `AxumMiddleware`) inserts a `RequestParent` into the
+request's extensions. Parent layers run before global middleware and before the eager opening,
+so every opening sees the parent. Without a parent layer, nothing reads `RequestParent`.
+
 `RequestMeta` copies the request's method, URI and headers, so it is captured only when something
 reads it, once per request: when the scope opens if the route reads it (directly or through a
 component it builds or reaches lazily), otherwise at the first `Inject` that reads it. A route
