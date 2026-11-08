@@ -25,8 +25,9 @@ use super::{SCOPE_SPAN_NAME, ScopeLogSink, entered, route, sink};
 /// any capturing instance reach only the other layers: uncaptured, never misrouted. Capture
 /// tees: the layer never stops an event reaching the rest of the subscriber.
 ///
-/// A span entered by hand inside an unrelated invocation's context therefore does not capture
-/// into its own instance unless that instance opened under the invocation's innermost one.
+/// A span entered by hand inside an invocation's context that does not run in its instance
+/// therefore does not capture into that instance, even one that opened under the invocation's
+/// innermost one: only while an instance still opens do its events reach it that way.
 ///
 /// `init_tracing` installs it behind the same filter as the console output, so capture defaults
 /// to the level the subscriber logs at. When composing it into your own subscriber, wrap it in

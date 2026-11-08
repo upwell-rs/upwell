@@ -9,8 +9,10 @@
 //! - with an entered context that runs in no scope instance, such as a job's or a lifecycle
 //!   hook's, the span decides, since there is no chain to check it against;
 //! - with an entered context, the span's sink applies when its instance is on the context's
-//!   scope chain or opens under the context's innermost instance, as an instance does while
-//!   it opens. Otherwise the innermost capturing instance on the context's chain applies.
+//!   scope chain or is still opening under the context's innermost instance, as its
+//!   constructors run before any context runs in it. Otherwise the innermost capturing
+//!   instance on the context's chain applies, so work bound in an invocation and called inside
+//!   a child instance that already opened logs to the invocation it was bound in.
 //!
 //! A sink whose instance finished no longer applies, and neither does one whose routing span
 //! no layer took, such as under an explicit `upwell::scope=off`. An instance on the chain is
@@ -36,7 +38,7 @@ pub(super) fn route(
     }
 
     let span_sink = span_sink.filter(|sink| sink.is_open());
-    let parent = span_sink.as_ref().and_then(|sink| sink.parent());
+    let parent = span_sink.as_ref().and_then(|sink| sink.opening_under());
     let routed = with_context_state(|state| match state {
         ContextState::Absent => span_sink,
         ContextState::Masked => None,
@@ -52,12 +54,16 @@ pub(super) fn route(
 /// Hands `sink` to `container`, the capturing instance it belongs to, so work running in an
 /// invocation context inside the instance finds it. The instance releases it with its last
 /// handle. Only a scope instance a builder opened retains a sink, never a root, whose slot
-/// holds its generation's guard.
+/// holds its generation's guard. The instance opened, so from here on only the contexts that
+/// run in it route to the sink.
 pub(crate) fn retain_sink(container: &ScopeContainer, sink: Option<&Arc<ScopeLogSink>>) {
     let Some(sink) = sink else {
         return;
     };
+
     let retained = container.retain_drop_guard(Arc::clone(sink));
+
+    sink.opened();
 
     // Ignored in release builds: a builder retains a sink once, right after it opened the
     // instance, so a second one cannot occur; the instance would keep the first.
@@ -81,8 +87,8 @@ fn entered(
     }
 }
 
-/// Whether `sink`'s instance, opened under `parent`, is on `chain` or opens under its
-/// innermost instance.
+/// Whether `sink`'s instance is on `chain`, or is still opening under `parent`, a descendant
+/// of the chain's innermost instance.
 fn belongs(
     sink: &Arc<ScopeLogSink>,
     parent: Option<&Arc<ScopeContainer>>,
