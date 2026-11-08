@@ -31,7 +31,7 @@ async fn draining_waits_for_an_observer_that_is_still_running() {
     let app = app("scope-end-drain").await;
 
     opener(&app)
-        .builder(ended(GATED))
+        .builder(ended(GATED_DRAIN))
         .run(|| async {})
         .await
         .expect("the run succeeds");
@@ -43,8 +43,8 @@ async fn draining_waits_for_an_observer_that_is_still_running() {
         "the gated observer is still running"
     );
 
-    RELEASE.notify_one();
+    RELEASE_DRAIN.notify_one();
 
     assert!(app.runtime().drain_scope_ends(Duration::from_secs(5)).await);
-    assert_eq!(ends_of(GATED).len(), 1);
+    assert_eq!(ends_of(GATED_DRAIN).len(), 1);
 }
