@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: a #[scope] child must rank below the scope: `HttpRequest` does not rank below `Session`
+ --> tests/ui/scopes/child_does_not_rank_below.rs:5:50
+  |
+5 | #[scope(parents = [Root], rank = 50, children = [HttpRequest])]
+  |                                                  ^^^^^^^^^^^ evaluation of `_` failed here

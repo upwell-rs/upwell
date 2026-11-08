@@ -361,6 +361,7 @@ fn parent_must_have_strictly_greater_lifetime_rank() {
     );
 }
 
+mod children;
 mod dense;
 
 #[test]

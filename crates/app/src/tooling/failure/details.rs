@@ -144,7 +144,9 @@ pub(in crate::tooling) fn app_failure(
             phase,
             super::scope_topology_resources(error),
             Vec::new(),
-            Some("Correct duplicate, missing, cyclic, or invalid scope parent declarations."),
+            Some(
+                "Correct duplicate, missing, cyclic, or invalid scope parent or child declarations.",
+            ),
         ),
         crate::Error::UndeclaredScope {
             component, scope, ..
