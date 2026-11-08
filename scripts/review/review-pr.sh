@@ -38,22 +38,26 @@ fi
 
 mkdir -p "$root/locks" "$root/drafts"
 
-lock="$root/locks/$provider--$model"
+# Takes an exclusive flock(2) on the file $1 through fd 9, which this shell keeps open until it
+# exits, and records this pid next to it for the refusal message. The kernel releases the lock
+# however the process ends, so there is no stale lock to take over and no lock to delete. The
+# long-running provider commands get fd 9 closed (9>&-) so an orphan of a killed run cannot keep
+# holding it.
+hold_lock() {
+    exec 9>> "$1"
 
-if ! mkdir "$lock" 2> /dev/null; then
-    holder="$(cat "$lock/pid" 2> /dev/null || true)"
+    python3 -I -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)' 2> /dev/null || return 1
+    echo "$$" > "$1.pid"
+}
 
-    if [ -n "$holder" ] && ! kill -0 "$holder" 2> /dev/null; then
-        rm -rf "$lock"
-        mkdir "$lock"
-    else
-        echo "another review with $provider/$model is already running (pid ${holder:-unknown}, lock $lock); run one instance at a time" >&2
-        exit 9
-    fi
+lock="$root/locks/$provider--$model.lock"
+
+if ! hold_lock "$lock"; then
+    holder="$(cat "$lock.pid" 2> /dev/null || true)"
+
+    echo "another review with $provider/$model is already running (pid ${holder:-unknown}, lock $lock); run one instance at a time" >&2
+    exit 9
 fi
-
-echo "$$" > "$lock/pid"
-trap 'rm -rf "$lock"' EXIT
 
 work="$(mktemp -d "$root/pr$pr.XXXXXX")"
 out="$work/review.json"
@@ -123,7 +127,7 @@ case "$provider" in
     codex)
         codex exec -m "$model" -c "model_reasoning_effort=$effort" -s read-only --ephemeral \
             --output-schema "$here/review-schema.json" \
-            -C "$worktree" -o "$out" - < "$prompt" 2>&1 | "${filter[@]}"
+            -C "$worktree" -o "$out" - < "$prompt" 2>&1 9>&- | "${filter[@]}" 9>&-
         statuses=("${PIPESTATUS[@]}")
         ;;
     gemini)
@@ -132,7 +136,7 @@ case "$provider" in
             agy --model "$model" --mode plan --sandbox --output-format stream-json --settings "$agy_settings" \
                 --json-schema "$here/review-schema.json" --add-dir "$worktree" --add-dir "$work" \
                 -p "$(cat "$prompt")" 2>&1
-        ) | "${filter[@]}"
+        ) 9>&- | "${filter[@]}" 9>&-
         statuses=("${PIPESTATUS[@]}")
         ;;
     copilot)
@@ -144,7 +148,7 @@ case "$provider" in
             copilot_args+=("--deny-tool=$denied")
         done
 
-        copilot -p "$(cat "$prompt")" "${copilot_args[@]}" 2>&1 | "${filter[@]}"
+        copilot -p "$(cat "$prompt")" "${copilot_args[@]}" 2>&1 9>&- | "${filter[@]}" 9>&-
         statuses=("${PIPESTATUS[@]}")
         ;;
 esac

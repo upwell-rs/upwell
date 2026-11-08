@@ -47,7 +47,7 @@ Only the final structured answer is posted, and only after it validates against 
 ## Guards, locks and dry run
 
 - Refuses a stale tree (2), a tree with uncommitted tracked changes (4), and does not post if the PR head (5) or base (6) moved or the local checkout changed (7) while the review ran.
-- One instance per provider and model: a lock directory `$UPWELL_REVIEW_OUT/locks/<provider>--<model>` (removed on exit; a lock of a dead process is taken over) makes a second concurrent run refuse with exit 9.
+- One instance per provider and model: an exclusive `flock(2)` on `$UPWELL_REVIEW_OUT/locks/<provider>--<model>.lock`, held on a file descriptor for the run's lifetime, makes a second concurrent run refuse with exit 9 (the holder's pid is in `<lock>.pid`). The kernel releases it however the run ends, so a crashed run leaves no stale lock and no run ever deletes another's.
 - `UPWELL_REVIEW_DRY_RUN=1` runs everything except the post and prints the would-be review.
 
 | Exit | Meaning |
