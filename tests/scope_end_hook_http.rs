@@ -17,6 +17,9 @@ use upwell::{AppBuilder, Scope, ScopeEnd, ScopeEndKind, ScopeEnded, component, m
 /// Every end the recorder saw.
 static ENDS: Mutex<Vec<ScopeEnd>> = Mutex::new(Vec::new());
 
+/// What happened, in order.
+static ORDER: Mutex<Vec<&str>> = Mutex::new(Vec::new());
+
 /// A component of the request scope, so a route injecting it opens the scope.
 #[component(scope = HttpRequest)]
 struct RequestState {}
@@ -28,7 +31,13 @@ struct PingController;
 #[handlers]
 impl PingController {
     #[get("/")]
-    async fn ping(&self, Inject(_state): Inject<Arc<RequestState>>) {}
+    async fn ping(&self, Inject(_state): Inject<Arc<RequestState>>) {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        ORDER
+            .lock()
+            .expect("the order lock is healthy")
+            .push("work");
+    }
 }
 
 /// Observes every ended instance.
@@ -37,8 +46,12 @@ struct Recorder {}
 
 #[methods]
 impl Recorder {
-    #[hook(ScopeEnded)]
+    #[hook(ScopeEnded<HttpRequest>)]
     async fn ended(&self, end: ScopeEnd) {
+        ORDER
+            .lock()
+            .expect("the order lock is healthy")
+            .push("ended");
         ENDS.lock().expect("the ends lock is healthy").push(end);
     }
 }
@@ -72,6 +85,11 @@ async fn a_request_scope_ends_once_the_request_is_done() {
     let ends = request_ends().await;
 
     assert_eq!(ends.len(), 1);
+    assert_eq!(
+        *ORDER.lock().expect("the order lock is healthy"),
+        ["work", "ended"],
+        "the end fires only after the request's work finished"
+    );
     assert_eq!(ends[0].kind, ScopeEndKind::Released);
     assert!(ends[0].params.is_empty());
 }

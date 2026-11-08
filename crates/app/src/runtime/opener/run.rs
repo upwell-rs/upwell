@@ -200,14 +200,15 @@ async fn execute<S: OpensUnder<P>, P: Scope, W: ScopeWork<Targets>, Targets>(
         logs::describe_sink(sink, &builder.params);
     }
 
-    let (seeds, instance_end) = builder.into_parts(&view, ScopeEndKind::Cancelled, &parent, sink);
+    let (seeds, instance_end) =
+        builder.into_parts(&view, Some(ScopeEndKind::Cancelled), &parent, sink);
     let opening = context
         .clone()
         .with_opening_scope(S::KEY, Arc::clone(&parent));
     let instance = async {
         let container = open_planned_in(&view, S::ID, parent, Some(&plan), seeds).await?;
 
-        logs::retain_sink(&container, instance_end.sink());
+        logs::retain(&container, instance_end.sink().cloned(), None);
 
         context
             .with_scope(Arc::clone(&container))

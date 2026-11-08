@@ -139,7 +139,9 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         let (view, parent) = self.target()?;
         let builds = match entry {
             Some(entry) if plans_nothing(&view, entry) => {
-                let (seeds, end) = self.into_parts(&view, ScopeEndKind::Released, &parent, None);
+                let (seeds, mut end) = self.into_parts(&view, None, &parent, None);
+
+                end.arm(ScopeEndKind::Released);
 
                 return Ok(EntryScope::deferred(view, parent, entry.id, seeds, end));
             }
@@ -149,14 +151,16 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         };
         let plan =
             entry.and_then(|entry| view.scope_plan().layouts.shared_entry(entry.id).cloned());
-        let (seeds, end) = self.into_parts(&view, ScopeEndKind::Released, &parent, None);
+        let (seeds, mut end) = self.into_parts(&view, None, &parent, None);
         let container = open_in(view, S::ID, parent, builds, seeds)
             .instrument(end.span().clone())
             .await?;
 
-        crate::logs::retain_sink(&container, end.sink());
+        end.arm(ScopeEndKind::Released);
 
-        Ok(EntryScope::opened(container, plan, end))
+        let observed = end.retain_in(&container);
+
+        Ok(EntryScope::opened(container, plan, observed))
     }
 
     /// Opens the instance as `opening` says, adding the seed of type `T` from `source` only when
@@ -202,14 +206,16 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     ) -> crate::Result<OpenScope<S>> {
         use tracing::Instrument;
 
-        let (seeds, end) = self.into_parts(&view, ScopeEndKind::Released, &parent, None);
+        let (seeds, mut end) = self.into_parts(&view, None, &parent, None);
         let container = open_in(view, S::ID, parent, builds, seeds)
             .instrument(end.span().clone())
             .await?;
 
-        crate::logs::retain_sink(&container, end.sink());
+        end.arm(ScopeEndKind::Released);
 
-        Ok(OpenScope::new(container, end))
+        let observed = end.retain_in(&container);
+
+        Ok(OpenScope::new(container, observed))
     }
 
     /// Splits the builder into the seeds opening consumes, the instance's value first, and the
@@ -219,10 +225,10 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     pub(super) fn into_parts(
         self,
         view: &RuntimeView,
-        unfinished: ScopeEndKind,
+        unfinished: Option<ScopeEndKind>,
         parent: &Arc<ScopeContainer>,
         sink: Option<Arc<ScopeLogSink>>,
-    ) -> (Vec<BoxedComponent>, InstanceEnd) {
+    ) -> (Vec<BoxedComponent>, InstanceEnd<S>) {
         let logs = InstanceLogs::open(&self.params, &self.logs, sink);
         let end = InstanceEnd::new(view, logs, &self.params, unfinished);
         let mut seeds = self.seeds;

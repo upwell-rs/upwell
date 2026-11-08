@@ -10,6 +10,8 @@ extern crate upwell as fork;
 
 mod handles;
 mod runs;
+mod shutdown;
+mod typed;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,7 +25,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use upwell::daemon::App;
 use upwell::logs::{ScopeLog, ScopeLogLayer, ScopeLogStream};
 use upwell::scope::Root;
-use upwell::{ScopeEnd, ScopeEnded, ScopeOpener, component, methods, scope};
+use upwell::{AnyScopeEnded, ScopeEnd, ScopeEnded, ScopeOpener, component, methods, scope};
 
 /// The tag whose end the failing observer panics on.
 const PANICKING: u64 = 900;
@@ -31,8 +33,14 @@ const PANICKING: u64 = 900;
 /// The tag whose end the gated observer waits on until [`RELEASE`] opens.
 const GATED: u64 = 901;
 
-/// Every end the recorder saw.
+/// Every end the any-scope hook saw.
 static ENDS: Mutex<Vec<ScopeEnd>> = Mutex::new(Vec::new());
+
+/// Every end the hook typed for [`Ended`] saw.
+static TYPED_ENDED: Mutex<Vec<ScopeEnd>> = Mutex::new(Vec::new());
+
+/// Every end the hook typed for [`Sibling`] saw.
+static TYPED_SIBLING: Mutex<Vec<ScopeEnd>> = Mutex::new(Vec::new());
 
 /// Counts [`DropProbe`]s that dropped.
 static DROPS: AtomicUsize = AtomicUsize::new(0);
@@ -59,6 +67,17 @@ impl Drop for DropProbe {
     }
 }
 
+/// A second instance kind, observed by a hook typed for it.
+#[scope(parents = [Root])]
+pub struct Sibling {
+    #[log]
+    tag: u64,
+}
+
+/// An entry into [`Ended`] that builds nothing.
+#[upwell::entry(scope = Ended, key = "scope-end/nothing")]
+async fn nothing() {}
+
 /// An instance whose only component cannot be built.
 #[scope(parents = [Root])]
 pub struct Failing {
@@ -84,7 +103,7 @@ struct Recorder {}
 
 #[methods]
 impl Recorder {
-    #[hook(ScopeEnded)]
+    #[hook(AnyScopeEnded)]
     async fn ended(&self, end: ScopeEnd) {
         let tag = tag_of(&end);
 
@@ -96,7 +115,23 @@ impl Recorder {
         ENDS.lock().expect("the ends lock is healthy").push(end);
     }
 
-    #[hook(ScopeEnded)]
+    #[hook(ScopeEnded<Ended>)]
+    async fn typed_ended(&self, end: ScopeEnd) {
+        TYPED_ENDED
+            .lock()
+            .expect("the ends lock is healthy")
+            .push(end);
+    }
+
+    #[hook(ScopeEnded<Sibling>)]
+    async fn typed_sibling(&self, end: ScopeEnd) {
+        TYPED_SIBLING
+            .lock()
+            .expect("the ends lock is healthy")
+            .push(end);
+    }
+
+    #[hook(AnyScopeEnded)]
     async fn failing(&self, end: ScopeEnd) {
         assert_ne!(tag_of(&end), PANICKING, "the observer fails on purpose");
     }

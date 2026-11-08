@@ -9,7 +9,7 @@ use upwell_core::Scope;
 use upwell_di::context::{self, InvocationContext};
 use upwell_di::{BoxedComponent, Component, EntryPlan, FromContainer, ScopeContainer};
 
-use super::{Builds, InstanceEnd, open_in};
+use super::{Builds, InstanceEnd, Observed, open_in};
 use crate::entry::EntryId;
 use crate::logs::{ScopeLogSink, ScopeLogStream};
 use crate::runtime::RuntimeView;
@@ -24,9 +24,9 @@ use crate::runtime::RuntimeView;
 ///
 /// [`ScopeBuilder::open_when_needed`]: super::ScopeBuilder::open_when_needed
 pub struct EntryScope<S: Scope> {
-    state: State,
+    state: State<S>,
     span: Span,
-    end: Option<Arc<InstanceEnd>>,
+    sink: Option<Arc<ScopeLogSink>>,
     scope: PhantomData<fn() -> S>,
 }
 
@@ -35,22 +35,22 @@ pub struct EntryScope<S: Scope> {
 /// An open instance is its container and the plan of the entry it opened for, if any; the
 /// deferred state, once-cell included, lives behind its own box so it costs nothing when the
 /// container opens at once.
-enum State {
+enum State<S: Scope> {
     Open {
         container: Arc<ScopeContainer>,
         plan: Option<Arc<EntryPlan>>,
     },
-    Deferred(Box<Deferred>),
+    Deferred(Box<Deferred<S>>),
 }
 
 /// What a deferred [`EntryScope`] opens from, and its container once open.
-struct Deferred {
+struct Deferred<S: Scope> {
     view: RuntimeView,
     parent: Arc<ScopeContainer>,
     entry: EntryId,
     seeds: Mutex<Option<Vec<BoxedComponent>>>,
     span: Span,
-    sink: Option<Arc<ScopeLogSink>>,
+    end: Mutex<Option<InstanceEnd<S>>>,
     container: OnceCell<Arc<ScopeContainer>>,
 }
 
@@ -63,7 +63,7 @@ impl<S: Scope> EntryScope<S> {
                 plan: None,
             },
             span: Span::none(),
-            end: None,
+            sink: None,
             scope: PhantomData,
         }
     }
@@ -72,14 +72,12 @@ impl<S: Scope> EntryScope<S> {
     pub(super) fn opened(
         container: Arc<ScopeContainer>,
         plan: Option<Arc<EntryPlan>>,
-        end: InstanceEnd,
+        observed: Observed,
     ) -> Self {
-        let span = end.span().clone();
-
         Self {
             state: State::Open { container, plan },
-            span,
-            end: end.is_observed().then(|| Arc::new(end)),
+            span: observed.span,
+            sink: observed.sink,
             scope: PhantomData,
         }
     }
@@ -89,10 +87,10 @@ impl<S: Scope> EntryScope<S> {
         parent: Arc<ScopeContainer>,
         entry: EntryId,
         seeds: Vec<BoxedComponent>,
-        end: InstanceEnd,
+        end: InstanceEnd<S>,
     ) -> Self {
         let span = end.span().clone();
-        let sink = end.sink().map(Arc::clone);
+        let sink = end.sink().cloned();
 
         Self {
             state: State::Deferred(Box::new(Deferred {
@@ -101,11 +99,11 @@ impl<S: Scope> EntryScope<S> {
                 entry,
                 seeds: Mutex::new(Some(seeds)),
                 span: span.clone(),
-                sink,
+                end: Mutex::new(Some(end)),
                 container: OnceCell::new(),
             })),
             span,
-            end: end.is_observed().then(|| Arc::new(end)),
+            sink,
             scope: PhantomData,
         }
     }
@@ -121,9 +119,8 @@ impl<S: Scope> EntryScope<S> {
     /// A stream of the records the instance captures from now on. Already ended unless the
     /// instance was opened with [`capture_logs`](super::ScopeBuilder::capture_logs).
     pub fn logs(&self) -> ScopeLogStream {
-        self.end
+        self.sink
             .as_ref()
-            .and_then(|end| end.sink())
             .map_or_else(ScopeLogStream::ended, |sink| sink.subscribe())
     }
 
@@ -174,7 +171,7 @@ impl<S: Scope> EntryScope<S> {
     pub async fn container(&self) -> crate::Result<&Arc<ScopeContainer>> {
         match &self.state {
             State::Open { container, .. } => Ok(container),
-            State::Deferred(deferred) => deferred.open::<S>().await,
+            State::Deferred(deferred) => deferred.open().await,
         }
     }
 
@@ -221,10 +218,10 @@ impl<S: Scope> EntryScope<S> {
     }
 }
 
-impl Deferred {
+impl<S: Scope> Deferred<S> {
     /// The container, opened on the first call with the seeds and on the generation it was
     /// planned on. The opening binds it into the running invocation context waiting for it.
-    async fn open<S: Scope>(&self) -> crate::Result<&Arc<ScopeContainer>> {
+    async fn open(&self) -> crate::Result<&Arc<ScopeContainer>> {
         self.container
             .get_or_try_init(|| async {
                 let seeds = self
@@ -244,7 +241,10 @@ impl Deferred {
                 .instrument(self.span.clone())
                 .await?;
 
-                crate::logs::retain_sink(&container, self.sink.as_ref());
+                if let Some(end) = self.end.lock().expect("deferred end lock poisoned").take() {
+                    end.retain_in(&container);
+                }
+
                 context::bind_opened_scope(&container);
 
                 Ok(container)

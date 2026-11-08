@@ -12,6 +12,7 @@ use crate::transition::{CommitActions, HeldLiveCells};
 
 mod commit;
 mod coordinator;
+mod end_tasks;
 mod release;
 mod view;
 
@@ -21,6 +22,7 @@ pub(crate) use coordinator::{
     RuntimeTransition, RuntimeTransitionCoordinator, WeakTransitionCoordinator,
 };
 
+pub(crate) use end_tasks::{EndTask, EndTasks};
 pub use release::DisplacedGeneration;
 use release::{DisplacedGenerations, ReleaseGuard};
 pub use view::RuntimeView;
@@ -85,6 +87,7 @@ impl AppConditionState {
 /// plus the graph, condition state, and hook manager committed with it.
 pub(crate) struct RuntimeGeneration {
     owner: Arc<()>,
+    end_tasks: Arc<EndTasks>,
     id: RuntimeGenerationId,
     root: Arc<ScopeContainer>,
     scopes: Arc<ScopeRegistry>,
@@ -168,6 +171,7 @@ impl PreparedRuntimeGeneration {
     fn commit(
         self,
         owner: Arc<()>,
+        end_tasks: Arc<EndTasks>,
         id: RuntimeGenerationId,
         displaced: &Arc<DisplacedGenerations>,
     ) -> (RuntimeGeneration, CommitActions) {
@@ -178,6 +182,7 @@ impl PreparedRuntimeGeneration {
 
         let generation = RuntimeGeneration {
             owner,
+            end_tasks,
             id,
             root: self.root,
             scopes: self.scopes,

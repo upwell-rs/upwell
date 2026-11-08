@@ -43,7 +43,9 @@ pub use sink::ScopeLogSink;
 pub use span::InstanceLogs;
 pub use stream::ScopeLogStream;
 
-pub(crate) use route::retain_sink;
+#[cfg(test)]
+pub(crate) use route::is_retained;
+pub(crate) use route::retain;
 pub(crate) use span::{deferred_sink, describe_sink, loggable_params};
 
 /// The name of the span every scope instance runs in.

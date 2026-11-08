@@ -29,6 +29,11 @@ impl RuntimeView {
         Self { generation }
     }
 
+    /// Counts an end-hook task about to be spawned for an instance of this runtime.
+    pub(crate) fn track_end_task(&self) -> super::EndTask {
+        self.generation.end_tasks.track()
+    }
+
     pub(crate) fn generation_state(&self) -> Arc<RuntimeGeneration> {
         Arc::clone(&self.generation)
     }

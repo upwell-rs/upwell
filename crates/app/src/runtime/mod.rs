@@ -32,8 +32,8 @@ pub(crate) use generation::PreparedRuntimeGeneration;
 pub use generation::{AppConditionState, DisplacedGeneration, RuntimeView};
 use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransitionCoordinator};
 pub use opener::{
-    EntryScope, OpenScope, Opening, OpensUnder, ScopeBuilder, ScopeEnd, ScopeEndContext,
-    ScopeEndKind, ScopeEnded, ScopeEntry, ScopeOpener, ScopeRun, ScopeWork,
+    AnyScopeEnded, EntryScope, OpenScope, Opening, OpensUnder, ScopeBuilder, ScopeEnd,
+    ScopeEndContext, ScopeEndKind, ScopeEnded, ScopeEntry, ScopeOpener, ScopeRun, ScopeWork,
 };
 #[cfg(feature = "tooling")]
 pub(crate) use reload::{resolve_staged_transition, staged_condition_snapshot};
@@ -50,6 +50,9 @@ pub use transition_hooks::{
     TransitionAborted, TransitionCommitted, TransitionDecision, TransitionHookContext,
     TransitionOutcomeContext, TransitionProposal, TransitionVerdict,
 };
+
+/// How long a graceful shutdown waits for pending scope end hooks.
+pub const END_HOOK_DRAIN: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Everything a protocol needs to drive requests through DI, cheaply cloneable.
 ///
@@ -261,6 +264,17 @@ impl AppRuntime {
     /// never listed.
     pub fn displaced_generations(&self) -> Vec<DisplacedGeneration> {
         self.transitions.displaced_generations()
+    }
+
+    /// Waits until the hooks of every ended scope instance have finished, or `limit` passes,
+    /// and returns whether none is pending.
+    ///
+    /// The end hooks run on tasks spawned onto the ambient Tokio runtime, so a runtime that
+    /// returns or is dropped first cancels them. The application's graceful shutdown calls
+    /// this with [`END_HOOK_DRAIN`]; code driving a runtime without it should call it before
+    /// the Tokio runtime ends.
+    pub async fn drain_scope_ends(&self, limit: std::time::Duration) -> bool {
+        self.transitions.end_tasks().drain(limit).await
     }
 
     pub(crate) async fn begin_transition(&self) -> generation::RuntimeTransition {
