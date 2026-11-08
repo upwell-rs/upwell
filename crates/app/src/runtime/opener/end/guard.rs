@@ -102,6 +102,12 @@ impl<S: Scope> InstanceEnd<S> {
         observed
     }
 
+    /// Makes the end fire nothing, for an instance that turned out never to open.
+    pub(in crate::runtime) fn disarm(&mut self) {
+        self.unfinished = None;
+        self.finished = None;
+    }
+
     /// Ends the instance as `kind`.
     pub(in crate::runtime) fn complete(mut self, kind: ScopeEndKind) {
         self.finished = Some(kind);
@@ -166,25 +172,29 @@ impl<S: Scope> Firing<S> {
             kind,
             params: Arc::clone(&self.params),
         });
-        let owners = HookOwners::new(self.view.resolved_components());
         let hooks = self.view.hooks();
         let typed = self.view.context(hook_target!(ScopeEnded::<S>::NAME));
         let any = self.view.context(hook_target!(AnyScopeEnded::NAME));
         let typed = typed.enter(hooks.fire_all::<ScopeEnded<S>>(&cx)).await;
         let any = any.enter(hooks.fire_all::<AnyScopeEnded>(&cx)).await;
 
-        self.trace_failures(kind, ScopeEnded::<S>::NAME, &owners, typed.observers);
-        self.trace_failures(kind, AnyScopeEnded::NAME, &owners, any.observers);
+        self.trace_failures(kind, ScopeEnded::<S>::NAME, typed.observers);
+        self.trace_failures(kind, AnyScopeEnded::NAME, any.observers);
     }
 
     fn trace_failures(
         &self,
         kind: ScopeEndKind,
         hook: &'static str,
-        owners: &HookOwners,
         observers: Vec<(TypeDescriptor, upwell_hooks::Result<()>)>,
     ) {
-        for (owner, outcome) in failed_observers(observers, owners) {
+        if observers.iter().all(|(_, outcome)| outcome.is_ok()) {
+            return;
+        }
+
+        let owners = HookOwners::new(self.view.resolved_components());
+
+        for (owner, outcome) in failed_observers(observers, &owners) {
             tracing::warn!(
                 target: SCOPE_LOG_TARGET,
                 scope = %self.scope,

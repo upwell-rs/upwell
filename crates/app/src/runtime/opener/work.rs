@@ -18,11 +18,12 @@ use crate::entry::EntryTargets;
 /// Implemented for closures of up to twelve parameters returning a future of `()`. The
 /// parameters declare the work's dependencies the way an entry's do, so the work is planned
 /// like one. Work that returns a value or a `Result` runs through
-/// [`ScopeBuilder::try_run`](super::ScopeBuilder::try_run) and [`TryScopeWork`].
+/// [`ScopeBuilder::try_run`](super::ScopeBuilder::try_run) and [`TryScopeWork`]; work that
+/// cannot fail returns `Ok::<_, std::convert::Infallible>(value)`.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not work `ScopeBuilder::run` can run",
     label = "`run` takes a closure of injectable targets returning a future of `()`",
-    note = "work that returns a value or a `Result` runs through `ScopeBuilder::try_run`"
+    note = "work that returns a value or a `Result` runs through `ScopeBuilder::try_run`, which needs a `Result`: return `Ok::<_, std::convert::Infallible>(value)` for work that cannot fail"
 )]
 pub trait ScopeWork<Targets>: Send + sealed::Sealed<Targets> {
     /// The type that keys the work's plan: two kinds of work with the same targets plan

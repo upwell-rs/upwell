@@ -4,7 +4,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use super::{CustomerClient, CustomerSync, SyncAudit, UNUSED_BUILDS, app, ok, opener};
+use upwell_test_utils::ok;
+
+use super::{CustomerClient, CustomerSync, SyncAudit, UNUSED_BUILDS, app, opener};
 
 /// How many instances [`parallel_runs_never_share_scoped_components`] runs at once.
 const RUNS: u64 = 64;

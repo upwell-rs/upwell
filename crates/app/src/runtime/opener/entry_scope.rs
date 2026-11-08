@@ -219,6 +219,18 @@ impl<S: Scope> EntryScope<S> {
 }
 
 impl<S: Scope> Deferred<S> {
+    /// Makes the instance's end fire nothing, because its container failed to open.
+    fn disarm_end(&self) {
+        if let Some(end) = self
+            .end
+            .lock()
+            .expect("deferred end lock poisoned")
+            .as_mut()
+        {
+            end.disarm();
+        }
+    }
+
     /// The container, opened on the first call with the seeds and on the generation it was
     /// planned on. The opening binds it into the running invocation context waiting for it.
     async fn open(&self) -> crate::Result<&Arc<ScopeContainer>> {
@@ -239,7 +251,8 @@ impl<S: Scope> Deferred<S> {
                     seeds,
                 )
                 .instrument(self.span.clone())
-                .await?;
+                .await
+                .inspect_err(|_| self.disarm_end())?;
 
                 if let Some(end) = self.end.lock().expect("deferred end lock poisoned").take() {
                     end.retain_in(&container);

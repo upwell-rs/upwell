@@ -7,8 +7,10 @@ use std::sync::atomic::Ordering;
 use upwell::daemon::App;
 use upwell::{AppError, EntryKey, ScopeOpener};
 
+use upwell_test_utils::ok;
+
 use super::{
-    Batch, BatchStep, CustomerClient, CustomerSync, Syncer, UNUSED_BUILDS, Unused, app, ok, opener,
+    Batch, BatchStep, CustomerClient, CustomerSync, Syncer, UNUSED_BUILDS, Unused, app, opener,
 };
 
 #[tokio::test]

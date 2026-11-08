@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use upwell::context::{Scoped, ScopedError};
 
-use super::{Batch, CustomerClient, CustomerSync, app, ok, opener};
+use upwell_test_utils::ok;
+
+use super::{Batch, CustomerClient, CustomerSync, app, opener};
 
 #[tokio::test]
 async fn a_run_reads_its_own_instance_of_the_scope() {

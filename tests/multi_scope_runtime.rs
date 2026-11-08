@@ -10,6 +10,7 @@ use std::sync::Arc;
 use upwell::daemon::App;
 use upwell::scope::Root;
 use upwell::{component, methods, scope};
+use upwell_test_utils::ok;
 
 /// The first of two disjoint scopes under the root.
 #[scope(parents = [Root])]
@@ -44,11 +45,6 @@ impl Worker {
             label: "right".to_string(),
         }
     }
-}
-
-/// A successful result of work that cannot fail.
-fn ok<T>(value: T) -> Result<T, std::convert::Infallible> {
-    Ok(value)
 }
 
 async fn app() -> App {
