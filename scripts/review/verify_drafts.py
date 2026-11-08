@@ -7,12 +7,12 @@ Usage:
   verify_drafts.py block <input.jsonl>
       Prints the drafts as id-tagged JSON lines between delimiters, for the verification prompt.
   verify_drafts.py apply <input.jsonl> <verify.json> <pr.diff> <run dir> <mirror.jsonl> <provider> <model> <effort> <resumed 0|1>
-      Validates the verifier's answer (exit 3 on an unknown or duplicate id, a schema violation or
-      a kept line outside the diff) and writes review.json, verification.jsonl and stages.json to
+      Validates the verifier's answer (exit 3 on an unknown, duplicate or missing id, a schema
+      violation or a kept line outside the diff) and writes review.json, verification.jsonl and stages.json to
       <run dir>; verification.jsonl is also appended to <mirror.jsonl>.
   verify_drafts.py empty <discovery.json> <run dir> <provider> <model> <effort>
       Writes the NO_FINDINGS review.json and stages.json for a discovery without drafts (exit 3
-      when the discovery answer is not a valid done marker).
+      when the discovery answer is not a valid done marker or reports drafts none were saved).
 """
 
 import json
@@ -108,7 +108,7 @@ def block(input_path):
 
 
 def decisions_by_id(answer, drafts):
-    """Maps each draft id to its decision; rejects unknown and duplicate ids."""
+    """Maps each draft id to its decision; rejects unknown and duplicate ids and a draft left out."""
     known = {draft["id"] for draft in drafts}
     found = {}
 
@@ -122,6 +122,11 @@ def decisions_by_id(answer, drafts):
             raise Invalid(f"more than one decision for draft {ident}")
 
         found[ident] = decision
+
+    missing = [draft["id"] for draft in drafts if draft["id"] not in found]
+
+    if missing:
+        raise Invalid(f"no decision for draft(s) {', '.join(missing)}: every draft needs one, so a left-out draft is never treated as dropped")
 
     return found
 
@@ -143,13 +148,8 @@ def verdicts(drafts, decisions, visible):
     findings = []
 
     for draft in drafts:
-        decision = decisions.get(draft["id"])
+        decision = decisions[draft["id"]]
         record = {"id": draft["id"], "draft": {name: draft[name] for name in FINDING}, "origin": draft["origin"]}
-
-        if decision is None:
-            record.update(decision="drop", reason="no verifier decision returned; not verified, so not posted")
-            records.append(record)
-            continue
 
         record.update(decision=decision["decision"], reason=decision["reason"].strip() or "(no reason given)")
 
@@ -227,6 +227,9 @@ def empty(discovery_path, run_dir, provider, model, effort):
 
     if found:
         raise Invalid(found)
+
+    if answer["drafts"] > 0:
+        raise Invalid(f"the discovery done marker reports {answer['drafts']} draft(s) but none were saved; they may have been lost, so no clean review is posted")
 
     review = {"verdict": "NO_FINDINGS", "summary": answer["summary"], "findings": [], "unchecked": answer["unchecked"]}
     origin = {"provider": provider, "model": model, "effort": effort}

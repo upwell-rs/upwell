@@ -211,7 +211,7 @@ if [ "$draft_count" -eq 0 ]; then
     echo "discovery saved no drafts; skipping verification" >&2
 
     if ! python3 -I "$here/verify_drafts.py" empty "$discovery" "$work" "$provider" "$model" "$effort"; then
-        echo "not posting a clean review without a valid discovery done marker (see $work/discovery.log)" >&2
+        echo "not posting a clean review: discovery returned no valid done marker or reported drafts none were saved (see $work/discovery.log and $work/discovery.json)" >&2
         exit 3
     fi
 else

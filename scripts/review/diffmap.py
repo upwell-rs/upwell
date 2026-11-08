@@ -7,6 +7,8 @@ review comments on the RIGHT side.
 import re
 
 HUNK = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+OCTAL = re.compile(r"[0-7]{3}")
+ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
 
 
 def patch_lines(patch):
@@ -30,12 +32,37 @@ def patch_lines(patch):
     return lines
 
 
+def unquote(quoted):
+    """Decodes the body of a path git C-quoted (octal byte escapes and `\\t`, `\\"`, `\\\\` and the like)."""
+    decoded = bytearray()
+    index = 0
+
+    while index < len(quoted):
+        char = quoted[index]
+        escape = quoted[index + 1:index + 2]
+
+        if char == "\\" and OCTAL.fullmatch(quoted[index + 1:index + 4]):
+            decoded.append(int(quoted[index + 1:index + 4], 8))
+            index += 4
+            continue
+
+        if char == "\\" and escape in ESCAPES:
+            decoded.append(ESCAPES[escape])
+            index += 2
+            continue
+
+        decoded.extend(char.encode("utf-8"))
+        index += 1
+
+    return decoded.decode("utf-8", errors="replace")
+
+
 def new_path(header):
     """Returns the repo-relative path of a `+++ b/<path>` header, or None for a deleted file."""
-    path = header[4:].strip()
+    path = header[4:].rstrip("\r\n\t")
 
-    if path.startswith('"') and path.endswith('"'):
-        path = path[1:-1]
+    if len(path) >= 2 and path.startswith('"') and path.endswith('"'):
+        path = unquote(path[1:-1])
 
     if path == "/dev/null":
         return None
