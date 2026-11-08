@@ -61,8 +61,10 @@ pub trait AxumAppBuilder {
     /// Parent layers run before every [`layer`](Self::layer) and
     /// [`middleware`](Self::middleware), and before the request scope opens for eager
     /// request-scoped components and `Current`/`Scoped` accessors, so every opening sees the
-    /// parent. They run inside the protocol's body limit and request timeout, for routed
-    /// requests only; the first one registered is the outermost. The request scope reads
+    /// parent. They run inside the protocol's body limit and request timeout, and only for
+    /// requests a route matches (they are applied with `Router::route_layer`), so a request no
+    /// route matches takes the plain 404 path without reaching them. The first one registered
+    /// is the outermost. The request scope reads
     /// [`RequestParent`](crate::RequestParent) only when at least one parent layer is
     /// registered, so an application without one pays nothing.
     fn parent_layer<L>(self, layer: L) -> Self
@@ -75,7 +77,8 @@ pub trait AxumAppBuilder {
 
     /// Sugar over [`parent_layer`](Self::parent_layer), as [`middleware`](Self::middleware)
     /// is over [`layer`](Self::layer): resolves `M` as a DI singleton, such as a session cache
-    /// holding the `ScopeOpener` of its session scope, and wraps it via [`as_layer`].
+    /// holding the `ScopeOpener` of its session scope, and wraps it via [`as_layer`]. Like
+    /// every parent layer, it runs only for requests a route matches.
     fn parent_middleware<M>(self) -> Self
     where
         M: AxumMiddleware + Component<Handle = Arc<M>> + Descriptor<ComponentDescriptor>;
@@ -126,7 +129,9 @@ impl AxumAppBuilder for AppBuilder<Axum> {
         <L::Service as Service<Request>>::Error: Into<Infallible> + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
-        self.protocol_mut().middleware.push(raw_applier(layer));
+        self.protocol_mut()
+            .middleware
+            .push(raw_applier(layer, Attach::Router));
 
         self
     }
@@ -135,7 +140,9 @@ impl AxumAppBuilder for AppBuilder<Axum> {
     where
         M: AxumMiddleware + Component<Handle = Arc<M>> + Descriptor<ComponentDescriptor>,
     {
-        self.protocol_mut().middleware.push(di_applier::<M>());
+        self.protocol_mut()
+            .middleware
+            .push(di_applier::<M>(Attach::Router));
 
         self.component::<M>()
     }
@@ -148,7 +155,9 @@ impl AxumAppBuilder for AppBuilder<Axum> {
         <L::Service as Service<Request>>::Error: Into<Infallible> + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
-        self.protocol_mut().parent_layers.push(raw_applier(layer));
+        self.protocol_mut()
+            .parent_layers
+            .push(raw_applier(layer, Attach::MatchedRoutes));
 
         self
     }
@@ -157,7 +166,9 @@ impl AxumAppBuilder for AppBuilder<Axum> {
     where
         M: AxumMiddleware + Component<Handle = Arc<M>> + Descriptor<ComponentDescriptor>,
     {
-        self.protocol_mut().parent_layers.push(di_applier::<M>());
+        self.protocol_mut()
+            .parent_layers
+            .push(di_applier::<M>(Attach::MatchedRoutes));
 
         self.component::<M>()
     }
@@ -201,8 +212,35 @@ impl AxumAppBuilder for AppBuilder<Axum> {
     }
 }
 
-/// Applies the raw `layer` to the router being built.
-fn raw_applier<L>(layer: L) -> MiddlewareApplier
+/// Which requests an applier's layer wraps.
+#[derive(Clone, Copy)]
+enum Attach {
+    /// Every request the router serves, the fallback included (`Router::layer`).
+    Router,
+    /// Only requests a route matches (`Router::route_layer`), so an unmatched request takes
+    /// the plain fallback.
+    MatchedRoutes,
+}
+
+impl Attach {
+    fn apply<L>(self, router: axum::Router, layer: L) -> axum::Router
+    where
+        L: Layer<Route> + Clone + Send + Sync + 'static,
+        L::Service: Service<Request> + Clone + Send + Sync + 'static,
+        <L::Service as Service<Request>>::Response: IntoResponse + 'static,
+        <L::Service as Service<Request>>::Error: Into<Infallible> + 'static,
+        <L::Service as Service<Request>>::Future: Send + 'static,
+    {
+        match self {
+            Self::Router => router.layer(layer),
+            Self::MatchedRoutes if router.has_routes() => router.route_layer(layer),
+            Self::MatchedRoutes => router,
+        }
+    }
+}
+
+/// Applies the raw `layer` to the requests `attach` names.
+fn raw_applier<L>(layer: L, attach: Attach) -> MiddlewareApplier
 where
     L: Layer<Route> + Clone + Send + Sync + 'static,
     L::Service: Service<Request> + Clone + Send + Sync + 'static,
@@ -210,20 +248,21 @@ where
     <L::Service as Service<Request>>::Error: Into<Infallible> + 'static,
     <L::Service as Service<Request>>::Future: Send + 'static,
 {
-    Box::new(move |_runtime, router| router.layer(layer))
+    Box::new(move |_runtime, router| attach.apply(router, layer))
 }
 
-/// Resolves the DI singleton `M` once the runtime is built and applies it to the router.
-fn di_applier<M>() -> MiddlewareApplier
+/// Resolves the DI singleton `M` once the runtime is built and applies it to the requests
+/// `attach` names.
+fn di_applier<M>(attach: Attach) -> MiddlewareApplier
 where
     M: AxumMiddleware + Component<Handle = Arc<M>> + Descriptor<ComponentDescriptor>,
 {
-    Box::new(|runtime, router| {
+    Box::new(move |runtime, router| {
         let mw = runtime
             .root()
             .get::<M>()
             .expect("middleware component missing from DI root — did you register it?");
 
-        router.layer(as_layer(mw))
+        attach.apply(router, as_layer(mw))
     })
 }

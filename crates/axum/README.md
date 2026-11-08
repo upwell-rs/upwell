@@ -33,7 +33,8 @@ application scope that lists `HttpRequest` among its `children`, such as a cache
 `Session`. A parent layer (`AxumAppBuilder::parent_layer` for a raw `tower::Layer`, or
 `parent_middleware::<M>()` for a DI-backed `AxumMiddleware`) inserts a `RequestParent` into the
 request's extensions. Parent layers run before global middleware and before the eager opening,
-so every opening sees the parent. Without a parent layer, nothing reads `RequestParent`.
+so every opening sees the parent, and only for requests a route matches. Without a parent layer,
+nothing reads `RequestParent`.
 
 `RequestMeta` copies the request's method, URI and headers, so it is captured only when something
 reads it, once per request: when the scope opens if the route reads it (directly or through a

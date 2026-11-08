@@ -26,7 +26,10 @@
 //! puts a [`RequestParent`] into the request's extensions, such as the caller's cached session
 //! scope: then the scope opens under that instance, on the generation it runs on. Parent layers
 //! run before global middleware and before [`open_eager_scope`], so every opening sees the
-//! parent. Without a parent layer the extensions are never searched for one.
+//! parent, and only for requests a route matches. [`open_eager_scope`] decides whether to open
+//! at once on the generation the scope opens on, the parent's, since after a reload it can
+//! differ from the current one. Without a parent layer the extensions are never searched for
+//! one.
 //!
 //! # When [`RequestMeta`] is captured
 //!
@@ -190,6 +193,26 @@ impl RequestScopeLayer {
     }
 }
 
+impl RequestScopes {
+    /// The parent a request with `extensions` opens under: its [`RequestParent`] when a parent
+    /// layer may set one, else the root (`None`).
+    fn parent<'e>(&self, extensions: &'e Extensions) -> Option<&'e RequestParent> {
+        match self.parents {
+            ParentChoice::Root => None,
+            ParentChoice::Chosen => extensions.get::<RequestParent>(),
+        }
+    }
+
+    /// Whether the scope of a request with `extensions` must open at once, decided on the
+    /// generation it opens on: its parent's, or the current one under the root.
+    fn opens_at_once(&self, extensions: &Extensions) -> bool {
+        match self.parent(extensions) {
+            Some(parent) => self.opener.opens_at_once_under(parent),
+            None => self.opener.opens_at_once(),
+        }
+    }
+}
+
 impl RouteEntries {
     pub(crate) fn insert(&mut self, method: Method, path: String, entry: ScopeEntry<HttpRequest>) {
         self.0
@@ -336,7 +359,7 @@ fn capture_into(scope: &ScopeContainer, head: Head<'_>) -> Result<(), InjectReje
 pub(crate) async fn open_eager_scope(mut request: Request, next: Next) -> Response {
     let routed = request.extensions().get::<MatchedPath>().is_some();
     let at_once = REQUEST_SCOPES
-        .try_with(|scopes| scopes.opener.opens_at_once())
+        .try_with(|scopes| scopes.opens_at_once(request.extensions()))
         .unwrap_or(false);
 
     if routed
@@ -392,10 +415,7 @@ async fn open(
         (None, WithoutEntry::Everything) => Opening::Everything,
         (None, WithoutEntry::Eager) => Opening::OnDemand,
     };
-    let parent = match scopes.parents {
-        ParentChoice::Root => None,
-        ParentChoice::Chosen => extensions.get::<RequestParent>(),
-    };
+    let parent = scopes.parent(extensions);
     let builder = scopes.opener.builder(HttpRequest);
     let builder = match parent {
         Some(parent) => builder.under_parent(parent),

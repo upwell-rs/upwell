@@ -214,15 +214,21 @@ impl<S: Scope> ScopeOpener<S> {
     /// builds an eager component, or an invocation-context accessor reads one of its slots.
     /// False once an injected opener outlives its runtime.
     pub fn opens_at_once(&self) -> bool {
+        self.runtime
+            .get::<S>()
+            .is_ok_and(|runtime| opens_at_once_on::<S>(&runtime.view()))
+    }
+
+    /// Whether an opening of the scope under `parent` must open it at once, as
+    /// [`opens_at_once`](Self::opens_at_once) answers, but on the generation `parent` runs on,
+    /// which the instance opens on: after a reload it can differ from the current one. True
+    /// when `parent` cannot be opened under, so the opening reports why at once. False once an
+    /// injected opener outlives its runtime.
+    pub fn opens_at_once_under(&self, parent: &ParentScope<S>) -> bool {
         self.runtime.get::<S>().is_ok_and(|runtime| {
             runtime
-                .view()
-                .scope_plan()
-                .layouts
-                .get(&S::ID)
-                .is_some_and(|layout| {
-                    layout.eager_components().next().is_some() || layout.is_accessed()
-                })
+                .pinned_view(S::ID, parent.container())
+                .map_or(true, |view| opens_at_once_on::<S>(&view))
         })
     }
 
@@ -348,6 +354,15 @@ impl<S: Scope> Clone for OpenScope<S> {
             scope: PhantomData,
         }
     }
+}
+
+/// Whether an opening of `S` on `view` must open it at once: it builds an eager component, or
+/// an invocation-context accessor reads one of its slots.
+fn opens_at_once_on<S: Scope>(view: &RuntimeView) -> bool {
+    view.scope_plan()
+        .layouts
+        .get(&S::ID)
+        .is_some_and(|layout| layout.eager_components().next().is_some() || layout.is_accessed())
 }
 
 /// Whether a factory of `component` declares an invocation-context edge.
