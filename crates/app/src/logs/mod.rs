@@ -19,6 +19,8 @@ mod field;
 #[cfg(feature = "tracing-subscriber")]
 mod layer;
 mod options;
+#[cfg(feature = "tracing-subscriber")]
+mod reach;
 #[cfg_attr(not(feature = "tracing-subscriber"), allow(dead_code))]
 mod record;
 mod render;

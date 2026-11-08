@@ -157,3 +157,59 @@ fn a_detached_span_entered_inside_a_capture_hides_the_capture_from_the_current_l
         "a span with no capturing ancestor shows no log, as its events reach none"
     );
 }
+
+#[test]
+fn a_capture_entered_under_one_subscriber_is_not_current_under_another() {
+    let _guard = install();
+    let without_layer = Dispatch::new(Registry::default());
+    let with_own_layer = Dispatch::new(Registry::default().with(ScopeLogLayer::new()));
+    let (logs, _stream) = instance(1, &options());
+
+    let (inside, without, own) = logs.span().in_scope(|| {
+        let inside = ScopeLogs::current().is_capturing();
+        let without = tracing::dispatcher::with_default(&without_layer, || {
+            ScopeLogs::current().is_capturing()
+        });
+        let own = tracing::dispatcher::with_default(&with_own_layer, || {
+            ScopeLogs::current().is_capturing()
+        });
+
+        (inside, without, own)
+    });
+
+    logs.finish();
+
+    assert!(inside, "the subscriber that took the span shows its log");
+    assert!(
+        !without,
+        "a subscriber without a scope log layer shows no log, as its events reach none"
+    );
+    assert!(
+        !own,
+        "another subscriber's scope log layer shows no log it did not take"
+    );
+}
+
+#[test]
+fn a_formatter_rendering_an_event_inside_a_capture_sees_the_log() {
+    let dispatch = Dispatch::new(
+        Registry::default()
+            .with(ScopeLogLayer::new())
+            .with(tracing_subscriber::fmt::layer().with_writer(std::io::sink)),
+    );
+    let seen = Arc::new(AtomicBool::new(false));
+
+    tracing::dispatcher::with_default(&dispatch, || {
+        let (logs, _stream) = instance(1, &options());
+
+        logs.span().in_scope(|| {
+            tracing::info!(value = ?AsksForTheLog(Arc::clone(&seen)), "rendered");
+        });
+        logs.finish();
+    });
+
+    assert!(
+        seen.load(Ordering::SeqCst),
+        "a formatter rendering an event made in the instance sees its log"
+    );
+}

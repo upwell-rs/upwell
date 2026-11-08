@@ -50,6 +50,11 @@ impl ScopeLogLayer {
             id: LayerId::UNREGISTERED,
         }
     }
+
+    /// The identity the sinks this layer takes record.
+    pub(super) fn id(&self) -> LayerId {
+        self.id
+    }
 }
 
 impl Default for ScopeLogLayer {
