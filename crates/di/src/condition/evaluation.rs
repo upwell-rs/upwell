@@ -227,6 +227,7 @@ impl ConditionCatalog {
 
                 dependency.rank() >= consumer.rank()
             },
+            crate::registry::scopes::never_encloses,
         ) {
             crate::observability::condition_validation_rejected(&evaluation);
 

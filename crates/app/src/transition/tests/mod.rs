@@ -148,6 +148,7 @@ fn active_graph(registry: &AppRegistry) -> EffectiveGraph {
         RuntimeGenerationId::INITIAL,
         &registry.component_registry(),
         |_, _| true,
+        |_, _| false,
     )
     .expect("active graph validates")
 }

@@ -137,7 +137,7 @@ async fn prepared_generation(
         components: vec![hook_manager_descriptor()],
         providers: Vec::new(),
     };
-    let graph = EffectiveGraph::build(base, &components, |_, _| true)
+    let graph = EffectiveGraph::build(base, &components, |_, _| true, |_, _| false)
         .expect("the hook manager's graph validates");
     let layouts = seed_layouts(
         &topology,

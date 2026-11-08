@@ -132,6 +132,7 @@ impl CandidateGraph {
             base_generation,
             &component_registry,
             |consumer, dependency| topology.is_reachable(&consumer, &dependency),
+            |ancestor, descendant| topology.encloses(&ancestor, &descendant),
         )?;
         let selection = Arc::clone(graph.provider_selection());
 

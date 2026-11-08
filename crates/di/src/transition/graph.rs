@@ -32,16 +32,24 @@ pub struct EffectiveGraph {
 }
 
 impl EffectiveGraph {
-    /// Validates and freezes an effective registry using caller-owned scope reachability.
+    /// Validates and freezes an effective registry using caller-owned scope reachability and
+    /// enclosure, with the meaning of
+    /// [`ComponentRegistry::validate_with_scope_reachability`].
     pub fn build(
         generation: RuntimeGenerationId,
         registry: &ComponentRegistry,
         can_reach: impl Fn(ScopeId, ScopeId) -> bool + Copy,
+        may_enclose: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<Self> {
         let components = registry.resolved_components()?;
         let selection = Arc::new(registry.provider_selection_model(&components)?);
 
-        registry.validate_with_scope_reachability_using(&components, &selection, can_reach)?;
+        registry.validate_with_scope_reachability_using(
+            &components,
+            &selection,
+            can_reach,
+            may_enclose,
+        )?;
 
         Self::from_validated(generation, &components, selection, can_reach)
     }

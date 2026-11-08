@@ -9,12 +9,13 @@ use super::{ScopeBoundary, ScopeParent, ScopeTopologyError};
 ///
 /// Boundaries are stored in stable identity order. The implicit root is available
 /// to ancestry and reachability queries but is never returned by [`boundary`](Self::boundary).
-/// Each boundary's common ancestors are computed once here, so queries never walk the parent
-/// graph.
+/// Each boundary's common ancestors, and the ancestors on any of its chains, are computed once
+/// here, so queries never walk the parent graph.
 #[derive(Clone, Debug)]
 pub struct PreparedScopeTopology {
     boundaries: Box<[ScopeBoundary]>,
     common_ancestors: Box<[Box<[ScopeId]>]>,
+    any_ancestors: Box<[Box<[ScopeId]>]>,
 }
 
 impl PreparedScopeTopology {
@@ -25,10 +26,12 @@ impl PreparedScopeTopology {
         validate_sorted(&boundaries)?;
 
         let common_ancestors = common_ancestors(&boundaries);
+        let any_ancestors = any_ancestors(&boundaries);
 
         Ok(Self {
             boundaries: boundaries.into_boxed_slice(),
             common_ancestors,
+            any_ancestors,
         })
     }
 
@@ -88,30 +91,8 @@ impl PreparedScopeTopology {
     /// chain, this holds when any chain opens `descendant` under `ancestor`. The root
     /// encloses every declared boundary and nothing encloses the root.
     pub fn encloses(&self, ancestor: &ScopeId, descendant: &ScopeId) -> bool {
-        let mut pending = vec![*descendant];
-        let mut visited = BTreeSet::new();
-
-        while let Some(id) = pending.pop() {
-            if !visited.insert(id) {
-                continue;
-            }
-
-            let Some(boundary) = self.boundary(&id) else {
-                continue;
-            };
-
-            for parent in boundary.parents() {
-                if parent.id() == *ancestor {
-                    return true;
-                }
-
-                if let ScopeParent::Boundary(parent_id) = parent {
-                    pending.push(*parent_id);
-                }
-            }
-        }
-
-        false
+        find_index(&self.boundaries, descendant)
+            .is_some_and(|index| self.any_ancestors[index].binary_search(ancestor).is_ok())
     }
 }
 
@@ -143,6 +124,29 @@ fn common_ancestors(boundaries: &[ScopeBoundary]) -> Box<[Box<[ScopeId]>]> {
     }
 
     common.into_boxed_slice()
+}
+
+/// The ancestors on at least one opening chain of each boundary, sorted, indexed like
+/// `boundaries`: the union, over its parents, of the parent itself plus the parent's own. Like
+/// [`common_ancestors`], visits boundaries from the highest rank down, so each parent is
+/// complete before its children read it.
+fn any_ancestors(boundaries: &[ScopeBoundary]) -> Box<[Box<[ScopeId]>]> {
+    let mut order: Vec<usize> = (0..boundaries.len()).collect();
+    let mut any: Vec<Box<[ScopeId]>> = vec![Box::new([]); boundaries.len()];
+
+    order.sort_by_key(|index| std::cmp::Reverse(boundaries[*index].rank()));
+
+    for index in order {
+        let ancestors: BTreeSet<ScopeId> = boundaries[index]
+            .parents()
+            .iter()
+            .flat_map(|parent| through_parent(boundaries, &any, *parent))
+            .collect();
+
+        any[index] = ancestors.into_iter().collect();
+    }
+
+    any.into_boxed_slice()
 }
 
 /// The sorted ancestors of a boundary opened directly under `parent`.

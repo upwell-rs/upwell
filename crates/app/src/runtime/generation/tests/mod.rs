@@ -101,6 +101,7 @@ async fn prepared_with_hooks(
         RuntimeGenerationId::INITIAL,
         &ComponentRegistry::default(),
         |_, _| true,
+        |_, _| false,
     )
     .expect("empty graph validates");
 

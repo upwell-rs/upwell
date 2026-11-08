@@ -38,6 +38,7 @@ use upwell_config::ResolverChain;
 
 mod generations;
 mod routing;
+mod validation;
 
 /// The header naming the caller whose session a request runs under.
 const USER: &str = "x-user";

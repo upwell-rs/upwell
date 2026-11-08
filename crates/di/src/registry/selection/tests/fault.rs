@@ -26,7 +26,7 @@ fn fault(
     };
 
     model
-        .dependency_fault(dependency, consumer, can_reach)
+        .dependency_fault(dependency, consumer, can_reach, |_, _| false)
         .expect("the edge has a per-edge outcome")
 }
 

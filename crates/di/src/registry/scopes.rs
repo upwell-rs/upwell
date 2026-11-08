@@ -14,7 +14,12 @@ impl ComponentRegistry {
     pub fn validate_scopes(&self, components: &[ComponentDescriptor]) -> crate::Result<()> {
         let selection = self.provider_selection_model(components)?;
 
-        self.validate_scopes_with(components, &selection, &scope_allows_by_rank)
+        self.validate_scopes_with(
+            components,
+            &selection,
+            &scope_allows_by_rank,
+            &never_encloses,
+        )
     }
 
     pub(super) fn validate_scopes_with(
@@ -22,10 +27,11 @@ impl ComponentRegistry {
         components: &[ComponentDescriptor],
         selection: &selection::ProviderSelectionModel,
         can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
+        may_enclose: &impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<()> {
         for consumer in components {
             for dependency in consumer.dependencies() {
-                check_scope(selection, consumer, &dependency, can_access)?;
+                check_scope(selection, consumer, &dependency, can_access, may_enclose)?;
             }
         }
 
@@ -41,14 +47,17 @@ impl ComponentRegistry {
 /// retain nothing, so they cannot hold a shorter-lived value captive.
 ///
 /// An optional edge may also name a target the consumer cannot reach on every chain, when the
-/// target's scope is longer-lived: an HTTP request that may open under the root or under an
-/// application's session takes the session's component as `Option<Arc<T>>`, which is `None` on
-/// a chain without the session. It cannot hold a shorter-lived value captive either.
+/// target's scope encloses the consumer's on at least one (`may_enclose(target, consumer)`): an
+/// HTTP request that may open under the root or under an application's session takes the
+/// session's component as `Option<Arc<T>>`, which is `None` on a chain without the session. An
+/// enclosing scope outlives the consumer, so it cannot hold a value captive. A scope that never
+/// encloses the consumer, such as a sibling, is still rejected: the edge could never be present.
 pub(super) fn check_scope(
     selection: &selection::ProviderSelectionModel,
     consumer: &ComponentDescriptor,
     dep: &upwell_core::DependencyDescriptor,
     can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
+    may_enclose: &impl Fn(ScopeId, ScopeId) -> bool,
 ) -> crate::Result<()> {
     if dep.dynamic || dep.config || dep.resolution == ResolutionMode::Current {
         return Ok(());
@@ -62,7 +71,7 @@ pub(super) fn check_scope(
     for (dep_scope, dep_name) in dep_scopes {
         if dep.resolution != ResolutionMode::Fresh
             && !can_access(consumer.scope, dep_scope)
-            && !(dep.optional && outlives(dep_scope, consumer.scope))
+            && !(dep.optional && encloses_on_some_chain(dep_scope, consumer.scope, may_enclose))
         {
             return Err(Error::ScopeViolation(Box::new(
                 crate::error::ScopeViolation {
@@ -169,9 +178,20 @@ pub(super) fn selected_dependency_scopes(
         .collect()
 }
 
-/// Whether `scope` is strictly longer-lived than `consumer`, both scopes below the transient one.
-fn outlives(scope: ScopeKey, consumer: ScopeKey) -> bool {
-    !scope.is_transient() && !consumer.is_transient() && scope.rank() > consumer.rank()
+/// Whether `scope` is open around `consumer` on at least one chain `consumer` opens in, neither
+/// of them transient.
+fn encloses_on_some_chain(
+    scope: ScopeKey,
+    consumer: ScopeKey,
+    may_enclose: &impl Fn(ScopeId, ScopeId) -> bool,
+) -> bool {
+    !scope.is_transient() && !consumer.is_transient() && may_enclose(scope.id(), consumer.id())
+}
+
+/// The enclosure of a model without a topology: no scope encloses another beyond what scope
+/// access already allows.
+pub(crate) fn never_encloses(_ancestor: ScopeId, _descendant: ScopeId) -> bool {
+    false
 }
 
 /// Whether a `consumer`-scoped component may hold a `dependency`-scoped one under

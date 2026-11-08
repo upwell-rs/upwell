@@ -181,10 +181,10 @@ impl AppRegistry {
         &self,
         topology: &PreparedScopeTopology,
     ) -> crate::Result<()> {
-        self.component_registry()
-            .validate_with_scope_reachability(|consumer, dependency| {
-                topology.is_reachable(&consumer, &dependency)
-            })?;
+        self.component_registry().validate_with_scope_reachability(
+            |consumer, dependency| topology.is_reachable(&consumer, &dependency),
+            |ancestor, descendant| topology.encloses(&ancestor, &descendant),
+        )?;
 
         let components = self.resolved_components()?;
 
@@ -208,6 +208,7 @@ impl AppRegistry {
                 components,
                 selection,
                 |consumer, dependency| topology.is_reachable(&consumer, &dependency),
+                |ancestor, descendant| topology.encloses(&ancestor, &descendant),
             )?;
         self.component_registry()
             .validate_placement_overlap(components, |outer, inner| {
