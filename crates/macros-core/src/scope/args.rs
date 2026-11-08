@@ -42,11 +42,20 @@ impl Parse for ScopeArgs {
         let mut id = None;
         let mut name = None;
         let mut upwell = None;
+        let mut seen = Vec::new();
 
         while !input.is_empty() {
             let key = syn::Ident::parse_any(input)?;
+            let spelled = key.to_string();
 
-            match key.to_string().as_str() {
+            if seen.contains(&spelled) {
+                return Err(syn::Error::new_spanned(
+                    &key,
+                    format!("`{spelled}` is given more than once"),
+                ));
+            }
+
+            match spelled.as_str() {
                 "parents" => parents = Some(parse_parents(&key, input)?),
                 "children" => children = parse_children(&key, input)?,
                 "generations" => {
@@ -74,6 +83,8 @@ impl Parse for ScopeArgs {
                     ));
                 }
             }
+
+            seen.push(spelled);
 
             if input.peek(Token![,]) {
                 input.parse::<Token![,]>()?;
