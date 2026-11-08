@@ -19,6 +19,7 @@
 //! picked only when the caller `admits` its sink: the layer admits only sinks it took itself,
 //! so a subscriber that never saw the routing span, or filtered it out, feeds no capture.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use upwell_di::ScopeContainer;
@@ -56,18 +57,40 @@ pub(super) fn route(
 /// handle. Only a scope instance a builder opened retains a sink, never a root, whose slot
 /// holds its generation's guard. The instance opened, so from here on only the contexts that
 /// run in it route to the sink.
-pub(crate) fn retain_sink(container: &ScopeContainer, sink: Option<&Arc<ScopeLogSink>>) {
-    let Some(sink) = sink else {
+pub(crate) fn retain(
+    container: &ScopeContainer,
+    sink: Option<Arc<ScopeLogSink>>,
+    keepalive: Option<Box<dyn Any + Send + Sync>>,
+) {
+    if sink.is_none() && keepalive.is_none() {
         return;
-    };
+    }
 
-    let retained = container.retain_drop_guard(Arc::clone(sink));
+    let opened = sink.clone();
+    let retained = container.retain_drop_guard(Retained { sink, keepalive });
 
-    sink.opened();
+    if let Some(sink) = opened {
+        sink.opened();
+    }
 
     // Ignored in release builds: a builder retains a sink once, right after it opened the
     // instance, so a second one cannot occur; the instance would keep the first.
     debug_assert!(retained.is_ok(), "a scope instance retains one log sink");
+}
+
+/// What a scope instance's container releases with its last owner: the sink events route to,
+/// and anything else the instance's owner asked to keep alive exactly as long, which the logs
+/// never look at.
+pub(crate) struct Retained {
+    sink: Option<Arc<ScopeLogSink>>,
+    #[allow(dead_code)]
+    keepalive: Option<Box<dyn Any + Send + Sync>>,
+}
+
+/// Whether `container` retains anything for its instance's owner.
+#[cfg(test)]
+pub(crate) fn is_retained(container: &ScopeContainer) -> bool {
+    container.drop_guard::<Retained>().is_some()
 }
 
 /// The sink an event belongs to inside an entered context whose scope chain is `chain`.
@@ -110,6 +133,7 @@ fn descends((ancestor, parent): (&Arc<ScopeContainer>, &Arc<ScopeContainer>)) ->
 /// layer took, so a filter that disables the span disables capture on this path too.
 fn retained(instance: &Arc<ScopeContainer>) -> Option<&Arc<ScopeLogSink>> {
     instance
-        .drop_guard::<Arc<ScopeLogSink>>()
+        .drop_guard::<Retained>()
+        .and_then(|retained| retained.sink.as_ref())
         .filter(|sink| sink.is_open() && sink.is_attached())
 }

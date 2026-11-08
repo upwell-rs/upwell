@@ -50,3 +50,10 @@ fn nested_parallel_adapters_after_current_fail_to_compile() {
 
     cases.compile_fail("tests/ui/rayon/*.rs");
 }
+
+#[test]
+fn end_hooks_of_a_type_that_is_not_a_scope_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/end_hooks/*.rs");
+}

@@ -70,6 +70,22 @@ async fn an_observer_runs_before_the_log_closes_and_its_events_are_captured() {
     assert_eq!(ends_of(4).len(), 1);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_scoped_subscriber_still_captures_the_observer_on_a_multi_thread_runtime() {
+    let _guard = install();
+    let app = app("scope-end-multi-thread").await;
+    let opener = opener(&app);
+    let run = opener
+        .builder(ended(5))
+        .capture_logs()
+        .run(|| async { tracing::info!("working") });
+    let stream = run.logs();
+
+    run.await.expect("the run succeeds");
+
+    assert_eq!(messages(stream).await, ["working", "observed end"]);
+}
+
 #[tokio::test]
 async fn a_panicking_observer_neither_fails_the_run_nor_silences_the_others() {
     let app = app("scope-end-panic").await;

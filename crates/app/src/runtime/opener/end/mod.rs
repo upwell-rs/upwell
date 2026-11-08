@@ -1,5 +1,5 @@
-//! The end of a scope instance: [`ScopeEnded`] tells every singleton observer that an
-//! instance ended.
+//! The end of a scope instance: [`ScopeEnded<S>`] tells the singleton observers of scope `S`
+//! that an instance of it ended, and [`AnyScopeEnded`] tells those of every scope.
 //!
 //! The hook is observer-only. It sees the instance's identity, how it ended and its loggable
 //! params, never the container, its components or any secret, so it cannot veto, resurrect or
@@ -19,6 +19,13 @@
 //! captured, and a stream of the instance's log ends only afterwards. The task pins the
 //! generation the instance ran on while it runs, and holds nothing else of the instance.
 //!
+//! Dispatch is by type. The kind carries its scope as a type argument, so
+//! `#[hook(ScopeEnded<Session>)]` registers under the kind `ScopeEnded<Session>` and an instance
+//! of `Session` fires exactly that kind, with no filtering of other scopes' hooks. Both kinds
+//! fire for the same instance, [`ScopeEnded<S>`] first. Whether either applies is decided when
+//! the instance opens by two lookups in the generation's hook index, and an instance nothing
+//! observes allocates no end at all.
+//!
 //! # Failures
 //!
 //! A failing or panicking hook is traced as `scope end hook failed` on `upwell::scope`, with
@@ -28,22 +35,22 @@
 
 mod guard;
 
+use std::marker::PhantomData;
 use std::sync::Arc;
 
-use upwell_core::{DependencyDescriptor, ScopeId};
+use upwell_core::{DependencyDescriptor, Scope, ScopeId};
 use upwell_hooks::{HookKind, HookParam, HookParticipation};
 
 use super::super::transition_hooks::event_dependency;
 use crate::logs::LogField;
 
-pub(super) use guard::InstanceEnd;
+pub(super) use guard::{InstanceEnd, Observed};
 
-/// Fired once on each singleton hook when a scope instance ends, with the instance's identity
-/// as the parameter. Every hook of the kind observes every ending instance and reads which
-/// scope from its [`ScopeEnd`].
-pub struct ScopeEnded;
+/// Fired once on each singleton hook declared for scope `S` when an instance of `S` ends, with
+/// the instance's identity as the parameter: `#[hook(ScopeEnded<Session>)]`.
+pub struct ScopeEnded<S: Scope>(PhantomData<fn() -> S>);
 
-impl HookKind for ScopeEnded {
+impl<S: Scope> HookKind for ScopeEnded<S> {
     type Output = ();
     type Cx = ScopeEndContext;
 
@@ -51,14 +58,28 @@ impl HookKind for ScopeEnded {
     const PARTICIPATION: HookParticipation = HookParticipation::ObserversOnly;
 }
 
+/// Fired once on each singleton hook when an instance of any scope ends, with the instance's
+/// identity as the parameter. The hook reads which scope from [`ScopeEnd::scope`]; hook
+/// [`ScopeEnded<S>`] to observe one scope only.
+pub struct AnyScopeEnded;
+
+impl HookKind for AnyScopeEnded {
+    type Output = ();
+    type Cx = ScopeEndContext;
+
+    const NAME: &'static str = "any_scope_ended";
+    const PARTICIPATION: HookParticipation = HookParticipation::ObserversOnly;
+}
+
 /// How a scope instance ended.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ScopeEndKind {
-    /// A run's work finished and its targets resolved.
+    /// A run's work finished and its targets resolved, whatever the work itself returned: an
+    /// `Err` in the work's own output is a completed run.
     Completed,
-    /// A run's instance could not open or its work's targets could not resolve. A failure
-    /// the work returns in its own output is a completed run.
+    /// A run's instance could not open or its work's targets could not resolve, a failure of
+    /// the framework rather than of the work.
     Failed,
     /// A run was dropped before it finished, by its caller or by unwinding.
     Cancelled,
@@ -106,7 +127,17 @@ impl ScopeEndContext {
     }
 }
 
-impl HookParam<ScopeEnded> for ScopeEnd {
+impl<S: Scope> HookParam<ScopeEnded<S>> for ScopeEnd {
+    fn dependency(_path: Option<&'static str>) -> DependencyDescriptor {
+        event_dependency::<Self>("ScopeEnd")
+    }
+
+    fn extract(cx: &ScopeEndContext, _path: Option<&'static str>) -> upwell_hooks::Result<Self> {
+        Ok(cx.end.clone())
+    }
+}
+
+impl HookParam<AnyScopeEnded> for ScopeEnd {
     fn dependency(_path: Option<&'static str>) -> DependencyDescriptor {
         event_dependency::<Self>("ScopeEnd")
     }

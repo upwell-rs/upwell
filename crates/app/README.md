@@ -99,13 +99,14 @@ closes the instance when the work finishes.
 
 ### End-of-scope hook
 
-`#[hook(ScopeEnded)] async fn ended(&self, end: ScopeEnd)` on a singleton observes every scope
-instance ending. `ScopeEnd` carries the scope, how it ended (`Completed`, `Failed`, `Cancelled`
+`#[hook(ScopeEnded<Session>)] async fn ended(&self, end: ScopeEnd)` on a singleton observes every
+`Session` instance ending, and `#[hook(AnyScopeEnded)]` observes every scope's (read `end.scope`). `ScopeEnd` carries the scope, how it ended (`Completed`, `Failed`, `Cancelled`
 for a run; `Released` when the last `OpenScope` or `EntryScope` handle, such as a protocol's
-request scope, drops) and the `#[log]` params. The hook is observer-only: it runs on a spawned
+request scope, drops, `into_container` included) and the `#[log]` params. The hook is observer-only: it runs on a spawned
 Tokio task after the instance's work and before its log closes, so the events it makes are
 captured, and it cannot delay, veto or extend the instance. A failing or panicking hook is
-traced on `upwell::scope`, never propagated.
+traced on `upwell::scope`, never propagated. Graceful shutdown waits up to `END_HOOK_DRAIN` for
+pending end hooks (`AppRuntime::drain_scope_ends` does it on demand).
 
 ### Scope log routing
 

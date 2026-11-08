@@ -5,7 +5,7 @@ use std::sync::Arc;
 use upwell_config::{ConfigManager, ConfigReloader};
 use upwell_core::{EntryKey, ResolverSet, Scope, ScopeGenerations, ScopeId, Singleton};
 use upwell_di::{EffectiveGraph, ScopeContainer, ScopeRegistry};
-use upwell_hooks::HookManager;
+use upwell_hooks::{HookDescriptor, HookManager};
 
 use super::*;
 use crate::test_support::{
@@ -110,6 +110,7 @@ async fn prepared_generation(
     base: RuntimeGenerationId,
     seed_destinations: HashMap<TypeId, SeedDestination>,
     entries: &[crate::EntryDescriptor],
+    hooks: Vec<HookDescriptor>,
 ) -> (PreparedRuntimeGeneration, Arc<ScopeRegistry>) {
     let registry = Arc::new(
         ScopeRegistry::new(HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
@@ -117,7 +118,7 @@ async fn prepared_generation(
     );
     let root = ScopeContainer::build_root(
         &[],
-        vec![seed_hook_manager(&HookManager::new(Vec::new()))],
+        vec![seed_hook_manager(&HookManager::new(hooks))],
         ResolverSet::new(),
         Arc::clone(&registry),
     )
@@ -171,8 +172,22 @@ async fn build_runtime_with_entries(
     seed_destinations: HashMap<TypeId, SeedDestination>,
     entries: &[crate::EntryDescriptor],
 ) -> (AppRuntime, Arc<ScopeRegistry>) {
-    let (generation, registry) =
-        prepared_generation(RuntimeGenerationId::INITIAL, seed_destinations, entries).await;
+    build_runtime_with_hooks(seed_destinations, entries, Vec::new()).await
+}
+
+/// A runtime over the test topology whose generation registers `hooks`.
+async fn build_runtime_with_hooks(
+    seed_destinations: HashMap<TypeId, SeedDestination>,
+    entries: &[crate::EntryDescriptor],
+    hooks: Vec<HookDescriptor>,
+) -> (AppRuntime, Arc<ScopeRegistry>) {
+    let (generation, registry) = prepared_generation(
+        RuntimeGenerationId::INITIAL,
+        seed_destinations,
+        entries,
+        hooks,
+    )
+    .await;
     let topology = ScopeTopology::new(&BOUNDARIES)
         .prepare()
         .expect("test topology prepares");
@@ -186,7 +201,8 @@ async fn build_runtime_with_entries(
 /// Publishes a fresh empty generation over the runtime's current one.
 async fn publish_next(runtime: &AppRuntime) -> RuntimeView {
     let transition = runtime.begin_transition().await;
-    let (candidate, _) = prepared_generation(transition.base().id(), HashMap::new(), &[]).await;
+    let (candidate, _) =
+        prepared_generation(transition.base().id(), HashMap::new(), &[], Vec::new()).await;
 
     transition.publish(candidate).expect("candidate publishes")
 }
@@ -210,6 +226,7 @@ fn expect_app_error<T>(result: crate::Result<T>, message: &str) -> Error {
 }
 
 mod context;
+mod end_hooks;
 mod entry_scopes;
 mod log_context;
 mod log_subscribers;

@@ -915,25 +915,38 @@ watcher.await?;
 - **Follow-up:** the container has one retained-value slot. If an instance ever needs a second
   retained value, replace the single slot with a small fixed struct of named optional fields
   (still static, no extension map).
-- **End-of-scope hook (#406):** `ScopeEnded` is an observer-only `#[hook]` kind. A hook takes a
-  `ScopeEnd` (scope id and name, a `ScopeEndKind` of `Completed`, `Failed`, `Cancelled` or
-  `Released`, and the loggable params, never the container or any other field). The instance's
-  owner holds an `InstanceEnd` next to its `InstanceLogs`; dropping it ends the instance. `run`
-  completes it with the run's outcome, a dropped or unwinding run ends as `Cancelled`, and an
-  `OpenScope` or `EntryScope` (a protocol's request or connection scope) ends as `Released` with
-  its last handle, after it released its container reference.
-  - **Never inline:** the hooks run on a task spawned on the ambient Tokio runtime that owns the
-    `InstanceLogs` until they finish. They cannot delay or veto the code that ended the instance,
-    cannot reach the instance to extend its lifetime or mutate it, and run after the work and
-    before the sink closes, so their events are captured and a log stream ends only afterwards.
-    Without a Tokio runtime the end is traced as skipped.
+- **End-of-scope hooks (#406):** two observer-only `#[hook]` kinds. `ScopeEnded<S>` fires when
+  an instance of scope `S` ends (`#[hook(ScopeEnded<Session>)]`); `AnyScopeEnded` fires for every
+  scope and reads `ScopeEnd::scope`. A hook takes a `ScopeEnd` (scope id and name, a
+  `ScopeEndKind` of `Completed`, `Failed`, `Cancelled` or `Released`, and the loggable params,
+  never the container or any other field). Both fire for the same instance, typed first.
+  - **Dispatch by type:** the kind's `TypeId` is already data in the hook descriptor, so the
+    generic kind needs no new registration machinery; `ScopeEnded<NotAScope>` fails the `Scope`
+    bound on the user's own token. `InstanceEnd<S>` is monomorphized per scope and fires
+    `ScopeEnded<S>` straight from the generation's hook index.
+  - **Allocation:** an instance holds an end only when a capture sink exists or `has::<ScopeEnded<S>>()`
+    or `has::<AnyScopeEnded>()` holds for its generation, two O(1) index lookups when it opens.
+  - **Ownership:** `InstanceEnd` lives with `InstanceLogs`. For `run` the run owns it and
+    completes it with its outcome (a dropped or unwinding run ends as `Cancelled`). For an
+    `OpenScope` or `EntryScope` (a protocol's request or connection scope) it is handed to the
+    container's retained slot beside the sink, so the instance ends as `Released` when its last
+    owner lets go of the container, `into_container` included. A scope that never opened emits
+    nothing. The container's slot carries the sink for routing and an opaque keep-alive; the
+    logs never look at the keep-alive and know nothing of hooks.
+  - **Never inline:** the hooks run on a task spawned on the ambient Tokio runtime under the
+    dispatcher that was current when the instance ended, inside the instance's span, and the task
+    owns the `InstanceLogs` until they finish. They cannot delay or veto the code that ended the
+    instance, cannot reach the instance to extend its lifetime or mutate it, and run after the
+    work and before the sink closes. Without a Tokio runtime the end is traced at `warn` as
+    skipped.
+  - **Shutdown:** every runtime counts its pending end tasks. `App::run` and `App::serve` drain
+    them for up to `END_HOOK_DRAIN` after the shutdown hooks, and `AppRuntime::drain_scope_ends`
+    does the same on demand. A raw Tokio runtime dropped without either may still cancel them.
   - **Failures:** the hook manager isolates panics and errors; each is traced as
     `scope end hook failed` on `upwell::scope` with the owner and category, never the message or
-    payload. No `catch_unwind` is added.
-  - **Receivers are singletons** resolved through the generation the instance ran on, which the
-    task pins while it runs. Every hook sees every ending scope and filters on `ScopeEnd::scope`.
-  - **Decoupled:** logs know nothing of hooks and context propagation is untouched; only the
-    instance owner connects them.
+    payload. No `catch_unwind` is added. `Failed` is a framework failure; a work's own `Err`
+    counts as `Completed`.
+  - **Decoupled:** logs and context propagation know nothing of hooks.
 
 Delivery is always bounded and drops the newest record when a buffer is full, counting it in
 `Lagged(n)`. An explicit `LogBuffer { Bounded(NonZeroUsize), Unbounded }` choice is a possible later

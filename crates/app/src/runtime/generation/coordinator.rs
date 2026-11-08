@@ -7,6 +7,7 @@ use arc_swap::ArcSwap;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use upwell_core::RuntimeGenerationId;
 
+use super::EndTasks;
 use super::release::{DisplacedGeneration, DisplacedGenerations};
 use super::{
     PreparedRuntimeCommit, PreparedRuntimeGeneration, RuntimeGeneration, RuntimePublication,
@@ -18,6 +19,7 @@ use crate::runtime::reentrancy::ActiveTransition;
 #[derive(Clone)]
 pub(crate) struct RuntimeTransitionCoordinator {
     owner: Arc<()>,
+    end_tasks: Arc<EndTasks>,
     pub(super) publication: RuntimePublication,
     pub(super) displaced: Arc<DisplacedGenerations>,
     pub(super) writer: Arc<Mutex<()>>,
@@ -29,6 +31,7 @@ pub(crate) struct RuntimeTransitionCoordinator {
 #[derive(Clone)]
 pub(crate) struct WeakTransitionCoordinator {
     owner: Arc<()>,
+    end_tasks: Arc<EndTasks>,
     current: Weak<ArcSwap<RuntimeGeneration>>,
     displaced: Arc<DisplacedGenerations>,
     writer: Arc<Mutex<()>>,
@@ -42,6 +45,7 @@ impl WeakTransitionCoordinator {
 
         Some(RuntimeTransitionCoordinator {
             owner: Arc::clone(&self.owner),
+            end_tasks: Arc::clone(&self.end_tasks),
             publication: RuntimePublication { current },
             displaced: Arc::clone(&self.displaced),
             writer: Arc::clone(&self.writer),
@@ -54,12 +58,18 @@ impl RuntimeTransitionCoordinator {
     pub(crate) fn new(initial: PreparedRuntimeGeneration) -> Self {
         let owner = Arc::new(());
         let displaced = Arc::default();
-        let (initial, _) =
-            initial.commit(Arc::clone(&owner), RuntimeGenerationId::INITIAL, &displaced);
+        let end_tasks = Arc::<EndTasks>::default();
+        let (initial, _) = initial.commit(
+            Arc::clone(&owner),
+            Arc::clone(&end_tasks),
+            RuntimeGenerationId::INITIAL,
+            &displaced,
+        );
         let publication = RuntimePublication::new(initial);
 
         Self {
             owner,
+            end_tasks,
             publication,
             displaced,
             writer: Arc::new(Mutex::new(())),
@@ -71,6 +81,7 @@ impl RuntimeTransitionCoordinator {
     pub(crate) fn downgrade(&self) -> WeakTransitionCoordinator {
         WeakTransitionCoordinator {
             owner: Arc::clone(&self.owner),
+            end_tasks: Arc::clone(&self.end_tasks),
             current: Arc::downgrade(&self.publication.current),
             displaced: Arc::clone(&self.displaced),
             writer: Arc::clone(&self.writer),
@@ -91,6 +102,11 @@ impl RuntimeTransitionCoordinator {
     /// The runtime identity shared by every handle of this coordinator.
     pub(crate) fn owner(&self) -> &Arc<()> {
         &self.owner
+    }
+
+    /// The end-hook tasks of this runtime, shared by all its generations.
+    pub(crate) fn end_tasks(&self) -> &Arc<EndTasks> {
+        &self.end_tasks
     }
 
     pub(crate) fn owns(&self, generation: &Arc<RuntimeGeneration>) -> bool {
@@ -172,8 +188,12 @@ impl RuntimeTransition {
             attempt,
             base,
         } = self;
-        let (candidate, commit_actions) =
-            candidate.commit(Arc::clone(&coordinator.owner), next, &coordinator.displaced);
+        let (candidate, commit_actions) = candidate.commit(
+            Arc::clone(&coordinator.owner),
+            Arc::clone(&coordinator.end_tasks),
+            next,
+            &coordinator.displaced,
+        );
         let candidate = Arc::new(candidate);
 
         Ok(PreparedRuntimeCommit {

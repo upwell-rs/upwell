@@ -16,7 +16,7 @@ use upwell_di::context::{ContextRuntime, InvocationContext, TargetRef};
 use super::{AppRuntime, RuntimeGeneration, RuntimeView};
 use crate::builtins::RuntimeReloader;
 use crate::entry::EntryId;
-use crate::logs::ScopeLogStream;
+use crate::logs::{ScopeLogSink, ScopeLogStream};
 use tracing::Span;
 
 mod builder;
@@ -27,10 +27,10 @@ mod log_options;
 mod run;
 
 use builder::{Builds, open_in};
-use end::InstanceEnd;
+use end::{InstanceEnd, Observed};
 
 pub use builder::{Opening, ScopeBuilder};
-pub use end::{ScopeEnd, ScopeEndContext, ScopeEndKind, ScopeEnded};
+pub use end::{AnyScopeEnded, ScopeEnd, ScopeEndContext, ScopeEndKind, ScopeEnded};
 pub use entry_scope::EntryScope;
 
 pub use run::{ScopeRun, ScopeWork};
@@ -76,7 +76,7 @@ pub struct ScopeEntry<S: Scope> {
 /// An open instance of scope `S`, usable as a typed parent for [`ScopeBuilder::under`].
 pub struct OpenScope<S: Scope> {
     container: Arc<ScopeContainer>,
-    end: Option<Arc<InstanceEnd>>,
+    sink: Option<Arc<ScopeLogSink>>,
     span: Span,
     scope: PhantomData<fn() -> S>,
 }
@@ -286,16 +286,20 @@ impl<S: Scope> Clone for ScopeEntry<S> {
 impl<S: Scope> Copy for ScopeEntry<S> {}
 
 impl<S: Scope> OpenScope<S> {
-    /// An open instance with the span of `logs`, and its sink when it captures.
-    fn new(container: Arc<ScopeContainer>, end: InstanceEnd) -> Self {
-        let span = end.span().clone();
-
+    /// An open instance with the span and the sink its container retains.
+    fn new(container: Arc<ScopeContainer>, observed: Observed) -> Self {
         Self {
             container,
-            end: end.is_observed().then(|| Arc::new(end)),
-            span,
+            sink: observed.sink,
+            span: observed.span,
             scope: PhantomData,
         }
+    }
+
+    /// Whether the instance's container retains an end: a log sink or an end hook observes it.
+    #[cfg(test)]
+    pub(in crate::runtime) fn has_end(&self) -> bool {
+        crate::logs::is_retained(&self.container)
     }
 
     /// The instance's `upwell.scope` span, to instrument the work that runs in it. Events made
@@ -311,9 +315,8 @@ impl<S: Scope> OpenScope<S> {
     /// to the instance goes. Already ended unless the instance was opened with
     /// [`capture_logs`](ScopeBuilder::capture_logs).
     pub fn logs(&self) -> ScopeLogStream {
-        self.end
+        self.sink
             .as_ref()
-            .and_then(|end| end.sink())
             .map_or_else(ScopeLogStream::ended, |sink| sink.subscribe())
     }
 
@@ -322,7 +325,9 @@ impl<S: Scope> OpenScope<S> {
         &self.container
     }
 
-    /// The instance's container, giving up the scope type.
+    /// The instance's container, giving up the scope type. The container keeps the instance's
+    /// log and end hooks alive, so the instance ends when its last owner lets go of the
+    /// container, not when this handle does.
     pub fn into_container(self) -> Arc<ScopeContainer> {
         self.container
     }
@@ -332,7 +337,7 @@ impl<S: Scope> Clone for OpenScope<S> {
     fn clone(&self) -> Self {
         Self {
             container: Arc::clone(&self.container),
-            end: self.end.clone(),
+            sink: self.sink.clone(),
             span: self.span.clone(),
             scope: PhantomData,
         }

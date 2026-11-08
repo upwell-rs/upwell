@@ -5,7 +5,7 @@ use tracing::error;
 use upwell_core::TypeDescriptor;
 use upwell_hooks::{HookKind, Shutdown, Startup};
 
-use crate::runtime::{AppRuntime, hook_target};
+use crate::runtime::{AppRuntime, END_HOOK_DRAIN, hook_target};
 
 /// Fires the startup event, returning the components whose startup gates all succeeded.
 ///
@@ -71,6 +71,13 @@ pub(super) async fn run_shutdown(runtime: &AppRuntime, started: &HashSet<TypeId>
         .await;
 
     log_observer_failures::<Shutdown>(fired.observers);
+
+    if !runtime.drain_scope_ends(END_HOOK_DRAIN).await {
+        error!(
+            target: "upwell::scope",
+            "scope end hooks were still running when the shutdown drain ended"
+        );
+    }
 }
 
 /// Logs every failed lifecycle observer. Observer failures never change the lifecycle.

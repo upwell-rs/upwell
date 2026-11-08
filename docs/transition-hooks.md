@@ -102,7 +102,7 @@ paths) is documented on `ConfigReload` in
 ```rust
 #[methods]
 impl Audit {
-    #[hook(ScopeEnded)]
+    #[hook(ScopeEnded<Session>)]
     async fn ended(&self, end: ScopeEnd) {
         self.record(end.scope, end.kind, &end.params);
     }
@@ -110,7 +110,8 @@ impl Audit {
 ```
 
 Not a transition hook: it fires whenever a scope instance (a run, a request, a connection) ends.
-Every hook of the kind observes every ending scope and filters on `ScopeEnd::scope`. It runs on a
+`ScopeEnded<S>` observes one scope; `AnyScopeEnded` observes every scope and filters on
+`ScopeEnd::scope`. Both fire for the same instance. It runs on a
 spawned task after the instance's work and before its log closes, so it never delays the code
 that ended the instance and the events it makes are captured. See
 `crates/app/src/runtime/opener/end/mod.rs` for the full contract.
