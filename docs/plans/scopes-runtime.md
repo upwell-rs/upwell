@@ -902,7 +902,7 @@ watcher.await?;
     one subscriber, an unsupported setup in which each delivers, the first the downcast finds
     decides. Inside a `tracing` dispatch (a formatter rendering an event) `get_default` yields
     `Dispatch::none`, so there, as under an explicit `Dispatch::none` default, it accepts any
-    layer's sink. While no sink is open anywhere an event costs one atomic read.
+    layer's sink; spans of several subscribers interleaved on one thread can therefore make it pick another subscriber's capture (event delivery is unaffected; tracked in #484). While no sink is open anywhere an event costs one atomic read.
 - **Cost of the rule:** an `OpenScope` span entered by hand inside an unrelated invocation's
   context routes to that invocation, not to the hand-entered instance, unless the instance opened
   under the invocation's innermost one. Run work inside the instance's own context (`run`, or a

@@ -16,7 +16,7 @@ def patch_lines(patch):
     lines = set()
     new = 0
 
-    for raw in patch.splitlines():
+    for raw in patch.removesuffix("\n").split("\n"):
         hunk = HUNK.match(raw)
 
         if hunk:
@@ -76,7 +76,7 @@ def diff_lines(diff):
     path = None
     patch = []
 
-    for raw in diff.splitlines():
+    for raw in diff.removesuffix("\n").split("\n"):
         if raw.startswith("diff --git "):
             if path is not None:
                 files[path] = patch_lines("\n".join(patch))

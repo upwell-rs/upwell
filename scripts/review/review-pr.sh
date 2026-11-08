@@ -200,6 +200,11 @@ else
 fi
 
 check_fresh
+if [ -z "$verify_only" ] && ! python3 -I "$here/verify_drafts.py" saved "$discovery" "$drafts"; then
+    echo "run dir $work kept; after inspecting $drafts you can resume it with UPWELL_REVIEW_VERIFY_ONLY=$drafts" >&2
+    exit 3
+fi
+
 draft_count="$(python3 -I "$here/verify_drafts.py" prepare "$source_drafts" "$pr" "$head_sha" "$verify_input")"
 
 if [ "$draft_count" -eq 0 ] && [ -n "$verify_only" ]; then
