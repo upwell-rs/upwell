@@ -135,3 +135,25 @@ fn the_log_is_current_under_any_span_store_the_layer_supports() {
     assert!(capturing, "ScopeLogs finds the instance's log");
     assert_eq!(messages(&captured), ["in the instance"]);
 }
+
+#[test]
+fn a_detached_span_entered_inside_a_capture_hides_the_capture_from_the_current_log() {
+    let _guard = install();
+    let (logs, _stream) = instance(1, &options());
+
+    let (inside, detached) = logs.span().in_scope(|| {
+        let inside = ScopeLogs::current().is_capturing();
+        let detached = tracing::error_span!(parent: None, "detached")
+            .in_scope(|| ScopeLogs::current().is_capturing());
+
+        (inside, detached)
+    });
+
+    logs.finish();
+
+    assert!(inside, "the instance's own span shows its log");
+    assert!(
+        !detached,
+        "a span with no capturing ancestor shows no log, as its events reach none"
+    );
+}

@@ -1,5 +1,7 @@
-//! The capturing `upwell.scope` spans entered on this thread, as the layer sees them enter and
-//! exit.
+//! The spans entered on this thread while a sink is open, each with the sink of its innermost
+//! capturing `upwell.scope` span, as the layer sees them enter and exit. A span with no
+//! capturing ancestor, such as a root entered inside a capture, is recorded without a sink, so
+//! it hides the capture around it just as it keeps its events out of it.
 //!
 //! [`ScopeLogs`](super::ScopeLogs) reads the innermost one here instead of looking the current
 //! span up in the subscriber: that lookup would lock span extensions, which a formatter may
@@ -15,11 +17,11 @@ use tracing::Id;
 use super::ScopeLogSink;
 
 thread_local! {
-    static ENTERED: RefCell<Vec<(Id, Arc<ScopeLogSink>)>> = const { RefCell::new(Vec::new()) };
+    static ENTERED: RefCell<Vec<(Id, Option<Arc<ScopeLogSink>>)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Records that the span `id`, routing to `sink`, was entered on this thread.
-pub(super) fn enter(id: &Id, sink: Arc<ScopeLogSink>) {
+/// Records that the span `id`, routing to `sink`, or to no sink, was entered on this thread.
+pub(super) fn enter(id: &Id, sink: Option<Arc<ScopeLogSink>>) {
     let entry = (id.clone(), sink);
 
     // Ignored when the thread is tearing down its locals: nothing reads the stack after that.
@@ -34,16 +36,16 @@ pub(super) fn exit(id: &Id) -> Option<Arc<ScopeLogSink>> {
             let mut entered = entered.borrow_mut();
             let position = entered.iter().rposition(|(entry, _)| entry == id)?;
 
-            Some(entered.remove(position).1)
+            entered.remove(position).1
         })
         .ok()
         .flatten()
 }
 
-/// The sink of the innermost capturing span entered on this thread.
+/// The sink the innermost span entered on this thread routes to.
 pub(super) fn innermost() -> Option<Arc<ScopeLogSink>> {
     ENTERED
-        .try_with(|entered| entered.borrow().last().map(|(_, sink)| Arc::clone(sink)))
+        .try_with(|entered| entered.borrow().last().and_then(|(_, sink)| sink.clone()))
         .ok()
         .flatten()
 }

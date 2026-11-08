@@ -75,9 +75,7 @@ where
             .scope()
             .find_map(|span| span.extensions().get::<Arc<ScopeLogSink>>().cloned());
 
-        if let Some(sink) = found {
-            entered::enter(id, sink);
-        }
+        entered::enter(id, found);
     }
 
     fn on_exit(&self, id: &Id, _ctx: Context<'_, S>) {
