@@ -47,7 +47,18 @@ enum ActiveScope {
 struct PendingScope {
     scope: ScopeKey,
     parent: Option<Arc<ScopeContainer>>,
+    claim: Claim,
     opened: OnceLock<Arc<ScopeContainer>>,
+}
+
+/// Which opening of its scope a [`PendingScope`] binds.
+#[derive(Clone, Copy)]
+enum Claim {
+    /// Any instance of the scope that opens under the parent, through [`bind_opened_scope`].
+    AnyOpening,
+    /// None: the code that made the context opens the instance and runs it in a context of
+    /// its own, so an unrelated instance opened while it constructs cannot take its place.
+    Owner,
 }
 
 impl InvocationContext {
@@ -74,10 +85,26 @@ impl InvocationContext {
     /// has one. Until it opens, `parent` is the innermost scope instance.
     #[doc(hidden)]
     pub fn with_pending_scope(self, scope: ScopeKey, parent: Option<Arc<ScopeContainer>>) -> Self {
+        self.pending(scope, parent, Claim::AnyOpening)
+    }
+
+    /// This context running while the caller opens an instance of `scope` under `parent`, as
+    /// [`with_pending_scope`](Self::with_pending_scope) does, except that no opening binds it:
+    /// the caller runs the opened instance in [`with_scope`](Self::with_scope) itself. An
+    /// instance of the same scope opened lazily while the caller's instance constructs then
+    /// cannot stand in for it.
+    #[doc(hidden)]
+    pub fn with_opening_scope(self, scope: ScopeKey, parent: Arc<ScopeContainer>) -> Self {
+        self.pending(scope, Some(parent), Claim::Owner)
+    }
+
+    /// This context waiting for an instance of `scope` under `parent` that `claim` binds.
+    fn pending(self, scope: ScopeKey, parent: Option<Arc<ScopeContainer>>, claim: Claim) -> Self {
         Self {
             scope: ActiveScope::Pending(PendingScope {
                 scope,
                 parent,
+                claim,
                 opened: OnceLock::new(),
             }),
             ..self
@@ -279,7 +306,7 @@ pub fn with_context_state<R>(read: impl FnOnce(ContextState<'_>) -> R) -> R {
 /// instance of its scope under its parent. Returns whether it bound.
 ///
 /// A protocol calls it from the task that opened the scope lazily; anywhere else it does
-/// nothing.
+/// nothing. A context made by [`InvocationContext::with_opening_scope`] never binds.
 #[doc(hidden)]
 pub fn bind_opened_scope(container: &Arc<ScopeContainer>) -> bool {
     CONTEXT
@@ -296,6 +323,10 @@ pub fn bind_opened_scope(container: &Arc<ScopeContainer>) -> bool {
 
 impl PendingScope {
     fn expects(&self, container: &ScopeContainer) -> bool {
+        if matches!(self.claim, Claim::Owner) {
+            return false;
+        }
+
         let parent_matches = match (&self.parent, container.parent()) {
             (Some(expected), Some(actual)) => Arc::ptr_eq(expected, actual),
             (Some(_), None) => false,
