@@ -1,0 +1,19 @@
+error: `HttpRequest` is listed as a child more than once
+ --> tests/ui/scopes/child_listed_twice.rs:5:52
+  |
+5 | #[scope(parents = [Root], children = [HttpRequest, HttpRequest])]
+  |                                                    ^^^^^^^^^^^
+
+warning: unused import: `upwell::axum::HttpRequest`
+ --> tests/ui/scopes/child_listed_twice.rs:1:5
+  |
+1 | use upwell::axum::HttpRequest;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `upwell::scope::Root`
+ --> tests/ui/scopes/child_listed_twice.rs:3:5
+  |
+3 | use upwell::scope::Root;
+  |     ^^^^^^^^^^^^^^^^^^^

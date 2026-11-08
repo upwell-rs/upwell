@@ -1,0 +1,46 @@
+error[E0277]: the trait bound `NotAScope: upwell::Scope` is not satisfied
+ --> tests/ui/scopes/child_not_a_scope.rs:6:39
+  |
+6 | #[scope(parents = [Root], children = [NotAScope])]
+  |                                       ^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `upwell::Scope` is not implemented for `NotAScope`
+ --> tests/ui/scopes/child_not_a_scope.rs:4:1
+  |
+4 | struct NotAScope;
+  | ^^^^^^^^^^^^^^^^
+  = help: the following other types implement trait `upwell::Scope`:
+            HttpRequest
+            Session
+            WebsocketConnectionScope
+            WebsocketMessageScope
+            upwell::Singleton
+            upwell::Transient
+            upwell::scope::Connection
+            upwell::scope::Request
+note: required by a bound in `OpensUnder`
+ --> crates/app/src/runtime/opener/mod.rs
+  |
+  | pub trait OpensUnder<P: Scope>: Scope {}
+  |                                 ^^^^^ required by this bound in `OpensUnder`
+
+error[E0277]: the trait bound `NotAScope: upwell::Scope` is not satisfied
+ --> tests/ui/scopes/child_not_a_scope.rs:6:39
+  |
+6 | #[scope(parents = [Root], children = [NotAScope])]
+  |                                       ^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `upwell::Scope` is not implemented for `NotAScope`
+ --> tests/ui/scopes/child_not_a_scope.rs:4:1
+  |
+4 | struct NotAScope;
+  | ^^^^^^^^^^^^^^^^
+  = help: the following other types implement trait `upwell::Scope`:
+            HttpRequest
+            Session
+            WebsocketConnectionScope
+            WebsocketMessageScope
+            upwell::Singleton
+            upwell::Transient
+            upwell::scope::Connection
+            upwell::scope::Request

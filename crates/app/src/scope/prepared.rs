@@ -52,7 +52,8 @@ impl PreparedScopeTopology {
         self.boundary(id).is_some()
     }
 
-    /// Returns the declared opening parents of `id`, if `id` is a boundary.
+    /// Returns the opening parents of `id`, if `id` is a boundary: the ones it declares, then
+    /// the ones application scopes added to it.
     pub fn parents_of(&self, id: &ScopeId) -> Option<&'static [ScopeParent]> {
         self.boundary(id).map(ScopeBoundary::parents)
     }

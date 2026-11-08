@@ -10,7 +10,7 @@ use upwell_di::{
 };
 
 use crate::entry::{ENTRIES, EntryDescriptor};
-use crate::scope::{PreparedScopeTopology, SCOPES, ScopeBoundary, ScopeDeclaration};
+use crate::scope::{PreparedScopeTopology, SCOPES, ScopeDeclaration};
 
 mod condition;
 mod config;
@@ -98,11 +98,6 @@ impl AppRegistry {
         if !registered {
             self.scopes.push(scope);
         }
-    }
-
-    /// The boundary of every declared scope, in registration order.
-    pub(crate) fn declared_boundaries(&self) -> impl Iterator<Item = ScopeBoundary> + '_ {
-        self.scopes.iter().map(|scope| scope.boundary)
     }
 
     /// Registers the parameter slot of every declared scope that stores its value.

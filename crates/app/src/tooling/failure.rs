@@ -261,7 +261,7 @@ fn scope_topology_diagnostic(error: &crate::ScopeTopologyError) -> Diagnostic {
         "upwell/tooling-scope-topology",
         error.to_string(),
         resources,
-        "Correct duplicate, missing, cyclic, or invalid scope parent declarations.",
+        "Correct duplicate, missing, cyclic, or invalid scope parent or child declarations.",
     )
 }
 
@@ -274,7 +274,8 @@ pub(super) fn scope_topology_resources(error: &crate::ScopeTopologyError) -> Vec
         | ScopeTopologyError::NoParents { id }
         | ScopeTopologyError::SelfParent { id } => vec![scope_resource(*id)],
         ScopeTopologyError::MissingParent { id, parent }
-        | ScopeTopologyError::DuplicateParent { id, parent } => {
+        | ScopeTopologyError::DuplicateParent { id, parent }
+        | ScopeTopologyError::MissingChild { id, child: parent } => {
             vec![scope_resource(*id), scope_resource(*parent)]
         }
         ScopeTopologyError::Cycle { members } => {

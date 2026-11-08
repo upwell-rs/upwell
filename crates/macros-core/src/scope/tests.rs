@@ -85,6 +85,61 @@ fn explicit_arguments_override_the_derived_constants() {
 }
 
 #[test]
+fn children_open_under_the_scope_and_rank_below_it() {
+    let expanded = expand_str(
+        quote!(
+            parents = [Root],
+            generations = durable,
+            children = [HttpRequest, crate::Call]
+        ),
+        quote!(
+            struct Session;
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains("impl::upwell::OpensUnder<Session>forHttpRequest{}"));
+    assert!(expanded.contains("impl::upwell::OpensUnder<Session>forcrate::Call{}"));
+    assert!(
+        expanded.contains("<Sessionas::upwell::Scope>::RANK><HttpRequestas::upwell::Scope>::RANK")
+    );
+    assert!(expanded.contains(
+        ".with_children(&[<HttpRequestas::upwell::Scope>::ID,<crate::Callas::upwell::Scope>::ID])"
+    ));
+}
+
+#[test]
+fn a_scope_without_children_names_none() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct Unit;
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains(".with_children(&[])"));
+}
+
+#[test]
+fn invalid_children_are_rejected() {
+    let unit = quote!(
+        struct Session;
+    );
+
+    assert!(
+        error(quote!(parents = [Root], children = []), unit.clone()).contains("at least one scope")
+    );
+    assert!(
+        error(
+            quote!(parents = [Root], children = [HttpRequest, HttpRequest]),
+            unit
+        )
+        .contains("`HttpRequest` is listed as a child more than once")
+    );
+}
+
+#[test]
 fn a_generation_policy_path_is_emitted_verbatim() {
     let expanded = expand_str(
         quote!(parents = [Root], generations = my::POLICY),

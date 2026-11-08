@@ -2,7 +2,8 @@
 //! parameters.
 //!
 //! The struct is kept unchanged. Beside it the macro emits, from the one `parents` list, the
-//! `Scope` impl, an `OpensUnder<P>` impl and a rank check per parent, and the scope's
+//! `Scope` impl, an `OpensUnder<P>` impl and a rank check per parent, from the `children` list
+//! an `impl OpensUnder<Scope> for Child` and a rank check per child, and the scope's
 //! `ScopeDeclaration`, carried by the type (so the builder can register it explicitly) and
 //! appended to the `SCOPES` discovery slice. Preparation adds the declaration's boundary to the
 //! protocol's topology and its parameter slot to the registry, so the trait impls and the
@@ -59,6 +60,12 @@ pub fn expand(args: ScopeArgs, mut item: ItemStruct, paths: &Paths) -> syn::Resu
     let generations = generations(args.generations.as_ref(), paths);
     let opens_under = opens_under(&args.parents, ident, paths);
     let rank_checks = rank_checks(&args.parents, ident, paths);
+    let children = children(&args.children, ident, paths);
+    let child_ids = args.children.iter().map(|child| {
+        let scope_trait = paths.core("Scope");
+
+        quote_spanned!(child.span()=> <#child as #scope_trait>::ID)
+    });
     let parents = args
         .parents
         .iter()
@@ -80,6 +87,8 @@ pub fn expand(args: ScopeArgs, mut item: ItemStruct, paths: &Paths) -> syn::Resu
 
         #rank_checks
 
+        #children
+
         const _: () = ::core::assert!(
             <#ident as #scope_trait>::RANK >= 1,
             "a #[scope] rank must be at least 1: rank 0 belongs to the transient scope"
@@ -90,6 +99,7 @@ pub fn expand(args: ScopeArgs, mut item: ItemStruct, paths: &Paths) -> syn::Resu
                 const PARENTS: &[#scope_parent] = &[#(#parents),*];
 
                 #declaration::new::<#ident>(PARENTS)
+                    .with_children(&[#(#child_ids),*])
                     .with_fields(&[#(#fields),*])
                     .declared_at(#source)
             };
@@ -374,6 +384,32 @@ fn rank_checks(parents: &[syn::Path], ident: &syn::Ident, paths: &Paths) -> Toke
     });
 
     quote!(#(#checks)*)
+}
+
+/// Per child, spanned at the child: `impl OpensUnder<S> for Child {}`, which is allowed for a
+/// child declared in another crate because `S` is local, and a const assertion that the scope
+/// outranks the child.
+fn children(children: &[syn::Path], ident: &syn::Ident, paths: &Paths) -> TokenStream {
+    let opens_under = paths.core("OpensUnder");
+    let scope_trait = paths.core("Scope");
+    let items = children.iter().map(|child| {
+        let message = format!(
+            "a #[scope] child must rank below the scope: `{}` does not rank below `{}`",
+            quote!(#child).to_string().replace(' ', ""),
+            ident.unraw()
+        );
+
+        quote_spanned! {child.span()=>
+            impl #opens_under<#ident> for #child {}
+
+            const _: () = ::core::assert!(
+                <#ident as #scope_trait>::RANK > <#child as #scope_trait>::RANK,
+                #message
+            );
+        }
+    });
+
+    quote!(#(#items)*)
 }
 
 /// For a scope with fields: a const assertion that the scope is not zero-sized, so the

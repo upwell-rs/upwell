@@ -7,9 +7,11 @@ use syn::{LitInt, LitStr, Token};
 
 use crate::paths::Paths;
 
-/// The arguments of `#[scope(parents = [..], generations = .., rank = .., id = "..", name = "..")]`.
+/// The arguments of `#[scope(parents = [..], children = [..], generations = .., rank = ..,
+/// id = "..", name = "..")]`.
 pub struct ScopeArgs {
     pub(super) parents: Vec<syn::Path>,
+    pub(super) children: Vec<syn::Path>,
     pub(super) generations: Option<Generations>,
     pub(super) rank: Option<LitInt>,
     pub(super) id: Option<LitStr>,
@@ -34,6 +36,7 @@ impl ScopeArgs {
 impl Parse for ScopeArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut parents = None;
+        let mut children = Vec::new();
         let mut generations = None;
         let mut rank = None;
         let mut id = None;
@@ -45,6 +48,7 @@ impl Parse for ScopeArgs {
 
             match key.to_string().as_str() {
                 "parents" => parents = Some(parse_parents(&key, input)?),
+                "children" => children = parse_children(&key, input)?,
                 "generations" => {
                     input.parse::<Token![=]>()?;
                     generations = Some(parse_generations(input.parse()?)?);
@@ -65,8 +69,8 @@ impl Parse for ScopeArgs {
                 _ => {
                     return Err(syn::Error::new_spanned(
                         key,
-                        "unknown argument; expected one of: `parents`, `generations`, `rank`, \
-                         `id`, `name`, `upwell`",
+                        "unknown argument; expected one of: `parents`, `children`, \
+                         `generations`, `rank`, `id`, `name`, `upwell`",
                     ));
                 }
             }
@@ -84,6 +88,7 @@ impl Parse for ScopeArgs {
 
         Ok(Self {
             parents,
+            children,
             generations,
             rank,
             id,
@@ -112,6 +117,48 @@ fn parse_parents(key: &syn::Ident, input: ParseStream) -> syn::Result<Vec<syn::P
     }
 
     Ok(parents)
+}
+
+/// `= [Child, ..]`, rejecting an empty list at `key` and a child named twice at its second
+/// mention.
+fn parse_children(key: &syn::Ident, input: ParseStream) -> syn::Result<Vec<syn::Path>> {
+    let content;
+
+    input.parse::<Token![=]>()?;
+    syn::bracketed!(content in input);
+
+    let children: Vec<syn::Path> = Punctuated::<syn::Path, Token![,]>::parse_terminated(&content)?
+        .into_iter()
+        .collect();
+
+    if children.is_empty() {
+        return Err(syn::Error::new_spanned(
+            key,
+            "`children` needs at least one scope that may open under this one; leave it out \
+             when none does",
+        ));
+    }
+
+    for (index, child) in children.iter().enumerate() {
+        let spelled = path_text(child);
+
+        if children[..index]
+            .iter()
+            .any(|earlier| path_text(earlier) == spelled)
+        {
+            return Err(syn::Error::new_spanned(
+                child,
+                format!("`{spelled}` is listed as a child more than once"),
+            ));
+        }
+    }
+
+    Ok(children)
+}
+
+/// A path as written, without spaces, to compare and name it.
+fn path_text(path: &syn::Path) -> String {
+    quote::quote!(#path).to_string().replace(' ', "")
 }
 
 /// `pinned`, `durable`, or a path to a policy value.

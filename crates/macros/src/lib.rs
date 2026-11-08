@@ -250,6 +250,10 @@ pub fn entry(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// - `parents = [Path, ..]` (required): every scope it opens under, `Root` for the application
 ///   root. Each path is emitted as written.
+/// - `children = [Path, ..]`: scopes declared elsewhere, such as a protocol's `HttpRequest`, that
+///   may also open under this one. Each gets `impl OpensUnder<Self>` and a compile-time check
+///   that it ranks below the scope; preparation adds the scope to its parents, beside the ones
+///   it declares. A child the topology does not declare fails preparation.
 /// - `generations = pinned | durable | path`: how an open instance relates to later runtime
 ///   generations, `pinned` by default.
 /// - `rank = N`: the lifetime rank, between 1 and 254, by default one below the lowest-ranked
@@ -259,8 +263,9 @@ pub fn entry(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// # Errors
 ///
-/// A missing or empty `parents`, a generic struct, a malformed `id`, an out-of-range `rank` or
-/// a parent that does not outrank the scope is a compile error.
+/// A missing or empty `parents`, an empty `children` or a child listed twice, a generic struct,
+/// a malformed `id`, an out-of-range `rank`, a parent that does not outrank the scope, or a
+/// child that does not rank below it is a compile error.
 #[proc_macro_attribute]
 pub fn scope(attr: TokenStream, item: TokenStream) -> TokenStream {
     upwell_macros_core::scope(attr.into(), item.into()).into()

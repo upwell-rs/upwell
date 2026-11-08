@@ -47,6 +47,14 @@ pub enum ScopeTopologyError {
         /// The undeclared parent identity.
         parent: ScopeId,
     },
+    /// An application scope names a child no boundary of the topology declares.
+    #[error("scope '{id}' names child '{child}', which no scope boundary declares")]
+    MissingChild {
+        /// The application scope that names the child.
+        id: ScopeId,
+        /// The undeclared child identity.
+        child: ScopeId,
+    },
     /// Parent links contain a structural cycle.
     #[error("scope topology contains a parent cycle involving {members:?}")]
     Cycle {

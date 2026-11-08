@@ -1,21 +1,25 @@
 //! Application-declared scopes: the `#[scope]` declarations an application adds to its
 //! protocol's topology.
 
-use upwell_core::{ItemSource, Scope, TypeDescriptor};
+use upwell_core::{ItemSource, Scope, ScopeId, TypeDescriptor};
 use upwell_di::ComponentDescriptor;
 
 use super::{ScopeBoundary, ScopeParent};
 
-/// One scope an application declares, such as a `#[scope]` type: its boundary in the topology
-/// and the slot its parameters fill.
+/// One scope an application declares, such as a `#[scope]` type: its boundary in the topology,
+/// the scopes that may open under it, and the slot its parameters fill.
 ///
-/// Preparation adds the boundary to the active protocol's topology and registers the
-/// parameter slot, so every instance can inject its own value as `Arc<S>`.
+/// Preparation adds the boundary to the active protocol's topology, adds the scope as a parent
+/// of each of its `children`, and registers the parameter slot, so every instance can inject
+/// its own value as `Arc<S>`.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct ScopeDeclaration {
     /// The scope and every parent it opens under.
     pub boundary: ScopeBoundary,
+    /// Scopes declared elsewhere, such as a protocol's request scope, that may also open under
+    /// this one. Each must already be a boundary of the topology and rank below this scope.
+    pub children: &'static [ScopeId],
     /// The factory-less slot each instance's value fills, or `None` for a zero-sized scope,
     /// whose instances store nothing.
     pub params: Option<ComponentDescriptor>,
@@ -31,10 +35,18 @@ impl ScopeDeclaration {
     pub const fn new<S: Scope>(parents: &'static [ScopeParent]) -> Self {
         Self {
             boundary: ScopeBoundary::new::<S>(parents),
+            children: &[],
             params: params_slot::<S>(),
             fields: &[],
             source: None,
         }
+    }
+
+    /// Lets each of `children`, a scope declared elsewhere, also open under this one.
+    pub const fn with_children(mut self, children: &'static [ScopeId]) -> Self {
+        self.children = children;
+
+        self
     }
 
     /// Records the scope's parameter fields.

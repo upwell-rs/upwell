@@ -72,7 +72,7 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         let tree = finalize_config(config_source, &dirs, auto_discovery_enabled, &mut registry)?;
         let scope_topology = Arc::new(
             D::SCOPE_TOPOLOGY
-                .prepare_with(registry.declared_boundaries())
+                .prepare_with(&registry.scopes)
                 .map_err(Error::from)?,
         );
         let entries =
