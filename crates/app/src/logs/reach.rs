@@ -12,8 +12,9 @@ use super::{ScopeLogLayer, ScopeLogSink};
 pub(super) enum Reach {
     /// The sinks the current subscriber's scope log layer took.
     Layer(LayerId),
-    /// Every sink a layer took: the code runs inside a `tracing` dispatch, which hides the
-    /// subscriber dispatching.
+    /// Every sink a layer took, read from the innermost span any layer recorded entered on
+    /// this thread: the code runs inside a `tracing` dispatch, which hides the subscriber
+    /// dispatching.
     Any,
     /// No sink: the current subscriber exposes no scope log layer.
     Nothing,

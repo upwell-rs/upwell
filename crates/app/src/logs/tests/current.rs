@@ -213,3 +213,61 @@ fn a_formatter_rendering_an_event_inside_a_capture_sees_the_log() {
         "a formatter rendering an event made in the instance sees its log"
     );
 }
+
+#[test]
+fn another_subscribers_exit_keeps_the_current_capture() {
+    let capturing = Dispatch::new(Registry::default().with(ScopeLogLayer::new()));
+    let other = Dispatch::new(Registry::default().with(ScopeLogLayer::new()));
+    let foreign = tracing::dispatcher::with_default(&other, || tracing::error_span!("foreign"));
+    let entered_foreign = foreign.enter();
+
+    let (before, after) = tracing::dispatcher::with_default(&capturing, || {
+        let (logs, _stream) = instance(1, &options());
+        let _entered = logs.span().enter();
+        let before = ScopeLogs::current().is_capturing();
+
+        drop(entered_foreign);
+
+        let after = ScopeLogs::current().is_capturing();
+
+        (before, after)
+    });
+
+    assert!(before, "the instance's span shows its log");
+    assert!(
+        after,
+        "another subscriber's span exiting with the same id leaves the instance's entry"
+    );
+}
+
+#[test]
+fn another_subscribers_span_entered_inside_a_capture_does_not_hide_it() {
+    let capturing = Dispatch::new(Registry::default().with(ScopeLogLayer::new()));
+    let other = Dispatch::new(Registry::default().with(ScopeLogLayer::new()));
+
+    let (inside, under_other) = tracing::dispatcher::with_default(&capturing, || {
+        let (logs, _stream) = instance(1, &options());
+
+        logs.span().in_scope(|| {
+            let foreign =
+                tracing::dispatcher::with_default(&other, || tracing::error_span!("foreign"));
+
+            foreign.in_scope(|| {
+                let under_other = tracing::dispatcher::with_default(&other, || {
+                    ScopeLogs::current().is_capturing()
+                });
+
+                (ScopeLogs::current().is_capturing(), under_other)
+            })
+        })
+    });
+
+    assert!(
+        inside,
+        "a sinkless span of another subscriber hides no capture of the current one"
+    );
+    assert!(
+        !under_other,
+        "the other subscriber shows no log it did not take"
+    );
+}

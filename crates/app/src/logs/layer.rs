@@ -100,11 +100,11 @@ where
             .scope()
             .find_map(|span| span.extensions().get::<Arc<ScopeLogSink>>().cloned());
 
-        entered::enter(id, found);
+        entered::enter(self.id, id, found);
     }
 
     fn on_exit(&self, id: &Id, _ctx: Context<'_, S>) {
-        drop(entered::exit(id));
+        drop(entered::exit(self.id, id));
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
