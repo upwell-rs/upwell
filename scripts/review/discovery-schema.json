@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "drafts", "summary", "unchecked"],
+  "properties": {
+    "status": { "type": "string", "enum": ["DISCOVERY_DONE"] },
+    "drafts": { "type": "integer", "minimum": 0 },
+    "summary": { "type": "string" },
+    "unchecked": { "type": "string" }
+  }
+}
