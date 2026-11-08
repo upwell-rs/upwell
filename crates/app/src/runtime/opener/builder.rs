@@ -1,13 +1,15 @@
 //! The inputs of one scope instance and how it opens.
 
 use std::any::{Any, TypeId};
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use upwell_core::{Scope, ScopeId, Singleton, TypeDescriptor};
 use upwell_di::{BoxedComponent, EntryPlan, Injectable, ScopeContainer};
 
 use super::{
-    EntryScope, InstanceEnd, OpenScope, OpensUnder, ScopeEndKind, ScopeEntry, ScopeOpener,
+    EntryScope, InstanceEnd, OpenScope, OpensUnder, ParentScope, ScopeEndKind, ScopeEntry,
+    ScopeOpener,
 };
 use crate::entry::EntryId;
 use crate::logs::{InstanceLogs, LogOptions, ScopeLogSink};
@@ -45,8 +47,9 @@ pub enum Opening<'e, S: Scope> {
 #[must_use = "a scope builder does nothing until it is opened"]
 pub struct ScopeBuilder<'a, S: Scope, P: Scope = Singleton> {
     pub(super) opener: &'a ScopeOpener<S>,
-    parent: Option<&'a OpenScope<P>>,
+    parent: Option<&'a Arc<ScopeContainer>>,
     pub(super) params: S,
+    parent_type: PhantomData<fn() -> P>,
     pub(super) seeds: Vec<BoxedComponent>,
     pub(super) logs: LogOptions,
 }
@@ -57,6 +60,7 @@ impl<'a, S: Scope> ScopeBuilder<'a, S> {
             opener,
             parent: None,
             params,
+            parent_type: PhantomData,
             seeds: Vec::new(),
             logs: LogOptions::new(),
         }
@@ -71,11 +75,25 @@ impl<'a, S: Scope, P: Scope> ScopeBuilder<'a, S, P> {
     {
         ScopeBuilder {
             opener: self.opener,
-            parent: Some(parent),
+            parent: Some(parent.container()),
             params: self.params,
+            parent_type: PhantomData,
             seeds: self.seeds,
             logs: self.logs,
         }
+    }
+
+    /// Opens the instance under `parent`, a parent picked at run time, on the runtime
+    /// generation `parent` runs on.
+    ///
+    /// Making `parent` checked that `S` may open under it, so the builder keeps its parent
+    /// type `P`, and its opening methods still require `S: OpensUnder<P>`: under the root
+    /// (the default), `S: OpensUnder<Singleton>`. A scope that never opens under the root
+    /// picks a typed parent with [`under`](Self::under).
+    pub fn under_parent(mut self, parent: &'a ParentScope<S>) -> Self {
+        self.parent = Some(parent.container());
+
+        self
     }
 
     /// Fills the scope's factory-less slot for `T` with `value`.
@@ -248,10 +266,7 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     pub(super) fn target(&self) -> crate::Result<(RuntimeView, Arc<ScopeContainer>)> {
         let runtime = self.opener.runtime.get::<S>()?;
         let (view, parent) = match self.parent {
-            Some(parent) => (
-                runtime.pinned_view(S::ID, &parent.container)?,
-                Arc::clone(&parent.container),
-            ),
+            Some(parent) => (runtime.pinned_view(S::ID, parent)?, Arc::clone(parent)),
             None => {
                 let view = runtime.view();
                 let root = Arc::clone(view.root());
@@ -261,7 +276,7 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
         };
 
         debug_assert!(
-            opens_under::<S, P>(&view),
+            opens_under::<S>(&view, parent.scope().id()),
             "`OpensUnder` lists a parent the topology of `{}` does not",
             S::NAME
         );
@@ -364,12 +379,12 @@ pub(super) async fn open_planned_in(
     .map_err(crate::Error::from)
 }
 
-/// Whether the topology `view` runs on lets `S` open under `P`.
-fn opens_under<S: Scope, P: Scope>(view: &RuntimeView) -> bool {
-    let parent = if P::ID == Singleton::ID {
+/// Whether the topology `view` runs on lets `S` open under the scope `parent`.
+fn opens_under<S: Scope>(view: &RuntimeView, parent: ScopeId) -> bool {
+    let parent = if parent == Singleton::ID {
         ScopeParent::Root
     } else {
-        ScopeParent::of::<P>()
+        ScopeParent::Boundary(parent)
     };
 
     view.scope_plan()

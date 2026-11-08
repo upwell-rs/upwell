@@ -24,6 +24,7 @@ mod end;
 mod entry_scope;
 mod inject;
 mod log_options;
+mod parent;
 mod run;
 mod run_error;
 mod work;
@@ -35,6 +36,7 @@ pub use builder::{Opening, ScopeBuilder};
 pub use end::{AnyScopeEnded, ScopeEnd, ScopeEndContext, ScopeEndKind, ScopeEnded};
 pub use entry_scope::EntryScope;
 
+pub use parent::ParentScope;
 pub use run::ScopeRun;
 pub use run_error::RunError;
 pub use work::{ScopeWork, TryScopeWork};

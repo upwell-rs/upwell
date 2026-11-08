@@ -39,6 +39,11 @@ impl ComponentRegistry {
 /// Three kinds of edge are exempt: config edges resolve against external bindings, dynamic
 /// edges are runtime-provided, and invocation-context edges (`Current<T>`, `Scoped<S, T>`)
 /// retain nothing, so they cannot hold a shorter-lived value captive.
+///
+/// An optional edge may also name a target the consumer cannot reach on every chain, when the
+/// target's scope is longer-lived: an HTTP request that may open under the root or under an
+/// application's session takes the session's component as `Option<Arc<T>>`, which is `None` on
+/// a chain without the session. It cannot hold a shorter-lived value captive either.
 pub(super) fn check_scope(
     selection: &selection::ProviderSelectionModel,
     consumer: &ComponentDescriptor,
@@ -55,7 +60,10 @@ pub(super) fn check_scope(
     };
 
     for (dep_scope, dep_name) in dep_scopes {
-        if dep.resolution != ResolutionMode::Fresh && !can_access(consumer.scope, dep_scope) {
+        if dep.resolution != ResolutionMode::Fresh
+            && !can_access(consumer.scope, dep_scope)
+            && !(dep.optional && outlives(dep_scope, consumer.scope))
+        {
             return Err(Error::ScopeViolation(Box::new(
                 crate::error::ScopeViolation {
                     component: consumer.name.to_string(),
@@ -159,6 +167,11 @@ pub(super) fn selected_dependency_scopes(
             ))
         })
         .collect()
+}
+
+/// Whether `scope` is strictly longer-lived than `consumer`, both scopes below the transient one.
+fn outlives(scope: ScopeKey, consumer: ScopeKey) -> bool {
+    !scope.is_transient() && !consumer.is_transient() && scope.rank() > consumer.rank()
 }
 
 /// Whether a `consumer`-scoped component may hold a `dependency`-scoped one under
