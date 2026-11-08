@@ -10,6 +10,8 @@ Usage:
       Validates the verifier's answer (exit 3 on an unknown, duplicate or missing id, a schema
       violation or a kept line outside the diff) and writes review.json, verification.jsonl and stages.json to
       <run dir>; verification.jsonl is also appended to <mirror.jsonl>.
+  verify_drafts.py saved <discovery.json> <drafts.jsonl>
+      Exit 3 when a valid done marker reports more drafts than <drafts.jsonl> holds.
   verify_drafts.py empty <discovery.json> <run dir> <provider> <model> <effort>
       Writes the NO_FINDINGS review.json and stages.json for a discovery without drafts (exit 3
       when the discovery answer is not a valid done marker or reports drafts none were saved).
@@ -217,7 +219,7 @@ def apply(input_path, answer_path, diff_path, run_dir, mirror, provider, model, 
     print("verification: {keep} kept, {modify} modified, {drop} dropped".format(**counts(records)))
 
 
-def empty(discovery_path, run_dir, provider, model, effort):
+def done_marker(discovery_path):
     try:
         answer = load(discovery_path)
     except (OSError, ValueError) as error:
@@ -228,8 +230,29 @@ def empty(discovery_path, run_dir, provider, model, effort):
     if found:
         raise Invalid(found)
 
-    if answer["drafts"] > 0:
-        raise Invalid(f"the discovery done marker reports {answer['drafts']} draft(s) but none were saved; they may have been lost, so no clean review is posted")
+    return answer
+
+
+def check_saved(answer, saved):
+    if answer["drafts"] > saved:
+        raise Invalid(f"the discovery done marker reports {answer['drafts']} draft(s) but only {saved} were saved; drafts may have been lost, so nothing is verified or posted")
+
+
+def saved(discovery_path, drafts_path):
+    try:
+        answer = load(discovery_path)
+    except (OSError, ValueError):
+        return
+
+    if violation(answer, load(os.path.join(HERE, "discovery-schema.json")), "discovery"):
+        return
+
+    check_saved(answer, len(read_jsonl(drafts_path)))
+
+
+def empty(discovery_path, run_dir, provider, model, effort):
+    answer = done_marker(discovery_path)
+    check_saved(answer, 0)
 
     review = {"verdict": "NO_FINDINGS", "summary": answer["summary"], "findings": [], "unchecked": answer["unchecked"]}
     origin = {"provider": provider, "model": model, "effort": effort}
@@ -240,7 +263,7 @@ def empty(discovery_path, run_dir, provider, model, effort):
 
 def main():
     command, *args = sys.argv[1:]
-    commands = {"prepare": prepare, "block": block, "apply": apply, "empty": empty}
+    commands = {"prepare": prepare, "block": block, "apply": apply, "empty": empty, "saved": saved}
 
     try:
         commands[command](*args)

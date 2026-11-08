@@ -57,6 +57,12 @@ class DiffPaths(unittest.TestCase):
         self.assertEqual(files, {'café "q"\tx.rs': {1, 2}, "back\\slash.rs": {3}})
 
 
+    def test_added_lines_with_unicode_line_separators_do_not_shift_line_numbers(self):
+        diff = "diff --git a/x.rs b/x.rs\n--- a/x.rs\n+++ b/x.rs\n@@ -0,0 +1,3 @@\n+a\u2028b\n+c\x0cd\n+e\n"
+
+        self.assertEqual(diff_lines(diff), {"x.rs": {1, 2, 3}})
+
+
 class FailClosed(unittest.TestCase):
     """Answers that could hide findings are refused instead of posted as clean."""
 
@@ -74,6 +80,19 @@ class FailClosed(unittest.TestCase):
             verify_drafts.empty(marker, self.run_dir, "codex", "m", "e")
 
         self.assertFalse(os.path.exists(os.path.join(self.run_dir, "review.json")))
+
+    def test_a_done_marker_reporting_more_drafts_than_were_saved_is_refused(self):
+        marker = write(self.run_dir, "discovery.json", {"status": "DISCOVERY_DONE", "drafts": 3, "summary": "s", "unchecked": ""})
+        saved = write(self.run_dir, "drafts.jsonl", [DRAFT])
+
+        with self.assertRaisesRegex(verify_drafts.Invalid, "reports 3 draft.*only 1 were saved"):
+            verify_drafts.saved(marker, saved)
+
+    def test_a_done_marker_matching_the_saved_drafts_is_accepted(self):
+        marker = write(self.run_dir, "discovery.json", {"status": "DISCOVERY_DONE", "drafts": 1, "summary": "s", "unchecked": ""})
+        saved = write(self.run_dir, "drafts.jsonl", [DRAFT])
+
+        verify_drafts.saved(marker, saved)
 
     def test_a_done_marker_without_drafts_posts_a_clean_review(self):
         marker = write(self.run_dir, "discovery.json", {"status": "DISCOVERY_DONE", "drafts": 0, "summary": "s", "unchecked": ""})

@@ -23,7 +23,7 @@ scripts/review/review-pr.sh <pr> <worktree> [model] [effort] [provider] [focus-f
 
 `verify_drafts.py apply` then validates the verifier's answer and refuses to post (exit 3) when a decision names an unknown or a repeated draft id, the answer breaks the schema, or a kept or modified finding targets a line that is not an added or context line of `pr.diff`. An answer that leaves out any draft id is refused too (exit 3, artifacts kept, and the `UPWELL_REVIEW_VERIFY_ONLY` resume command printed), so an omitted draft is never silently treated as dropped; an empty reason is recorded as "(no reason given)". A kept draft is posted verbatim (the verifier's echoed fields are ignored); a modified one uses the verifier's fields. Only this stage's output is posted.
 
-With zero drafts, verification is skipped and a NO_FINDINGS review is posted, but only when discovery returned a valid done marker that reports zero drafts (otherwise exit 3 with the reason printed and the run dir kept: a run that answered in some other format may have put findings in its answer instead of drafts, and a marker counting drafts that were never saved means they were lost). A discovery answer that is not a valid done marker is only a warning when drafts exist.
+With zero drafts, verification is skipped and a NO_FINDINGS review is posted, but only when discovery returned a valid done marker that reports zero drafts (otherwise exit 3 with the reason printed and the run dir kept: a run that answered in some other format may have put findings in its answer instead of drafts, and a marker counting drafts that were never saved means they were lost). A discovery answer that is not a valid done marker is only a warning when drafts exist. With drafts saved, a valid done marker that reports more drafts than were saved (`verify_drafts.py saved`) is refused too (exit 3, run dir kept, nothing verified): the drafts file can be resumed with `UPWELL_REVIEW_VERIFY_ONLY` after manual inspection.
 
 The review footer names both stages: discovery provider, model and effort with the draft count, and verifier provider, model and effort with N kept, M modified and D dropped (or "skipped (no drafts)").
 
@@ -92,7 +92,7 @@ Each verification writes `verification.jsonl` to the run dir (one record per dra
 | 0 | posted (or dry run completed) |
 | 1 | bad arguments (missing focus or drafts file, empty drafts file in verification-only mode) |
 | 2 | worktree head differs from the PR head |
-| 3 | an answer is not valid (schema, unknown, repeated or missing draft id, kept line outside the diff, no done marker without drafts, a done marker counting drafts none were saved) |
+| 3 | an answer is not valid (schema, unknown, repeated or missing draft id, kept line outside the diff, no done marker without drafts, a done marker counting more drafts than were saved) |
 | 4 | worktree has uncommitted tracked changes |
 | 5 | PR head moved during the review, or the drafts belong to another PR or head |
 | 6 | PR base moved during the review |
