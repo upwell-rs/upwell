@@ -879,7 +879,9 @@ watcher.await?;
     under the same parent on the dispatching task binds first (follow-up: bind by the deferred
     instance's identity rather than scope and parent).
   - `ScopeLogs::current()` finds the current span's sink in a per-thread stack the layer keeps
-    of the capturing spans entered there (`on_enter`/`on_exit`). It mirrors `tracing`'s span
+    of the spans entered there while a sink is open (`on_enter`/`on_exit`), each with its
+    innermost capturing ancestor's sink or none, so a detached root span entered inside a
+    capture hides it, as it keeps its events out of it. It mirrors `tracing`'s span
     stack and decides nothing, but it locks no span extensions, so a formatter that holds them
     while rendering a value that asks for the log cannot deadlock, and it needs no concrete
     `Registry`, so it works with every `LookupSpan` subscriber the layer supports.
