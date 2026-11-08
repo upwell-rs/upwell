@@ -8,6 +8,7 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
+use super::sink::LayerId;
 use super::span as handoff;
 use super::{SCOPE_SPAN_NAME, ScopeLogSink, entered, route, sink};
 
@@ -33,13 +34,27 @@ use super::{SCOPE_SPAN_NAME, ScopeLogSink, entered, route, sink};
 /// target at error level: a span the layer never sees cannot hold a sink. A run's capture
 /// level narrows what that filter admits; it can only widen capture as far as the filter lets
 /// events through, because enabling a callsite for one layer enables it for every layer.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ScopeLogLayer;
+///
+/// Inside an invocation, a layer falls back only to instances whose routing span it took
+/// itself: events made under another subscriber, or one whose filter turns `upwell::scope`
+/// off, never enter a capture they could not see.
+#[derive(Clone, Copy, Debug)]
+pub struct ScopeLogLayer {
+    id: LayerId,
+}
 
 impl ScopeLogLayer {
     /// The layer.
     pub const fn new() -> Self {
-        Self
+        Self {
+            id: LayerId::UNREGISTERED,
+        }
+    }
+}
+
+impl Default for ScopeLogLayer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -47,6 +62,10 @@ impl<S> Layer<S> for ScopeLogLayer
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
+    fn on_layer(&mut self, _subscriber: &mut S) {
+        self.id = LayerId::register();
+    }
+
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
         if attrs.metadata().name() != SCOPE_SPAN_NAME {
             return;
@@ -59,7 +78,7 @@ where
             return;
         };
 
-        sink.attach();
+        sink.attach(self.id);
         span.extensions_mut().insert(sink);
     }
 
@@ -93,7 +112,7 @@ where
                 .find_map(|span| span.extensions().get::<Arc<ScopeLogSink>>().cloned())
         });
 
-        if let Some(sink) = route::route(span_sink) {
+        if let Some(sink) = route::route(span_sink, |sink| sink.is_attached_to(self.id)) {
             sink.deliver(event);
         }
     }

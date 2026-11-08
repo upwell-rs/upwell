@@ -30,7 +30,7 @@ impl ScopeLogs {
     /// The log of the instance the calling code runs in.
     pub fn current() -> Self {
         Self {
-            sink: route::route(span_sink()),
+            sink: route::route(span_sink(), ScopeLogSink::is_attached),
         }
     }
 

@@ -13,7 +13,9 @@
 //!   it opens. Otherwise the innermost capturing instance on the context's chain applies.
 //!
 //! A sink whose instance finished no longer applies, and neither does one whose routing span
-//! no layer took, such as under an explicit `upwell::scope=off`.
+//! no layer took, such as under an explicit `upwell::scope=off`. An instance on the chain is
+//! picked only when the caller `admits` its sink: the layer admits only sinks it took itself,
+//! so a subscriber that never saw the routing span, or filtered it out, feeds no capture.
 
 use std::sync::Arc;
 
@@ -24,8 +26,11 @@ use super::ScopeLogSink;
 use super::sink::any_open;
 
 /// The sink an event made here belongs to, given `span_sink`, the sink of the innermost
-/// capturing `upwell.scope` span around it.
-pub(super) fn route(span_sink: Option<Arc<ScopeLogSink>>) -> Option<Arc<ScopeLogSink>> {
+/// capturing `upwell.scope` span around it, and which sinks of the context's chain `admits`.
+pub(super) fn route(
+    span_sink: Option<Arc<ScopeLogSink>>,
+    admits: impl Fn(&ScopeLogSink) -> bool,
+) -> Option<Arc<ScopeLogSink>> {
     if !any_open() {
         return None;
     }
@@ -36,7 +41,7 @@ pub(super) fn route(span_sink: Option<Arc<ScopeLogSink>>) -> Option<Arc<ScopeLog
         ContextState::Absent => span_sink,
         ContextState::Masked => None,
         ContextState::Entered(chain) if chain.innermost().is_none() => span_sink,
-        ContextState::Entered(chain) => entered(span_sink, parent.as_ref(), chain),
+        ContextState::Entered(chain) => entered(span_sink, parent.as_ref(), chain, admits),
     });
 
     drop(parent);
@@ -64,10 +69,15 @@ fn entered(
     span_sink: Option<Arc<ScopeLogSink>>,
     parent: Option<&Arc<ScopeContainer>>,
     chain: ScopeChain<'_>,
+    admits: impl Fn(&ScopeLogSink) -> bool,
 ) -> Option<Arc<ScopeLogSink>> {
     match span_sink {
         Some(sink) if belongs(&sink, parent, chain) => Some(sink),
-        Some(_) | None => chain.into_iter().find_map(retained).map(Arc::clone),
+        Some(_) | None => chain
+            .into_iter()
+            .filter_map(retained)
+            .find(|sink| admits(sink))
+            .map(Arc::clone),
     }
 }
 

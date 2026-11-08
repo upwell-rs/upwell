@@ -890,7 +890,12 @@ watcher.await?;
     and `is_capturing()` needs a layer that took the routing span, as capture does. It replaced the
     log task-local, whose answers could disagree with delivery.
   - A closed sink, whose instance finished, never applies, nor does one whose routing span no
-    layer took (no layer, or a filter such as `upwell::scope=off` that rejects the span). While no sink is open anywhere an
+    layer took (no layer, or a filter such as `upwell::scope=off` that rejects the span). The
+    sink records which layer took it (an identity `ScopeLogLayer::on_layer` assigns), and a
+    layer falls back to a chain instance's sink only when it took that sink itself, so events
+    under another subscriber (`with_default`) never enter a capture that subscriber could not
+    see. `ScopeLogs::current()` has no layer to ask and accepts any layer's sink (follow-up:
+    tell it the current dispatcher's layer). While no sink is open anywhere an
     event costs one atomic read.
 - **Cost of the rule:** an `OpenScope` span entered by hand inside an unrelated invocation's
   context routes to that invocation, not to the hand-entered instance, unless the instance opened

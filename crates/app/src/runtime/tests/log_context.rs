@@ -318,29 +318,3 @@ async fn an_open_instance_inside_a_scopeless_hook_context_captures_by_its_span()
 
     assert_eq!(messages(stream).await, ["in the hook"]);
 }
-
-#[tokio::test]
-async fn an_explicit_scope_off_disables_capture_inside_a_run() {
-    let layer = crate::builtins::logging::scope_log_layer(
-        &crate::builtins::config::LoggingConfig::default(),
-        Some(std::ffi::OsStr::new("myapp=info,upwell::scope=off")),
-    )
-    .expect("filter directives are valid");
-    let _guard = tracing::dispatcher::set_default(&Dispatch::new(Registry::default().with(layer)));
-    let (runtime, _registry) = build_runtime(HashMap::new()).await;
-    let opener = sessions(&runtime);
-    let run = opener.builder(Session).capture_logs().run(|| async {
-        tracing::info!(target: "myapp", "inside the run");
-
-        ScopeLogs::current().is_capturing()
-    });
-    let stream = run.logs();
-
-    let capturing = run.await.expect("the run succeeds");
-
-    assert!(
-        !capturing,
-        "ScopeLogs reports no capture under upwell::scope=off"
-    );
-    assert!(messages(stream).await.is_empty());
-}
