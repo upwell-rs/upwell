@@ -17,6 +17,22 @@ import sys
 
 MARKER = "UPWELL_FINDING_DRAFT"
 FIELDS = {"status", "severity", "path", "line", "title", "body", "suggestion"}
+TEXT_FIELDS = ("path", "title", "body", "suggestion")
+SEVERITIES = {"blocker", "major", "minor", "nit"}
+
+
+def valid_draft(draft):
+    """Accepts exactly the draft fields with their types; rejects the prompt's template line."""
+    if not isinstance(draft, dict) or set(draft) != FIELDS or draft["status"] != "draft":
+        return False
+
+    line = draft["line"]
+    texts = all(isinstance(draft[name], str) for name in TEXT_FIELDS)
+
+    if not texts or not isinstance(line, int) or isinstance(line, bool) or line < 1:
+        return False
+
+    return draft["severity"] in SEVERITIES and draft["path"].strip() != "" and not draft["path"].startswith("<")
 
 
 class Sink:
@@ -43,12 +59,7 @@ class Sink:
         except ValueError:
             return
 
-        if not isinstance(draft, dict) or draft.get("status") != "draft" or not FIELDS.issuperset(draft):
-            return
-
-        line_no = draft.get("line")
-
-        if not isinstance(line_no, int) or line_no < 1 or str(draft.get("path", "<")).startswith("<"):
+        if not valid_draft(draft):
             return
 
         key = json.dumps(draft, ensure_ascii=False, sort_keys=True)
