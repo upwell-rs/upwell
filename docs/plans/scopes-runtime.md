@@ -740,11 +740,15 @@ would leave components already built in the request resolved through the old cha
   a value captive; a scope that never encloses it, such as a sibling, is still a
   `ScopeViolation`, since the edge could never be present. The topology computes each
   boundary's ancestors on any chain once at preparation (`PreparedScopeTopology::encloses`),
-  and the DI validation entry points take that relation beside reachability. The edge is `None`
-  on a chain without the session, and `Some` under one, through the
-  existing `shadowed_by` fallback for injected targets and dynamic resolution for factory edges.
-  Required edges are still rejected, so required dependencies on the session need an "only
-  parent" mode (follow-up).
+  and the DI validation entry points take that relation beside reachability. When the target is
+  placed in several scopes, the edge validates when one placement encloses the consumer, in any
+  registration order; slot planning reads that placement, since each layout is planned only
+  against the layouts of scopes that may enclose it. Two placements that each enclose the
+  consumer on different chains are rejected (`AmbiguousEnclosingPlacement`): the edge would
+  have to resolve per chain (#490). The edge is `None` on a chain without the session and
+  `Some` under one: a factory edge reads the session's slot as a planned ancestor, built on
+  demand, and an injected target falls back through `shadowed_by`. Required edges are still
+  rejected, so required dependencies on the session need an "only parent" mode (#487).
 - **Generations.** A `Durable` session keeps its generation: a request under it runs on the
   session's generation, `AppRuntime::generations_behind` reports how far behind the session is
   after a reload, so the app's cache can evict it, and the displaced generation stays alive while

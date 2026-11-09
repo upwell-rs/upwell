@@ -465,3 +465,16 @@ fn an_optional_edge_with_no_placement_enclosing_the_consumer_is_rejected() {
     ));
     assert!(optional_edge_fault(&registry).is_some());
 }
+
+#[test]
+fn an_optional_edge_into_placements_enclosing_the_consumer_on_different_chains_is_rejected() {
+    let registry = registry_with_placements(&[SessionScope::KEY, SiblingScope::KEY]);
+    let both_enclose = |ancestor: ScopeId, descendant: ScopeId| {
+        descendant == HTTP_ID && (ancestor == SESSION_ID || ancestor == SIBLING_ID)
+    };
+
+    assert!(matches!(
+        registry.validate_with_scope_reachability(reaches, both_enclose),
+        Err(Error::AmbiguousEnclosingPlacement { .. })
+    ));
+}

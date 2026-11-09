@@ -38,6 +38,7 @@ use upwell_config::ResolverChain;
 
 mod ends;
 mod generations;
+mod placements;
 mod routing;
 mod validation;
 

@@ -295,6 +295,11 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
     }
 
     /// The source holding `target` as seen from the scope being planned.
+    ///
+    /// An optional edge whose target has no placement open around the scope on every chain
+    /// reads the placement in an enclosing scope that is open on some chains: `ancestors` holds
+    /// only scopes that may enclose this one, and validation allows one such placement at
+    /// most. On a chain without it the read finds nothing and the edge is `None`.
     fn locate(
         &self,
         consumer: &ComponentDescriptor,
@@ -302,7 +307,7 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
         target: DependencyTarget,
         visiting: &mut Vec<TypeId>,
     ) -> crate::Result<DepRef> {
-        let (component, provider) = match target {
+        let (mut component, provider) = match target {
             DependencyTarget::Component(component) => (component, None),
             DependencyTarget::Provider(provider) => (
                 self.placement(provider.concrete_ty.type_id)
@@ -310,6 +315,14 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
                 Some(provider),
             ),
         };
+
+        if dependency.optional && !self.reaches(component.scope) {
+            let Some(enclosing) = self.enclosing_placement(component.ty.type_id) else {
+                return Ok(DepRef::Absent);
+            };
+
+            component = enclosing;
+        }
 
         if component.scope.is_transient() {
             let plan = self.transient(component, provider, visiting)?;
@@ -354,6 +367,22 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
             layout: Arc::clone(layout),
             at,
         })
+    }
+
+    /// Whether `scope` is open around the scope being planned on every chain it opens in.
+    fn reaches(&self, scope: ScopeKey) -> bool {
+        scope_allows_with(self.layout.scope, scope, &|from, to| {
+            (self.can_reach)(from, to)
+        })
+    }
+
+    /// The placement of `type_id` in a scope that may be open around the scope being planned.
+    fn enclosing_placement(&self, type_id: TypeId) -> Option<ComponentDescriptor> {
+        self.selection
+            .placements(type_id)
+            .iter()
+            .find(|placement| self.ancestors.contains_key(&placement.scope.id()))
+            .copied()
     }
 
     /// The placement of `type_id` the scope being planned reaches.

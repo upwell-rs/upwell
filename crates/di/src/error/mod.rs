@@ -165,6 +165,21 @@ pub enum Error {
         scope: &'static str,
     },
 
+    /// An optional edge's target is placed in several scopes that each enclose the consumer on
+    /// a different chain, and none on every chain, so which placement it reads would depend on
+    /// the chain an instance opens in. Not supported yet: place the target in one of them.
+    #[error(
+        "optional dependency '{dependency}' of component '{component_id}' is placed in scopes {scopes:?}, which each enclose the consumer only on some chains; place it in one of them"
+    )]
+    AmbiguousEnclosingPlacement {
+        /// Stable consumer component identity.
+        component_id: String,
+        /// Human-readable dependency description.
+        dependency: String,
+        /// The scopes of the enclosing placements, in registration order.
+        scopes: Vec<&'static str>,
+    },
+
     /// A factory built another component than the slot it runs for holds.
     #[error("the factory for component '{component}' built '{built}' instead")]
     FactoryOutputMismatch {
