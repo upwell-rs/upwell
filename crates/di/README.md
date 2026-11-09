@@ -57,6 +57,8 @@ static CACHE: ComponentDescriptor = ComponentDescriptor::of::<Cache>()
     .with_factories(factories!["fresh" => Cache::new, replace "carry" => carry]);
 ```
 
+One component type may build in several scopes that do not share a hierarchy, such as a WebSocket connection and an HTTP request: [`ComponentDescriptor::with_scopes`] (what `#[component(scope = [A, B])]` emits) places it in each listed scope, and a factory's own [`scopes`](ComponentFactoryDescriptor::scopes) list places that factory. The registry expands each into one placement per scope, and a consumer resolves the one placement its chain reaches. Preparation rejects scopes where one encloses another, a transient placement beside any other, and a factory-less (seeded) type in more than one scope, because a seed is addressed by type.
+
 A longer-lived component reads a shorter-lived value per invocation through a declared accessor instead of holding it: [`Current<T>`](Current) resolves the closest `T` in the active invocation, [`Scoped<S, T>`](Scoped) the `T` of scope `S`. Work spawned through [`context::tokio`](context::tokio), [`context::thread`](context::thread) or, with the `rayon` feature, `context::rayon` carries the invocation and its span along, and a [`CapturedContext`](context::CapturedContext) carries it into any other executor; a plain `tokio::spawn` does not. Dropping a tokio `JoinHandle` detaches the task rather than cancelling it, and the task keeps the invocation's scope chain alive until it ends, so await request-bound work or manage its handle.
 
 ```rust,ignore

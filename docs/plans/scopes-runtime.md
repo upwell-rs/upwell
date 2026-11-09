@@ -1035,10 +1035,10 @@ user surface exists for it.
 ### Placements
 
 - A **placement** is one scope a type builds in. A type has one placement per distinct scope of
-  its explicit factories (`ComponentFactoryDescriptor::scope`, `None` meaning the component's
-  declared scope). With no scoped factory, the only placement is the declared scope. The default
-  field-injection factory stays in the declared scope and is used only when the type has no explicit
-  factory at all, as before.
+  its explicit factories (`ComponentFactoryDescriptor::scopes`, empty meaning the component's
+  declared scopes). With no explicit factory, the placements are the declared scopes: one, or each
+  of a scope list (#136). The default field-injection factory builds in the declared scopes and is
+  used only when the type has no explicit factory at all, as before.
 - Two sources produce placements: factories with distinct scopes on one descriptor, and
   descriptors of one type declared in distinct scopes. `ComponentRegistry::resolved_components`
   expands both into one `ComponentDescriptor` per placement. Overrides apply per placement: a seed
@@ -1064,13 +1064,36 @@ user surface exists for it.
 - Trait providers map a concrete type, so a provider is visible to a consumer when any placement
   of its concrete type is accessible. Collections gather it once per consumer scope.
 - Both factories of a type produce the same handle type by construction: handle and identity come
-  from the `Component` impl, and only the scope varies. The per-factory fallback list
-  `scope = [Connection, Request]` of #136 is not built; the same effect is two `#[init]`s in
-  disjoint scopes.
+  from the `Component` impl, and only the scope varies.
 - The cache key of a built instance is the scope instance, as before. An ancestor instance of the
   same type cannot exist by the overlap rule, so the "ancestor already has it" question of #135 does
   not arise. A selection cannot fail after dependents are built, because it is fixed at
   preparation.
+
+### Scope lists (#136)
+
+Status: done. `scope = [A, B]` is the list form of the placement model above, not a separate
+fallback mechanism, so it answers the open questions of #136 as follows:
+
+- `#[component(scope = [WebsocketConnection, HttpRequest])]` places the field-injection default in
+  each listed scope, and `#[init(scope = [A, B])]` places that constructor in each. An `#[init]`
+  without `scope` builds in every scope the component declares. A list of one is the plain form.
+- The list is ordered only for the declared scope: the first entry is `DeclaredScope::Scope` and
+  `ComponentDescriptor::scope`, and tooling lists placements in declaration order. Resolution is
+  set-like, because the scopes may not share a hierarchy and a chain reaches at most one of them;
+  there is no "first eligible open scope" rule and no shadowing.
+- Construction stays per placement: on demand, or `eager` on every opening of each listed scope.
+  Each placement has its own factory dependencies, checked against its own scope by the captive,
+  provider and fresh validation. Singleton dependencies are shared by every placement.
+- Descriptors: `ComponentDescriptor::scopes` lists every declared scope (empty for one, with
+  `with_scopes` as the `const` builder), and `ComponentFactoryDescriptor::scopes` replaces the
+  former `scope: Option<ScopeKey>` (empty inherits the component's scopes). Both are breaking
+  changes to the descriptor literals.
+- Diagnostics: an empty list and a scope listed twice (aliases resolved, so `request` and
+  `Request` are one) are compile errors at the offending token; `eager` checks every listed scope;
+  `#[service]` and `#[controller]` reject a list like any non-singleton scope. Overlap, transient
+  placements and seeds in two scopes fail preparation as before.
+- Nearest-wins shadowing stays deferred.
 
 ### Validation and diagnostics (#138)
 
@@ -1093,16 +1116,36 @@ user surface exists for it.
 - A seed (factory-less descriptor) has one destination because `seed_destinations` and the seeding
   API address a type, not a scope. A type seeded in two scopes is `AmbiguousSeedScopes`. A type may
   be a seed in one scope and factory-built in a disjoint one.
-- Use matrix: authenticated identity and request metadata are seeds; a per-request or
-  per-connection optimised service is one type with an `#[init(scope = ..)]` per scope; a
-  singleton needing the current identity uses `Scoped<T>` or a deferred read; an optional contextual
-  value is an optional edge. Multi-scope placement is not a workaround for missing protocol
-  lifecycle control, and `Scoped<T>` is not a workaround for a scope mismatch a placement fixes.
+- A scope list cannot make a seed several-scoped: `#[component(scope = [A, B],
+  default_factory = false)]` is two seed slots of one type and fails with `AmbiguousSeedScopes`.
+  A seed registered for one scope of a list replaces only that placement, so a type can be seeded
+  in one scope and built in the others.
+- `Current<T>` resolves the placement of `T` on the active chain; `Scoped<S, T>` resolves the
+  placement `S` reaches and fails with `ScopedError::ScopeNotActive` where `S` is not on the
+  chain. Neither needs to know that `T` has several placements.
+- Status: done; the rules are tested in `crates/di/src/registry/tests/scope_lists.rs`,
+  `tests/multi_scope_runtime.rs` and `tests/multi_scope_seed_list.rs`.
+
+Use matrix:
+
+| Need | Feature | Why not the others |
+|---|---|---|
+| Authenticated identity | A seed (`Identity`, filled by the protocol or `ScopeBuilder::seed`) | It is produced outside DI and is immutable; a placement would construct it. |
+| Protocol metadata (headers, peer) | A seed, lazily captured where declared (`RequestMeta`, `PeerInfo`) | Same as identity: the protocol owns its lifecycle. |
+| Per-request optimised service | `#[component(scope = HttpRequest)]` | One lifecycle, one scope. |
+| Per-connection optimised service | `#[component(scope = WebsocketConnection)]` | Same. |
+| One service, per connection over WS and per request over REST | `#[component(scope = [WebsocketConnection, HttpRequest])]`, or one `#[init(scope = ..)]` per scope when construction differs | One type, disjoint lifecycles; no trait and no duplicate concrete types. |
+| Singleton needing the current identity | `Current<Arc<Identity>>`, or `Scoped<S, Arc<Identity>>` to pin a scope | The singleton outlives every request, so it reads per invocation instead of holding. |
+| Optional contextual value | `Option<Arc<T>>` on a consumer in or below `T`'s scope | Optional edges into a scope that encloses the consumer (#488). |
+
+Multi-scope placement is not a workaround for missing protocol lifecycle control, and `Scoped<T>`
+is not a workaround for a scope mismatch a placement fixes.
 
 ### Attributes (#140)
 
 - `#[init(scope = <ScopePath>)]` sets the scope of that factory, with the same path and lowercase
-  alias handling as `#[component]`. Omitting it inherits the component's scope.
+  alias handling as `#[component]`; `#[init(scope = [A, B])]` sets several (#136). Omitting it
+  inherits every scope the component declares.
   `#[component(scope = ..)]` is unchanged and scopes the default factory.
 - A scoped `#[init]` emits a wrapper named after the marked function so several `#[init]`s on one
   type coexist across impl blocks; two unscoped ones still collide at compile time.
@@ -1116,7 +1159,7 @@ user surface exists for it.
 
 - Two descriptors of one type declared in two scopes must carry distinct ids of their own;
   factory-expanded placements get `<id>@<scope id>`, which tooling shows.
-- Nearest-wins shadowing and a fallback list are deferred.
+- Nearest-wins shadowing is deferred; the list form is built as placements (#136).
 
 ## Access and propagation (#131, #132, #134, #267)
 
