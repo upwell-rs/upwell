@@ -1,0 +1,3 @@
+[submodule "tools/upwell-review"]
+	path = tools/upwell-review
+	url = https://github.com/upwell-rs/upwell-review.git

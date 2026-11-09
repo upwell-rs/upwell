@@ -110,8 +110,14 @@ test-ui:
 test-doc:
     cargo test --doc --workspace --all-features --locked
 
-review pr worktree model="gpt-6.1-terra" effort="medium" provider="codex" focus="" verify_provider="" verify_model="" verify_effort="":
-    scripts/review/review-pr.sh {{ quote(pr) }} {{ quote(worktree) }} {{ quote(model) }} {{ quote(effort) }} {{ quote(provider) }} {{ quote(focus) }} {{ quote(verify_provider) }} {{ quote(verify_model) }} {{ quote(verify_effort) }}
+[positional-arguments]
+review-tool *args:
+    @test -f tools/upwell-review/Cargo.toml || git submodule update --init tools/upwell-review
+    @cargo run --quiet --release --locked --manifest-path tools/upwell-review/Cargo.toml -- "$@"
+
+[positional-arguments]
+review *args:
+    @just review-tool review "$@"
 
 test-config:
     #!/usr/bin/env bash
