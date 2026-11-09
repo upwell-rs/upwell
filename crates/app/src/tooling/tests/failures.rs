@@ -102,6 +102,37 @@ fn di_failures_use_stable_component_and_underlying_type_identities() {
 }
 
 #[test]
+fn ambiguous_enclosing_placement_failures_name_consumer_type_and_scopes() {
+    let first = upwell_core::ScopeId::new("fixture/first").expect("valid first scope identity");
+    let second = upwell_core::ScopeId::new("fixture/second").expect("valid second scope identity");
+    let error = crate::Error::Di(upwell_di::Error::AmbiguousEnclosingPlacement(Box::new(
+        upwell_di::AmbiguousEnclosingPlacement {
+            component_id: String::from("worker-component"),
+            dependency: String::from("fixture::Service"),
+            dependency_type: String::from("fixture::Service"),
+            scopes: vec!["a", "b"],
+            scope_ids: vec![first, second],
+        },
+    )));
+    let failure = ToolingProbeError::Lifecycle(crate::PhaseError::new(
+        crate::LifecyclePhase::Prepare,
+        error,
+    ))
+    .failure();
+    let diagnostic = &failure.diagnostics[0];
+
+    assert_eq!(
+        diagnostic.code,
+        "upwell/tooling-optional-placement-ambiguous"
+    );
+    assert_eq!(diagnostic.resources.len(), 4);
+    assert_eq!(diagnostic.resources[0], "component:worker-component");
+    assert_eq!(diagnostic.resources[1], "type:fixture::Service");
+    assert_eq!(diagnostic.resources[2], format!("scope:{first}"));
+    assert_eq!(diagnostic.resources[3], format!("scope:{second}"));
+}
+
+#[test]
 fn orphan_provider_failures_emit_provider_component_and_type_identities() {
     let error = crate::Error::Di(upwell_di::Error::ProviderComponentMissing(Box::new(
         upwell_di::ProviderComponentMissing {

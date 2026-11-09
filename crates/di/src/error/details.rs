@@ -210,3 +210,18 @@ impl fmt::Display for ScopeUnreachableDependency {
         )
     }
 }
+
+/// Stable identities describing an optional edge placed in several enclosing scopes.
+#[derive(Debug)]
+pub struct AmbiguousEnclosingPlacement {
+    /// Stable consumer component identity.
+    pub component_id: String,
+    /// Human-readable dependency description.
+    pub dependency: String,
+    /// Underlying dependency type name.
+    pub dependency_type: String,
+    /// The scopes of the enclosing placements, in registration order.
+    pub scopes: Vec<&'static str>,
+    /// The identities of the enclosing placements' scopes, in the order of `scopes`.
+    pub scope_ids: Vec<ScopeId>,
+}

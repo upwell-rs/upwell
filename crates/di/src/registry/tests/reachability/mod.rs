@@ -475,6 +475,6 @@ fn an_optional_edge_into_placements_enclosing_the_consumer_on_different_chains_i
 
     assert!(matches!(
         registry.validate_with_scope_reachability(reaches, both_enclose),
-        Err(Error::AmbiguousEnclosingPlacement { .. })
+        Err(Error::AmbiguousEnclosingPlacement(_))
     ));
 }

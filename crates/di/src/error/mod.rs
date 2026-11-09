@@ -7,9 +7,10 @@ use crate::ComponentFactoryRole;
 mod details;
 
 pub use details::{
-    DeferredTransientDependency, InvalidFreshDependency, ProviderComponentMissing,
-    ProviderOrderCycle, ProviderOrderSourceTraitMismatch, ProviderOrderTargetTraitMismatch,
-    ScopeUnreachableDependency, ScopeUnreachableProvider, ScopeViolation,
+    AmbiguousEnclosingPlacement, DeferredTransientDependency, InvalidFreshDependency,
+    ProviderComponentMissing, ProviderOrderCycle, ProviderOrderSourceTraitMismatch,
+    ProviderOrderTargetTraitMismatch, ScopeUnreachableDependency, ScopeUnreachableProvider,
+    ScopeViolation,
 };
 
 /// Errors from the DI engine: graph validation and component construction.
@@ -169,16 +170,10 @@ pub enum Error {
     /// a different chain, and none on every chain, so which placement it reads would depend on
     /// the chain an instance opens in. Not supported yet: place the target in one of them.
     #[error(
-        "optional dependency '{dependency}' of component '{component_id}' is placed in scopes {scopes:?}, which each enclose the consumer only on some chains; place it in one of them"
+        "optional dependency '{}' of component '{}' is placed in scopes {:?}, which each enclose the consumer only on some chains; place it in one of them",
+        .0.dependency, .0.component_id, .0.scopes
     )]
-    AmbiguousEnclosingPlacement {
-        /// Stable consumer component identity.
-        component_id: String,
-        /// Human-readable dependency description.
-        dependency: String,
-        /// The scopes of the enclosing placements, in registration order.
-        scopes: Vec<&'static str>,
-    },
+    AmbiguousEnclosingPlacement(Box<AmbiguousEnclosingPlacement>),
 
     /// A factory built another component than the slot it runs for holds.
     #[error("the factory for component '{component}' built '{built}' instead")]

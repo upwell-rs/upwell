@@ -83,11 +83,15 @@ pub(super) fn check_scope(
         };
 
         if enclosing.len() > 1 {
-            return Err(Error::AmbiguousEnclosingPlacement {
-                component_id: consumer.id.to_string(),
-                dependency: dep_name.to_string(),
-                scopes: enclosing.iter().map(|scope| scope.name()).collect(),
-            });
+            return Err(Error::AmbiguousEnclosingPlacement(Box::new(
+                crate::error::AmbiguousEnclosingPlacement {
+                    component_id: consumer.id.to_string(),
+                    dependency: dep_name.to_string(),
+                    dependency_type: (dep.ty.type_name)().to_string(),
+                    scopes: enclosing.iter().map(|scope| scope.name()).collect(),
+                    scope_ids: enclosing.iter().map(|scope| scope.id()).collect(),
+                },
+            )));
         }
 
         if enclosing.is_empty() {
