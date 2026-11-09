@@ -1,5 +1,5 @@
-error: a context value lives only in scopes below the root: it is seeded into scope instances, and the root and the transient scope open none
-  --> tests/ui/context/with_root.rs:12:28
+error[E0080]: evaluation panicked: a context value lives only in scopes below the root: it is seeded into scope instances, and the root and the transient scope open none
+  --> tests/ui/context/with_root.rs:13:11
    |
-12 | #[context(scopes = [Local, Root])]
-   |                            ^^^^
+13 | #[context(scopes = [Local, Root])]
+   |           ^^^^^^ evaluation of `_::_` failed here

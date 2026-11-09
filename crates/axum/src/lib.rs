@@ -237,8 +237,9 @@ pub type AppBuilder = upwell_app::AppBuilder<Axum>;
 // Re-export the agnostic app surface so a standalone `upwell-axum` user has one import.
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_app::{
-    AppRegistry, AppRuntime, LoggingConfig, Plugin, PreparedProtocol, ProtocolDefinition,
-    ProtocolRuntime, SeedClaim, Seeds, Serve, ServerConfig, ShutdownHandle, ShutdownSignal,
+    AppRegistry, AppRuntime, LoggingConfig, OpenerSeeds, Plugin, PreparedProtocol,
+    ProtocolDefinition, ProtocolRuntime, SeedClaim, Seeds, Serve, ServerConfig, ShutdownHandle,
+    ShutdownSignal,
 };
 
 /// Re-exported so macro-generated code can reach the `#[distributed_slice]` attribute for

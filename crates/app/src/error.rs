@@ -63,7 +63,8 @@ pub enum Error {
         actual: ScopeId,
     },
 
-    /// A seed claim is duplicated, or a required context value has no claim for its scope.
+    /// A seed claim names a scope without a slot of its type, or a required context value is
+    /// not provided in its scope.
     #[error(transparent)]
     SeedClaim(#[from] crate::registry::SeedClaimError),
 

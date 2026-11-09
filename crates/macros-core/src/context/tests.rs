@@ -59,8 +59,11 @@ fn an_unknown_or_repeated_argument_is_rejected() {
 }
 
 #[test]
-fn a_context_in_the_root_is_rejected() {
-    let error = expansion("scopes = [Request, Root]").expect_err("the root opens no instance");
+fn a_scope_named_root_is_checked_by_its_rank_not_its_name() {
+    let tokens = expansion("scopes = [tenant::Root]").expect("a user scope may be named `Root`");
 
-    assert!(error.to_string().contains("only in scopes below the root"));
+    assert!(
+        tokens.contains("< tenant :: Root as :: upwell :: Scope > :: RANK"),
+        "the generated assertion decides whether it lies below the root: {tokens}"
+    );
 }

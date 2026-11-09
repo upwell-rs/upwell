@@ -29,8 +29,10 @@ permit a protocol crate to blanket-adapt every downstream codec trait implementa
   `CONNECT` rejects the connection (`StompAuthenticationError::Unresolved`). Rejection returns
   `ERROR` and never registers the connection with the broker. An app seed that is a
   `#[context]` value, such as an `Identity` also seeded per request over REST, is claimed for
-  the connection scope with `StompConfig::provides_seed::<Identity>()`; preparation rejects a
-  required context value of the connection scope no endpoint claims.
+  the connection scope with `StompConfig::provides_seed::<Identity>()`, which needs an
+  authenticator to produce it. Each endpoint declares the seeds it fills, and preparation
+  rejects a required context value of the connection scope that any endpoint, STOMP or not,
+  does not seed (`OpenerWithoutSeed`, naming that endpoint).
 - **App handlers.** `#[controller(ws = Stomp)]` + `#[handlers(ws = Stomp)] #[message("/app/..")]`;
   handlers get frame headers (`Inject<StompHeaders>`), a session (`Inject<StompSession>`), and a
   typed publisher (`Inject<Publisher<T>>`), plus the usual request-scoped DI.

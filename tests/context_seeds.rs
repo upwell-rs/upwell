@@ -26,6 +26,20 @@ pub struct Right;
 #[scope(parents = [Left])]
 pub struct LeftStep;
 
+/// A tenant's scopes, one of them named like the application root.
+mod tenant {
+    use upwell::scope;
+
+    /// A tenant's unit of work, deliberately named `Root`.
+    #[scope(parents = [upwell::scope::Root])]
+    pub struct Root;
+}
+
+/// A context of a user scope named `Root`: the macro checks the scope's rank, not its name.
+#[context(scopes = [tenant::Root])]
+#[derive(Clone)]
+pub struct TenantId;
+
 /// The identity a [`Left`] or [`Right`] instance runs as.
 #[context(scopes = [Left, Right])]
 #[derive(Clone)]

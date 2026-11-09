@@ -200,8 +200,16 @@ impl WebsocketProtocol for Stomp {
             .get::<StompTopicBus>()
             .ok_or(StompBuildError::MissingTopicBus)?;
 
-        if let Some(authenticator) = &config.authenticator {
-            auth::check_root_dependencies(authenticator.as_ref(), runtime)?;
+        match (&config.authenticator, config.provided_seeds.first()) {
+            (Some(authenticator), _) => {
+                auth::check_root_dependencies(authenticator.as_ref(), runtime)?
+            }
+            (None, Some(seed)) => {
+                return Err(StompBuildError::SeedWithoutAuthenticator {
+                    seed: (seed.type_name)(),
+                });
+            }
+            (None, None) => {}
         }
 
         Ok(Self {
@@ -351,30 +359,31 @@ impl WebsocketProtocol for Stomp {
     fn register(registry: &mut upwell_axum::AppRegistry) {
         upwell_axum::register_topic_bus::<Self>(registry);
 
-        for descriptor in [
+        registry.components.extend([
             STOMP_HEADERS_DESCRIPTOR,
             STOMP_SESSION_DESCRIPTOR,
             STOMP_PRINCIPAL_DESCRIPTOR,
-        ] {
-            registry.components.push(descriptor);
-            registry.claim_seed(SeedClaim {
-                ty: descriptor.ty,
-                scope: descriptor.scope,
-                claimant: STOMP_CLAIMANT,
-            });
-        }
+        ]);
     }
 
     fn seed_claims(config: &StompConfig) -> Vec<SeedClaim> {
-        config
-            .provided_seeds
-            .iter()
-            .map(|ty| SeedClaim {
-                ty: *ty,
-                scope: WebsocketConnectionScope::KEY,
-                claimant: STOMP_CLAIMANT,
-            })
-            .collect()
+        let own = [
+            STOMP_HEADERS_DESCRIPTOR,
+            STOMP_SESSION_DESCRIPTOR,
+            STOMP_PRINCIPAL_DESCRIPTOR,
+        ]
+        .map(|descriptor| SeedClaim {
+            ty: descriptor.ty,
+            scope: descriptor.scope,
+            claimant: STOMP_CLAIMANT,
+        });
+        let provided = config.provided_seeds.iter().map(|ty| SeedClaim {
+            ty: *ty,
+            scope: WebsocketConnectionScope::KEY,
+            claimant: STOMP_CLAIMANT,
+        });
+
+        own.into_iter().chain(provided).collect()
     }
 }
 

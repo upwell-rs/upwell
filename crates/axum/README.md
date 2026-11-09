@@ -43,8 +43,10 @@ request (or rejects it) before global middleware and fills each request scope wi
 WebSocket the protocol's `serve` receives a `PreparedConnection` and opens the connection scope
 itself, after its handshake: STOMP opens it after `CONNECT` authentication, seeded with the
 `StompPrincipal` and whatever the authenticator returns in `StompAuthenticated::seed`, and
-`StompConfig::provides_seed::<Identity>()` claims it. Preparation rejects a required context
-value whose scope no one claims to seed (`UnprovidedSeed`).
+`StompConfig::provides_seed::<Identity>()` claims it. Every WebSocket endpoint is declared an
+opener of the connection and message scopes with the seeds it fills, so preparation rejects a
+required context value that no one claims for its scope (`UnprovidedSeed`), or that one
+endpoint opening the scope does not seed (`OpenerWithoutSeed`).
 
 `RequestMeta` copies the request's method, URI and headers, so it is captured only when something
 reads it, once per request: when the scope opens if the route reads it (directly or through a

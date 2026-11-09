@@ -1,3 +1,4 @@
+use upwell::scope::Root;
 use upwell::{Scope, ScopeId, context};
 
 struct Local;

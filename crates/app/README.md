@@ -109,12 +109,12 @@ and opens with `ScopeBuilder::under_parent`.
 A value produced outside DI, such as an authenticated identity, is a `#[context(scopes = [..])]`:
 factory-less and by value, it may be seeded into several scopes that share no hierarchy, each
 instance through its own builder (`ScopeBuilder::seed`, or `.seeds(Seeds)` for seeds collected
-ahead of the opening). The registry holds `SeedClaim`s saying who seeds what where: protocols
-claim their own seeds and their endpoints' seeds, and `AppBuilder::provides_seed::<T, S>()`
-claims a seed the application fills in a scope it opens itself. Preparation rejects a required
-dependency on a context value whose scope no one claims (`SeedClaimError::UnprovidedSeed`) and a
-claim for a scope with no slot of its type (`ClaimWithoutSlot`). Several openers may claim one
-seed for one scope, since each fills its own instances.
+ahead of the opening). The registry records who seeds what: `SeedClaim`s for a scope one opener
+opens (`AppBuilder::provides_seed::<T, S>()` for a scope the application opens itself), and
+`OpenerSeeds` for each opener of a scope several openers share, where a value counts only when
+every opener seeds it. Preparation rejects a required dependency on a context value that is not
+provided in its scope (`SeedClaimError::UnprovidedSeed`, or `OpenerWithoutSeed` naming the
+opener that lacks it) and a claim for a scope with no slot of its type (`ClaimWithoutSlot`).
 
 ### End-of-scope hook
 

@@ -209,7 +209,9 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
     /// Claims that the application seeds `T` into every instance of scope `S` it opens, for
     /// a `#[context]` value filled with [`ScopeBuilder::seed`](crate::ScopeBuilder::seed) in a
     /// scope the application opens itself. Preparation rejects a required context value whose
-    /// scope no one claims (`UnprovidedSeed`), and a pair two claimants claim.
+    /// scope no one claims (`UnprovidedSeed`), and a claim for a scope without a slot of `T`
+    /// (`ClaimWithoutSlot`). Other claimants of the same seed are accepted, since each fills its
+    /// own instances.
     pub fn provides_seed<T: 'static, S: Scope>(mut self) -> Self {
         self.registry
             .claim_seed(crate::registry::SeedClaim::of::<T, S>(

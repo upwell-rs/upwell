@@ -277,3 +277,43 @@ async fn two_seeders_of_one_type_fail_the_build() {
     assert!(message.contains("HeaderIdentity"), "{message}");
     assert!(message.contains("AnonymousIdentity"), "{message}");
 }
+
+#[tokio::test]
+async fn an_endpoint_that_does_not_seed_the_identity_fails_the_build() {
+    let environment = TestEnvironment::new("upwell-http-context-bare-endpoint-");
+
+    let Err(error) = builder(&environment, true, true)
+        .register_ws::<JsonWs>("/json")
+        .build()
+        .await
+    else {
+        panic!("the STOMP endpoint's seed does not vouch for the JSON-WS connections");
+    };
+    let message = error.to_string();
+
+    assert!(message.contains("Identity"), "{message}");
+    assert!(
+        message.contains("/json"),
+        "the endpoint that lacks it is named: {message}"
+    );
+}
+
+#[tokio::test]
+async fn a_claimed_seed_without_an_authenticator_fails_the_build() {
+    let environment = TestEnvironment::new("upwell-http-context-no-authenticator-");
+
+    let Err(error) = IdentityApplication::builder()
+        .expect("app builder")
+        .config_source(environment.config())
+        .directories(environment.directories())
+        .request_seed::<Identity, HeaderIdentity>()
+        .register_ws_with::<Stomp>("/stomp", StompConfig::default().provides_seed::<Identity>())
+        .build()
+        .await
+    else {
+        panic!("nothing would produce the claimed identity");
+    };
+    let message = format!("{error:?}");
+
+    assert!(message.contains("SeedWithoutAuthenticator"), "{message}");
+}

@@ -33,8 +33,8 @@ use upwell_core::{DependencyDescriptor, EntryKey, ItemSource, TypeDescriptor};
 use crate::scope::WebsocketMessage;
 
 pub use connection::WsConnectionScope;
-pub(crate) use meta::register_framework_seeds;
 pub use meta::{WebsocketUpgradeMeta, WsConnectionMeta};
+pub(crate) use meta::{register_framework_seeds, upgrade_seeds};
 pub use mount::WebsocketHandler;
 pub(crate) use mount::mount_ws;
 pub use prepared::{PreparedConnection, scope_failure_close};
@@ -436,9 +436,12 @@ pub trait WebsocketProtocol: Send + Sync + Sized + 'static {
     /// [`AppRegistry::claim_seed`].
     fn register(_registry: &mut AppRegistry) {}
 
-    /// The connection seeds one endpoint configured with `options` guarantees beyond the
-    /// protocol's own, such as the application values its authentication step seeds. None by
-    /// default.
+    /// Every seed one endpoint configured with `options` fills in each
+    /// [`WebsocketConnection`](crate::scope::WebsocketConnection) and
+    /// [`WebsocketMessage`](crate::scope::WebsocketMessage) scope it opens, beyond the upgrade
+    /// metadata: the protocol's own seeds and the application values its handshake seeds. The
+    /// endpoint is declared an opener of both scopes with these seeds, and a value one endpoint
+    /// seeds does not count for another's instances. None by default.
     fn seed_claims(_options: &Self::Options) -> Vec<upwell_app::SeedClaim> {
         Vec::new()
     }

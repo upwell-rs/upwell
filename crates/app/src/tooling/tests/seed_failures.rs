@@ -58,13 +58,39 @@ fn an_entry_consumer_is_named_as_an_entry() {
 }
 
 #[test]
+fn an_opener_without_the_seed_names_its_consumer_type_and_scope() {
+    let diagnostic = diagnostic(crate::Error::SeedClaim(
+        crate::SeedClaimError::OpenerWithoutSeed {
+            seed: "app::Identity",
+            scope: "Request",
+            scope_id: scope(),
+            consumer: crate::SeedConsumer::Component {
+                id: "audit",
+                name: "Audit",
+            },
+            opener: String::from("JsonWs at /json"),
+        },
+    ));
+
+    assert_eq!(diagnostic.code, "upwell/tooling-seed-opener-missing");
+    assert_eq!(
+        diagnostic.resources,
+        [
+            "component:audit",
+            "type:app::Identity",
+            "scope:fixture/request"
+        ]
+    );
+}
+
+#[test]
 fn a_claim_without_a_slot_names_the_type_and_scope() {
     let diagnostic = diagnostic(crate::Error::SeedClaim(
         crate::SeedClaimError::ClaimWithoutSlot {
             seed: "app::Identity",
             scope: "Request",
             scope_id: scope(),
-            claimant: "app::HeaderIdentity",
+            claimant: String::from("app::HeaderIdentity"),
         },
     ));
 

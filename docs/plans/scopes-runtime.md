@@ -1160,37 +1160,51 @@ fallback mechanism, so it answers the open questions of #136 as follows:
   `StompAuthenticated::seed`, a `RequestSeeder`), which already addresses one scope. A context
   with a factory, or in the root or the transient scope, is `InvalidContext`.
 
-Status (#128, seed claims): DI core knows only that a value is seeded from outside; a
-`SeedClaim { ty, scope, claimant }` on `AppRegistry::seed_claims` says who seeds it. Protocols
-claim their framework seeds when they register (`RequestMeta` in `HttpRequest`, the upgrade's
-`WebsocketUpgradeMeta` and `WsConnectionMeta` in `WebsocketConnection`, STOMP's headers and
-session in `WebsocketMessage` and its principal in `WebsocketConnection`). Endpoints claim what
-their options produce (`WebsocketProtocol::seed_claims(&options)`, which STOMP answers from
-`StompConfig::provides_seed::<T>()`), `AxumAppBuilder::request_seed::<T, M>()` claims `T` for
-`HttpRequest` as it registers the seeder, and `AppBuilder::provides_seed::<T, S>()` is the
-claim for a scope the application opens itself. Preparation (`validate_seed_claims`, beside
-the placement-overlap check) then rejects:
+Status (#128, seed claims): DI core knows only that a value is seeded from outside; the app
+records who seeds it, without knowing any concrete protocol. There are two forms, by how many
+openers a scope has:
 
-- a claim for a scope without a factory-less slot of its type (`SeedClaimError::ClaimWithoutSlot`),
-  since every opening that fills it would reject a seed without a slot;
+- **A scope with one opener** (the HTTP request scope, a scope the application opens) is
+  covered by plain claims, `SeedClaim { ty, scope, claimant }` on `AppRegistry::seed_claims`.
+  Axum claims `RequestMeta` in `HttpRequest`, `AxumAppBuilder::request_seed::<T, M>()` claims
+  `T` there as it registers the seeder, and `AppBuilder::provides_seed::<T, S>()` is the claim
+  for a scope the application opens itself.
+- **A scope several openers share** (every WebSocket endpoint opens `WebsocketConnection` and
+  `WebsocketMessage`) is covered per opener. Each endpoint declares itself with
+  `AppRegistry::declare_opener(OpenerSeeds { opener, scope, seeds })` (`"<protocol> at <path>"`):
+  the upgrade metadata, plus what `WebsocketProtocol::seed_claims(&options)` returns. STOMP
+  returns its headers and session for the message scope, its principal for the connection scope,
+  and every `StompConfig::provides_seed::<T>()`; a STOMP endpoint that claims a seed without an
+  authenticator fails its build (`StompBuildError::SeedWithoutAuthenticator`). Once a scope has
+  a declared opener, a value is provided there only when **every** declared opener seeds it,
+  and plain claims do not count. The review of #496 found the hole this closes: with claims
+  collapsed to `(type, scope)`, one endpoint's seed vouched for another endpoint's connections
+  that never receive it. Per-opener coverage is the smallest sound model: only the openers that
+  share a scope need to say what they fill, and nothing else changes.
+
+Preparation (`validate_seed_claims`, beside the placement-overlap check) then rejects:
+
+- a claim or an opener's seed for a scope without a factory-less slot of its type
+  (`SeedClaimError::ClaimWithoutSlot`), since every opening that fills it would reject the seed;
 - a required edge (eager or deferred, not optional, not configuration) of a component or an
-  entry onto a checked seed whose placement on the consumer's chain no one claims
-  (`SeedClaimError::UnprovidedSeed`, naming the seed, the scope and the consumer). A claim on
-  the connection scope covers consumers in message scopes below it. Checked seeds are every
-  `#[context]` value and every type something claims; a plain factory-less slot no one claims
-  keeps its old rules and fails only when resolved.
+  entry onto a checked seed whose placement on the consumer's chain is not provided: no claim
+  covers it (`UnprovidedSeed`), or one declared opener does not seed it (`OpenerWithoutSeed`,
+  naming that opener). The placement is the one the consumer's chain reaches, so a connection
+  seed covers consumers in message scopes below it. Checked seeds are every `#[context]` value
+  and every type something claims; a plain factory-less slot no one claims keeps its old rules
+  and fails only when resolved.
 
-Several claimants of one `(type, scope)` pair are accepted: a claim describes an opener, and
-each opener fills its own instances, as two WebSocket protocols each seed their own connections.
-Two fills of one opening are caught where the opening is assembled: two request seeders of one
-type fail the axum build (`DuplicateRequestSeeder`), registering the same seeder twice is a
-no-op, and any other double fill fails the opening (`DuplicateSeed`).
+Several claimants of one `(type, scope)` pair are accepted: each describes an opener that fills
+its own instances. Two fills of one opening are caught where the opening is assembled: two
+request seeders of one type fail the axum build (`DuplicateRequestSeeder`), registering the same
+seeder twice is a no-op, and any other double fill fails the opening (`DuplicateSeed`).
 
-Tooling reports them as `upwell/tooling-seed-unprovided` (naming the consumer by component id
-or entry key), `upwell/tooling-seed-claim-without-slot` and `upwell/tooling-context-invalid`, and labels a context's `construction-policy` as
-`context`. A claim is a guarantee, not a check of each opening: a protocol that claims a seed
-and opens a scope without it fails the opening of an eager consumer, or the first resolution of
-an on-demand one.
+Tooling reports them as `upwell/tooling-seed-unprovided` and `upwell/tooling-seed-opener-missing`
+(naming the consumer by component id or entry key), `upwell/tooling-seed-claim-without-slot` and
+`upwell/tooling-context-invalid`, and labels a context's `construction-policy` as `context`. A
+claim is a guarantee, not a check of each opening: an opener that claims a seed and opens a
+scope without it fails the opening of an eager consumer, or the first resolution of an
+on-demand one.
 
 The REST path (#127): a `RequestSeeder` is a DI singleton producing the seed from the request or
 rejecting it with a response. It runs for every request a controller route serves, inside the

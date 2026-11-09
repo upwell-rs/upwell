@@ -74,8 +74,8 @@ pub use protocol::{
     ValidationContext,
 };
 pub use registry::{
-    APPLICATION_CLAIMANT, AppConditionEvaluation, AppRegistry, SeedClaim, SeedClaimError,
-    SeedConsumer,
+    APPLICATION_CLAIMANT, AppConditionEvaluation, AppRegistry, OpenerSeeds, SeedClaim,
+    SeedClaimError, SeedConsumer,
 };
 pub use runtime::{
     AnyScopeEnded, AppConditionState, AppRuntime, ComponentRetired, ComponentRetirement,

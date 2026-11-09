@@ -18,7 +18,7 @@ mod seeds;
 
 pub use condition::AppConditionEvaluation;
 pub(crate) use config::{BoundConfigs, ConfigFault};
-pub use seeds::{APPLICATION_CLAIMANT, SeedClaim, SeedClaimError, SeedConsumer};
+pub use seeds::{APPLICATION_CLAIMANT, OpenerSeeds, SeedClaim, SeedClaimError, SeedConsumer};
 
 /// Holds the *agnostic* component, provider, config-binding and entry descriptors of an
 /// app — declarations only. Runtime instances live in the
@@ -50,6 +50,9 @@ pub struct AppRegistry {
     /// Which values protocols, endpoints and the application guarantee to seed into which
     /// scopes; added with [`claim_seed`](Self::claim_seed).
     pub seed_claims: Vec<SeedClaim>,
+    /// The openers of scopes several openers share, each with the seeds it fills; added with
+    /// [`declare_opener`](Self::declare_opener).
+    pub scope_openers: Vec<OpenerSeeds>,
 }
 
 impl AppRegistry {
@@ -89,6 +92,7 @@ impl AppRegistry {
             scopes,
             unplanned: UnplannedConstruction::default(),
             seed_claims: Vec::new(),
+            scope_openers: Vec::new(),
         }
     }
 

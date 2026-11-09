@@ -93,22 +93,6 @@ impl ContextArgs {
             ));
         };
 
-        let outside = scopes.paths().iter().find(|path| {
-            path.segments.last().is_some_and(|segment| {
-                ["Singleton", "Root", "Transient"]
-                    .iter()
-                    .any(|name| segment.ident == name)
-            })
-        });
-
-        if let Some(path) = outside {
-            return Err(syn::Error::new_spanned(
-                path,
-                "a context value lives only in scopes below the root: it is seeded into scope \
-                 instances, and the root and the transient scope open none",
-            ));
-        }
-
         Ok(ComponentArgs {
             id: self.id,
             name: self.name,

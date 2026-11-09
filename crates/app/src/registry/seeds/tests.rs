@@ -42,11 +42,14 @@ fn two_openers_may_claim_one_seed_for_their_own_instances() {
     registry.claim_seed(SeedClaim::of::<Identity, Session>("first protocol"));
     registry.claim_seed(SeedClaim::of::<Identity, Session>("second protocol"));
 
-    let claimed = registry
-        .claimed_scopes(&[slot()])
+    let provided = registry
+        .provided(&[slot()])
         .expect("each opener fills its own instances");
 
-    assert_eq!(claimed.len(), 1);
+    assert!(matches!(
+        provided.coverage(TypeId::of::<Identity>(), Session::ID),
+        Coverage::Provided
+    ));
 }
 
 #[test]
@@ -55,16 +58,58 @@ fn a_claim_for_a_scope_without_a_slot_is_rejected() {
 
     registry.claim_seed(SeedClaim::of::<Identity, Session>("seeder"));
 
-    let error = registry
-        .claimed_scopes(&[])
-        .expect_err("every opening would reject the seed");
+    let Err(error) = registry.provided(&[]) else {
+        panic!("every opening would reject the seed");
+    };
 
     assert!(matches!(
         error,
         SeedClaimError::ClaimWithoutSlot {
-            claimant: "seeder",
+            ref claimant,
             scope_id,
             ..
-        } if scope_id == Session::ID
+        } if claimant == "seeder" && scope_id == Session::ID
+    ));
+}
+
+/// An opener of [`Session`] declaring `seeds`.
+fn opener(name: &str, seeds: Vec<TypeDescriptor>) -> OpenerSeeds {
+    OpenerSeeds {
+        opener: name.to_owned(),
+        scope: Session::KEY,
+        seeds,
+    }
+}
+
+#[test]
+fn one_openers_seed_does_not_vouch_for_another_opener() {
+    let mut registry = AppRegistry::default();
+
+    registry.declare_opener(opener(
+        "seeding endpoint",
+        vec![TypeDescriptor::of::<Identity>("Identity")],
+    ));
+    registry.declare_opener(opener("bare endpoint", Vec::new()));
+
+    let provided = registry.provided(&[slot()]).expect("every seed has a slot");
+
+    assert!(matches!(
+        provided.coverage(TypeId::of::<Identity>(), Session::ID),
+        Coverage::MissingIn(opener) if opener.opener == "bare endpoint"
+    ));
+}
+
+#[test]
+fn a_plain_claim_does_not_cover_a_scope_with_declared_openers() {
+    let mut registry = AppRegistry::default();
+
+    registry.claim_seed(SeedClaim::of::<Identity, Session>("application"));
+    registry.declare_opener(opener("bare endpoint", Vec::new()));
+
+    let provided = registry.provided(&[slot()]).expect("every seed has a slot");
+
+    assert!(matches!(
+        provided.coverage(TypeId::of::<Identity>(), Session::ID),
+        Coverage::MissingIn(_)
     ));
 }
