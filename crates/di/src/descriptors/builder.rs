@@ -235,14 +235,19 @@ impl ComponentDescriptor {
         }
     }
 
-    /// Places the component in `scope` instead of the singleton scope.
+    /// Places the component in `scope` instead of the singleton scope, replacing any list
+    /// [`with_scopes`](Self::with_scopes) set.
     pub const fn with_scope(self, scope: ScopeKey) -> Self {
-        Self { scope, ..self }
+        Self {
+            scope,
+            scopes: &[],
+            ..self
+        }
     }
 
     /// Places the component in every scope of `scopes`, as `#[component(scope = [A, B])]`
-    /// does: the first is its declared scope, and factories without scopes of their own
-    /// build in each. The scopes may not share a hierarchy.
+    /// does: the first becomes its declared [`scope`](Self::scope), and factories without
+    /// scopes of their own build in each. The scopes may not share a hierarchy or repeat.
     ///
     /// # Panics
     ///

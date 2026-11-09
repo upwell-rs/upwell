@@ -6,6 +6,7 @@ use std::sync::{Mutex, OnceLock};
 use upwell_core::{ScopeId, ScopeKey};
 
 use super::{ComponentDescriptor, ComponentFactoryRole};
+use crate::Error;
 
 /// The interned identity of a component placed in one of several scopes.
 static PLACEMENT_IDS: OnceLock<Mutex<HashMap<(&'static str, ScopeId), &'static str>>> =
@@ -68,6 +69,54 @@ impl ComponentDescriptor {
                 ..*self
             })
             .collect()
+    }
+}
+
+impl ComponentDescriptor {
+    /// Rejects inconsistent scope lists on a registered descriptor: a non-empty
+    /// [`scopes`](Self::scopes) list that does not start with the declared scope, and a scope
+    /// listed twice by the component or by one of its factories. One scope named through two
+    /// paths reaches the descriptor as one key twice, so it is caught here.
+    pub(crate) fn validate_scope_lists(&self) -> crate::Result<()> {
+        let declared = self.declared_scope.unwrap_or(self.scope);
+
+        if let [first, ..] = self.scopes
+            && *first != declared
+        {
+            return Err(Error::DeclaredScopeMismatch {
+                component: self.name.to_string(),
+                scope: declared.name(),
+                first: first.name(),
+            });
+        }
+
+        self.reject_repeated(self.scopes, None)?;
+
+        for factory in (self.factories)() {
+            self.reject_repeated(factory.scopes, Some(factory.id))?;
+        }
+
+        Ok(())
+    }
+
+    /// Rejects the first scope `scopes` lists twice, naming `factory` when the list is its own.
+    fn reject_repeated(
+        &self,
+        scopes: &[ScopeKey],
+        factory: Option<&'static str>,
+    ) -> crate::Result<()> {
+        for (index, scope) in scopes.iter().enumerate() {
+            if scopes[..index].contains(scope) {
+                return Err(Error::RepeatedScope {
+                    component: self.name.to_string(),
+                    factory,
+                    scope: scope.name(),
+                    scope_id: scope.id(),
+                });
+            }
+        }
+
+        Ok(())
     }
 }
 

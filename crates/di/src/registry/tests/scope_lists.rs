@@ -179,3 +179,91 @@ fn a_declared_list_including_transient_is_rejected() {
 
     assert!(matches!(error, Error::TransientPlacement { .. }));
 }
+
+const TWICE_IN_A: ComponentFactoryDescriptor = ComponentFactoryDescriptor {
+    scopes: &[SiblingA::KEY, SiblingA::KEY],
+    ..unbuilt_recipe("twice-in-a", Explicit, no_dependencies)
+};
+
+static REPEATING: [ComponentFactoryDescriptor; 1] = [TWICE_IN_A];
+
+fn repeating() -> &'static [ComponentFactoryDescriptor] {
+    &REPEATING
+}
+
+#[test]
+fn a_single_scope_set_after_a_list_replaces_the_list() {
+    let component = in_both(default_only).with_scope(Request::KEY);
+    let resolved = resolve(vec![component]).expect("the single scope resolves");
+
+    assert!(component.scopes.is_empty(), "the list is cleared");
+    assert_eq!(component.declared_scopes(), [Request::KEY]);
+    assert_eq!(factory_ids(&resolved), [(Request::ID, "fallback")]);
+}
+
+#[test]
+fn a_list_set_after_a_single_scope_declares_its_first_entry() {
+    let component = descriptor_with_factories(default_only)
+        .with_scope(Request::KEY)
+        .with_scopes(&[SiblingB::KEY, SiblingA::KEY]);
+
+    assert_eq!(component.scope.id(), SiblingB::ID);
+}
+
+#[test]
+fn a_list_that_does_not_start_with_the_declared_scope_is_rejected() {
+    let component = ComponentDescriptor {
+        scope: Request::KEY,
+        scopes: &[SiblingA::KEY, SiblingB::KEY],
+        ..descriptor_with_factories(default_only)
+    };
+
+    let error = resolve(vec![component]).expect_err("the scope and its list disagree");
+
+    assert!(
+        matches!(
+            &error,
+            Error::DeclaredScopeMismatch {
+                component,
+                scope: "Request",
+                first: "SiblingA",
+            } if component == "FactoryFixture"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_scope_declared_twice_is_rejected() {
+    let component =
+        descriptor_with_factories(default_only).with_scopes(&[SiblingA::KEY, SiblingA::KEY]);
+
+    let error = resolve(vec![component]).expect_err("one scope listed twice");
+
+    assert!(
+        matches!(
+            &error,
+            Error::RepeatedScope { component, scope: "SiblingA", .. } if component == "FactoryFixture"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_factory_listing_a_scope_twice_is_rejected() {
+    let component = descriptor_with_factories(repeating).with_scope(Request::KEY);
+
+    let error = resolve(vec![component]).expect_err("one factory scope listed twice");
+
+    assert!(
+        matches!(
+            &error,
+            Error::RepeatedScope {
+                scope: "SiblingA",
+                factory: Some("twice-in-a"),
+                ..
+            }
+        ),
+        "{error}"
+    );
+}

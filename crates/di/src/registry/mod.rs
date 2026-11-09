@@ -79,6 +79,8 @@ impl ComponentRegistry {
         let mut positions: HashMap<(TypeId, ScopeId), usize> = HashMap::new();
 
         for registered in &self.components {
+            registered.validate_scope_lists()?;
+
             for component in registered.expand_placements() {
                 component.validate_factories()?;
                 Self::place(&mut chosen, &mut positions, component)?;
