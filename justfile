@@ -112,8 +112,8 @@ test-doc:
 
 [positional-arguments]
 review-tool *args:
-    @test -f tools/upwell-review/Cargo.toml || git submodule update --init tools/upwell-review
-    @cargo run --quiet --release --locked --manifest-path tools/upwell-review/Cargo.toml -- "$@"
+    @command -v upwell-review >/dev/null || { echo "upwell-review is not installed: cargo install --locked --git https://github.com/upwell-rs/upwell-review" >&2; exit 1; }
+    @upwell-review "$@"
 
 [positional-arguments]
 review *args:
