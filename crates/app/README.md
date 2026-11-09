@@ -106,6 +106,15 @@ components take the session's components optionally (`Option<Arc<T>>`). Code tha
 parent per opening holds a `ParentScope<S>` (made from an `OpenScope<P>` where `S: OpensUnder<P>`)
 and opens with `ScopeBuilder::under_parent`.
 
+A value produced outside DI, such as an authenticated identity, is a `#[context(scopes = [..])]`:
+factory-less and by value, it may be seeded into several scopes that share no hierarchy, each
+instance through its own builder (`ScopeBuilder::seed`, or `.seeds(Seeds)` for seeds collected
+ahead of the opening). The registry holds `SeedClaim`s saying who seeds what where: protocols
+claim their own seeds and their endpoints' seeds, and `AppBuilder::provides_seed::<T, S>()`
+claims a seed the application fills in a scope it opens itself. Preparation rejects a required
+dependency on a context value whose scope no one claims (`SeedClaimError::UnprovidedSeed`) and a
+seed two claimants claim for one scope (`DuplicateSeedClaim`).
+
 ### End-of-scope hook
 
 `#[hook(ScopeEnded<Session>)] async fn ended(&self, end: ScopeEnd)` on a singleton observes every

@@ -13,6 +13,11 @@ pub enum ScopedConstruction {
     /// Built on every opening of the scope, whatever the entry, for a component whose
     /// construction is the intended side effect (an audit record, a span, a gate).
     Eager,
+    /// Never built: a `#[context]` value, which the protocol or the application seeds into
+    /// an instance of each scope it lists. Unlike any other factory-less component, it may be
+    /// placed in several scopes that share no hierarchy, and preparation checks that a seed
+    /// claim covers each placement something depends on.
+    Context,
 }
 
 impl ScopedConstruction {
@@ -21,11 +26,17 @@ impl ScopedConstruction {
         match self {
             Self::OnDemand => "on-demand",
             Self::Eager => "eager",
+            Self::Context => "context",
         }
     }
 
     /// Whether every opening of the scope builds the component.
     pub const fn is_eager(self) -> bool {
         matches!(self, Self::Eager)
+    }
+
+    /// Whether the component is a `#[context]` value, seeded into each scope it lists.
+    pub const fn is_context(self) -> bool {
+        matches!(self, Self::Context)
     }
 }

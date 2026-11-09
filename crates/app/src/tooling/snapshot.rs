@@ -229,7 +229,8 @@ impl ComponentSnapshot {
             seeded: seeded.contains(&descriptor.ty.type_id),
             seed_destination: seed_destinations
                 .get(&descriptor.ty.type_id)
-                .map(|seed| seed.scope),
+                .filter(|seed| seed.scopes.contains(&descriptor.scope.id()))
+                .map(|_| descriptor.scope.id()),
         })
     }
 }

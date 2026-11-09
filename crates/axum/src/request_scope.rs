@@ -83,6 +83,7 @@ use upwell_di::{FromContainer, ScopeContainer};
 use crate::config::AxumConfig;
 use crate::extract::InjectRejection;
 use crate::request_meta::RequestMeta;
+use crate::request_seed::{self, SeedReader};
 use crate::scope::{HttpRequest, RequestParent};
 use crate::target::HttpTarget;
 
@@ -96,6 +97,7 @@ pub(crate) struct RequestScopes {
     routes: RouteEntries,
     config: Cfg<AxumConfig>,
     parents: ParentChoice,
+    seeds: Box<[SeedReader]>,
 }
 
 /// Whether a request's scope may open under a parent other than the application root.
@@ -175,12 +177,14 @@ impl<'a> Head<'a> {
 
 impl RequestScopeLayer {
     /// The layer opening request scopes with `opener`, under the root or, as `parents` says,
-    /// under a [`RequestParent`] a parent layer set.
+    /// under a [`RequestParent`] a parent layer set, with the seeds `seeds` read from the
+    /// request's extensions.
     pub(crate) fn new(
         opener: ScopeOpener<HttpRequest>,
         routes: RouteEntries,
         config: Cfg<AxumConfig>,
         parents: ParentChoice,
+        seeds: Box<[SeedReader]>,
     ) -> Self {
         Self {
             scopes: Arc::new(RequestScopes {
@@ -188,6 +192,7 @@ impl RequestScopeLayer {
                 routes,
                 config,
                 parents,
+                seeds,
             }),
         }
     }
@@ -265,6 +270,18 @@ impl<S: Service<Request>> Service<Request> for RequestScopeService<S> {
             context.enter(self.inner.call(request)),
         )
     }
+}
+
+/// Whether the request with `head` is served by a controller route: a route whose
+/// [`HttpRequest`] scope this protocol opens, unlike a WebSocket upgrade.
+pub(crate) fn is_controller_route(head: &Parts) -> bool {
+    let Some(path) = head.extensions.get::<MatchedPath>() else {
+        return false;
+    };
+
+    REQUEST_SCOPES
+        .try_with(|scopes| scopes.routes.get(&head.method, path.as_str()).is_some())
+        .unwrap_or(false)
 }
 
 /// The protocol's configuration, for a request served by the protocol's router.
@@ -397,8 +414,9 @@ async fn open_request(
     Ok(scope)
 }
 
-/// Opens the request's scope under the parent in `extensions`, or the root, capturing
-/// [`RequestMeta`] from `head` when the opening reads it.
+/// Opens the request's scope under the parent in `extensions`, or the root, with the seeds
+/// request seeders left in `extensions`, capturing [`RequestMeta`] from `head` when the
+/// opening reads it.
 async fn open(
     head: Head<'_>,
     extensions: &Extensions,
@@ -420,6 +438,10 @@ async fn open(
     let builder = match parent {
         Some(parent) => builder.under_parent(parent),
         None => builder,
+    };
+    let builder = match scopes.seeds.is_empty() {
+        true => builder,
+        false => builder.seeds(request_seed::collect(&scopes.seeds, extensions)),
     };
 
     let opened = builder

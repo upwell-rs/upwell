@@ -36,6 +36,7 @@ mod app;
 mod case;
 mod component;
 mod config;
+mod context;
 mod injectable;
 mod when;
 
@@ -84,6 +85,17 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
     let paths = args.paths(Paths::upwell());
 
     run::<ItemStruct, _>(item, |item| component::expand(args, item, &paths))
+}
+
+/// `#[context]` expansion entry point.
+pub fn context(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = match syn::parse2::<context::ContextArgs>(attr) {
+        Ok(args) => args,
+
+        Err(e) => return e.into_compile_error(),
+    };
+
+    run::<ItemStruct, _>(item, |item| context::expand(args, item, Paths::upwell()))
 }
 
 /// `#[config]` expansion entry point.

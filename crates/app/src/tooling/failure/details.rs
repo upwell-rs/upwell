@@ -158,6 +158,7 @@ pub(in crate::tooling) fn app_failure(
             Vec::new(),
             Some("Declare the scope in the protocol topology or change the component scope."),
         ),
+        crate::Error::SeedClaim(error) => super::seeds::seed_claim_failure(error, phase),
         _ => (
             "upwell/tooling-framework",
             "The framework could not prepare the application tooling plan.",

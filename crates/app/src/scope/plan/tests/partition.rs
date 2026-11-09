@@ -91,8 +91,8 @@ fn child_order_accepts_root_ancestor_and_local_factoryless_descriptors() {
         TypeId::of::<ChildFactory>()
     );
     assert_eq!(
-        plan.seed_destinations[&TypeId::of::<ParentSeed>()].scope,
-        PARENT_ID
+        plan.seed_destinations[&TypeId::of::<ParentSeed>()].scopes,
+        [PARENT_ID]
     );
 }
 

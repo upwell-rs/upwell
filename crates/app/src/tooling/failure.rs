@@ -5,6 +5,7 @@ use crate::{ContributionProvenance, InstallationOrigin, InstallationProvenance};
 
 mod details;
 mod di;
+mod seeds;
 
 pub(in crate::tooling) use details::*;
 pub(in crate::tooling) use di::di_failure;

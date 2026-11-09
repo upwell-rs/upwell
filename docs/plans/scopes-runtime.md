@@ -1150,12 +1150,53 @@ fallback mechanism, so it answers the open questions of #136 as follows:
   chain. Neither needs to know that `T` has several placements.
 - Status: done; the rules are tested in `crates/di/src/registry/tests/scope_lists.rs`,
   `tests/multi_scope_runtime.rs` and `tests/multi_scope_seed_list.rs`.
+- `#[context]` values are the one exception (#127): a seed-only value declared with
+  `#[context(scopes = [WebsocketConnection, HttpRequest])]` is a by-value, factory-less
+  component with the `ScopedConstruction::Context` policy, placed in each listed scope through
+  the scope-list machinery. `AmbiguousSeedScopes` is not raised when every seed placement of a
+  type is a context; the overlap rule still keeps the scopes apart, so a chain reaches at most
+  one slot, and `seed_destinations` lists every scope of a context. Each slot is filled by the
+  builder of its own scope (`ScopeBuilder::seed`, `PreparedConnection::seed`,
+  `StompAuthenticated::seed`, a `RequestSeeder`), which already addresses one scope. A context
+  with a factory, or in the root or the transient scope, is `InvalidContext`.
+
+Status (#128, seed claims): DI core knows only that a value is seeded from outside; a
+`SeedClaim { ty, scope, claimant }` on `AppRegistry::seed_claims` says who seeds it. Protocols
+claim their framework seeds when they register (`RequestMeta` in `HttpRequest`, the upgrade's
+`WebsocketUpgradeMeta` and `WsConnectionMeta` in `WebsocketConnection`, STOMP's headers and
+session in `WebsocketMessage` and its principal in `WebsocketConnection`). Endpoints claim what
+their options produce (`WebsocketProtocol::seed_claims(&options)`, which STOMP answers from
+`StompConfig::provides_seed::<T>()`), `AxumAppBuilder::request_seed::<T, M>()` claims `T` for
+`HttpRequest` as it registers the seeder, and `AppBuilder::provides_seed::<T, S>()` is the
+claim for a scope the application opens itself. Preparation (`validate_seed_claims`, beside
+the placement-overlap check) then rejects:
+
+- two claimants of one `(type, scope)` pair (`SeedClaimError::DuplicateSeedClaim`); one
+  claimant claiming twice, such as an endpoint mounted at two paths, is merged;
+- a required edge (eager or deferred, not optional, not configuration) of a component or an
+  entry onto a checked seed whose placement on the consumer's chain no one claims
+  (`SeedClaimError::UnprovidedSeed`, naming the seed, the scope and the consumer). A claim on
+  the connection scope covers consumers in message scopes below it. Checked seeds are every
+  `#[context]` value and every type something claims; a plain factory-less slot no one claims
+  keeps its old rules and fails only when resolved.
+
+Tooling reports them as `upwell/tooling-seed-unprovided`, `upwell/tooling-seed-claim-duplicate`
+and `upwell/tooling-context-invalid`, and labels a context's `construction-policy` as
+`context`. A claim is a guarantee, not a check of each opening: a protocol that claims a seed
+and opens a scope without it fails the opening of an eager consumer, or the first resolution of
+an on-demand one.
+
+The REST path (#127): a `RequestSeeder` is a DI singleton producing the seed from the request or
+rejecting it with a response. It runs inside the parent layers and before global middleware and
+the eager request-scope opening; the seed waits in the request's extensions and is cloned into
+the scope's slot when the scope opens, whichever way it opens. Seeders that are not registered
+cost nothing: the opening reads extensions only when at least one is.
 
 Use matrix:
 
 | Need | Feature | Why not the others |
 |---|---|---|
-| Authenticated identity | A seed (`Identity`, filled by the protocol or `ScopeBuilder::seed`) | It is produced outside DI and is immutable; a placement would construct it. |
+| Authenticated identity | A `#[context(scopes = [..])]` value (`Identity`), seeded by the protocol (`StompAuthenticated::seed`, a `RequestSeeder`) or `ScopeBuilder::seed` and claimed for each scope | It is produced outside DI and is immutable; a placement would construct it. |
 | Protocol metadata (headers, peer) | A seed, lazily captured where declared (`RequestMeta`, `PeerInfo`) | Same as identity: the protocol owns its lifecycle. |
 | Per-request optimised service | `#[component(scope = HttpRequest)]` | One lifecycle, one scope. |
 | Per-connection optimised service | `#[component(scope = WebsocketConnection)]` | Same. |

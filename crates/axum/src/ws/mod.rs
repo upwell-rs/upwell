@@ -33,7 +33,7 @@ use upwell_core::{DependencyDescriptor, EntryKey, ItemSource, TypeDescriptor};
 use crate::scope::WebsocketMessage;
 
 pub use connection::WsConnectionScope;
-pub(crate) use meta::{WEBSOCKET_UPGRADE_META_DESCRIPTOR, WS_CONNECTION_META_DESCRIPTOR};
+pub(crate) use meta::register_framework_seeds;
 pub use meta::{WebsocketUpgradeMeta, WsConnectionMeta};
 pub use mount::WebsocketHandler;
 pub(crate) use mount::mount_ws;
@@ -431,8 +431,17 @@ pub trait WebsocketProtocol: Send + Sync + Sized + 'static {
         shutdown: WsShutdown,
     ) -> impl Future<Output = ()> + Send;
 
-    /// Contributes protocol-owned DI components before the root container is validated and built.
+    /// Contributes protocol-owned DI components before the root container is validated and
+    /// built, and claims the seeds the protocol provides with
+    /// [`AppRegistry::claim_seed`].
     fn register(_registry: &mut AppRegistry) {}
+
+    /// The connection seeds one endpoint configured with `options` guarantees beyond the
+    /// protocol's own, such as the application values its authentication step seeds. None by
+    /// default.
+    fn seed_claims(_options: &Self::Options) -> Vec<upwell_app::SeedClaim> {
+        Vec::new()
+    }
 }
 
 /// A [`WebsocketProtocol`] that carries topic pub/sub: it frames a delivered message for one

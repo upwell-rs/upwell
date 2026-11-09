@@ -68,3 +68,4 @@ mod fixtures;
 mod plugins;
 mod projection;
 mod protocol;
+mod seed_failures;

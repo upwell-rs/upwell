@@ -68,7 +68,7 @@ pub(crate) fn seed_layouts(
     for boundary in boundaries {
         let seeded: Vec<ComponentDescriptor> = destinations
             .iter()
-            .filter(|(_, destination)| destination.scope == boundary.id())
+            .filter(|(_, destination)| destination.scopes.contains(&boundary.id()))
             .map(|(type_id, destination)| {
                 let ty = TypeDescriptor {
                     name: destination.type_name,

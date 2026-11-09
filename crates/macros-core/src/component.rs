@@ -74,7 +74,7 @@ pub fn expand<Ext: ComponentExt>(
         .scope
         .as_ref()
         .map_or_else(|| quote!(&[]), |scope| scope.declared_keys(paths));
-    let construction = Construction::lower(args.eager.as_ref(), args.scope.as_ref(), paths);
+    let construction = Construction::lower(&args, paths);
     let registrations_slice = args
         .factory_slice
         .clone()
@@ -200,33 +200,61 @@ struct Construction {
 }
 
 impl Construction {
-    fn lower(eager: Option<&Ident>, scope: Option<&ScopeList>, paths: &Paths) -> Self {
+    fn lower<Ext: ComponentExt>(args: &ComponentArgs<Ext>, paths: &Paths) -> Self {
         let policy = paths.core("ScopedConstruction");
-        let scope_trait = paths.core("Scope");
-        let scopes = scope.map(ScopeList::paths).unwrap_or_default();
-        let Some(eager) = eager else {
+        let scopes = args
+            .scope
+            .as_ref()
+            .map(ScopeList::paths)
+            .unwrap_or_default();
+
+        if let Some(context) = &args.context {
+            return Self {
+                policy: quote_spanned!(context.span()=> #policy::Context),
+                check: below_root(
+                    context,
+                    scopes,
+                    "a context value lives only in scopes below the root: it is seeded into \
+                     scope instances, and the root and the transient scope open none",
+                    paths,
+                ),
+            };
+        }
+
+        let Some(eager) = &args.eager else {
             return Self {
                 policy: quote!(#policy::OnDemand),
                 check: quote!(),
             };
         };
 
-        let check = scopes.iter().map(|scope_path| {
-            quote_spanned! {eager.span()=>
-                const _: () = ::core::assert!(
-                    !<#scope_path as #scope_trait>::IS_TRANSIENT
-                        && <#scope_path as #scope_trait>::RANK != ::core::primitive::u8::MAX,
-                    "`eager` applies only to scopes below the root: a singleton is built when \
-                     the application starts and a transient on every resolution",
-                );
-            }
-        });
-
         Self {
             policy: quote_spanned!(eager.span()=> #policy::Eager),
-            check: quote!(#(#check)*),
+            check: below_root(
+                eager,
+                scopes,
+                "`eager` applies only to scopes below the root: a singleton is built when \
+                 the application starts and a transient on every resolution",
+                paths,
+            ),
         }
     }
+}
+
+/// A compile-time check, spanned at `keyword`, that each of `scopes` lies below the root.
+fn below_root(keyword: &Ident, scopes: &[syn::Path], message: &str, paths: &Paths) -> TokenStream {
+    let scope_trait = paths.core("Scope");
+    let checks = scopes.iter().map(|scope_path| {
+        quote_spanned! {keyword.span()=>
+            const _: () = ::core::assert!(
+                !<#scope_path as #scope_trait>::IS_TRANSIENT
+                    && <#scope_path as #scope_trait>::RANK != ::core::primitive::u8::MAX,
+                #message,
+            );
+        }
+    });
+
+    quote!(#(#checks)*)
 }
 
 /// Reports a malformed `#[when]` while keeping the item, so its lowered `#[when]` markers still

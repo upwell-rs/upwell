@@ -1,0 +1,5 @@
+error: `#[context]` needs `scopes = [..]`: the scopes a protocol or the application seeds the value into, as in `#[context(scopes = [WebsocketConnection, HttpRequest])]`
+ --> tests/ui/context/missing_scopes.rs:6:8
+  |
+6 | struct Identity;
+  |        ^^^^^^^^

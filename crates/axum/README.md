@@ -36,6 +36,16 @@ request's extensions. Parent layers run before global middleware and before the 
 so every opening sees the parent, and only for requests a route matches. Without a parent layer,
 nothing reads `RequestParent`.
 
+An application value such as an authenticated identity, declared once with
+`#[context(scopes = [WebsocketConnection, HttpRequest])]`, reaches both paths as a seed. Over
+REST a `RequestSeeder` registered with `request_seed::<Identity, M>()` produces it from the
+request (or rejects it) before global middleware and fills each request scope with it. Over
+WebSocket the protocol's `serve` receives a `PreparedConnection` and opens the connection scope
+itself, after its handshake: STOMP opens it after `CONNECT` authentication, seeded with the
+`StompPrincipal` and whatever the authenticator returns in `StompAuthenticated::seed`, and
+`StompConfig::provides_seed::<Identity>()` claims it. Preparation rejects a required context
+value whose scope no one claims to seed (`UnprovidedSeed`).
+
 `RequestMeta` copies the request's method, URI and headers, so it is captured only when something
 reads it, once per request: when the scope opens if the route reads it (directly or through a
 component it builds or reaches lazily), otherwise at the first `Inject` that reads it. A route

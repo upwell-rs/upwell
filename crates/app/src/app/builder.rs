@@ -206,6 +206,19 @@ impl<D: ProtocolDefinition> AppBuilder<D> {
         self.entry_descriptor(EntryDescriptor::new::<S, T>(key))
     }
 
+    /// Claims that the application seeds `T` into every instance of scope `S` it opens, for
+    /// a `#[context]` value filled with [`ScopeBuilder::seed`](crate::ScopeBuilder::seed) in a
+    /// scope the application opens itself. Preparation rejects a required context value whose
+    /// scope no one claims (`UnprovidedSeed`), and a pair two claimants claim.
+    pub fn provides_seed<T: 'static, S: Scope>(mut self) -> Self {
+        self.registry
+            .claim_seed(crate::registry::SeedClaim::of::<T, S>(
+                crate::registry::APPLICATION_CLAIMANT,
+            ));
+
+        self
+    }
+
     /// Fails resolutions that build, on demand, a component the entry their scope was opened
     /// for does not declare, to surface drift between declared entries and what the
     /// application resolves, for example in tests.

@@ -332,6 +332,20 @@ pub(in crate::tooling) fn di_failure(
                 Some("Build the descriptor with `with_scopes`, or list the declared scope first."),
             )
         }
+        upwell_di::Error::InvalidContext {
+            component_id,
+            scope_id,
+            ..
+        } => (
+            "upwell/tooling-context-invalid",
+            "A context value has a factory or is placed in the root or the transient scope.",
+            phase,
+            vec![component_resource(component_id), scope_resource(*scope_id)],
+            Vec::new(),
+            Some(
+                "Declare the context with `#[context(scopes = [..])]` naming scopes below the root.",
+            ),
+        ),
         _ => (
             "upwell/tooling-dependency-graph",
             "The dependency graph is structurally invalid.",

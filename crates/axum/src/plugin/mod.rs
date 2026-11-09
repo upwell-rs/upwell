@@ -3,7 +3,7 @@
 use std::future::Future;
 
 use upwell_app::{
-    AppRegistry, AppRuntime, PreparedProtocol, ProtocolDefinition, ValidationContext,
+    AppRegistry, AppRuntime, PreparedProtocol, ProtocolDefinition, SeedClaim, ValidationContext,
 };
 use upwell_config::{ConfigBinding, ContainerConfigExt};
 
@@ -13,6 +13,7 @@ use crate::middleware::MiddlewareApplier;
 use crate::protocol::AxumRuntime;
 use crate::request_meta::REQUEST_META_DESCRIPTOR;
 use crate::request_scope::{ParentChoice, RequestScopeLayer, open_eager_scope};
+use crate::request_seed::SeedReader;
 use crate::scope::{HttpRequest as HttpRequestScope, SCOPE_TOPOLOGY};
 
 pub use builder::AxumAppBuilder;
@@ -20,7 +21,7 @@ use timeout::RequestTimeoutLayer;
 
 /// The axum HTTP protocol definition.
 ///
-/// Accumulates the registered/discovered controllers, contributes no extra DI seeds, and
+/// Accumulates the registered/discovered controllers, claims the seeds it provides, and
 /// builds the [`AxumRuntime`]: each controller's [`axum::Router`] merged together and
 /// wrapped by a request-scope layer, so the [`Inject`](crate::Inject) extractor opens the
 /// request scope on first use.
@@ -39,6 +40,11 @@ pub struct Axum {
     /// [`AxumAppBuilder::parent_layer`] and [`AxumAppBuilder::parent_middleware`]).
     parent_layers: Vec<MiddlewareApplier>,
 
+    /// The layers of the [`RequestSeeder`](crate::RequestSeeder)s registered with
+    /// [`AxumAppBuilder::request_seed`], applied inside the parent layers and outside the eager
+    /// request-scope opening, with the readers that hand each seed to the opening.
+    request_seeds: RequestSeeds,
+
     /// Discovered `#[controller(ws = ..)]` descriptors. Only mounted for protocols a user opts into
     /// via [`register_ws`](AxumAppBuilder::register_ws).
     #[cfg(feature = "ws")]
@@ -48,6 +54,16 @@ pub struct Axum {
     #[cfg(feature = "ws")]
     ws_registrations: Vec<WsRegistration>,
 }
+
+/// The registered request seeders: their layers and the readers of their seeds.
+#[derive(Default)]
+struct RequestSeeds {
+    layers: Vec<MiddlewareApplier>,
+    readers: Vec<SeedReader>,
+}
+
+/// The claimant of the seeds the axum protocol itself provides.
+pub const AXUM_CLAIMANT: &str = "upwell/axum";
 
 /// A mount closure: builds one ws endpoint's router + handle from its controllers and runtime. A
 /// boxed `FnOnce` (not a `fn` pointer) so it can capture the path and the protocol's `Options`,
@@ -72,6 +88,7 @@ struct WsRegistration {
     protocol_name: &'static str,
     mount: WsMount,
     register: fn(&mut AppRegistry),
+    claims: Vec<upwell_app::SeedClaim>,
 }
 
 /// One validated WebSocket endpoint and the exact route plan retained from preparation.
@@ -92,6 +109,7 @@ pub struct PreparedAxum {
     controllers: Vec<ControllerDescriptor>,
     middleware: Vec<MiddlewareApplier>,
     parent_layers: Vec<MiddlewareApplier>,
+    request_seeds: RequestSeeds,
     #[cfg(feature = "tooling")]
     base_prefix: String,
     #[cfg(feature = "ws")]
@@ -115,14 +133,14 @@ impl ProtocolDefinition for Axum {
             .config_bindings
             .push(ConfigBinding::of::<AxumConfig>(AXUM_CONFIG_PATH));
         registry.components.push(REQUEST_META_DESCRIPTOR);
+        registry.claim_seed(SeedClaim::of::<crate::RequestMeta, HttpRequestScope>(
+            AXUM_CLAIMANT,
+        ));
         registry
             .entries
             .extend(entries::route_entries(&self.controllers));
         #[cfg(feature = "ws")]
-        registry.components.extend([
-            crate::ws::WEBSOCKET_UPGRADE_META_DESCRIPTOR,
-            crate::ws::WS_CONNECTION_META_DESCRIPTOR,
-        ]);
+        crate::ws::register_framework_seeds(registry);
 
         #[cfg(feature = "openapi")]
         registry
@@ -138,6 +156,10 @@ impl ProtocolDefinition for Axum {
             for registration in &self.ws_registrations {
                 if registered.insert(registration.protocol) {
                     (registration.register)(registry);
+                }
+
+                for claim in &registration.claims {
+                    registry.claim_seed(*claim);
                 }
             }
 
@@ -222,6 +244,7 @@ impl ProtocolDefinition for Axum {
             controllers: self.controllers,
             middleware: self.middleware,
             parent_layers: self.parent_layers,
+            request_seeds: self.request_seeds,
             #[cfg(feature = "tooling")]
             base_prefix,
             #[cfg(feature = "ws")]
@@ -293,6 +316,10 @@ impl PreparedProtocol for PreparedAxum {
             router = router.layer(axum::middleware::from_fn(open_eager_scope));
         }
 
+        for applier in self.request_seeds.layers.into_iter().rev() {
+            router = applier(runtime, router);
+        }
+
         let parents = if self.parent_layers.is_empty() {
             ParentChoice::Root
         } else {
@@ -325,6 +352,7 @@ impl PreparedProtocol for PreparedAxum {
             routes,
             config.clone(),
             parents,
+            self.request_seeds.readers.into_boxed_slice(),
         ));
 
         // One canonical prefix drives both the OpenAPI server/UI URLs and the router nesting, so the

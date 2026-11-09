@@ -137,3 +137,19 @@ pub(crate) static WS_CONNECTION_META_DESCRIPTOR: upwell_di::ComponentDescriptor 
         TypeDescriptor::of::<WsConnectionMeta>("WsConnectionMeta"),
         crate::scope::WebsocketConnection::KEY,
     );
+
+/// Registers the upgrade's seeds of the connection scope and claims them for it.
+pub(crate) fn register_framework_seeds(registry: &mut upwell_app::AppRegistry) {
+    registry.components.extend([
+        WEBSOCKET_UPGRADE_META_DESCRIPTOR,
+        WS_CONNECTION_META_DESCRIPTOR,
+    ]);
+    registry.claim_seed(upwell_app::SeedClaim::of::<
+        WebsocketUpgradeMeta,
+        crate::scope::WebsocketConnection,
+    >(crate::plugin::AXUM_CLAIMANT));
+    registry.claim_seed(upwell_app::SeedClaim::of::<
+        WsConnectionMeta,
+        crate::scope::WebsocketConnection,
+    >(crate::plugin::AXUM_CLAIMANT));
+}

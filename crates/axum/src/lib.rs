@@ -57,6 +57,8 @@ pub mod request_meta;
 #[cfg(not(target_family = "wasm"))]
 mod request_scope;
 #[cfg(not(target_family = "wasm"))]
+mod request_seed;
+#[cfg(not(target_family = "wasm"))]
 pub mod scope;
 #[cfg(not(target_family = "wasm"))]
 mod target;
@@ -141,6 +143,8 @@ pub use plugin::{Axum, AxumAppBuilder, AxumAppServe, PreparedAxum};
 pub use protocol::AxumRuntime;
 #[cfg(not(target_family = "wasm"))]
 pub use request_meta::RequestMeta;
+#[cfg(not(target_family = "wasm"))]
+pub use request_seed::RequestSeeder;
 /// The `StreamBody` request extractor is an axum `FromRequest` — server-only.
 #[cfg(not(target_family = "wasm"))]
 pub use stream::StreamBody;
@@ -234,7 +238,7 @@ pub type AppBuilder = upwell_app::AppBuilder<Axum>;
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_app::{
     AppRegistry, AppRuntime, LoggingConfig, Plugin, PreparedProtocol, ProtocolDefinition,
-    ProtocolRuntime, Seeds, Serve, ServerConfig, ShutdownHandle, ShutdownSignal,
+    ProtocolRuntime, SeedClaim, Seeds, Serve, ServerConfig, ShutdownHandle, ShutdownSignal,
 };
 
 /// Re-exported so macro-generated code can reach the `#[distributed_slice]` attribute for
