@@ -361,3 +361,65 @@ fn invalid_envelope_does_not_open_or_truncate_response_path() {
         "preserve-me"
     );
 }
+
+#[test]
+fn repeated_scope_failures_name_component_factory_and_scope() {
+    let scope = upwell_core::ScopeId::new("fixture/request").expect("valid scope identity");
+    let error = crate::Error::Di(upwell_di::Error::RepeatedScope(Box::new(
+        upwell_di::RepeatedScope {
+            component: String::from("Friendly Store"),
+            component_id: String::from("store-component"),
+            factory: Some("init:build"),
+            scope: "Request",
+            scope_id: scope,
+        },
+    )));
+    let failure = ToolingProbeError::Lifecycle(crate::PhaseError::new(
+        crate::LifecyclePhase::Prepare,
+        error,
+    ))
+    .failure();
+    let diagnostic = &failure.diagnostics[0];
+
+    assert_eq!(diagnostic.code, "upwell/tooling-scope-repeated");
+    assert_eq!(
+        diagnostic.resources,
+        [
+            "component:store-component",
+            "factory:store-component:init:build",
+            "scope:fixture/request",
+        ]
+    );
+}
+
+#[test]
+fn declared_scope_mismatch_failures_name_component_and_both_scopes() {
+    let declared = upwell_core::ScopeId::new("fixture/request").expect("valid declared scope");
+    let first = upwell_core::ScopeId::new("fixture/connection").expect("valid listed scope");
+    let error = crate::Error::Di(upwell_di::Error::DeclaredScopeMismatch(Box::new(
+        upwell_di::DeclaredScopeMismatch {
+            component: String::from("Friendly Store"),
+            component_id: String::from("store-component"),
+            scope: "Request",
+            scope_id: declared,
+            first: "Connection",
+            first_id: first,
+        },
+    )));
+    let failure = ToolingProbeError::Lifecycle(crate::PhaseError::new(
+        crate::LifecyclePhase::Prepare,
+        error,
+    ))
+    .failure();
+    let diagnostic = &failure.diagnostics[0];
+
+    assert_eq!(diagnostic.code, "upwell/tooling-declared-scope-mismatch");
+    assert_eq!(
+        diagnostic.resources,
+        [
+            "component:store-component",
+            "scope:fixture/request",
+            "scope:fixture/connection",
+        ]
+    );
+}

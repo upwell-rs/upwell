@@ -30,8 +30,10 @@ fn a_scope_named_through_two_paths_fails_resolution() {
     assert!(
         matches!(
             &error,
-            DiError::RepeatedScope { component, scope: "Local", factory: None, .. }
-                if component == "Twice"
+            DiError::RepeatedScope(repeated)
+                if repeated.component == "Twice"
+                    && repeated.scope == "Local"
+                    && repeated.factory.is_none()
         ),
         "{error}"
     );

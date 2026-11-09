@@ -1097,7 +1097,10 @@ fallback mechanism, so it answers the open questions of #136 as follows:
   through two paths (or repeated in a hand-written list, the component's or a factory's) is
   `RepeatedScope`, and a non-empty `scopes` that does not start with the declared `scope` is
   `DeclaredScopeMismatch`. `with_scope` clears a list `with_scopes` set, and `with_scopes` sets
-  `scope` to the first entry.
+  `scope` to the first entry; both also drop a resolved placement's expansion record, so a
+  placement registered again with new scopes is an ordinary descriptor (keeping its placement
+  id). Tooling reports the two errors as `upwell/tooling-scope-repeated` and
+  `upwell/tooling-declared-scope-mismatch`.
 - Nearest-wins shadowing stays deferred.
 
 ### Validation and diagnostics (#138)

@@ -55,10 +55,10 @@ pub use descriptors::{
     provider_live_cell,
 };
 pub use error::{
-    AmbiguousEnclosingPlacement, DeferredTransientDependency, Error, InvalidFreshDependency,
-    ProviderComponentMissing, ProviderOrderCycle, ProviderOrderSourceTraitMismatch,
-    ProviderOrderTargetTraitMismatch, Result, ScopeUnreachableDependency, ScopeUnreachableProvider,
-    ScopeViolation,
+    AmbiguousEnclosingPlacement, DeclaredScopeMismatch, DeferredTransientDependency, Error,
+    InvalidFreshDependency, ProviderComponentMissing, ProviderOrderCycle,
+    ProviderOrderSourceTraitMismatch, ProviderOrderTargetTraitMismatch, RepeatedScope, Result,
+    ScopeUnreachableDependency, ScopeUnreachableProvider, ScopeViolation,
 };
 pub use layout::{EntryPlan, SlotLayout, UnplannedConstruction};
 pub use primitives::{Deferred, Fresh, FreshFromContainer, Lazy};
