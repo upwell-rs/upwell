@@ -125,6 +125,18 @@ impl StompGreeting {
     }
 }
 
+/// A JSON-WS controller greeting too, on endpoints that seed no identity.
+#[controller(ws = JsonWs)]
+struct JsonGreeting;
+
+#[handlers(ws = JsonWs)]
+impl JsonGreeting {
+    #[message("greet")]
+    async fn greet(&self, Inject(greeting): Inject<Arc<Greeting>>) -> String {
+        greeting.text()
+    }
+}
+
 /// A STOMP endpoint seeding the identity from the CONNECT login, claiming it when `claim` says.
 fn stomp(claim: bool) -> StompConfig {
     let config = StompConfig::default().with_authenticator(|connect: StompConnect| async move {
@@ -287,7 +299,7 @@ async fn an_endpoint_that_does_not_seed_the_identity_fails_the_build() {
         .build()
         .await
     else {
-        panic!("the STOMP endpoint's seed does not vouch for the JSON-WS connections");
+        panic!("the STOMP endpoint's seed does not vouch for the JSON-WS handler's greeting");
     };
     let message = error.to_string();
 

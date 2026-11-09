@@ -13,15 +13,19 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
-use upwell_core::{DependencyDescriptor, ResolutionMode, Scope, ScopeId, ScopeKey, TypeDescriptor};
+use upwell_core::{
+    DependencyDescriptor, EntryKey, ResolutionMode, Scope, ScopeId, ScopeKey, TypeDescriptor,
+};
 use upwell_di::ComponentDescriptor;
 
 use super::AppRegistry;
 use crate::scope::PreparedScopeTopology;
 
 mod error;
+mod reach;
 
 pub use error::{SeedClaimError, SeedConsumer};
+use reach::EntryReach;
 
 /// The claimant of the seeds the application claims with
 /// [`AppBuilder::provides_seed`](crate::AppBuilder::provides_seed).
@@ -49,6 +53,22 @@ pub struct OpenerSeeds {
     pub scope: ScopeKey,
     /// The seeds it fills in every instance.
     pub seeds: Vec<TypeDescriptor>,
+    /// The entries it opens instances for, such as an endpoint's message handlers, so a
+    /// requirement only those entries reach is checked against it alone. `None` when it cannot
+    /// be tied to entries: it counts for every consumer of its scope.
+    pub entries: Option<Vec<EntryKey>>,
+}
+
+/// What reaches a consumer, deciding which openers of a shared scope must seed what it
+/// requires.
+#[derive(Clone, Copy)]
+enum Reached<'r, 'a> {
+    /// One entry: the consumer is that entry.
+    Entry(&'r EntryKey),
+    /// The entries that transitively depend on a component.
+    Entries(&'r HashSet<&'a EntryKey>),
+    /// Unknown: every opener of the scope may open an instance for it.
+    Any,
 }
 
 /// Which `(type, scope)` pairs are provided: by plain claims, or by every opener of a scope
@@ -86,6 +106,19 @@ impl SeedClaim {
 impl OpenerSeeds {
     fn seeds(&self, ty: TypeId) -> bool {
         self.seeds.iter().any(|seed| seed.type_id == ty)
+    }
+
+    /// Whether this opener may open an instance for a consumer `reached` describes.
+    fn serves(&self, reached: Reached<'_, '_>) -> bool {
+        let Some(entries) = &self.entries else {
+            return true;
+        };
+
+        match reached {
+            Reached::Any => true,
+            Reached::Entry(key) => entries.contains(key),
+            Reached::Entries(keys) => entries.iter().any(|entry| keys.contains(entry)),
+        }
     }
 }
 
@@ -129,22 +162,39 @@ impl AppRegistry {
             return Ok(());
         }
 
+        let reach = EntryReach::of(components, &self.providers, &self.entries);
+
         for component in components {
+            let consumer = SeedConsumer::Component {
+                id: component.id,
+                name: component.name,
+            };
+            let reached = reach
+                .of_component(component)
+                .map_or(Reached::Any, Reached::Entries);
+
             for dependency in component.dependencies() {
-                let consumer = SeedConsumer::Component {
-                    id: component.id,
-                    name: component.name,
+                let required = Requirement {
+                    dependency: &dependency,
+                    scope: component.scope,
+                    consumer,
+                    reached,
                 };
 
-                seeds.check(&dependency, component.scope, consumer, &provided, topology)?;
+                seeds.check(&required, &provided, topology)?;
             }
         }
 
         for entry in &self.entries {
             for dependency in (entry.targets)() {
-                let consumer = SeedConsumer::Entry(entry.key);
+                let required = Requirement {
+                    dependency: &dependency,
+                    scope: entry.scope,
+                    consumer: SeedConsumer::Entry(entry.key),
+                    reached: Reached::Entry(&entry.key),
+                };
 
-                seeds.check(&dependency, entry.scope, consumer, &provided, topology)?;
+                seeds.check(&required, &provided, topology)?;
             }
         }
 
@@ -204,8 +254,9 @@ impl Provided<'_> {
                 .any(|opener| opener.seeds(ty))
     }
 
-    /// Whether `ty` is provided in `scope`.
-    fn coverage(&self, ty: TypeId, scope: ScopeId) -> Coverage<'_> {
+    /// Whether `ty` is provided in `scope` for a consumer `reached` describes: by a claim, or by
+    /// every declared opener of the scope that may open an instance for it.
+    fn coverage(&self, ty: TypeId, scope: ScopeId, reached: Reached<'_, '_>) -> Coverage<'_> {
         let Some(openers) = self.openers.get(&scope) else {
             return match self.claimed.contains(&(ty, scope)) {
                 true => Coverage::Provided,
@@ -213,11 +264,23 @@ impl Provided<'_> {
             };
         };
 
-        match openers.iter().find(|opener| !opener.seeds(ty)) {
+        match openers
+            .iter()
+            .find(|opener| opener.serves(reached) && !opener.seeds(ty))
+        {
             Some(opener) => Coverage::MissingIn(opener),
             None => Coverage::Provided,
         }
     }
+}
+
+/// One dependency edge to check: what it requires, from which scope, for whom, and what
+/// reaches its consumer.
+struct Requirement<'d, 'r, 'a> {
+    dependency: &'d DependencyDescriptor,
+    scope: ScopeKey,
+    consumer: SeedConsumer,
+    reached: Reached<'r, 'a>,
 }
 
 /// The scopes each checked seed is placed in.
@@ -245,16 +308,20 @@ impl SeedPlacements {
         self.0.is_empty()
     }
 
-    /// Fails when `dependency`, required by `consumer` in `scope`, reaches a placement of a
-    /// checked seed that is not provided there.
+    /// Fails when the edge of `requirement` reaches a placement of a checked seed that is not
+    /// provided there for its consumer.
     fn check(
         &self,
-        dependency: &DependencyDescriptor,
-        scope: ScopeKey,
-        consumer: SeedConsumer,
+        requirement: &Requirement<'_, '_, '_>,
         provided: &Provided<'_>,
         topology: &PreparedScopeTopology,
     ) -> Result<(), SeedClaimError> {
+        let Requirement {
+            dependency,
+            scope,
+            consumer,
+            reached,
+        } = *requirement;
         let required = !dependency.optional
             && !dependency.config
             && matches!(
@@ -277,7 +344,7 @@ impl SeedPlacements {
             return Ok(());
         };
 
-        match provided.coverage(ty, placement.id()) {
+        match provided.coverage(ty, placement.id(), reached) {
             Coverage::Provided => Ok(()),
 
             Coverage::MissingIn(opener) => Err(SeedClaimError::OpenerWithoutSeed {

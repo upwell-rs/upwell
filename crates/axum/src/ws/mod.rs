@@ -431,10 +431,24 @@ pub trait WebsocketProtocol: Send + Sync + Sized + 'static {
         shutdown: WsShutdown,
     ) -> impl Future<Output = ()> + Send;
 
-    /// Contributes protocol-owned DI components before the root container is validated and
-    /// built, and claims the seeds the protocol provides with
-    /// [`AppRegistry::claim_seed`].
+    /// Contributes protocol-owned DI components, such as the seed slots the protocol fills,
+    /// before the root container is validated and built. The seeds an endpoint fills are
+    /// declared by [`seed_claims`](Self::seed_claims), not here: every endpoint opens the
+    /// connection and message scopes, so a plain [`AppRegistry::claim_seed`] for them does not
+    /// count, and only what each endpoint declares covers its own instances.
     fn register(_registry: &mut AppRegistry) {}
+
+    /// Rejects endpoint `options` that can never work, such as a claimed seed nothing would
+    /// produce, while the application prepares, before any endpoint is built, so tooling
+    /// reports it too. [`build`](Self::build) may check the same again. Accepts every option by
+    /// default.
+    ///
+    /// # Errors
+    ///
+    /// The protocol's build error for the options it rejects.
+    fn check_options(_options: &Self::Options) -> Result<(), Self::BuildError> {
+        Ok(())
+    }
 
     /// Every seed one endpoint configured with `options` fills in each
     /// [`WebsocketConnection`](crate::scope::WebsocketConnection) and

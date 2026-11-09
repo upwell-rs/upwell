@@ -200,16 +200,10 @@ impl WebsocketProtocol for Stomp {
             .get::<StompTopicBus>()
             .ok_or(StompBuildError::MissingTopicBus)?;
 
-        match (&config.authenticator, config.provided_seeds.first()) {
-            (Some(authenticator), _) => {
-                auth::check_root_dependencies(authenticator.as_ref(), runtime)?
-            }
-            (None, Some(seed)) => {
-                return Err(StompBuildError::SeedWithoutAuthenticator {
-                    seed: (seed.type_name)(),
-                });
-            }
-            (None, None) => {}
+        Self::check_options(&config)?;
+
+        if let Some(authenticator) = &config.authenticator {
+            auth::check_root_dependencies(authenticator.as_ref(), runtime)?;
         }
 
         Ok(Self {
@@ -364,6 +358,16 @@ impl WebsocketProtocol for Stomp {
             STOMP_SESSION_DESCRIPTOR,
             STOMP_PRINCIPAL_DESCRIPTOR,
         ]);
+    }
+
+    fn check_options(config: &StompConfig) -> Result<(), StompBuildError> {
+        match (&config.authenticator, config.provided_seeds.first()) {
+            (None, Some(seed)) => Err(StompBuildError::SeedWithoutAuthenticator {
+                seed: (seed.type_name)(),
+            }),
+
+            _ => Ok(()),
+        }
     }
 
     fn seed_claims(config: &StompConfig) -> Vec<SeedClaim> {

@@ -82,39 +82,8 @@ struct WsRegistration {
     mount: WsMount,
     register: fn(&mut AppRegistry),
     claims: Vec<upwell_app::SeedClaim>,
-}
-
-#[cfg(feature = "ws")]
-impl WsRegistration {
-    /// The endpoint as an opener of the connection and message scopes, with the seeds it
-    /// fills in each.
-    fn openers(&self) -> [upwell_app::OpenerSeeds; 2] {
-        let opener = format!("{} at {}", self.protocol_name, self.path);
-        let seeds = |scope: upwell_core::ScopeKey| {
-            self.claims
-                .iter()
-                .filter(move |claim| claim.scope.id() == scope.id())
-                .map(|claim| claim.ty)
-        };
-        let connection = <crate::scope::WebsocketConnection as upwell_core::Scope>::KEY;
-        let message = <crate::scope::WebsocketMessage as upwell_core::Scope>::KEY;
-
-        [
-            upwell_app::OpenerSeeds {
-                opener: opener.clone(),
-                scope: connection,
-                seeds: crate::ws::upgrade_seeds()
-                    .into_iter()
-                    .chain(seeds(connection))
-                    .collect(),
-            },
-            upwell_app::OpenerSeeds {
-                opener,
-                scope: message,
-                seeds: seeds(message).collect(),
-            },
-        ]
-    }
+    /// Why the endpoint's options are rejected, reported when the application prepares.
+    rejected: Option<crate::Error>,
 }
 
 /// One validated WebSocket endpoint and the exact route plan retained from preparation.
@@ -184,7 +153,7 @@ impl ProtocolDefinition for Axum {
                     (registration.register)(registry);
                 }
 
-                for opener in registration.openers() {
+                for opener in openers::of(registration, &self.ws_controllers) {
                     registry.declare_opener(opener);
                 }
             }
@@ -218,6 +187,10 @@ impl ProtocolDefinition for Axum {
             let mut paths = std::collections::HashSet::new();
 
             for registration in self.ws_registrations {
+                if let Some(rejected) = registration.rejected {
+                    return Err(rejected);
+                }
+
                 crate::config::validate_mount_path("WebSocket mount path", &registration.path)?;
 
                 if !endpoints.insert((registration.protocol, registration.path.clone())) {
@@ -448,6 +421,8 @@ fn normalize_base_path(base_path: &str) -> String {
 
 mod builder;
 mod entries;
+#[cfg(feature = "ws")]
+mod openers;
 mod seeds;
 #[cfg(test)]
 mod tests;

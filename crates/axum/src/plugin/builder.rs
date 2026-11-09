@@ -234,6 +234,13 @@ impl AxumAppBuilder for AppBuilder<Axum> {
     {
         let path = path.into();
         let claims = P::seed_claims(&options);
+        let rejected =
+            P::check_options(&options)
+                .err()
+                .map(|source| crate::Error::WebsocketBuild {
+                    protocol: std::any::type_name::<P>(),
+                    source: Box::new(source),
+                });
 
         // Capture the path and options in the mount closure so the non-generic registration can
         // carry protocol-specific `Options` without erasing their type.
@@ -251,6 +258,7 @@ impl AxumAppBuilder for AppBuilder<Axum> {
             mount,
             register: P::register,
             claims,
+            rejected,
         });
 
         self

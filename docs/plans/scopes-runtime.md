@@ -1175,12 +1175,20 @@ openers a scope has:
   the upgrade metadata, plus what `WebsocketProtocol::seed_claims(&options)` returns. STOMP
   returns its headers and session for the message scope, its principal for the connection scope,
   and every `StompConfig::provides_seed::<T>()`; a STOMP endpoint that claims a seed without an
-  authenticator fails its build (`StompBuildError::SeedWithoutAuthenticator`). Once a scope has
-  a declared opener, a value is provided there only when **every** declared opener seeds it,
-  and plain claims do not count. The review of #496 found the hole this closes: with claims
-  collapsed to `(type, scope)`, one endpoint's seed vouched for another endpoint's connections
-  that never receive it. Per-opener coverage is the smallest sound model: only the openers that
-  share a scope need to say what they fill, and nothing else changes.
+  authenticator is rejected while the application prepares (`WebsocketProtocol::check_options`,
+  `StompBuildError::SeedWithoutAuthenticator`), so tooling reports it. Once a scope has a
+  declared opener, plain claims do not count there (`WebsocketProtocol::register` says so), and
+  a value is provided for a consumer only when **every opener that can reach that consumer**
+  seeds it. An opener records the entries it serves (`OpenerSeeds::entries`: an endpoint serves
+  the message handlers of the controllers speaking its protocol). An entry is reached by the
+  openers serving it; a component by the openers serving any entry that transitively depends on
+  it (over dependency edges and trait providers). An eager component, a component no entry
+  reaches, and an opener that cannot be tied to entries (`entries: None`) fall back to every
+  declared opener of the scope. The reviews of #496 found both holes this closes: with claims
+  collapsed to `(type, scope)`, one endpoint's seed vouched for another endpoint's connections;
+  with every opener checked for every consumer, a STOMP handler reading `StompHeaders` failed as
+  soon as a JSON-WS endpoint was mounted. Reachability by entry is the smallest sound model:
+  openers say what they fill and whom they serve, and nothing else changes.
 
 Preparation (`validate_seed_claims`, beside the placement-overlap check) then rejects:
 
@@ -1188,8 +1196,9 @@ Preparation (`validate_seed_claims`, beside the placement-overlap check) then re
   (`SeedClaimError::ClaimWithoutSlot`), since every opening that fills it would reject the seed;
 - a required edge (eager or deferred, not optional, not configuration) of a component or an
   entry onto a checked seed whose placement on the consumer's chain is not provided: no claim
-  covers it (`UnprovidedSeed`), or one declared opener does not seed it (`OpenerWithoutSeed`,
-  naming that opener). The placement is the one the consumer's chain reaches, so a connection
+  covers it (`UnprovidedSeed`), or an opener that reaches the consumer does not seed it
+  (`OpenerWithoutSeed`, naming that opener; tooling adds an `opener:<name>` resource). The
+  placement is the one the consumer's chain reaches, so a connection
   seed covers consumers in message scopes below it. Checked seeds are every `#[context]` value
   and every type something claims; a plain factory-less slot no one claims keeps its old rules
   and fails only when resolved.

@@ -1,20 +1,21 @@
 //! Tooling diagnostics for seed-claim failures.
 
-use super::FailureDetails;
+use upwell_tooling_schema::Diagnostic;
+
+use super::details_diagnostic;
 use crate::registry::{SeedClaimError, SeedConsumer};
 
 /// The diagnostic of a seed-claim failure found while preparing the application.
-pub(super) fn seed_claim_failure(error: &SeedClaimError, phase: Option<String>) -> FailureDetails {
+pub(super) fn seed_claim_diagnostic(error: &SeedClaimError) -> Diagnostic {
     match error {
         SeedClaimError::UnprovidedSeed {
             seed,
             scope_id,
             consumer,
             ..
-        } => (
+        } => details_diagnostic(
             "upwell/tooling-seed-unprovided",
             "A required context value has no seed claim for the scope its consumer reaches it in.",
-            phase,
             consumer_resources(consumer, seed, *scope_id),
             Vec::new(),
             Some(
@@ -25,19 +26,26 @@ pub(super) fn seed_claim_failure(error: &SeedClaimError, phase: Option<String>) 
             seed,
             scope_id,
             consumer,
+            opener,
             ..
-        } => (
-            "upwell/tooling-seed-opener-missing",
-            "One of the openers of a scope does not seed a value a consumer requires there.",
-            phase,
-            consumer_resources(consumer, seed, *scope_id),
-            Vec::new(),
-            Some("Claim the seed with the seed API of every opener of the scope."),
-        ),
-        SeedClaimError::ClaimWithoutSlot { seed, scope_id, .. } => (
+        } => {
+            let mut resources = consumer_resources(consumer, seed, *scope_id);
+
+            resources.push(format!("opener:{opener}"));
+
+            details_diagnostic(
+                "upwell/tooling-seed-opener-missing",
+                &format!(
+                    "'{opener}' opens the scope for this consumer but does not seed a value it requires."
+                ),
+                resources,
+                Vec::new(),
+                Some("Claim the seed with the seed API of that opener."),
+            )
+        }
+        SeedClaimError::ClaimWithoutSlot { seed, scope_id, .. } => details_diagnostic(
             "upwell/tooling-seed-claim-without-slot",
             "A seed claim names a scope that has no seed slot for its type.",
-            phase,
             vec![format!("type:{seed}"), format!("scope:{scope_id}")],
             Vec::new(),
             Some(

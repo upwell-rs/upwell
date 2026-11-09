@@ -47,7 +47,7 @@ fn two_openers_may_claim_one_seed_for_their_own_instances() {
         .expect("each opener fills its own instances");
 
     assert!(matches!(
-        provided.coverage(TypeId::of::<Identity>(), Session::ID),
+        provided.coverage(TypeId::of::<Identity>(), Session::ID, Reached::Any),
         Coverage::Provided
     ));
 }
@@ -78,6 +78,7 @@ fn opener(name: &str, seeds: Vec<TypeDescriptor>) -> OpenerSeeds {
         opener: name.to_owned(),
         scope: Session::KEY,
         seeds,
+        entries: None,
     }
 }
 
@@ -94,7 +95,7 @@ fn one_openers_seed_does_not_vouch_for_another_opener() {
     let provided = registry.provided(&[slot()]).expect("every seed has a slot");
 
     assert!(matches!(
-        provided.coverage(TypeId::of::<Identity>(), Session::ID),
+        provided.coverage(TypeId::of::<Identity>(), Session::ID, Reached::Any),
         Coverage::MissingIn(opener) if opener.opener == "bare endpoint"
     ));
 }
@@ -109,7 +110,41 @@ fn a_plain_claim_does_not_cover_a_scope_with_declared_openers() {
     let provided = registry.provided(&[slot()]).expect("every seed has a slot");
 
     assert!(matches!(
-        provided.coverage(TypeId::of::<Identity>(), Session::ID),
+        provided.coverage(TypeId::of::<Identity>(), Session::ID, Reached::Any),
         Coverage::MissingIn(_)
+    ));
+}
+
+#[test]
+fn an_opener_that_serves_other_entries_is_not_checked_for_an_entry() {
+    let served = EntryKey::new("ws/stomp_greeting.greet").expect("a valid entry key");
+    let other = EntryKey::new("ws/json_greeting.greet").expect("a valid entry key");
+    let mut registry = AppRegistry::default();
+
+    registry.declare_opener(OpenerSeeds {
+        entries: Some(vec![served]),
+        ..opener(
+            "seeding endpoint",
+            vec![TypeDescriptor::of::<Identity>("Identity")],
+        )
+    });
+    registry.declare_opener(OpenerSeeds {
+        entries: Some(vec![other]),
+        ..opener("bare endpoint", Vec::new())
+    });
+
+    let provided = registry.provided(&[slot()]).expect("every seed has a slot");
+
+    assert!(matches!(
+        provided.coverage(
+            TypeId::of::<Identity>(),
+            Session::ID,
+            Reached::Entry(&served)
+        ),
+        Coverage::Provided
+    ));
+    assert!(matches!(
+        provided.coverage(TypeId::of::<Identity>(), Session::ID, Reached::Entry(&other)),
+        Coverage::MissingIn(opener) if opener.opener == "bare endpoint"
     ));
 }

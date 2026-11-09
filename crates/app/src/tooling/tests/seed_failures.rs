@@ -73,12 +73,18 @@ fn an_opener_without_the_seed_names_its_consumer_type_and_scope() {
     ));
 
     assert_eq!(diagnostic.code, "upwell/tooling-seed-opener-missing");
+    assert!(
+        diagnostic.message.contains("JsonWs at /json"),
+        "{}",
+        diagnostic.message
+    );
     assert_eq!(
         diagnostic.resources,
         [
             "component:audit",
             "type:app::Identity",
-            "scope:fixture/request"
+            "scope:fixture/request",
+            "opener:JsonWs at /json"
         ]
     );
 }
