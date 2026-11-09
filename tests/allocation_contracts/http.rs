@@ -187,13 +187,13 @@ impl Routers {
 /// policy layers: the Upwell router's body limit, with the request timeout off.
 ///
 /// Not met yet, so ignored: on a route injecting nothing, the Upwell router makes 5 more
-/// allocations and 432 more bytes per request than raw axum (25 and 2 173 against 20 and
-/// 1 741). Four allocations and about 400 bytes are axum re-boxing every route for the
-/// request-scope layer, which `PreparedAxum::build` applies as its own `Router::layer`: any
-/// layer, `tower::layer::util::Identity` included, costs that. The last allocation, 32 bytes,
-/// is not attributed yet.
+/// allocations and 560 more bytes per request than raw axum (25 and 2 301 against 20 and
+/// 1 741, measured over 32 calls and divided). Four allocations and about 400 bytes are axum
+/// re-boxing every route for the request-scope layer, which `PreparedAxum::build` applies as
+/// its own `Router::layer`: any layer, `tower::layer::util::Identity` included, costs that. The
+/// remaining allocation and bytes are not attributed yet.
 #[test]
-#[ignore = "the request-scope layer costs 5 allocations and 432 bytes per request; see the docs"]
+#[ignore = "the request-scope layer costs 5 allocations and 560 bytes per request; see the docs"]
 fn a_route_injecting_nothing_allocates_no_more_than_raw_axum() {
     let routers = Routers::new(UNUSED);
 
