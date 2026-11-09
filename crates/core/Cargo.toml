@@ -15,3 +15,6 @@ workspace = true
 
 [dependencies]
 inventory.workspace = true
+
+[dev-dependencies]
+allocation-counter = { workspace = true }

@@ -62,5 +62,8 @@ async-trait = { workspace = true, optional = true }
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
+[dev-dependencies]
+allocation-counter = { workspace = true }
+
 [build-dependencies]
 upwell-build = { workspace = true }

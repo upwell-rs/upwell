@@ -41,6 +41,7 @@ serde = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
+allocation-counter = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 # Sets the `upwell_hybrid` cfg (target-correct here) so the registration read-side can branch on

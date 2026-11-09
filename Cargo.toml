@@ -98,6 +98,8 @@ notify = "6"
 thiserror = "2"
 rayon = "1.11"
 tempfile = "3"
+# Counts the allocations of a closure per thread, so allocation contracts need no allocator of our own.
+allocation-counter = "0.8"
 toml = "1.1"
 serde_yaml_ng = "0.10"
 directories = "6"
@@ -377,6 +379,7 @@ bench = false
 required-features = ["cli", "tooling"]
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+allocation-counter = { workspace = true }
 upwell-test-utils = { workspace = true }
 # The context tests inspect the invocation contexts protocols and hooks establish.
 upwell-di = { workspace = true, features = ["test-support"] }
