@@ -247,7 +247,8 @@ impl DescriptorPartitions {
         Ok(layouts)
     }
 
-    /// Plans `boundary`'s slot layout against the already planned layouts of its ancestors.
+    /// Plans `boundary`'s slot layout against the already planned layouts of its ancestors:
+    /// those of `ancestors` that may be open around it, so no edge plans into a sibling.
     fn layout(
         &self,
         boundary: &ScopeBoundary,
@@ -265,11 +266,16 @@ impl DescriptorPartitions {
             .copied()
             .collect();
         let order = orders.get(&scope).map_or(&[][..], Vec::as_slice);
+        let enclosing: HashMap<ScopeId, Arc<SlotLayout>> = ancestors
+            .iter()
+            .filter(|(id, _)| planning.topology.encloses(id, &scope))
+            .map(|(id, layout)| (*id, Arc::clone(layout)))
+            .collect();
         let layout = SlotLayout::plan(
             boundary.scope(),
             &seeded,
             order,
-            ancestors,
+            &enclosing,
             planning.selection,
             |consumer, dependency| planning.topology.is_reachable(&consumer, &dependency),
         )?;

@@ -49,7 +49,7 @@ impl ComponentRegistry {
 /// retain nothing, so they cannot hold a shorter-lived value captive.
 ///
 /// An optional edge may also name a target the consumer cannot reach on every chain, when the
-/// scope of some placement of the target encloses the consumer's on at least one
+/// scope of exactly one placement of the target encloses the consumer's on at least one
 /// (`may_enclose(placement, consumer)`): an
 /// HTTP request that may open under the root or under an application's session takes the
 /// session's component as `Option<Arc<T>>`, which is `None` on a chain without the session. An
@@ -72,11 +72,25 @@ pub(super) fn check_scope(
     };
 
     for (dep_scope, dep_name, target) in dep_scopes {
-        if dep.resolution != ResolutionMode::Fresh
-            && !can_access(consumer.scope, dep_scope)
-            && !(dep.optional
-                && any_placement_encloses(selection, target, consumer.scope, may_enclose))
-        {
+        if dep.resolution == ResolutionMode::Fresh || can_access(consumer.scope, dep_scope) {
+            continue;
+        }
+
+        let enclosing = if dep.optional {
+            enclosing_placements(selection, target, consumer.scope, may_enclose)
+        } else {
+            Vec::new()
+        };
+
+        if enclosing.len() > 1 {
+            return Err(Error::AmbiguousEnclosingPlacement {
+                component_id: consumer.id.to_string(),
+                dependency: dep_name.to_string(),
+                scopes: enclosing.iter().map(|scope| scope.name()).collect(),
+            });
+        }
+
+        if enclosing.is_empty() {
             return Err(Error::ScopeViolation(Box::new(
                 crate::error::ScopeViolation {
                     component: consumer.name.to_string(),
@@ -196,19 +210,28 @@ fn selected_dependency_targets(
         .collect()
 }
 
-/// Whether any placement of the component `target` is open around `consumer` on at least one
-/// chain `consumer` opens in, neither scope transient. That placement is the one such a chain
-/// resolves, so the edge can be present whatever order the placements were registered in.
-fn any_placement_encloses(
+/// The scopes of the placements of the component `target` that are open around `consumer` on
+/// at least one chain `consumer` opens in, neither scope transient, in registration order.
+/// Placements that enclose one another are rejected elsewhere, so each is on other chains. Slot
+/// planning plans an optional edge to the one enclosing placement, whatever order the
+/// placements were registered in; several would need the edge to resolve per chain, which is
+/// not supported, so validation rejects them.
+fn enclosing_placements(
     selection: &selection::ProviderSelectionModel,
     target: TypeId,
     consumer: ScopeKey,
     may_enclose: &impl Fn(ScopeId, ScopeId) -> bool,
-) -> bool {
-    !consumer.is_transient()
-        && selection.placements(target).iter().any(|placement| {
-            !placement.scope.is_transient() && may_enclose(placement.scope.id(), consumer.id())
-        })
+) -> Vec<ScopeKey> {
+    if consumer.is_transient() {
+        return Vec::new();
+    }
+
+    selection
+        .placements(target)
+        .iter()
+        .map(|placement| placement.scope)
+        .filter(|scope| !scope.is_transient() && may_enclose(scope.id(), consumer.id()))
+        .collect()
 }
 
 /// The enclosure of a model without a topology: no scope encloses another beyond what scope
