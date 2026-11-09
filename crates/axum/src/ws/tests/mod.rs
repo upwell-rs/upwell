@@ -439,5 +439,6 @@ async fn required_subprotocol_is_negotiated_and_seeded() {
 
 #[cfg(feature = "tungstenite")]
 mod context;
+mod meta;
 #[cfg(feature = "tungstenite")]
 mod prepared;

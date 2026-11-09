@@ -40,7 +40,8 @@ impl WebsocketUpgradeMeta {
 }
 
 impl WebsocketUpgradeMeta {
-    /// The upgrade URI with every query value redacted, safe to log: `/ws?token=[REDACTED]`.
+    /// The upgrade URI with every query value redacted, safe to log: `/ws?token=[REDACTED]`. A
+    /// segment without `=` may itself be a credential (`/ws?<token>`), so it is redacted whole.
     pub fn redacted_uri(&self) -> String {
         let path = self.uri.path();
         let Some(query) = self.uri.query() else {
@@ -50,7 +51,7 @@ impl WebsocketUpgradeMeta {
             .split('&')
             .map(|pair| match pair.split_once('=') {
                 Some((name, _)) => format!("{name}={REDACTED}"),
-                None => pair.to_owned(),
+                None => REDACTED.to_owned(),
             })
             .collect();
 
