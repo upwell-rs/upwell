@@ -71,7 +71,7 @@ fn factories<const N: usize>() -> &'static [ComponentFactoryDescriptor] {
             construct_ready: Some(ready::<N>),
             dependencies: no_dependencies,
             role: ComponentFactoryRole::Explicit,
-            scope: None,
+            scopes: &[],
         }]
     }
 }

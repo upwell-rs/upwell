@@ -6,15 +6,15 @@ use crate::test_support::unbuilt_recipe;
 use ComponentFactoryRole::{Default, Explicit};
 
 const IN_SIBLING_A: ComponentFactoryDescriptor = ComponentFactoryDescriptor {
-    scope: Some(SiblingA::KEY),
+    scopes: &[SiblingA::KEY],
     ..unbuilt_recipe("in-a", Explicit, no_dependencies)
 };
 const IN_SIBLING_B: ComponentFactoryDescriptor = ComponentFactoryDescriptor {
-    scope: Some(SiblingB::KEY),
+    scopes: &[SiblingB::KEY],
     ..unbuilt_recipe("in-b", Explicit, no_dependencies)
 };
 const AGAIN_IN_SIBLING_A: ComponentFactoryDescriptor = ComponentFactoryDescriptor {
-    scope: Some(SiblingA::KEY),
+    scopes: &[SiblingA::KEY],
     ..unbuilt_recipe("again-in-a", Explicit, no_dependencies)
 };
 const INHERITING: ComponentFactoryDescriptor =
@@ -59,7 +59,9 @@ fn twin(
     planned(id, TypeDescriptor::of::<u128>("Twin"), factories).with_scope(scope)
 }
 
-fn resolve(components: Vec<ComponentDescriptor>) -> crate::Result<Vec<ComponentDescriptor>> {
+pub(super) fn resolve(
+    components: Vec<ComponentDescriptor>,
+) -> crate::Result<Vec<ComponentDescriptor>> {
     ComponentRegistry {
         components,
         providers: Vec::new(),
@@ -67,7 +69,7 @@ fn resolve(components: Vec<ComponentDescriptor>) -> crate::Result<Vec<ComponentD
     .resolved_components()
 }
 
-fn factory_ids(components: &[ComponentDescriptor]) -> Vec<(ScopeId, &'static str)> {
+pub(super) fn factory_ids(components: &[ComponentDescriptor]) -> Vec<(ScopeId, &'static str)> {
     components
         .iter()
         .map(|component| {
@@ -81,7 +83,7 @@ fn factory_ids(components: &[ComponentDescriptor]) -> Vec<(ScopeId, &'static str
         .collect()
 }
 
-fn encloses(outer: ScopeId, inner: ScopeId) -> bool {
+pub(super) fn encloses(outer: ScopeId, inner: ScopeId) -> bool {
     outer == Connection::ID && inner == Request::ID
 }
 

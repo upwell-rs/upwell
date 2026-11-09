@@ -90,3 +90,37 @@ fn an_init_without_a_scope_inherits_the_declared_one() {
 
     assert_eq!(in_a.0, ScopeA::ID);
 }
+
+/// A component whose field-injection default builds in both scopes.
+#[component(scope = [ScopeA, ScopeB])]
+struct Pair {}
+
+#[test]
+fn a_scope_list_places_the_default_factory_in_every_listed_scope() {
+    let type_id = std::any::TypeId::of::<Pair>();
+    let resolved = ComponentRegistry::collect()
+        .resolved_components()
+        .expect("the pair resolves");
+    let mut placements: Vec<_> = resolved
+        .iter()
+        .filter(|component| component.ty.type_id == type_id)
+        .map(|component| {
+            let factory = component
+                .effective_factory()
+                .expect("one factory per scope")
+                .expect("the placement is built");
+
+            (component.scope.id(), factory.id)
+        })
+        .collect();
+    let declared = <Pair as upwell::DeclaredScope>::Scope::ID;
+
+    placements.sort();
+
+    let mut expected = vec![(ScopeA::ID, "default"), (ScopeB::ID, "default")];
+
+    expected.sort();
+
+    assert_eq!(placements, expected);
+    assert_eq!(declared, ScopeA::ID, "the first listed scope is declared");
+}

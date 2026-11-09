@@ -51,7 +51,7 @@ static SCHEDULER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryD
     construct_ready: None,
     dependencies: scheduler_deps,
     role: ComponentFactoryRole::Explicit,
-    scope: None,
+    scopes: &[],
 }];
 
 fn scheduler_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -118,6 +118,7 @@ impl upwell_core::Descriptor<ComponentDescriptor> for JobScheduler {
         hooks: scheduler_hooks,
         construction: ScopedConstruction::OnDemand,
         generation_snapshot: Some(GenerationSnapshot::of::<JobScheduler>()),
+        scopes: &[],
         declared_scope: None,
     };
 }

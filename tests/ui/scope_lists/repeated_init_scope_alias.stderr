@@ -1,0 +1,5 @@
+error: `Request` is listed twice; a component builds once in each scope
+ --> tests/ui/scope_lists/repeated_init_scope_alias.rs:8:30
+  |
+8 |     #[init(scope = [request, Request])]
+  |                              ^^^^^^^

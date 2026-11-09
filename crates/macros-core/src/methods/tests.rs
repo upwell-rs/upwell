@@ -94,6 +94,48 @@ fn a_scoped_init_registers_its_scope_under_a_name_of_its_own() {
 }
 
 #[test]
+fn a_listed_init_registers_one_factory_for_every_scope() {
+    let expanded = expansion(syn::parse_quote! {
+        impl Store {
+            #[init(scope = [WebsocketConnection, request])]
+            fn per_call() -> Self { Self }
+        }
+    });
+
+    assert_eq!(
+        expanded.matches("ComponentFactoryRole :: Explicit").count(),
+        1,
+        "one factory carries the whole list: {expanded}"
+    );
+
+    for needle in [
+        "__upwell_init_per_call",
+        "scopes : & [< WebsocketConnection as",
+        "< Request as",
+    ] {
+        assert!(
+            expanded.contains(needle),
+            "a listed init emits `{needle}`: {expanded}"
+        );
+    }
+}
+
+#[test]
+fn a_repeated_init_scope_is_rejected_at_the_repetition() {
+    let expanded = expansion(syn::parse_quote! {
+        impl Store {
+            #[init(scope = [Request, Request])]
+            fn build() -> Self { Self }
+        }
+    });
+
+    assert!(
+        expanded.contains("`Request` is listed twice"),
+        "a repeated scope is a compile error: {expanded}"
+    );
+}
+
+#[test]
 fn an_unscoped_init_keeps_the_inherited_scope_and_the_uniqueness_guard() {
     let expanded = expansion(syn::parse_quote! {
         impl Store {
@@ -107,7 +149,7 @@ fn an_unscoped_init_keeps_the_inherited_scope_and_the_uniqueness_guard() {
         "the fixed-name wrapper stays the uniqueness guard: {expanded}"
     );
     assert!(
-        expanded.contains("scope : :: core :: option :: Option :: None"),
+        expanded.contains("scopes : & []"),
         "the factory inherits the component scope: {expanded}"
     );
 }

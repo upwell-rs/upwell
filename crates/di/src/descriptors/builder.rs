@@ -150,7 +150,7 @@ macro_rules! __factory_entry {
             construct_ready: ::core::option::Option::None,
             dependencies: || $crate::factory_dependencies($factory),
             role: $crate::ComponentFactoryRole::$role,
-            scope: ::core::option::Option::None,
+            scopes: &[],
         }
     };
 }
@@ -165,7 +165,7 @@ macro_rules! __replacement_entry {
             construct_ready: ::core::option::Option::None,
             dependencies: || $crate::replacement_dependencies($factory),
             role: $crate::ComponentFactoryRole::Replacement,
-            scope: ::core::option::Option::None,
+            scopes: &[],
         }
     };
 }
@@ -180,7 +180,7 @@ macro_rules! __transition_entry {
             construct_ready: ::core::option::Option::None,
             dependencies: ::std::vec::Vec::new,
             role: $crate::ComponentFactoryRole::Transition,
-            scope: ::core::option::Option::None,
+            scopes: &[],
         }
     };
 }
@@ -195,7 +195,7 @@ macro_rules! __hot_update_entry {
             construct_ready: ::core::option::Option::None,
             dependencies: || $crate::hot_update_dependencies($factory),
             role: $crate::ComponentFactoryRole::HotUpdate,
-            scope: ::core::option::Option::None,
+            scopes: &[],
         }
     };
 }
@@ -238,6 +238,25 @@ impl ComponentDescriptor {
     /// Places the component in `scope` instead of the singleton scope.
     pub const fn with_scope(self, scope: ScopeKey) -> Self {
         Self { scope, ..self }
+    }
+
+    /// Places the component in every scope of `scopes`, as `#[component(scope = [A, B])]`
+    /// does: the first is its declared scope, and factories without scopes of their own
+    /// build in each. The scopes may not share a hierarchy.
+    ///
+    /// # Panics
+    ///
+    /// Panics, at compile time in a `const`, when `scopes` is empty.
+    pub const fn with_scopes(self, scopes: &'static [ScopeKey]) -> Self {
+        let [scope, ..] = scopes else {
+            panic!("a component declares at least one scope");
+        };
+
+        Self {
+            scope: *scope,
+            scopes,
+            ..self
+        }
     }
 
     /// Opts out of retention, so a transition never carries the instance across

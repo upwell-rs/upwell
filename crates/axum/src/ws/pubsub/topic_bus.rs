@@ -170,7 +170,7 @@ fn topic_bus_factories<P: PubSubProtocol>() -> &'static [ComponentFactoryDescrip
         construct_ready: None,
         dependencies: topic_bus_dependencies,
         role: ComponentFactoryRole::Default,
-        scope: None,
+        scopes: &[],
     }]
 }
 
@@ -189,6 +189,7 @@ pub fn topic_bus_descriptor<P: PubSubProtocol>() -> ComponentDescriptor {
         hooks: no_hooks,
         construction: ScopedConstruction::OnDemand,
         generation_snapshot: Some(GenerationSnapshot::of::<TopicBus<P>>()),
+        scopes: &[],
         declared_scope: None,
     }
 }

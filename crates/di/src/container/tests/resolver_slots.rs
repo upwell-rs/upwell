@@ -147,7 +147,7 @@ macro_rules! described {
                         construct_ready: None,
                         dependencies: $dependencies,
                         role: ComponentFactoryRole::Explicit,
-                        scope: None,
+                        scopes: &[],
                     }]
                 }
             }

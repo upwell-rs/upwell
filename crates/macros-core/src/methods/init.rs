@@ -8,6 +8,7 @@ use syn::{Attribute, FnArg, ImplItemFn, ReturnType, Token, Type};
 use super::init_params::InitParam;
 use crate::inject::{factory_descriptor, register_factory};
 use crate::paths::Paths;
+use crate::scopes::ScopeList;
 
 /// The parsed shape of an `#[init]` constructor.
 pub(super) struct InitInfo {
@@ -15,13 +16,14 @@ pub(super) struct InitInfo {
     is_async: bool,
     params: Vec<InitParam>,
     output: ReturnType,
-    scope: Option<syn::Path>,
+    scope: Option<ScopeList>,
 }
 
-/// The arguments of `#[init(..)]`: only `scope = <ScopePath>`, spelled as on `#[component]`.
+/// The arguments of `#[init(..)]`: only `scope = <ScopePath>` or `scope = [A, B]`, spelled as
+/// on `#[component]`.
 #[derive(Default)]
 struct InitArgs {
-    scope: Option<syn::Path>,
+    scope: Option<ScopeList>,
 }
 
 impl Parse for InitArgs {
@@ -34,7 +36,8 @@ impl Parse for InitArgs {
             if key != "scope" {
                 return Err(syn::Error::new(
                     key.span(),
-                    "unknown `#[init]` argument; the only argument is `scope = <ScopePath>`",
+                    "unknown `#[init]` argument; the only argument is `scope = <ScopePath>` or \
+                     `scope = [<ScopePath>, ..]`",
                 ));
             }
 
@@ -43,7 +46,7 @@ impl Parse for InitArgs {
             }
 
             input.parse::<Token![=]>()?;
-            args.scope = Some(crate::attr::parse_scope_path(input)?);
+            args.scope = Some(input.parse()?);
 
             if !input.is_empty() {
                 input.parse::<Token![,]>()?;

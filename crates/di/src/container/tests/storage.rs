@@ -21,7 +21,7 @@ fn factories() -> &'static [ComponentFactoryDescriptor] {
             construct_ready: None,
             dependencies: || factory_dependencies(held),
             role: ComponentFactoryRole::Explicit,
-            scope: None,
+            scopes: &[],
         }]
     }
 }
@@ -110,7 +110,7 @@ fn capturing_factories() -> &'static [ComponentFactoryDescriptor] {
             construct_ready: None,
             dependencies: no_dependencies,
             role: ComponentFactoryRole::Explicit,
-            scope: None,
+            scopes: &[],
         }]
     }
 }

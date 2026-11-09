@@ -14,6 +14,7 @@ async fn fresh_target_resolves_from_its_declared_scope_ancestry() {
         hooks: upwell_hooks::no_hooks,
         construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        scopes: &[],
         declared_scope: None,
     };
     let owner_provider = ComponentDescriptor {
@@ -26,6 +27,7 @@ async fn fresh_target_resolves_from_its_declared_scope_ancestry() {
         hooks: upwell_hooks::no_hooks,
         construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        scopes: &[],
         declared_scope: None,
     };
     let fresh_target = ComponentDescriptor {
@@ -38,6 +40,7 @@ async fn fresh_target_resolves_from_its_declared_scope_ancestry() {
         hooks: upwell_hooks::no_hooks,
         construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        scopes: &[],
         declared_scope: None,
     };
     let target_seed = ComponentDescriptor::manual(
@@ -142,7 +145,7 @@ async fn fresh_reconstructs_a_transient_against_the_requesting_scope() {
         construct_ready: None,
         dependencies: no_dependencies,
         role: ComponentFactoryRole::Explicit,
-        scope: None,
+        scopes: &[],
     }];
 
     let bound = ComponentDescriptor::manual(
@@ -161,6 +164,7 @@ async fn fresh_reconstructs_a_transient_against_the_requesting_scope() {
         hooks: upwell_hooks::no_hooks,
         construction: crate::ScopedConstruction::OnDemand,
         generation_snapshot: None,
+        scopes: &[],
         declared_scope: None,
     };
     let components = [(bound.ty.type_id, bound)].into_iter().collect();
