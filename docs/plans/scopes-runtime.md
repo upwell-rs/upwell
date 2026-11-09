@@ -1089,10 +1089,15 @@ fallback mechanism, so it answers the open questions of #136 as follows:
   `with_scopes` as the `const` builder), and `ComponentFactoryDescriptor::scopes` replaces the
   former `scope: Option<ScopeKey>` (empty inherits the component's scopes). Both are breaking
   changes to the descriptor literals.
-- Diagnostics: an empty list and a scope listed twice (aliases resolved, so `request` and
+- Diagnostics: an empty list and a path listed twice (aliases resolved, so `request` and
   `Request` are one) are compile errors at the offending token; `eager` checks every listed scope;
   `#[service]` and `#[controller]` reject a list like any non-singleton scope. Overlap, transient
   placements and seeds in two scopes fail preparation as before.
+- Registry resolution checks each registered descriptor's lists by scope key: one scope named
+  through two paths (or repeated in a hand-written list, the component's or a factory's) is
+  `RepeatedScope`, and a non-empty `scopes` that does not start with the declared `scope` is
+  `DeclaredScopeMismatch`. `with_scope` clears a list `with_scopes` set, and `with_scopes` sets
+  `scope` to the first entry.
 - Nearest-wins shadowing stays deferred.
 
 ### Validation and diagnostics (#138)

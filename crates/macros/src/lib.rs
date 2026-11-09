@@ -83,8 +83,9 @@ use proc_macro::TokenStream;
 ///   scope listed beside one of its ancestors (`OverlappingPlacements`), a transient beside
 ///   any other, and a manual instance (`default_factory = false`) in more than one scope,
 ///   since a seed is addressed by type (`AmbiguousSeedScopes`). An `#[init]` without a scope
-///   builds in every listed scope. An empty list or a scope listed twice is a compile error,
-///   and `eager` checks every listed scope.
+///   builds in every listed scope. An empty list or a path listed twice is a compile error,
+///   one scope named through two paths fails preparation (`RepeatedScope`), and `eager`
+///   checks every listed scope.
 /// - `eager` — with a `scope` below the root, build the component on **every** opening of
 ///   its scope instead, whatever the entry injects, together with what it depends on in the
 ///   scope. Use it for components whose construction is the intended side effect (an audit

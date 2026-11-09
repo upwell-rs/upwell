@@ -3,8 +3,9 @@
 //!
 //! A list places the component (or the factory) in each scope it names, one placement per
 //! scope. The scopes of one type may not share a hierarchy, which preparation checks against
-//! the scope topology; the macro rejects only what it can see: an empty list and a scope
-//! listed twice.
+//! the scope topology; the macro rejects only what it can see: an empty list and a path
+//! listed twice. One scope named through two different paths is rejected when the registry
+//! resolves the component (`RepeatedScope`).
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote, quote_spanned};
@@ -108,7 +109,8 @@ impl ToTokens for ScopeList {
 
 /// The listed paths with their aliases resolved, rejecting a scope listed twice at its second
 /// mention. Paths compare by their tokens after alias resolution, so `request` and `Request`
-/// are one scope; one type named through two different paths is caught at preparation.
+/// are one scope; one type named through two different paths fails registry resolution with
+/// `RepeatedScope`, which compares scope keys.
 fn distinct(listed: Punctuated<syn::Path, Token![,]>) -> syn::Result<Vec<syn::Path>> {
     let mut paths: Vec<syn::Path> = Vec::new();
     let mut seen: Vec<String> = Vec::new();

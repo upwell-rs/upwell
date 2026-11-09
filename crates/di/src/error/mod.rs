@@ -39,6 +39,27 @@ pub enum Error {
     },
 
     #[error(
+        "component '{component}' declares scope '{scope}' but lists '{first}' first; a component that lists several scopes declares the first of them"
+    )]
+    DeclaredScopeMismatch {
+        component: String,
+        scope: &'static str,
+        first: &'static str,
+    },
+
+    #[error(
+        "component '{component}' lists scope '{scope}' twice{}; each scope builds the component once",
+        factory.map(|factory| format!(" for factory '{factory}'")).unwrap_or_default()
+    )]
+    RepeatedScope {
+        component: String,
+        /// The factory whose list repeats the scope, or `None` for the component's own list.
+        factory: Option<&'static str>,
+        scope: &'static str,
+        scope_id: ScopeId,
+    },
+
+    #[error(
         "component '{component}' is placed in the transient scope and in scope '{other}'; a transient component is built wherever it is requested, so it cannot also be placed in another scope"
     )]
     TransientPlacement {
