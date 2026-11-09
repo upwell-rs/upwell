@@ -450,6 +450,23 @@ removed, so `ScopeOpener` is the only way to open a scope. A scope that does not
 `OpensUnder` for a parent cannot open under it; a hand-written impl the topology does not list
 is caught by a debug assertion; `#[scope]` (#405) generates both from one declaration.
 
+Status (#126, protocol-controlled WebSocket connections): the upgrade no longer opens the
+connection scope. `WebsocketProtocol::serve` receives a `PreparedConnection` (breaking): the
+upgrade's head (`upgrade()`), negotiation metadata (`meta()`), the application root (`root()`),
+`.seed(value)` / `.seeds(Seeds)`, and a consuming `open()` that returns the `WsConnectionScope`.
+It cannot be cloned, so a connection opens at most once. `serve` runs in the connection's
+invocation context from the start, as a context pending a `WebsocketConnection` instance; the
+opened instance binds into it, so work after the opening sees the connection scope and
+work before it sees none. The upgrade task keeps the admission permit; a protocol closes the
+socket itself when the opening fails (`scope_failure_close()`). JSON-WS opens at once. STOMP
+opens after `CONNECT` authentication: the authenticator resolves its arguments from the root,
+reads the upgrade head through `StompConnect::upgrade()`, and returns `StompAuthenticated`
+(principal plus `Seeds`), and the connection opens with them, so `StompPrincipal` is now a
+connection seed instead of a per-message one. A connection-scoped authenticator argument is
+rejected when the endpoint builds (`StompBuildError::ScopedAuthenticatorDependency`); any other
+argument the root cannot resolve rejects the connection (`StompAuthenticationError::Unresolved`).
+`upwell_app::Seeds` is the owned seed set a step that runs before an opening collects.
+
 Status (#348, #349): preparation plans every entry against its scope's layout, per runtime
 generation (`SlotLayout::plan_entry`, carried in `ScopeLayouts` and indexed by `EntryId`). A plan
 lists the slots the entry's eager targets resolve to, by concrete type or every provider of the

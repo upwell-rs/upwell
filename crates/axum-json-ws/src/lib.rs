@@ -35,8 +35,9 @@ use upwell_axum::client::{
 };
 #[cfg(not(target_family = "wasm"))]
 use upwell_axum::{
-    MessageReply, SOCKET_SEND_TIMEOUT, WebsocketProtocol, WsConnectionScope,
+    MessageReply, PreparedConnection, SOCKET_SEND_TIMEOUT, WebsocketProtocol, WsConnectionScope,
     WsControllerDescriptor, WsDispatchError, WsHandlerFn, WsIdle, WsRespond, WsShutdown,
+    scope_failure_close,
 };
 use upwell_axum::{MessagingProtocol, TopicCodec};
 
@@ -131,9 +132,16 @@ impl WebsocketProtocol for JsonWs {
     async fn serve(
         self: Arc<Self>,
         mut socket: WebSocket,
-        connection: WsConnectionScope,
+        connection: PreparedConnection,
         mut shutdown: WsShutdown,
     ) {
+        let Ok(connection) = connection.open().await else {
+            let _ =
+                tokio::time::timeout(SOCKET_SEND_TIMEOUT, socket.send(scope_failure_close())).await;
+
+            return;
+        };
+
         let mut idle = WsIdle::from_connection(connection.container());
 
         loop {

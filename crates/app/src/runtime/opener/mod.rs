@@ -27,6 +27,7 @@ mod log_options;
 mod parent;
 mod run;
 mod run_error;
+mod seeds;
 mod work;
 
 use builder::{Builds, open_in};
@@ -39,6 +40,7 @@ pub use entry_scope::EntryScope;
 pub use parent::ParentScope;
 pub use run::ScopeRun;
 pub use run_error::RunError;
+pub use seeds::Seeds;
 pub use work::{ScopeWork, TryScopeWork};
 
 /// Declares that scope `Self` may open under scope `P`.

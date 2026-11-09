@@ -92,11 +92,11 @@ pub use utoipa;
 
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
 pub use ws::{
-    ControllerWsRoute, SOCKET_SEND_TIMEOUT, WS_CONTROLLERS, WebsocketController, WebsocketHandler,
-    WebsocketProtocol, WebsocketUpgradeMeta, WsConnectionMeta, WsConnectionScope,
-    WsConnectionSettings, WsControllerDescriptor, WsControllerRegistration, WsDispatchError,
-    WsFuture, WsHandlerFn, WsIdle, WsMessageDescriptor, WsMessageMode, WsRespond, WsRoute,
-    WsRouteDescriptor, WsShutdown,
+    ControllerWsRoute, PreparedConnection, SOCKET_SEND_TIMEOUT, WS_CONTROLLERS,
+    WebsocketController, WebsocketHandler, WebsocketProtocol, WebsocketUpgradeMeta,
+    WsConnectionMeta, WsConnectionScope, WsConnectionSettings, WsControllerDescriptor,
+    WsControllerRegistration, WsDispatchError, WsFuture, WsHandlerFn, WsIdle, WsMessageDescriptor,
+    WsMessageMode, WsRespond, WsRoute, WsRouteDescriptor, WsShutdown, scope_failure_close,
 };
 
 /// The `PubSubProtocol` capability (server side): the seam a topic-bearing protocol implements so
@@ -196,7 +196,7 @@ pub use upwell_di::{
 };
 
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
-pub use upwell_core::{Scope, TypeDescriptor};
+pub use upwell_core::{DependencyDescriptor, Scope, TypeDescriptor};
 
 /// The DI error returned while resolving protocol-owned connection dependencies.
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
@@ -230,7 +230,7 @@ pub type AppBuilder = upwell_app::AppBuilder<Axum>;
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_app::{
     AppRegistry, AppRuntime, LoggingConfig, Plugin, PreparedProtocol, ProtocolDefinition,
-    ProtocolRuntime, Serve, ServerConfig, ShutdownHandle, ShutdownSignal,
+    ProtocolRuntime, Seeds, Serve, ServerConfig, ShutdownHandle, ShutdownSignal,
 };
 
 /// Re-exported so macro-generated code can reach the `#[distributed_slice]` attribute for

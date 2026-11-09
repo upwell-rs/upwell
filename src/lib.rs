@@ -133,8 +133,8 @@ pub use upwell_app::{
     RetirementReason, RunError, RuntimeReloader, RuntimeTransitionReport, RuntimeView, SCOPES,
     ScopeBoundary, ScopeBuilder, ScopeDeclaration, ScopeEnd, ScopeEndContext, ScopeEndKind,
     ScopeEnded, ScopeEntry, ScopeOpener, ScopeParent, ScopeRun, ScopeTopology, ScopeTopologyError,
-    ScopeWork, Serve, ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents,
-    SuppressionDecision, TransitionAborted, TransitionAttemptId, TransitionCommitted,
+    ScopeWork, Seeds, Serve, ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy,
+    SpanEvents, SuppressionDecision, TransitionAborted, TransitionAttemptId, TransitionCommitted,
     TransitionDecision, TransitionFailure, TransitionHookContext, TransitionHookOutcome,
     TransitionHookReport, TransitionOutcome, TransitionOutcomeContext, TransitionPhase,
     TransitionProposal, TransitionRejection, TransitionVerdict, TryScopeWork, ValidationContext,
@@ -376,8 +376,8 @@ pub mod axum {
         /// `stomp` feature.
         #[cfg(all(feature = "stomp", not(target_family = "wasm")))]
         pub use super::{
-            Publisher, Stomp, StompConfig, StompConnect, StompPrincipal, StompSession,
-            StompTopicBus, Topic, topics,
+            Publisher, Stomp, StompAuthenticated, StompConfig, StompConnect, StompPrincipal,
+            StompSession, StompTopicBus, Topic, topics,
         };
     }
 }

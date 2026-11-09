@@ -7,9 +7,10 @@ use std::sync::Arc;
 use upwell_core::{Scope, ScopeId, Singleton, TypeDescriptor};
 use upwell_di::{BoxedComponent, EntryPlan, Injectable, ScopeContainer};
 
+use super::seeds::boxed_seed;
 use super::{
     EntryScope, InstanceEnd, OpenScope, OpensUnder, ParentScope, ScopeEndKind, ScopeEntry,
-    ScopeOpener,
+    ScopeOpener, Seeds,
 };
 use crate::entry::EntryId;
 use crate::logs::{InstanceLogs, LogOptions, ScopeLogSink};
@@ -99,6 +100,14 @@ impl<'a, S: Scope, P: Scope> ScopeBuilder<'a, S, P> {
     /// Fills the scope's factory-less slot for `T` with `value`.
     pub fn seed<T: Any + Send + Sync>(mut self, value: T) -> Self {
         self.seeds.push(boxed_seed(value));
+
+        self
+    }
+
+    /// Fills the scope's factory-less slots with every seed of `seeds`, after the ones already
+    /// added.
+    pub fn seeds(mut self, seeds: Seeds) -> Self {
+        self.seeds.extend(seeds.into_values());
 
         self
     }
@@ -292,10 +301,6 @@ fn plans_nothing<S: Scope>(view: &RuntimeView, entry: &ScopeEntry<S>) -> bool {
         .layouts
         .entry(entry.id)
         .is_some_and(|plan| plan.is_empty() && !plan.is_accessed())
-}
-
-fn boxed_seed<T: Any + Send + Sync>(value: T) -> BoxedComponent {
-    BoxedComponent::stored(TypeDescriptor::of::<T>(std::any::type_name::<T>()), value)
 }
 
 /// The value of an instance of scope `S`, stored in the scope's own slot as the fixed handle

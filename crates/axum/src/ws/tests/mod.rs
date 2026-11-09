@@ -11,9 +11,10 @@ use upwell_core::TypeDescriptor;
 #[cfg(feature = "tungstenite")]
 use upwell_test_utils::{TestEnvironment, TestServer, deadline};
 
+use super::settings::WsAdmission;
 use super::{
-    WebsocketProtocol, WsAdmission, WsControllerDescriptor, WsControllerRegistration,
-    WsDispatchError, WsFuture, WsHandlerFn, WsIdle, WsShutdown,
+    WebsocketProtocol, WsControllerDescriptor, WsControllerRegistration, WsDispatchError, WsFuture,
+    WsHandlerFn, WsIdle, WsShutdown,
 };
 #[cfg(feature = "tungstenite")]
 use super::{WebsocketUpgradeMeta, WsConnectionMeta};
@@ -50,9 +51,10 @@ impl WebsocketProtocol for TestProtocol {
     async fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: crate::ws::WsConnectionScope,
+        connection: crate::ws::PreparedConnection,
         shutdown: WsShutdown,
     ) {
+        let connection = connection.open().await.expect("the connection scope opens");
         let _ = (self, socket, connection, shutdown);
     }
 }
@@ -81,9 +83,10 @@ impl WebsocketProtocol for MultiEndpointProtocol {
     async fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: crate::ws::WsConnectionScope,
+        connection: crate::ws::PreparedConnection,
         shutdown: WsShutdown,
     ) {
+        let connection = connection.open().await.expect("the connection scope opens");
         let _ = (self, socket, connection, shutdown);
     }
 
@@ -220,9 +223,10 @@ impl WebsocketProtocol for DuplicateProtocol {
     async fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: crate::ws::WsConnectionScope,
+        connection: crate::ws::PreparedConnection,
         shutdown: WsShutdown,
     ) {
+        let connection = connection.open().await.expect("the connection scope opens");
         let _ = (self, socket, connection, shutdown);
     }
 }
@@ -368,9 +372,10 @@ impl WebsocketProtocol for RequiredSubprotocol {
     async fn serve(
         self: Arc<Self>,
         mut socket: WebSocket,
-        connection: crate::ws::WsConnectionScope,
+        connection: crate::ws::PreparedConnection,
         shutdown: WsShutdown,
     ) {
+        let connection = connection.open().await.expect("the connection scope opens");
         let selected = connection
             .container()
             .extract::<WsConnectionMeta>()
@@ -434,3 +439,5 @@ async fn required_subprotocol_is_negotiated_and_seeded() {
 
 #[cfg(feature = "tungstenite")]
 mod context;
+#[cfg(feature = "tungstenite")]
+mod prepared;

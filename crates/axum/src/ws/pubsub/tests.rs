@@ -80,9 +80,10 @@ impl WebsocketProtocol for TestProto {
     async fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: crate::ws::WsConnectionScope,
+        connection: crate::ws::PreparedConnection,
         shutdown: WsShutdown,
     ) {
+        let connection = connection.open().await.expect("the connection scope opens");
         // A tag protocol for the topics test; it never actually drives a socket.
         let _ = (socket, connection, shutdown);
     }
@@ -124,9 +125,10 @@ impl WebsocketProtocol for OtherProto {
     async fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: crate::ws::WsConnectionScope,
+        connection: crate::ws::PreparedConnection,
         shutdown: WsShutdown,
     ) {
+        let connection = connection.open().await.expect("the connection scope opens");
         let _ = (self, socket, connection, shutdown);
     }
 }
