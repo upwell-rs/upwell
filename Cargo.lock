@@ -50,6 +50,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocation-counter"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "beb9e990c0a33699f1984d85a6abead615ccc72dd8130bf3e15dcabe2ca149c9"
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4359,6 +4365,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 name = "upwell"
 version = "0.20.0"
 dependencies = [
+ "allocation-counter",
  "clap",
  "futures",
  "postcard",
@@ -4546,6 +4553,7 @@ dependencies = [
 name = "upwell-core"
 version = "0.20.0"
 dependencies = [
+ "allocation-counter",
  "inventory",
 ]
 
@@ -4553,6 +4561,7 @@ dependencies = [
 name = "upwell-di"
 version = "0.20.0"
 dependencies = [
+ "allocation-counter",
  "arc-swap",
  "futures",
  "inventory",
@@ -4703,6 +4712,7 @@ dependencies = [
 name = "upwell-rpc"
 version = "0.20.0"
 dependencies = [
+ "allocation-counter",
  "arc-swap",
  "async-trait",
  "directories",
