@@ -113,7 +113,8 @@ ahead of the opening). The registry holds `SeedClaim`s saying who seeds what whe
 claim their own seeds and their endpoints' seeds, and `AppBuilder::provides_seed::<T, S>()`
 claims a seed the application fills in a scope it opens itself. Preparation rejects a required
 dependency on a context value whose scope no one claims (`SeedClaimError::UnprovidedSeed`) and a
-seed two claimants claim for one scope (`DuplicateSeedClaim`).
+claim for a scope with no slot of its type (`ClaimWithoutSlot`). Several openers may claim one
+seed for one scope, since each fills its own instances.
 
 ### End-of-scope hook
 

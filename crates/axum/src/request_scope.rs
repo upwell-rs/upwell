@@ -11,7 +11,8 @@
 //! only what the route injects; anything else is built when something resolves it. Other
 //! requests build every slot of the scope.
 //!
-//! The exception is a scope with eager components, which must run for every routed request,
+//! The exception is a scope with eager components, which must run for every request a controller
+//! route serves (a WebSocket upgrade opens no request scope),
 //! or one a `Current`/`Scoped` accessor reads, which must be open for any code of the request
 //! to read it. [`open_eager_scope`] then opens the scope before global middleware runs, as RPC opens a
 //! call's scope before its middleware: eager components run for a request middleware rejects
@@ -272,15 +273,16 @@ impl<S: Service<Request>> Service<Request> for RequestScopeService<S> {
     }
 }
 
-/// Whether the request with `head` is served by a controller route: a route whose
-/// [`HttpRequest`] scope this protocol opens, unlike a WebSocket upgrade.
-pub(crate) fn is_controller_route(head: &Parts) -> bool {
-    let Some(path) = head.extensions.get::<MatchedPath>() else {
+/// Whether a request with `method` and `extensions` is served by a controller route: a route
+/// whose [`HttpRequest`] scope this protocol opens, unlike a WebSocket upgrade or a route
+/// another router contributes. Request seeders and the eager opening cover exactly these.
+pub(crate) fn is_controller_route(method: &Method, extensions: &Extensions) -> bool {
+    let Some(path) = extensions.get::<MatchedPath>() else {
         return false;
     };
 
     REQUEST_SCOPES
-        .try_with(|scopes| scopes.routes.get(&head.method, path.as_str()).is_some())
+        .try_with(|scopes| scopes.routes.get(method, path.as_str()).is_some())
         .unwrap_or(false)
 }
 
@@ -363,9 +365,10 @@ fn capture_into(scope: &ScopeContainer, head: Head<'_>) -> Result<(), InjectReje
         .map_err(InjectRejection::SeedFailed)
 }
 
-/// Middleware opening a routed request's scope, unless something has already. Without an entry
-/// it builds only the eager set, so a route that injects nothing does not pay for the rest of
-/// the scope.
+/// Middleware opening the scope of a request a controller route serves, unless something has
+/// already. Without an entry it builds only the eager set, so a route that injects nothing does
+/// not pay for the rest of the scope. A WebSocket upgrade opens no request scope: its work runs
+/// in the connection scope the protocol opens, and request seeders skip it too.
 ///
 /// The protocol installs it only when the application registers an eager request-scoped
 /// component or a component with a `Current`/`Scoped` accessor, so other applications do not
@@ -374,7 +377,7 @@ fn capture_into(scope: &ScopeContainer, head: Head<'_>) -> Result<(), InjectReje
 /// middleware, so it runs before all of it, as RPC opens a call's scope before its middleware,
 /// and inside the request timeout, which covers eager construction.
 pub(crate) async fn open_eager_scope(mut request: Request, next: Next) -> Response {
-    let routed = request.extensions().get::<MatchedPath>().is_some();
+    let routed = is_controller_route(request.method(), request.extensions());
     let at_once = REQUEST_SCOPES
         .try_with(|scopes| scopes.opens_at_once(request.extensions()))
         .unwrap_or(false);

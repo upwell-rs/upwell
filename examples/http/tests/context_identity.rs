@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! One app-defined identity over REST and STOMP (#127, #128): REST seeds it into each request
 //! with a `RequestSeeder`, STOMP into each connection from its authenticator, and one
 //! request-or-message-scoped component reads it on both paths.
@@ -43,6 +45,13 @@ impl Greeting {
     }
 }
 
+/// Built on every controller request with the request's identity. A WebSocket upgrade opens no
+/// request scope, so it never builds one.
+#[component(scope = HttpRequest, eager)]
+struct Audit {
+    identity: Identity,
+}
+
 /// Seeds the identity from the `x-user` header, rejecting a request without one.
 #[component]
 struct HeaderIdentity;
@@ -59,6 +68,20 @@ impl RequestSeeder for HeaderIdentity {
                 subject: subject.to_owned(),
             })
             .ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())
+    }
+}
+
+/// A second seeder of the identity, which conflicts with [`HeaderIdentity`].
+#[component]
+struct AnonymousIdentity;
+
+impl RequestSeeder for AnonymousIdentity {
+    type Seed = Identity;
+
+    async fn seed(&self, _request: &Parts) -> Result<Identity, Response> {
+        Ok(Identity {
+            subject: String::from("anonymous"),
+        })
     }
 }
 
@@ -168,9 +191,10 @@ async fn get(address: std::net::SocketAddr, path: &str, headers: &str) -> (Strin
 async fn one_component_reads_the_identity_over_rest_and_stomp() {
     let environment = TestEnvironment::new("upwell-http-context-identity-");
     let app = builder(&environment, true, true)
+        .request_seed::<Identity, HeaderIdentity>()
         .build()
         .await
-        .expect("both seeds are claimed");
+        .expect("both seeds are claimed, and registering a seeder twice is a no-op");
     let server = TestServer::start_with_guard(app, environment).await;
     let address = server.address();
 
@@ -235,4 +259,21 @@ async fn an_unclaimed_connection_identity_fails_the_build() {
 
     assert!(message.contains("Identity"), "{message}");
     assert!(message.contains("WebsocketConnection"), "{message}");
+}
+
+#[tokio::test]
+async fn two_seeders_of_one_type_fail_the_build() {
+    let environment = TestEnvironment::new("upwell-http-context-two-seeders-");
+
+    let Err(error) = builder(&environment, true, true)
+        .request_seed::<Identity, AnonymousIdentity>()
+        .build()
+        .await
+    else {
+        panic!("two seeders would fill each request scope twice");
+    };
+    let message = error.to_string();
+
+    assert!(message.contains("HeaderIdentity"), "{message}");
+    assert!(message.contains("AnonymousIdentity"), "{message}");
 }

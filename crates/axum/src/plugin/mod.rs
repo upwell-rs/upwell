@@ -13,10 +13,10 @@ use crate::middleware::MiddlewareApplier;
 use crate::protocol::AxumRuntime;
 use crate::request_meta::REQUEST_META_DESCRIPTOR;
 use crate::request_scope::{ParentChoice, RequestScopeLayer, open_eager_scope};
-use crate::request_seed::SeedReader;
 use crate::scope::{HttpRequest as HttpRequestScope, SCOPE_TOPOLOGY};
 
 pub use builder::AxumAppBuilder;
+use seeds::RequestSeeds;
 use timeout::RequestTimeoutLayer;
 
 /// The axum HTTP protocol definition.
@@ -53,13 +53,6 @@ pub struct Axum {
     /// Opt-in ws endpoints: each pairs a protocol type with the path to mount its upgrade handler.
     #[cfg(feature = "ws")]
     ws_registrations: Vec<WsRegistration>,
-}
-
-/// The registered request seeders: their layers and the readers of their seeds.
-#[derive(Default)]
-struct RequestSeeds {
-    layers: Vec<MiddlewareApplier>,
-    readers: Vec<SeedReader>,
 }
 
 /// The claimant of the seeds the axum protocol itself provides.
@@ -169,12 +162,16 @@ impl ProtocolDefinition for Axum {
         }
     }
 
-    fn prepare(self, _context: &ValidationContext<'_>) -> crate::Result<Self::Prepared> {
+    fn prepare(mut self, _context: &ValidationContext<'_>) -> crate::Result<Self::Prepared> {
         let config = _context
             .config::<AxumConfig>(AXUM_CONFIG_PATH)
             .expect("AxumConfig missing from config store; Axum should register it")
             .snapshot();
         let base_prefix = normalize_base_path(&config.base_path);
+
+        if let Some(conflict) = self.request_seeds.conflict.take() {
+            return Err(conflict);
+        }
 
         if !base_prefix.is_empty() {
             crate::config::validate_mount_path("Axum base path", &base_prefix)?;
@@ -418,6 +415,7 @@ fn normalize_base_path(base_path: &str) -> String {
 
 mod builder;
 mod entries;
+mod seeds;
 #[cfg(test)]
 mod tests;
 mod timeout;

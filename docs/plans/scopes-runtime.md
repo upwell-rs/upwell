@@ -1171,8 +1171,8 @@ their options produce (`WebsocketProtocol::seed_claims(&options)`, which STOMP a
 claim for a scope the application opens itself. Preparation (`validate_seed_claims`, beside
 the placement-overlap check) then rejects:
 
-- two claimants of one `(type, scope)` pair (`SeedClaimError::DuplicateSeedClaim`); one
-  claimant claiming twice, such as an endpoint mounted at two paths, is merged;
+- a claim for a scope without a factory-less slot of its type (`SeedClaimError::ClaimWithoutSlot`),
+  since every opening that fills it would reject a seed without a slot;
 - a required edge (eager or deferred, not optional, not configuration) of a component or an
   entry onto a checked seed whose placement on the consumer's chain no one claims
   (`SeedClaimError::UnprovidedSeed`, naming the seed, the scope and the consumer). A claim on
@@ -1180,15 +1180,23 @@ the placement-overlap check) then rejects:
   `#[context]` value and every type something claims; a plain factory-less slot no one claims
   keeps its old rules and fails only when resolved.
 
-Tooling reports them as `upwell/tooling-seed-unprovided`, `upwell/tooling-seed-claim-duplicate`
-and `upwell/tooling-context-invalid`, and labels a context's `construction-policy` as
+Several claimants of one `(type, scope)` pair are accepted: a claim describes an opener, and
+each opener fills its own instances, as two WebSocket protocols each seed their own connections.
+Two fills of one opening are caught where the opening is assembled: two request seeders of one
+type fail the axum build (`DuplicateRequestSeeder`), registering the same seeder twice is a
+no-op, and any other double fill fails the opening (`DuplicateSeed`).
+
+Tooling reports them as `upwell/tooling-seed-unprovided` (naming the consumer by component id
+or entry key), `upwell/tooling-seed-claim-without-slot` and `upwell/tooling-context-invalid`, and labels a context's `construction-policy` as
 `context`. A claim is a guarantee, not a check of each opening: a protocol that claims a seed
 and opens a scope without it fails the opening of an eager consumer, or the first resolution of
 an on-demand one.
 
 The REST path (#127): a `RequestSeeder` is a DI singleton producing the seed from the request or
-rejecting it with a response. It runs inside the parent layers and before global middleware and
-the eager request-scope opening; the seed waits in the request's extensions and is cloned into
+rejecting it with a response. It runs for every request a controller route serves, inside the
+parent layers and before global middleware and the eager request-scope opening, which covers the
+same routes: a WebSocket upgrade opens no request scope, so neither runs for it (before, the
+eager opening also opened a request scope for an upgrade); the seed waits in the request's extensions and is cloned into
 the scope's slot when the scope opens, whichever way it opens. Seeders that are not registered
 cost nothing: the opening reads extensions only when at least one is.
 

@@ -75,6 +75,7 @@ pub use protocol::{
 };
 pub use registry::{
     APPLICATION_CLAIMANT, AppConditionEvaluation, AppRegistry, SeedClaim, SeedClaimError,
+    SeedConsumer,
 };
 pub use runtime::{
     AnyScopeEnded, AppConditionState, AppRuntime, ComponentRetired, ComponentRetirement,

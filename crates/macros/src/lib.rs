@@ -154,6 +154,13 @@ use proc_macro::TokenStream;
 ///
 /// # See also
 ///
+/// The selected protocol's component-producing macros and `#[methods]` (an `#[init]` constructor
+/// for any component).
+#[proc_macro_attribute]
+pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
+    upwell_macros_core::component(attr.into(), item.into()).into()
+}
+
 /// Declares a **context value**: an app-defined value, such as an authenticated `Identity`,
 /// that is never built but seeded by a protocol or the application into an instance of each
 /// scope it lists, and injected by value wherever one of those scopes is on the chain.
@@ -195,13 +202,6 @@ use proc_macro::TokenStream;
 #[proc_macro_attribute]
 pub fn context(attr: TokenStream, item: TokenStream) -> TokenStream {
     upwell_macros_core::context(attr.into(), item.into()).into()
-}
-
-/// The selected protocol's component-producing macros and `#[methods]` (an `#[init]` constructor
-/// for any component).
-#[proc_macro_attribute]
-pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
-    upwell_macros_core::component(attr.into(), item.into()).into()
 }
 
 /// Implements the `ConfigProperties` trait for a config `struct` or `enum`, making it

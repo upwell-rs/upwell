@@ -18,7 +18,7 @@ mod seeds;
 
 pub use condition::AppConditionEvaluation;
 pub(crate) use config::{BoundConfigs, ConfigFault};
-pub use seeds::{APPLICATION_CLAIMANT, SeedClaim, SeedClaimError};
+pub use seeds::{APPLICATION_CLAIMANT, SeedClaim, SeedClaimError, SeedConsumer};
 
 /// Holds the *agnostic* component, provider, config-binding and entry descriptors of an
 /// app — declarations only. Runtime instances live in the

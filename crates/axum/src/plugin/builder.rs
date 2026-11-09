@@ -92,8 +92,9 @@ pub trait AxumAppBuilder {
     /// The seeder runs inside the parent layers and before global middleware and the eager
     /// request-scope opening, so every opening of the request's scope holds the seed. A
     /// rejection ends the request with the seeder's response. WebSocket upgrades and requests
-    /// no route matches skip it. Seeders run in registration order;
-    /// two seeders of one type are rejected at preparation (`DuplicateSeedClaim`).
+    /// no route matches skip it. Seeders run in registration order. Registering `M` again is a
+    /// no-op; a second seeder of the same `T` fails preparation with
+    /// [`DuplicateRequestSeeder`](crate::Error::DuplicateRequestSeeder).
     fn request_seed<T, M>(self) -> Self
     where
         T: Clone + Send + Sync + 'static,
@@ -195,6 +196,10 @@ impl AxumAppBuilder for AppBuilder<Axum> {
         M: RequestSeeder<Seed = T> + Component<Handle = Arc<M>> + Descriptor<ComponentDescriptor>,
     {
         let seeds = &mut self.protocol_mut().request_seeds;
+
+        if !seeds.register::<T, M>() {
+            return self;
+        }
 
         seeds.layers.push(Box::new(|runtime, router| {
             let seeder = runtime

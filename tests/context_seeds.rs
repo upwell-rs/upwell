@@ -142,20 +142,31 @@ async fn a_plain_seed_no_one_claims_is_not_checked() {
 }
 
 #[tokio::test]
-async fn two_claimants_of_one_seed_fail_preparation() {
-    let mut builder = builder("context-duplicate").provides_seed::<Identity, Left>();
+async fn two_openers_may_claim_one_seed() {
+    let mut builder = builder("context-two-openers")
+        .component::<Badge>()
+        .provides_seed::<Identity, Left>()
+        .provides_seed::<Identity, Right>();
 
     builder
         .registry_mut()
-        .claim_seed(SeedClaim::of::<Identity, Left>("another"));
+        .claim_seed(SeedClaim::of::<Identity, Right>("another opener"));
 
-    let error = builder
+    builder
         .build()
         .await
-        .expect_err("two claimants fill one slot twice");
+        .expect("each opener fills its own instances of the scope");
+}
 
-    assert!(
-        error.to_string().contains("another"),
-        "the second claimant is named: {error}"
-    );
+#[tokio::test]
+async fn a_claim_for_a_scope_without_a_slot_fails_preparation() {
+    let error = builder("context-claim-without-slot")
+        .provides_seed::<Identity, LeftStep>()
+        .build()
+        .await
+        .expect_err("the step has no identity slot, so every opening would reject the seed");
+    let message = error.to_string();
+
+    assert!(message.contains("Identity"), "{message}");
+    assert!(message.contains("LeftStep"), "{message}");
 }

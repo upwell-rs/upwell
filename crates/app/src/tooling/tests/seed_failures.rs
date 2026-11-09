@@ -24,7 +24,10 @@ fn an_unprovided_seed_names_its_consumer_type_and_scope() {
             seed: "app::Identity",
             scope: "Request",
             scope_id: scope(),
-            consumer: String::from("audit"),
+            consumer: crate::SeedConsumer::Component {
+                id: "audit",
+                name: "Audit",
+            },
         },
     ));
 
@@ -40,18 +43,32 @@ fn an_unprovided_seed_names_its_consumer_type_and_scope() {
 }
 
 #[test]
-fn a_duplicate_seed_claim_names_the_type_and_scope() {
+fn an_entry_consumer_is_named_as_an_entry() {
+    let key = upwell_core::EntryKey::new("http/greet.get").expect("a valid entry key");
     let diagnostic = diagnostic(crate::Error::SeedClaim(
-        crate::SeedClaimError::DuplicateSeedClaim {
+        crate::SeedClaimError::UnprovidedSeed {
             seed: "app::Identity",
             scope: "Request",
             scope_id: scope(),
-            first: "first",
-            second: "second",
+            consumer: crate::SeedConsumer::Entry(key),
         },
     ));
 
-    assert_eq!(diagnostic.code, "upwell/tooling-seed-claim-duplicate");
+    assert_eq!(diagnostic.resources[0], "entry:http/greet.get");
+}
+
+#[test]
+fn a_claim_without_a_slot_names_the_type_and_scope() {
+    let diagnostic = diagnostic(crate::Error::SeedClaim(
+        crate::SeedClaimError::ClaimWithoutSlot {
+            seed: "app::Identity",
+            scope: "Request",
+            scope_id: scope(),
+            claimant: "app::HeaderIdentity",
+        },
+    ));
+
+    assert_eq!(diagnostic.code, "upwell/tooling-seed-claim-without-slot");
     assert_eq!(
         diagnostic.resources,
         ["type:app::Identity", "scope:fixture/request"]

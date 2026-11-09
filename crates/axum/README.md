@@ -23,10 +23,10 @@ WebSocket connection components use `WebsocketUpgradeMeta` for the upgrade reque
 
 A request opens its `HttpRequest` scope the first time something injects from it, so a route that
 injects nothing pays for no scope. An eager component (`#[component(scope = HttpRequest, eager)]`)
-changes that: it runs for every routed request before any middleware, as RPC opens a call's
+changes that: it runs for every request a controller route serves, before any middleware, as RPC opens a call's
 scope before its middleware. So it also runs for a request global middleware rejects, and reads
 the request head as the client sent it, before middleware rewrites it. A request no route
-matches (a 404) runs none.
+matches (a 404) runs none, and neither does a WebSocket upgrade, which opens no request scope.
 
 A request's scope opens under the application root unless the application picks a parent: an
 application scope that lists `HttpRequest` among its `children`, such as a cached per-user

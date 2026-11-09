@@ -10,7 +10,9 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
-use upwell_core::{DependencyDescriptor, ResolutionMode, Scope, ScopeId, ScopeKey, TypeDescriptor};
+use upwell_core::{
+    DependencyDescriptor, EntryKey, ResolutionMode, Scope, ScopeId, ScopeKey, TypeDescriptor,
+};
 use upwell_di::ComponentDescriptor;
 
 use super::AppRegistry;
@@ -32,6 +34,21 @@ pub struct SeedClaim {
     pub claimant: &'static str,
 }
 
+/// The component or entry that requires a seed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SeedConsumer {
+    /// A component placement, by its stable identity and display name.
+    Component {
+        /// The component's stable identity.
+        id: &'static str,
+        /// The component's display name.
+        name: &'static str,
+    },
+    /// An entry, by its stable key.
+    Entry(EntryKey),
+}
+
 /// What [`AppRegistry::validate_seed_claims`] reports.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -50,23 +67,34 @@ pub enum SeedClaimError {
         /// The scope's identity.
         scope_id: ScopeId,
         /// The component or entry that requires it.
-        consumer: String,
+        consumer: SeedConsumer,
     },
 
-    /// Two claimants guarantee the same seed in one scope, so its slot would be filled twice.
-    #[error("'{seed}' is claimed for scope '{scope}' by both '{first}' and '{second}'")]
-    DuplicateSeedClaim {
-        /// The seeded value's type name.
+    /// A claim names a type the claimed scope has no factory-less slot for, so every opening
+    /// that fills it would be rejected for a seed without a slot.
+    #[error(
+        "'{claimant}' claims to seed '{seed}' into scope '{scope}', which has no seed slot for it; \
+         declare it there, for example with `#[context(scopes = [..])]`"
+    )]
+    ClaimWithoutSlot {
+        /// The claimed value's type name.
         seed: &'static str,
-        /// The scope both claim.
+        /// The claimed scope.
         scope: &'static str,
-        /// The scope's identity.
+        /// The claimed scope's identity.
         scope_id: ScopeId,
-        /// The first claimant.
-        first: &'static str,
-        /// The second claimant.
-        second: &'static str,
+        /// Who claims it.
+        claimant: &'static str,
     },
+}
+
+impl std::fmt::Display for SeedConsumer {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Component { name, .. } => formatter.write_str(name),
+            Self::Entry(key) => write!(formatter, "entry {key}"),
+        }
+    }
 }
 
 impl SeedClaim {
@@ -97,15 +125,21 @@ impl AppRegistry {
         }
     }
 
-    /// Rejects two claimants of one seed in one scope, and a required dependency on a checked
-    /// seed whose placement on the consumer's chain no one claims. A checked seed is a
-    /// `#[context]` value or a type something claims.
+    /// Rejects a claim for a scope without a seed slot of its type, and a required dependency
+    /// on a checked seed whose placement on the consumer's chain no one claims. A checked seed
+    /// is a `#[context]` value or a type something claims.
+    ///
+    /// Several claimants of one `(type, scope)` pair are accepted: each describes an opener
+    /// that fills its own instances of the scope, such as two WebSocket protocols each seeding
+    /// their connections. Two fills of one opening are rejected where the opening is assembled
+    /// (two request seeders of one type fail the axum build) or when the instance opens
+    /// (`DuplicateSeed`).
     pub(crate) fn validate_seed_claims(
         &self,
         components: &[ComponentDescriptor],
         topology: &PreparedScopeTopology,
     ) -> Result<(), SeedClaimError> {
-        let claimed = self.claimed_scopes()?;
+        let claimed = self.claimed_scopes(components)?;
         let seeds = SeedPlacements::of(components, &claimed);
 
         if seeds.is_empty() {
@@ -114,44 +148,50 @@ impl AppRegistry {
 
         for component in components {
             for dependency in component.dependencies() {
-                seeds.check(
-                    &dependency,
-                    component.scope,
-                    &component.name,
-                    &claimed,
-                    topology,
-                )?;
+                let consumer = SeedConsumer::Component {
+                    id: component.id,
+                    name: component.name,
+                };
+
+                seeds.check(&dependency, component.scope, consumer, &claimed, topology)?;
             }
         }
 
         for entry in &self.entries {
             for dependency in (entry.targets)() {
-                seeds.check(&dependency, entry.scope, &entry.key, &claimed, topology)?;
+                let consumer = SeedConsumer::Entry(entry.key);
+
+                seeds.check(&dependency, entry.scope, consumer, &claimed, topology)?;
             }
         }
 
         Ok(())
     }
 
-    /// The claimed `(type, scope)` pairs, rejecting a pair two claimants share.
-    fn claimed_scopes(&self) -> Result<HashSet<(TypeId, ScopeId)>, SeedClaimError> {
-        let mut claimants: HashMap<(TypeId, ScopeId), &SeedClaim> = HashMap::new();
+    /// The claimed `(type, scope)` pairs, rejecting a claim whose scope has no factory-less
+    /// slot of its type among `components`.
+    fn claimed_scopes(
+        &self,
+        components: &[ComponentDescriptor],
+    ) -> Result<HashSet<(TypeId, ScopeId)>, SeedClaimError> {
+        let slots: HashSet<(TypeId, ScopeId)> = components
+            .iter()
+            .filter(|component| component.effective_factory().ok().flatten().is_none())
+            .map(|component| (component.ty.type_id, component.scope.id()))
+            .collect();
 
         for claim in &self.seed_claims {
-            if let Some(first) = claimants.insert(claim.key(), claim)
-                && first.claimant != claim.claimant
-            {
-                return Err(SeedClaimError::DuplicateSeedClaim {
+            if !slots.contains(&claim.key()) {
+                return Err(SeedClaimError::ClaimWithoutSlot {
                     seed: (claim.ty.type_name)(),
                     scope: claim.scope.name(),
                     scope_id: claim.scope.id(),
-                    first: first.claimant,
-                    second: claim.claimant,
+                    claimant: claim.claimant,
                 });
             }
         }
 
-        Ok(claimants.into_keys().collect())
+        Ok(self.seed_claims.iter().map(SeedClaim::key).collect())
     }
 }
 
@@ -187,7 +227,7 @@ impl SeedPlacements {
         &self,
         dependency: &DependencyDescriptor,
         scope: ScopeKey,
-        consumer: &dyn std::fmt::Display,
+        consumer: SeedConsumer,
         claimed: &HashSet<(TypeId, ScopeId)>,
         topology: &PreparedScopeTopology,
     ) -> Result<(), SeedClaimError> {
@@ -215,7 +255,7 @@ impl SeedPlacements {
                     seed: (dependency.ty.type_name)(),
                     scope: placement.name(),
                     scope_id: placement.id(),
-                    consumer: consumer.to_string(),
+                    consumer,
                 })
             }
 

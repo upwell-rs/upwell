@@ -55,7 +55,7 @@ impl<M: RequestSeeder> AxumMiddleware for SeederMiddleware<M> {
     async fn handle(&self, request: Request, next: Next) -> Response {
         let (mut head, body) = request.into_parts();
 
-        if !is_controller_route(&head) {
+        if !is_controller_route(&head.method, &head.extensions) {
             return next.run(Request::from_parts(head, body)).await;
         }
 
