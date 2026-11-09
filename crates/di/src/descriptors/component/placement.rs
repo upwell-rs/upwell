@@ -6,7 +6,7 @@ use std::sync::{Mutex, OnceLock};
 use upwell_core::{ScopeId, ScopeKey};
 
 use super::{ComponentDescriptor, ComponentFactoryRole};
-use crate::Error;
+use crate::error::{DeclaredScopeMismatch, Error, RepeatedScope};
 
 /// The interned identity of a component placed in one of several scopes.
 static PLACEMENT_IDS: OnceLock<Mutex<HashMap<(&'static str, ScopeId), &'static str>>> =
@@ -83,11 +83,16 @@ impl ComponentDescriptor {
         if let [first, ..] = self.scopes
             && *first != declared
         {
-            return Err(Error::DeclaredScopeMismatch {
-                component: self.name.to_string(),
-                scope: declared.name(),
-                first: first.name(),
-            });
+            return Err(Error::DeclaredScopeMismatch(Box::new(
+                DeclaredScopeMismatch {
+                    component: self.name.to_string(),
+                    component_id: self.id.to_string(),
+                    scope: declared.name(),
+                    scope_id: declared.id(),
+                    first: first.name(),
+                    first_id: first.id(),
+                },
+            )));
         }
 
         self.reject_repeated(self.scopes, None)?;
@@ -107,12 +112,13 @@ impl ComponentDescriptor {
     ) -> crate::Result<()> {
         for (index, scope) in scopes.iter().enumerate() {
             if scopes[..index].contains(scope) {
-                return Err(Error::RepeatedScope {
+                return Err(Error::RepeatedScope(Box::new(RepeatedScope {
                     component: self.name.to_string(),
+                    component_id: self.id.to_string(),
                     factory,
                     scope: scope.name(),
                     scope_id: scope.id(),
-                });
+                })));
             }
         }
 

@@ -290,6 +290,48 @@ pub(in crate::tooling) fn di_failure(
 
             provider_order_failure(phase, resources)
         }
+        upwell_di::Error::RepeatedScope(error) => {
+            let upwell_di::RepeatedScope {
+                component_id,
+                factory,
+                scope_id,
+                ..
+            } = error.as_ref();
+            let mut resources = vec![component_resource(component_id)];
+
+            resources.extend(factory.map(|factory| factory_resource(component_id, factory)));
+            resources.push(scope_resource(*scope_id));
+
+            (
+                "upwell/tooling-scope-repeated",
+                "A component or factory scope list names one scope twice.",
+                phase,
+                resources,
+                Vec::new(),
+                Some("List each scope once; the scope may be reached through two paths."),
+            )
+        }
+        upwell_di::Error::DeclaredScopeMismatch(error) => {
+            let upwell_di::DeclaredScopeMismatch {
+                component_id,
+                scope_id,
+                first_id,
+                ..
+            } = error.as_ref();
+
+            (
+                "upwell/tooling-declared-scope-mismatch",
+                "A component's scope list does not start with its declared scope.",
+                phase,
+                vec![
+                    component_resource(component_id),
+                    scope_resource(*scope_id),
+                    scope_resource(*first_id),
+                ],
+                Vec::new(),
+                Some("Build the descriptor with `with_scopes`, or list the declared scope first."),
+            )
+        }
         _ => (
             "upwell/tooling-dependency-graph",
             "The dependency graph is structurally invalid.",
@@ -311,6 +353,10 @@ fn type_resource(type_name: &str) -> String {
 
 fn scope_resource(scope: upwell_core::ScopeId) -> String {
     format!("scope:{scope}")
+}
+
+fn factory_resource(component: &str, factory: &str) -> String {
+    format!("factory:{component}:{factory}")
 }
 
 fn provider_resource(trait_type: &str, component_type: &str, qualifier: &str) -> String {

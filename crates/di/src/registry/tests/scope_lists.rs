@@ -223,11 +223,10 @@ fn a_list_that_does_not_start_with_the_declared_scope_is_rejected() {
     assert!(
         matches!(
             &error,
-            Error::DeclaredScopeMismatch {
-                component,
-                scope: "Request",
-                first: "SiblingA",
-            } if component == "FactoryFixture"
+            Error::DeclaredScopeMismatch(mismatch)
+                if mismatch.component == "FactoryFixture"
+                    && mismatch.scope == "Request"
+                    && mismatch.first == "SiblingA"
         ),
         "{error}"
     );
@@ -243,7 +242,10 @@ fn a_scope_declared_twice_is_rejected() {
     assert!(
         matches!(
             &error,
-            Error::RepeatedScope { component, scope: "SiblingA", .. } if component == "FactoryFixture"
+            Error::RepeatedScope(repeated)
+                if repeated.component == "FactoryFixture"
+                    && repeated.scope == "SiblingA"
+                    && repeated.factory.is_none()
         ),
         "{error}"
     );
@@ -258,12 +260,41 @@ fn a_factory_listing_a_scope_twice_is_rejected() {
     assert!(
         matches!(
             &error,
-            Error::RepeatedScope {
-                scope: "SiblingA",
-                factory: Some("twice-in-a"),
-                ..
-            }
+            Error::RepeatedScope(repeated)
+                if repeated.scope == "SiblingA" && repeated.factory == Some("twice-in-a")
         ),
         "{error}"
+    );
+}
+
+/// The first placement of the fixture declared in both sibling scopes, as resolution returns it.
+fn resolved_placement(
+    factories: fn() -> &'static [ComponentFactoryDescriptor],
+) -> ComponentDescriptor {
+    resolve(vec![in_both(factories)]).expect("a declared list resolves")[0]
+}
+
+#[test]
+fn a_resolved_placement_registered_again_with_a_new_list_builds_in_it() {
+    let component = resolved_placement(default_only).with_scopes(&[SiblingB::KEY, Request::KEY]);
+
+    let resolved = resolve(vec![component]).expect("the new list replaces the placement");
+
+    assert_eq!(
+        factory_ids(&resolved),
+        [(SiblingB::ID, "fallback"), (Request::ID, "fallback")]
+    );
+}
+
+#[test]
+fn a_resolved_placement_registered_again_in_one_scope_keeps_its_inherited_factory() {
+    let component = resolved_placement(inheriting_only).with_scope(Request::KEY);
+
+    let resolved = resolve(vec![component]).expect("the new scope replaces the placement");
+
+    assert_eq!(
+        factory_ids(&resolved),
+        [(Request::ID, "inheriting")],
+        "the unscoped factory builds in the new scope instead of leaving a seed"
     );
 }

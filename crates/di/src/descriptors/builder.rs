@@ -236,18 +236,23 @@ impl ComponentDescriptor {
     }
 
     /// Places the component in `scope` instead of the singleton scope, replacing any list
-    /// [`with_scopes`](Self::with_scopes) set.
+    /// [`with_scopes`](Self::with_scopes) set. On a placement taken from a resolved registry it
+    /// also drops the placement's record of the scopes it was expanded from, so the result is
+    /// an ordinary descriptor again; a placement id (`<id>@<scope id>`) is kept as the new id.
     pub const fn with_scope(self, scope: ScopeKey) -> Self {
         Self {
             scope,
             scopes: &[],
+            declared_scope: None,
             ..self
         }
     }
 
     /// Places the component in every scope of `scopes`, as `#[component(scope = [A, B])]`
     /// does: the first becomes its declared [`scope`](Self::scope), and factories without
-    /// scopes of their own build in each. The scopes may not share a hierarchy or repeat.
+    /// scopes of their own build in each. The scopes may not share a hierarchy or repeat. Like
+    /// [`with_scope`](Self::with_scope), it turns a resolved placement into an ordinary
+    /// descriptor again.
     ///
     /// # Panics
     ///
@@ -260,6 +265,7 @@ impl ComponentDescriptor {
         Self {
             scope: *scope,
             scopes,
+            declared_scope: None,
             ..self
         }
     }
