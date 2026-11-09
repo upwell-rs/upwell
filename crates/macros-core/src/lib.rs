@@ -29,6 +29,7 @@ pub mod methods;
 pub mod paths;
 pub mod provide;
 pub mod scope;
+pub mod scopes;
 pub mod source;
 
 mod app;

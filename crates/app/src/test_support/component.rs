@@ -33,14 +33,9 @@ macro_rules! unbuilt_factories {
         $crate::test_support::unbuilt_factories!($id, $dependencies, Explicit)
     };
     ($id:literal, $dependencies:expr, $role:ident) => {
-        $crate::test_support::unbuilt_factories!(
-            $id,
-            $dependencies,
-            $role,
-            ::core::option::Option::None
-        )
+        $crate::test_support::unbuilt_factories!($id, $dependencies, $role, &[])
     };
-    ($id:literal, $dependencies:expr, $role:ident, $scope:expr) => {
+    ($id:literal, $dependencies:expr, $role:ident, $scopes:expr) => {
         || {
             const {
                 &[::upwell_di::ComponentFactoryDescriptor {
@@ -49,7 +44,7 @@ macro_rules! unbuilt_factories {
                     construct_ready: ::core::option::Option::None,
                     dependencies: $dependencies,
                     role: ::upwell_di::ComponentFactoryRole::$role,
-                    scope: $scope,
+                    scopes: $scopes,
                 }]
             }
         }

@@ -59,7 +59,7 @@ fn factories() -> &'static [ComponentFactoryDescriptor] {
             construct_ready: Some(|cx| dispatch_ready_factory(fan_in, cx)),
             dependencies: || factory_dependencies(init),
             role: ComponentFactoryRole::Explicit,
-            scope: None,
+            scopes: &[],
         }]
     }
 }

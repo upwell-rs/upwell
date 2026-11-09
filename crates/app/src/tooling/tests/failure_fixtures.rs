@@ -73,7 +73,7 @@ pub(super) static DIAGNOSTIC_CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1]
         construct_ready: None,
         dependencies: diagnostic_dependency,
         role: ComponentFactoryRole::Explicit,
-        scope: None,
+        scopes: &[],
     }];
 
 pub(super) fn diagnostic_consumer_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -87,7 +87,7 @@ pub(super) static DIAGNOSTIC_PROVIDER_CONSUMER_FACTORIES: [ComponentFactoryDescr
         construct_ready: None,
         dependencies: diagnostic_provider_dependency,
         role: ComponentFactoryRole::Explicit,
-        scope: None,
+        scopes: &[],
     }];
 
 pub(super) fn diagnostic_provider_consumer_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -104,6 +104,7 @@ pub(super) static DIAGNOSTIC_CONSUMER: ComponentDescriptor = ComponentDescriptor
     hooks: upwell_hooks::no_hooks,
     construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
+    scopes: &[],
     declared_scope: None,
 };
 
@@ -117,6 +118,7 @@ pub(super) static DIAGNOSTIC_DEPENDENCY: ComponentDescriptor = ComponentDescript
     hooks: upwell_hooks::no_hooks,
     construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
+    scopes: &[],
     declared_scope: None,
 };
 
@@ -130,6 +132,7 @@ pub(super) static DIAGNOSTIC_PROVIDER_CONSUMER: ComponentDescriptor = ComponentD
     hooks: upwell_hooks::no_hooks,
     construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
+    scopes: &[],
     declared_scope: None,
 };
 
@@ -143,6 +146,7 @@ pub(super) static DIAGNOSTIC_PROVIDER_COMPONENT: ComponentDescriptor = Component
     hooks: upwell_hooks::no_hooks,
     construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
+    scopes: &[],
     declared_scope: None,
 };
 

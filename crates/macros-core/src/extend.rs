@@ -115,8 +115,8 @@ pub struct ComponentContext {
     pub id: syn::LitStr,
     /// The resolved display name (the `name = ..` override, else the ident).
     pub name: syn::LitStr,
-    /// The scope marker path from `scope = ..`, if specified (`None` = default singleton).
-    pub scope: Option<syn::Path>,
+    /// The scope marker paths from `scope = ..`, if specified (`None` = default singleton).
+    pub scope: Option<crate::scopes::ScopeList>,
     /// The type's own `#[doc]` attributes, cloned from the item. A router extension forwards them
     /// verbatim onto its generated client(s), so `{Controller}Client` (and the wasm binding, whose
     /// docs become TypeScript JSDoc) always carries the controller's documentation.

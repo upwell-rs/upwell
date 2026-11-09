@@ -203,7 +203,15 @@ pub struct ComponentDescriptor {
     pub id: &'static str,
     pub name: &'static str,
     pub ty: TypeDescriptor,
+    /// The scope the component builds in: its declared scope, the first of
+    /// [`scopes`](Self::scopes) when it lists several, or the scope of one placement.
     pub scope: ScopeKey,
+    /// Every scope the component declares when it lists more than one, as
+    /// `#[component(scope = [A, B])]` does, in declaration order with [`scope`](Self::scope)
+    /// first. Empty when it declares one scope, which is then `scope`. Factories without
+    /// scopes of their own build in each, so the component has one placement per scope
+    /// ([`placements`](Self::placements)); the scopes may not share a hierarchy.
+    pub scopes: &'static [ScopeKey],
     /// Optional root condition. Provider mappings inherit this component's eligibility.
     pub condition: Option<&'static ConditionDescriptor>,
     pub factories: fn() -> &'static [ComponentFactoryDescriptor],
@@ -241,6 +249,7 @@ impl ComponentDescriptor {
             name: T::NAME,
             ty: TypeDescriptor::of::<T>(T::NAME),
             scope: Singleton::KEY,
+            scopes: &[],
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
@@ -265,6 +274,7 @@ impl ComponentDescriptor {
             name,
             ty,
             scope,
+            scopes: &[],
             condition: None,
             factories: no_factories,
             hooks: no_hooks,
@@ -308,6 +318,10 @@ impl fmt::Debug for ComponentDescriptor {
             .field("name", &self.name)
             .field("ty", &self.ty)
             .field("scope", &self.scope.name())
+            .field(
+                "scopes",
+                &self.scopes.iter().map(ScopeKey::name).collect::<Vec<_>>(),
+            )
             .field("condition", &self.condition)
             .field("construction", &self.construction)
             .field("dependencies", &self.dependencies())

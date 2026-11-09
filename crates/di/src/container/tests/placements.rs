@@ -33,7 +33,7 @@ macro_rules! placement {
                         construct_ready: None,
                         dependencies: || factory_dependencies($factory),
                         role: ComponentFactoryRole::Explicit,
-                        scope: Some(<$scope>::KEY),
+                        scopes: &[<$scope>::KEY],
                     }]
                 }
             }

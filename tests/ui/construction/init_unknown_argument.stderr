@@ -1,4 +1,4 @@
-error: unknown `#[init]` argument; the only argument is `scope = <ScopePath>`
+error: unknown `#[init]` argument; the only argument is `scope = <ScopePath>` or `scope = [<ScopePath>, ..]`
  --> tests/ui/construction/init_unknown_argument.rs:8:12
   |
 8 |     #[init(qualifier = "main")]

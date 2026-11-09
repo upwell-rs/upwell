@@ -80,11 +80,12 @@ pub struct ComponentFactoryDescriptor {
     /// The factory's dependency edges, reported at runtime. Read only at build.
     pub dependencies: fn() -> Vec<DependencyDescriptor>,
     pub role: ComponentFactoryRole,
-    /// The scope this recipe builds its instance in. `None` inherits the scope the
-    /// component declares, so a single-scope component never states it. Several explicit
-    /// recipes with distinct scopes place one component type in several scopes (see
-    /// [`ComponentDescriptor::placements`]).
-    pub scope: Option<ScopeKey>,
+    /// The scopes this recipe builds its instance in, one placement each. Empty inherits
+    /// every scope the component declares, so a single-scope component never states it.
+    /// Explicit recipes with distinct scopes, or one recipe listing several, place one
+    /// component type in several scopes (see [`ComponentDescriptor::placements`]); the
+    /// scopes of one type may not share a hierarchy.
+    pub scopes: &'static [ScopeKey],
 }
 
 impl ComponentFactoryDescriptor {
@@ -197,7 +198,7 @@ impl ComponentDescriptor {
     pub fn effective_factory(&self) -> crate::Result<Option<&'static ComponentFactoryDescriptor>> {
         let mut explicit = self
             .factories_with(ComponentFactoryRole::Explicit)
-            .filter(|factory| self.factory_scope(factory) == self.scope);
+            .filter(|factory| self.factory_scopes(factory).contains(&self.scope));
         let first = explicit.next();
 
         if first.is_some() && explicit.next().is_some() {
@@ -213,11 +214,25 @@ impl ComponentDescriptor {
         }
     }
 
-    /// The scope `factory` builds in: its own, or the scope this component declared.
-    pub(crate) fn factory_scope(&self, factory: &ComponentFactoryDescriptor) -> ScopeKey {
-        factory
-            .scope
-            .unwrap_or_else(|| self.declared_scope.unwrap_or(self.scope))
+    /// The scopes `factory` builds in: its own, or every scope this component declares.
+    pub(crate) fn factory_scopes<'a>(
+        &'a self,
+        factory: &'static ComponentFactoryDescriptor,
+    ) -> &'a [ScopeKey] {
+        match factory.scopes {
+            [] => self.declared_scopes(),
+            scopes => scopes,
+        }
+    }
+
+    /// Every scope this component declares: its [`scopes`](Self::scopes) list, or its one
+    /// declared scope. A placement reports the declaration of the component it came from.
+    pub fn declared_scopes(&self) -> &[ScopeKey] {
+        match (self.scopes, &self.declared_scope) {
+            ([], Some(declared)) => std::slice::from_ref(declared),
+            ([], None) => std::slice::from_ref(&self.scope),
+            (scopes, _) => scopes,
+        }
     }
 
     /// Whether any explicit factory exists, whatever scope it builds in.

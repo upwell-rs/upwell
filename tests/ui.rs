@@ -57,3 +57,18 @@ fn end_hooks_of_a_type_that_is_not_a_scope_fail_to_compile() {
 
     cases.compile_fail("tests/ui/end_hooks/*.rs");
 }
+
+#[test]
+fn invalid_scope_lists_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/scope_lists/*.rs");
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn scope_lists_on_services_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/scope_lists/daemon/*.rs");
+}

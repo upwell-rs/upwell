@@ -17,6 +17,7 @@ use syn::{GenericArgument, Ident, ItemStruct, LitStr, PathArguments, Type};
 use crate::attr::ComponentArgs;
 use crate::extend::{ComponentContext, ComponentExt};
 use crate::paths::Paths;
+use crate::scopes::ScopeList;
 use crate::when::{self, Condition};
 use crate::{di, handle, inject, provide};
 
@@ -64,14 +65,16 @@ pub fn expand<Ext: ComponentExt>(
         .unwrap_or_else(|| LitStr::new(&self_ident.to_string(), self_ident.span()));
     let type_name = LitStr::new(&self_ident.to_string(), self_ident.span());
 
-    // The scope marker path: the user's `scope = <Path>` emitted verbatim (resolved in their
-    // scope), or the framework's `Singleton` anchor when omitted. Raw — no rewriting — so a
-    // protocol's `Request`/`Connection` (or any custom scope) is whatever the path names.
     let scope_path = args
         .scope
-        .clone()
+        .as_ref()
+        .map(|scope| scope.primary().clone())
         .unwrap_or_else(|| paths.core("scope::Singleton"));
-    let construction = Construction::lower(args.eager.as_ref(), &scope_path, paths);
+    let declared_scopes = args
+        .scope
+        .as_ref()
+        .map_or_else(|| quote!(&[]), |scope| scope.declared_keys(paths));
+    let construction = Construction::lower(args.eager.as_ref(), args.scope.as_ref(), paths);
     let registrations_slice = args
         .factory_slice
         .clone()
@@ -113,6 +116,7 @@ pub fn expand<Ext: ComponentExt>(
         &name,
         args.ext.defers_factory(),
         &scope_path,
+        &declared_scopes,
         &registrations_slice,
         emit_default,
         &condition.root,
@@ -189,16 +193,17 @@ pub fn expand<Ext: ComponentExt>(
 }
 
 /// The lowered `eager` key: the descriptor's construction policy, and for an eager
-/// component a compile-time check that its scope lies below the root.
+/// component a compile-time check that each of its scopes lies below the root.
 struct Construction {
     policy: TokenStream,
     check: TokenStream,
 }
 
 impl Construction {
-    fn lower(eager: Option<&Ident>, scope_path: &syn::Path, paths: &Paths) -> Self {
+    fn lower(eager: Option<&Ident>, scope: Option<&ScopeList>, paths: &Paths) -> Self {
         let policy = paths.core("ScopedConstruction");
         let scope_trait = paths.core("Scope");
+        let scopes = scope.map(ScopeList::paths).unwrap_or_default();
         let Some(eager) = eager else {
             return Self {
                 policy: quote!(#policy::OnDemand),
@@ -206,16 +211,20 @@ impl Construction {
             };
         };
 
-        Self {
-            policy: quote_spanned!(eager.span()=> #policy::Eager),
-            check: quote_spanned! {eager.span()=>
+        let check = scopes.iter().map(|scope_path| {
+            quote_spanned! {eager.span()=>
                 const _: () = ::core::assert!(
                     !<#scope_path as #scope_trait>::IS_TRANSIENT
                         && <#scope_path as #scope_trait>::RANK != ::core::primitive::u8::MAX,
                     "`eager` applies only to scopes below the root: a singleton is built when \
                      the application starts and a transient on every resolution",
                 );
-            },
+            }
+        });
+
+        Self {
+            policy: quote_spanned!(eager.span()=> #policy::Eager),
+            check: quote!(#(#check)*),
         }
     }
 }

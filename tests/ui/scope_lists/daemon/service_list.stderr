@@ -1,0 +1,5 @@
+error: #[service] components are always singletons; `scope` is only valid on #[component]
+  --> tests/ui/scope_lists/daemon/service_list.rs:13:19
+   |
+13 | #[service(scope = [Singleton, Local])]
+   |                   ^^^^^^^^^^^^^^^^^^

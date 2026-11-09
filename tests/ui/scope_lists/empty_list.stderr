@@ -1,0 +1,5 @@
+error: a scope list needs at least one scope, as in `scope = [WebsocketConnection, HttpRequest]`
+ --> tests/ui/scope_lists/empty_list.rs:4:21
+  |
+4 | #[component(scope = [])]
+  |                     ^^

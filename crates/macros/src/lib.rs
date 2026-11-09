@@ -75,6 +75,16 @@ use proc_macro::TokenStream;
 ///   protocol's `Request`). Omitted means a singleton. A component of a scope below the root
 ///   is built **on demand**: when the opening entry's plan lists it, or when something first
 ///   resolves it from the open scope.
+/// - `scope = [A, B]` — place the component in **each** listed scope: every scope instance of
+///   either kind builds its own instance with the same factory, and a resolution reaches the
+///   one placement on its chain (`#[component(scope = [WebsocketConnection, HttpRequest])]`
+///   for "per connection over WebSocket, per request over REST"). The first listed scope is
+///   the declared one. The listed scopes may not share a hierarchy: preparation rejects a
+///   scope listed beside one of its ancestors (`OverlappingPlacements`), a transient beside
+///   any other, and a manual instance (`default_factory = false`) in more than one scope,
+///   since a seed is addressed by type (`AmbiguousSeedScopes`). An `#[init]` without a scope
+///   builds in every listed scope. An empty list or a scope listed twice is a compile error,
+///   and `eager` checks every listed scope.
 /// - `eager` — with a `scope` below the root, build the component on **every** opening of
 ///   its scope instead, whatever the entry injects, together with what it depends on in the
 ///   scope. Use it for components whose construction is the intended side effect (an audit
@@ -101,6 +111,7 @@ use proc_macro::TokenStream;
 /// #[component(factory = Db::connect)]   // explicit async factory
 /// #[component(default_factory = false)] // manual, via with_component
 /// #[component(scope = Request, eager)]  // built on every request scope opening
+/// #[component(scope = [WebsocketConnection, HttpRequest])] // one per connection or request
 /// ```
 ///
 /// # What it generates
@@ -282,7 +293,12 @@ pub fn scope(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// The constructor's parameters are its dependencies (resolved from the container)
 /// and its return is `Self` or `Result<Self, E>`; a non-`async` constructor is
-/// wrapped to async. Two `#[init]`s on one type is a compile error.
+/// wrapped to async. Two unscoped `#[init]`s on one type is a compile error.
+///
+/// `#[init(scope = Path)]` builds in that scope instead of the component's, and
+/// `#[init(scope = [A, B])]` in each listed scope, so one type can be built by different
+/// constructors in disjoint scopes. Without `scope` it builds in every scope the component
+/// declares. Two constructors building in one scope fail preparation (`AmbiguousFactory`).
 ///
 /// # Transition recipes
 ///

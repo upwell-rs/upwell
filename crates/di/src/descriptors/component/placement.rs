@@ -13,28 +13,28 @@ static PLACEMENT_IDS: OnceLock<Mutex<HashMap<(&'static str, ScopeId), &'static s
 
 impl ComponentDescriptor {
     /// Every scope this component builds in, in the order its explicit factories declare
-    /// them. A component without scoped factories has one placement: its declared scope.
+    /// them. A factory without scopes of its own builds in every scope the component
+    /// declares, and a component without explicit factories builds in its declared scopes:
+    /// `#[component(scope = [A, B])]` places the field-injection default in both.
     ///
     /// Owner rule (2026-11-03): the placements of one type may not share a hierarchy, so a
     /// resolution from any scope chain finds at most one of them. Preparation rejects the
     /// rest with [`Error::OverlappingPlacements`](crate::Error::OverlappingPlacements).
     pub fn placements(&self) -> Vec<ScopeKey> {
         let mut scopes = Vec::new();
+        let mut explicit = false;
 
         if self.declared_scope.is_some() {
             return vec![self.scope];
         }
 
         for factory in self.factories_with(ComponentFactoryRole::Explicit) {
-            let scope = self.factory_scope(factory);
-
-            if !scopes.contains(&scope) {
-                scopes.push(scope);
-            }
+            explicit = true;
+            push_new(&mut scopes, self.factory_scopes(factory));
         }
 
-        if scopes.is_empty() {
-            scopes.push(self.scope);
+        if !explicit {
+            push_new(&mut scopes, self.declared_scopes());
         }
 
         scopes
@@ -68,6 +68,15 @@ impl ComponentDescriptor {
                 ..*self
             })
             .collect()
+    }
+}
+
+/// Appends the scopes of `from` that `scopes` does not hold yet, keeping their order.
+fn push_new(scopes: &mut Vec<ScopeKey>, from: &[ScopeKey]) {
+    for scope in from {
+        if !scopes.contains(scope) {
+            scopes.push(*scope);
+        }
     }
 }
 

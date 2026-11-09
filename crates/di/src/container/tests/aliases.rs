@@ -72,7 +72,7 @@ macro_rules! ready {
                         }),
                         dependencies: no_dependencies,
                         role: ComponentFactoryRole::Explicit,
-                        scope: None,
+                        scopes: &[],
                     }]
                 }
             }
@@ -94,7 +94,7 @@ fn reader_descriptor() -> ComponentDescriptor {
                 construct_ready: None,
                 dependencies: || factory_dependencies(reader),
                 role: ComponentFactoryRole::Explicit,
-                scope: None,
+                scopes: &[],
             }]
         }
     }

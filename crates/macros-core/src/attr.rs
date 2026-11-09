@@ -15,6 +15,7 @@ use syn::{
 
 use crate::extend::{NoExt, ParseKeyed, unknown_key_error};
 use crate::paths::Paths;
+use crate::scopes::ScopeList;
 
 /// The common component-macro keys, for the "unknown argument" diagnostic (the extension's
 /// keys are merged in by [`unknown_key_error`]).
@@ -46,24 +47,24 @@ pub(crate) fn parse_path_override(input: ParseStream) -> syn::Result<syn::Path> 
     input.parse()
 }
 
-pub(crate) fn parse_scope_path(input: ParseStream) -> syn::Result<syn::Path> {
-    let path: syn::Path = input.parse()?;
-
+/// Resolves the lowercase scope aliases (`singleton`, `connection`, `request`, `transient`)
+/// to their marker types; any other path is returned as written.
+pub(crate) fn scope_alias(path: syn::Path) -> syn::Path {
     if path.leading_colon.is_none()
         && path.segments.len() == 1
         && let Some(segment) = path.segments.first()
         && segment.arguments.is_empty()
     {
-        return Ok(match segment.ident.to_string().as_str() {
+        return match segment.ident.to_string().as_str() {
             "singleton" => syn::parse_quote!(Singleton),
             "connection" => syn::parse_quote!(Connection),
             "request" => syn::parse_quote!(Request),
             "transient" => syn::parse_quote!(Transient),
             _ => path,
-        });
+        };
     }
 
-    Ok(path)
+    path
 }
 
 /// The base arguments of a component macro, generic over an extension `Ext` (the struct-side
@@ -84,7 +85,9 @@ pub(crate) fn parse_scope_path(input: ParseStream) -> syn::Result<syn::Path> {
 ///   the handle does not share generation-local mutable slots, allowing unchanged instances
 ///   to be retained;
 /// - `scope = <ScopePath>` — the instance lifetime, named by a [`Scope`] marker type in scope
-///   (e.g. `Request` from a protocol's prelude, or a custom scope); omitted means singleton;
+///   (e.g. `Request` from a protocol's prelude, or a custom scope); omitted means singleton.
+///   `scope = [A, B]` places the component in each listed scope, which may not share a
+///   hierarchy (see [`ScopeList`](crate::scopes::ScopeList));
 /// - `eager` — with a `scope` below the root, build the component on every opening of its
 ///   scope rather than on demand; rejected without a `scope` and, at compile time, for a
 ///   singleton or transient scope;
@@ -106,12 +109,13 @@ pub struct ComponentArgs<Ext: ParseKeyed = NoExt> {
     /// Explicitly opts a by-value handle into cross-generation retention. The author
     /// guarantees that cloning the component does not share generation-local mutable slots.
     pub retainable: bool,
-    /// The [`Scope`] marker-type **path** parsed from `scope = ..`, emitted as written so it
-    /// resolves in the caller's scope (a protocol's `Request`/`Connection` arrives through its
-    /// prelude; a custom scope works the same way). The lowercase keywords
+    /// The [`Scope`] marker-type **paths** parsed from `scope = ..`, emitted as written so
+    /// they resolve in the caller's scope (a protocol's `Request`/`Connection` arrives through
+    /// its prelude; a custom scope works the same way). The lowercase keywords
     /// `singleton`/`connection`/`request`/`transient` are accepted as aliases for the
-    /// like-named marker types. `None` means the default (singleton).
-    pub scope: Option<syn::Path>,
+    /// like-named marker types. A bracketed list names every scope the component builds in.
+    /// `None` means the default (singleton).
+    pub scope: Option<ScopeList>,
     /// The `eager` keyword, kept for its span: the component is built on every opening of its
     /// scope. `None` means on demand.
     pub eager: Option<Ident>,
@@ -179,7 +183,7 @@ impl<Ext: ParseKeyed> Parse for ComponentArgs<Ext> {
                 "crate" => args.krate = Some(parse_path_override(input)?),
                 "scope" => {
                     input.parse::<Token![=]>()?;
-                    args.scope = Some(parse_scope_path(input)?);
+                    args.scope = Some(input.parse()?);
                 }
                 "provide" => {
                     input.parse::<Token![=]>()?;
@@ -271,8 +275,8 @@ impl<Ext: ParseKeyed> Parse for ComponentArgs<Ext> {
 
 /// Rejects `eager` without a scope below the root. A scope path spelled `Singleton` or
 /// `Transient` is rejected here; any other path is checked against the scope type when the
-/// generated code compiles.
-fn validate_eager(eager: Option<&Ident>, scope: Option<&syn::Path>) -> syn::Result<()> {
+/// generated code compiles. Every scope of a list is checked.
+fn validate_eager(eager: Option<&Ident>, scope: Option<&ScopeList>) -> syn::Result<()> {
     let Some(eager) = eager else {
         return Ok(());
     };
@@ -283,14 +287,15 @@ fn validate_eager(eager: Option<&Ident>, scope: Option<&syn::Path>) -> syn::Resu
              starts",
         ));
     };
-    let last = scope
-        .segments
-        .last()
-        .map(|segment| segment.ident.to_string());
+    let root_or_transient = scope.paths().iter().find(|path| {
+        path.segments
+            .last()
+            .is_some_and(|segment| segment.ident == "Singleton" || segment.ident == "Transient")
+    });
 
-    if matches!(last.as_deref(), Some("Singleton" | "Transient")) {
+    if let Some(path) = root_or_transient {
         return Err(syn::Error::new_spanned(
-            scope,
+            path,
             "`eager` applies only to scopes below the root: a singleton is built when the \
              application starts and a transient on every resolution",
         ));

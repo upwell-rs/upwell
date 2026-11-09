@@ -1,0 +1,15 @@
+error[E0277]: the trait bound `std::string::String: upwell::Scope` is not satisfied
+  --> tests/ui/scope_lists/not_a_scope.rs:12:29
+   |
+12 | #[component(scope = [Local, String])]
+   |                             ^^^^^^ the trait `upwell::Scope` is not implemented for `std::string::String`
+   |
+   = help: the following other types implement trait `upwell::Scope`:
+             HttpRequest
+             Local
+             WebsocketConnectionScope
+             WebsocketMessageScope
+             upwell::Singleton
+             upwell::Transient
+             upwell::scope::Connection
+             upwell::scope::Request

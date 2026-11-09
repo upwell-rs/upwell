@@ -49,7 +49,7 @@ fn broken_descriptor() -> ComponentDescriptor {
                 construct_ready: None,
                 dependencies: no_dependencies,
                 role: ComponentFactoryRole::Explicit,
-                scope: None,
+                scopes: &[],
             }]
         }
     }

@@ -63,7 +63,7 @@ static PROVIDER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDe
     construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Explicit,
-    scope: None,
+    scopes: &[],
 }];
 
 static CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
@@ -72,7 +72,7 @@ static CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDe
     construct_ready: None,
     dependencies: aggregate_dependencies,
     role: ComponentFactoryRole::Explicit,
-    scope: None,
+    scopes: &[],
 }];
 
 fn provider_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -97,6 +97,7 @@ static PROVIDER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     hooks: upwell_hooks::no_hooks,
     construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
+    scopes: &[],
     declared_scope: None,
 };
 
@@ -110,6 +111,7 @@ static CONSUMER_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     hooks: upwell_hooks::no_hooks,
     construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
+    scopes: &[],
     declared_scope: None,
 };
 

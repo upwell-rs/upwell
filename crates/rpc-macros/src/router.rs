@@ -82,10 +82,12 @@ impl<T: ComponentExt> ParseItem<ComponentContext> for Router<T> {
     fn parse_item(&mut self, cx: &ComponentContext, paths: &Paths) -> syn::Result<()> {
         // A service is always a singleton; reject a non-singleton scope on the component.
         if let Some(scope) = &cx.scope
-            && scope
-                .segments
-                .last()
-                .is_none_or(|seg| seg.ident != "Singleton")
+            && (scope.is_several()
+                || scope
+                    .primary()
+                    .segments
+                    .last()
+                    .is_none_or(|seg| seg.ident != "Singleton"))
         {
             return Err(syn::Error::new_spanned(
                 scope,

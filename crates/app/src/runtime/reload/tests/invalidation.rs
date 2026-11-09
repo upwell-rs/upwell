@@ -120,6 +120,7 @@ macro_rules! planned_component {
                 hooks: planned_component!(@hooks $($hooks)?),
                 construction: upwell_di::ScopedConstruction::OnDemand,
                 generation_snapshot: None,
+                scopes: &[],
                 declared_scope: None,
             }
         }

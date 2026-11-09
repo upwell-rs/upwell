@@ -56,7 +56,7 @@ static SENTINEL_FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDe
     construct_ready: None,
     dependencies: no_dependencies,
     role: ComponentFactoryRole::Default,
-    scope: None,
+    scopes: &[],
 }];
 
 fn sentinel_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -73,6 +73,7 @@ static SENTINEL_COMPONENT: ComponentDescriptor = ComponentDescriptor {
     hooks: upwell_hooks::no_hooks,
     construction: upwell_di::ScopedConstruction::OnDemand,
     generation_snapshot: None,
+    scopes: &[],
     declared_scope: None,
 };
 

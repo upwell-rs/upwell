@@ -15,23 +15,23 @@ fn twin_edge() -> Vec<DependencyDescriptor> {
     vec![one::<Twin>("twin", "Twin")]
 }
 
-/// The never-driven factory of [`Twin`] building in `scope`.
-const fn twin_in(id: &'static str, scope: ScopeKey) -> ComponentFactoryDescriptor {
+/// The never-driven factory of [`Twin`] building in `scopes`.
+const fn twin_in(id: &'static str, scopes: &'static [ScopeKey]) -> ComponentFactoryDescriptor {
     ComponentFactoryDescriptor {
         id,
         construct: crate::test_support::unbuilt,
         construct_ready: None,
         dependencies: Vec::new,
         role: ComponentFactoryRole::Explicit,
-        scope: Some(scope),
+        scopes,
     }
 }
 
 fn twin_factories() -> &'static [ComponentFactoryDescriptor] {
     const {
         &[
-            twin_in("twin-in-child", Child::KEY),
-            twin_in("twin-in-sibling", Sibling::KEY),
+            twin_in("twin-in-child", &[Child::KEY]),
+            twin_in("twin-in-sibling", &[Sibling::KEY]),
         ]
     }
 }

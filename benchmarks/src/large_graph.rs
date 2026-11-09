@@ -143,7 +143,7 @@ fn factories<const A: usize, const B: usize, const C: usize, const D: usize>()
             construct_ready: None,
             dependencies: dependencies::<A, B, C, D>,
             role: ComponentFactoryRole::Explicit,
-            scope: None,
+            scopes: &[],
         }]
     }
 }
