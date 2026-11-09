@@ -417,7 +417,7 @@ impl Stomp {
             .open()
             .await
             .map(|scope| (version, scope))
-            .map_err(|_| StompError::ConnectionScope)
+            .map_err(StompError::ConnectionScope)
     }
 
     /// Parses and routes one inbound frame. Returns [`ControlFlow::Break`] when the connection

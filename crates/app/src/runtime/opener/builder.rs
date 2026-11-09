@@ -49,6 +49,7 @@ pub enum Opening<'e, S: Scope> {
 pub struct ScopeBuilder<'a, S: Scope, P: Scope = Singleton> {
     pub(super) opener: &'a ScopeOpener<S>,
     parent: Option<&'a Arc<ScopeContainer>>,
+    generation: Option<&'a RuntimeView>,
     pub(super) params: S,
     parent_type: PhantomData<fn() -> P>,
     pub(super) seeds: Vec<BoxedComponent>,
@@ -60,6 +61,7 @@ impl<'a, S: Scope> ScopeBuilder<'a, S> {
         Self {
             opener,
             parent: None,
+            generation: None,
             params,
             parent_type: PhantomData,
             seeds: Vec::new(),
@@ -77,6 +79,7 @@ impl<'a, S: Scope, P: Scope> ScopeBuilder<'a, S, P> {
         ScopeBuilder {
             opener: self.opener,
             parent: Some(parent.container()),
+            generation: self.generation,
             params: self.params,
             parent_type: PhantomData,
             seeds: self.seeds,
@@ -93,6 +96,17 @@ impl<'a, S: Scope, P: Scope> ScopeBuilder<'a, S, P> {
     /// picks a typed parent with [`under`](Self::under).
     pub fn under_parent(mut self, parent: &'a ParentScope<S>) -> Self {
         self.parent = Some(parent.container());
+
+        self
+    }
+
+    /// Opens the instance under the root of `view`'s generation instead of the current one, so
+    /// work that ran before the opening on `view`, such as a handshake that resolved from its
+    /// root, and the instance see one generation even when a reload committed in between. A
+    /// parent given with [`under`](Self::under) or [`under_parent`](Self::under_parent) takes
+    /// precedence: the instance opens on the parent's generation.
+    pub fn on_generation(mut self, view: &'a RuntimeView) -> Self {
+        self.generation = Some(view);
 
         self
     }
@@ -274,14 +288,14 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     /// The generation the instance opens on and the container it opens under.
     pub(super) fn target(&self) -> crate::Result<(RuntimeView, Arc<ScopeContainer>)> {
         let runtime = self.opener.runtime.get::<S>()?;
-        let (view, parent) = match self.parent {
-            Some(parent) => (runtime.pinned_view(S::ID, parent)?, Arc::clone(parent)),
-            None => {
-                let view = runtime.view();
-                let root = Arc::clone(view.root());
-
-                (view, root)
-            }
+        let view = match (self.parent, self.generation) {
+            (Some(parent), _) => runtime.pinned_view(S::ID, parent)?,
+            (None, Some(view)) => runtime.owned_view(S::ID, view)?,
+            (None, None) => runtime.view(),
+        };
+        let parent = match self.parent {
+            Some(parent) => Arc::clone(parent),
+            None => Arc::clone(view.root()),
         };
 
         debug_assert!(

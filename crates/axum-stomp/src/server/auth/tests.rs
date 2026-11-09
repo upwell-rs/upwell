@@ -24,6 +24,11 @@ fn connect_debug_redacts_the_passcode() {
     assert!(debug.contains("authorization"));
     assert!(!debug.contains("super-secret"));
     assert!(!debug.contains("secret-token"));
+    assert!(debug.contains("/stomp?token=[REDACTED]"), "{debug}");
+    assert!(
+        !debug.contains("hidden"),
+        "the query credential is redacted: {debug}"
+    );
 }
 
 #[test]

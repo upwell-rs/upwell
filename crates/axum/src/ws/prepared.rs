@@ -4,7 +4,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, close_code};
-use upwell_app::{ScopeOpener, Seeds};
+use upwell_app::{RuntimeView, ScopeOpener, Seeds};
 use upwell_di::ScopeContainer;
 use upwell_di::context::bind_opened_scope;
 
@@ -24,7 +24,7 @@ use crate::scope::{WebsocketConnection, WebsocketMessage};
 /// `serve` runs in the connection's invocation context from the start; until the scope opens,
 /// that context has no scope instance, and the opened instance joins it.
 pub struct PreparedConnection {
-    root: Arc<ScopeContainer>,
+    generation: RuntimeView,
     connections: ScopeOpener<WebsocketConnection>,
     messages: ScopeOpener<WebsocketMessage>,
     entries: Arc<MessageEntries>,
@@ -35,7 +35,7 @@ pub struct PreparedConnection {
 
 impl PreparedConnection {
     pub(super) fn new(
-        root: Arc<ScopeContainer>,
+        generation: RuntimeView,
         connections: ScopeOpener<WebsocketConnection>,
         messages: ScopeOpener<WebsocketMessage>,
         entries: Arc<MessageEntries>,
@@ -43,7 +43,7 @@ impl PreparedConnection {
         meta: WsConnectionMeta,
     ) -> Self {
         Self {
-            root,
+            generation,
             connections,
             messages,
             entries,
@@ -54,9 +54,11 @@ impl PreparedConnection {
     }
 
     /// The application root of the generation current at the upgrade. A handshake resolves
-    /// singletons and configuration from it, since the connection scope is not open yet.
+    /// singletons and configuration from it, since the connection scope is not open yet, and
+    /// [`open`](Self::open) opens the scope on the same generation, so a reload during the
+    /// handshake does not split one connection across two generations.
     pub fn root(&self) -> &Arc<ScopeContainer> {
-        &self.root
+        self.generation.root()
     }
 
     /// The head of the HTTP request that initiated the upgrade. The opened scope holds it as
@@ -93,8 +95,8 @@ impl PreparedConnection {
         self
     }
 
-    /// Opens the connection scope with the upgrade metadata and the seeds added so far,
-    /// building its seeds and eager components; every other connection-scoped component is
+    /// Opens the connection scope on the generation of [`root`](Self::root), with the upgrade
+    /// metadata and the seeds added so far, building its seeds and eager components; every other connection-scoped component is
     /// built the first time something resolves it. The instance joins the invocation context
     /// `serve` runs in.
     ///
@@ -106,16 +108,17 @@ impl PreparedConnection {
     /// [`scope_failure_close`].
     pub async fn open(self) -> upwell_app::Result<WsConnectionScope> {
         let Self {
+            generation,
             connections,
             messages,
             entries,
             upgrade,
             meta,
             seeds,
-            ..
         } = self;
         let opening = connections
             .builder(WebsocketConnection)
+            .on_generation(&generation)
             .seed(Arc::unwrap_or_clone(upgrade))
             .seed(meta)
             .seeds(seeds)

@@ -202,6 +202,10 @@ pub use upwell_core::{DependencyDescriptor, Scope, TypeDescriptor};
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
 pub use upwell_di::Error as DiError;
 
+/// The application error a connection scope's opening fails with, for downstream protocols.
+#[cfg(all(feature = "ws", not(target_family = "wasm")))]
+pub use upwell_app::Error as AppError;
+
 /// The standard HTTP request scope marker, and the parent a request scope may open under.
 #[cfg(not(target_family = "wasm"))]
 pub use scope::{HttpRequest, HttpRequest as HttpRequestScope, RequestParent};

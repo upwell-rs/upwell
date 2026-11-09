@@ -3,7 +3,10 @@
 use upwell_core::{Scope, TypeDescriptor};
 
 /// Native HTTP metadata captured from the request that initiated a WebSocket upgrade.
-#[derive(Clone, Debug)]
+///
+/// `Debug` lists header and cookie names only and redacts every query value, since an upgrade
+/// often carries a credential there (`/stomp?token=..`).
+#[derive(Clone)]
 pub struct WebsocketUpgradeMeta {
     /// The upgrade request's HTTP method.
     pub method: axum::http::Method,
@@ -35,6 +38,43 @@ impl WebsocketUpgradeMeta {
         }
     }
 }
+
+impl WebsocketUpgradeMeta {
+    /// The upgrade URI with every query value redacted, safe to log: `/ws?token=[REDACTED]`.
+    pub fn redacted_uri(&self) -> String {
+        let path = self.uri.path();
+        let Some(query) = self.uri.query() else {
+            return path.to_owned();
+        };
+        let redacted: Vec<String> = query
+            .split('&')
+            .map(|pair| match pair.split_once('=') {
+                Some((name, _)) => format!("{name}={REDACTED}"),
+                None => pair.to_owned(),
+            })
+            .collect();
+
+        format!("{path}?{}", redacted.join("&"))
+    }
+}
+
+impl std::fmt::Debug for WebsocketUpgradeMeta {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let header_names: Vec<&str> = self.headers.keys().map(|name| name.as_str()).collect();
+        let cookie_names: Vec<&str> = self.cookies.keys().map(String::as_str).collect();
+
+        formatter
+            .debug_struct("WebsocketUpgradeMeta")
+            .field("method", &self.method)
+            .field("uri", &self.redacted_uri())
+            .field("header_names", &header_names)
+            .field("cookie_names", &cookie_names)
+            .finish()
+    }
+}
+
+/// What a redacted value is replaced with in logs.
+const REDACTED: &str = "[REDACTED]";
 
 impl upwell_di::Injectable for WebsocketUpgradeMeta {
     type Target = Self;

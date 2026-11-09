@@ -52,9 +52,9 @@ pub enum StompError {
     Authentication(#[from] StompAuthenticationError),
 
     /// The accepted connection's scope could not be opened, for example because an
-    /// authenticator seed has no slot in it. The cause is logged.
+    /// authenticator seed has no slot in it. Only this summary reaches the client.
     #[error("connection scope build failed")]
-    ConnectionScope,
+    ConnectionScope(#[source] upwell_axum::AppError),
 
     /// A frame was missing a header the command requires.
     #[error("missing required header `{0}`")]

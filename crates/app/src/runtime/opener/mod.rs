@@ -115,6 +115,18 @@ impl AppRuntime {
         Ok(())
     }
 
+    /// `view`, checked to be a generation of this runtime, for a `child` opened under its root.
+    fn owned_view(&self, child: ScopeId, view: &RuntimeView) -> crate::Result<RuntimeView> {
+        if !self.transitions.owns(&view.generation_state()) {
+            return Err(crate::Error::ForeignScopeParent {
+                child,
+                parent: view.root().scope().id(),
+            });
+        }
+
+        Ok(view.clone())
+    }
+
     /// The generation a child of `parent` opens under: the one `parent` runs on.
     fn pinned_view(&self, child: ScopeId, parent: &ScopeContainer) -> crate::Result<RuntimeView> {
         let Some(generation) = parent.generation_lease::<RuntimeGeneration>() else {

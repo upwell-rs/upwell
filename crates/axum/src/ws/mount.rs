@@ -153,7 +153,7 @@ impl<P: WebsocketProtocol> Endpoint<P> {
             .context(TargetRef::from_static(&HttpTarget::WebsocketConnection))
             .with_pending_scope(WebsocketConnection::KEY, None);
         let connection = PreparedConnection::new(
-            self.runtime.root(),
+            self.runtime.view(),
             self.connections.clone(),
             self.messages.clone(),
             Arc::clone(&self.entries),

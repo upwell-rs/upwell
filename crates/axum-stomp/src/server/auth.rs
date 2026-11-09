@@ -18,7 +18,7 @@ use super::StompHeaders;
 /// HTTP request that upgraded the connection.
 ///
 /// The custom headers are preserved in wire order. `Debug` deliberately redacts the passcode and
-/// lists only the names of the upgrade's headers.
+/// the upgrade URI's query values, and lists only the names of the upgrade's headers.
 #[derive(Clone)]
 pub struct StompConnect {
     host: String,
@@ -87,7 +87,7 @@ impl fmt::Debug for StompConnect {
             .field("login", &self.login)
             .field("passcode", &self.passcode.as_ref().map(|_| "[REDACTED]"))
             .field("header_names", &header_names)
-            .field("upgrade_uri", &self.upgrade.uri)
+            .field("upgrade_uri", &self.upgrade.redacted_uri())
             .field("upgrade_header_names", &upgrade_header_names)
             .finish()
     }
@@ -475,9 +475,10 @@ where
     }
 }
 
-/// Rejects an authenticator argument whose type every registered component provides only in a
-/// scope, which a root resolution can never reach. Trait and configuration arguments are left to
-/// the CONNECT-time resolution.
+/// Rejects a required authenticator argument whose type every registered component provides
+/// only in a scope, which a root resolution can never reach. An optional argument resolves to
+/// `None` there, as its edge declares, and trait and configuration arguments are left to the
+/// CONNECT-time resolution.
 pub(super) fn check_root_dependencies(
     authenticator: &dyn StompAuthenticator,
     runtime: &upwell_axum::AppRuntime,
@@ -486,6 +487,10 @@ pub(super) fn check_root_dependencies(
     let topology = runtime.scope_topology();
 
     for dependency in authenticator.dependencies() {
+        if dependency.optional || dependency.config {
+            continue;
+        }
+
         let placements: Vec<_> = components
             .iter()
             .filter(|component| component.ty.type_id == dependency.ty.type_id)
@@ -496,7 +501,6 @@ pub(super) fn check_root_dependencies(
 
         if let Some(first) = placements.first()
             && scoped_only
-            && !dependency.config
         {
             return Err(super::StompBuildError::ScopedAuthenticatorDependency {
                 dependency: (dependency.ty.type_name)(),

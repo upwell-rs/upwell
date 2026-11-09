@@ -245,3 +245,37 @@ async fn an_unresolvable_authenticator_argument_rejects_the_connection() {
 
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn an_optional_connection_scoped_argument_resolves_to_none() {
+    let environment = TestEnvironment::new("upwell-http-stomp-optional-auth-");
+    let config = StompConfig::default().with_authenticator(
+        |connect: StompConnect, audit: Option<Arc<ConnectionAudit>>| async move {
+            assert!(audit.is_none(), "the root has no connection-scoped audit");
+
+            tenant_authenticator(connect).await
+        },
+    );
+    let app = build(&environment, config)
+        .await
+        .expect("an optional scoped argument is not rejected");
+    let server = TestServer::start_with_guard(app, environment).await;
+    let url = format!("ws://{}/stomp", server.address());
+
+    let connection = deadline(
+        "optional-argument STOMP connect",
+        StompClientTransport::connect_with_options(
+            &url,
+            StompConnectOptions::new()
+                .with_login("alice")
+                .with_passcode("secret"),
+        ),
+    )
+    .await
+    .expect("the authenticator falls back without the audit");
+
+    deadline("disconnect", connection.disconnect())
+        .await
+        .expect("disconnect cleanly");
+    server.shutdown().await;
+}
