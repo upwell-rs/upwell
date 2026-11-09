@@ -86,6 +86,31 @@ pub(in crate::tooling) fn di_failure(
                 Some("Move the dependency to a reachable scope or shorten the consumer lifetime."),
             )
         }
+        upwell_di::Error::AmbiguousEnclosingPlacement(error) => {
+            let upwell_di::AmbiguousEnclosingPlacement {
+                component_id,
+                dependency_type,
+                scope_ids,
+                ..
+            } = error.as_ref();
+            let mut resources = vec![
+                component_resource(component_id),
+                type_resource(dependency_type),
+            ];
+
+            resources.extend(scope_ids.iter().map(|scope| scope_resource(*scope)));
+
+            (
+                "upwell/tooling-optional-placement-ambiguous",
+                "An optional dependency is placed in several scopes that each enclose the consumer on a different chain.",
+                phase,
+                resources,
+                Vec::new(),
+                Some(
+                    "Place the optional dependency's target in exactly one of the enclosing scopes.",
+                ),
+            )
+        }
         upwell_di::Error::ScopeUnreachableDependency(error) => {
             let upwell_di::ScopeUnreachableDependency {
                 component_id,

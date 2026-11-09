@@ -24,6 +24,12 @@ impl SlotLayout {
     /// open around it, and `can_reach` is the scope reachability validation used, so every
     /// edge resolves to the source validation selected. The sources single-value trait
     /// dependencies select from the scope are planned with them.
+    ///
+    /// `ancestors` must hold only the layouts of scopes that may enclose `scope` on some
+    /// chain, never unrelated or sibling scopes: an optional edge whose target is not open
+    /// on every chain falls back to the placement in one of them, and validation
+    /// guarantees at most one such placement exists only for the enclosing scopes. Holding
+    /// others could bind the edge to a scope that is never open around the instance.
     pub fn plan(
         scope: ScopeKey,
         seeded: &[ComponentDescriptor],
@@ -300,6 +306,9 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
     /// reads the placement in an enclosing scope that is open on some chains: `ancestors` holds
     /// only scopes that may enclose this one, and validation allows one such placement at
     /// most. On a chain without it the read finds nothing and the edge is `None`.
+    ///
+    /// The fallback is only sound while `ancestors` holds enclosing scopes alone; see
+    /// [`SlotLayout::plan`].
     fn locate(
         &self,
         consumer: &ComponentDescriptor,
@@ -378,6 +387,16 @@ impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
 
     /// The placement of `type_id` in a scope that may be open around the scope being planned.
     fn enclosing_placement(&self, type_id: TypeId) -> Option<ComponentDescriptor> {
+        debug_assert!(
+            self.selection
+                .placements(type_id)
+                .iter()
+                .filter(|placement| self.ancestors.contains_key(&placement.scope.id()))
+                .count()
+                <= 1,
+            "ancestors must hold only scopes that may enclose the planned scope, with at most one placement of an optional target"
+        );
+
         self.selection
             .placements(type_id)
             .iter()
