@@ -3,18 +3,19 @@ use std::collections::{HashMap, HashSet};
 
 mod dependencies;
 pub(crate) mod order;
+pub(crate) mod placements;
 mod resolution;
-mod scopes;
+pub(crate) mod scopes;
 pub(crate) mod selection;
 
-use scopes::{scope_allows_by_rank, scope_allows_with};
+use scopes::{never_encloses, scope_allows_by_rank, scope_allows_with};
 
 pub use selection::{
-    DependencySelectionReason, DependencySelectionStage, DependencyTarget, ProviderSelectionModel,
-    SelectedDependency,
+    DependencyConsumer, DependencyFault, DependencySelectionReason, DependencySelectionStage,
+    DependencyTarget, ProviderSelectionModel, SelectedDependency,
 };
 
-use upwell_core::{Scope, ScopeId};
+use upwell_core::{Scope, ScopeId, ScopeKey, Singleton};
 
 use crate::descriptors::{COMPONENTS, ComponentDescriptor, PROVIDERS, ProviderDescriptor};
 use crate::error::Error;
@@ -65,56 +66,71 @@ impl ComponentRegistry {
         }
     }
 
-    /// Collapses the registered descriptors to one per type. A manually-provided
-    /// instance (an empty-factory descriptor) **overrides** an auto-constructed one
-    /// for the same type. When factoryless descriptors share the same identity, a raw
+    /// Collapses the registered descriptors to one per type and scope. A component that
+    /// builds in several scopes (explicit factories with distinct scopes, or descriptors of
+    /// one type declared in distinct scopes) keeps one placement per scope. Within one scope,
+    /// a manually-provided instance (an empty-factory descriptor) **overrides** an
+    /// auto-constructed one. When factoryless descriptors share the same identity, a raw
     /// non-snapshot-capable descriptor overrides a typed catalog descriptor so active
-    /// seed provenance cannot be upgraded by later candidate metadata. The per-type
+    /// seed provenance cannot be upgraded by later candidate metadata. The per-scope
     /// factory ambiguity check runs here via [`ComponentDescriptor::effective_factory`].
     pub fn resolved_components(&self) -> crate::Result<Vec<ComponentDescriptor>> {
         let mut chosen = Vec::new();
-        let mut positions: HashMap<TypeId, usize> = HashMap::new();
+        let mut positions: HashMap<(TypeId, ScopeId), usize> = HashMap::new();
 
-        for component in &self.components {
-            component.validate_factories()?;
+        for registered in &self.components {
+            registered.validate_scope_lists()?;
 
-            let type_id = component.ty.type_id;
-            let new_manual = component.effective_factory()?.is_none();
-
-            match positions.get(&type_id).copied() {
-                None => {
-                    positions.insert(type_id, chosen.len());
-                    chosen.push(*component);
-                }
-
-                Some(position) => {
-                    let existing = &chosen[position];
-                    let existing_manual = existing.effective_factory()?.is_none();
-
-                    if new_manual && !existing_manual {
-                        // An override replaces the descriptor at its original position.
-                        // Lifecycle hook ordering must not depend on HashMap iteration.
-                        chosen[position] = *component;
-                    } else if new_manual
-                        && existing_manual
-                        && existing.id == component.id
-                        && existing.is_retainable()
-                        && !component.is_retainable()
-                    {
-                        // A raw pre-built registration has stronger provenance than a
-                        // snapshot-capable factoryless catalog descriptor for the same
-                        // component. Preserve that active-seed policy for later transitions.
-                        chosen[position] = *component;
-                    } else if new_manual == existing_manual && existing.id != component.id {
-                        return Err(Error::DuplicateComponentType(
-                            (component.ty.type_name)().to_string(),
-                        ));
-                    }
-                }
+            for component in registered.expand_placements() {
+                component.validate_factories()?;
+                Self::place(&mut chosen, &mut positions, component)?;
             }
         }
 
+        placements::validate_placement_set(&chosen)?;
+
         Ok(chosen)
+    }
+
+    /// Places `component` by type and scope. A manual instance replaces an auto-constructed
+    /// descriptor at its original position, so lifecycle hook ordering never depends on
+    /// `HashMap` iteration. A raw pre-built registration replaces a snapshot-capable factoryless
+    /// catalog descriptor with the same id, because it has stronger provenance; this keeps the
+    /// active-seed policy for later transitions.
+    fn place(
+        chosen: &mut Vec<ComponentDescriptor>,
+        positions: &mut HashMap<(TypeId, ScopeId), usize>,
+        component: ComponentDescriptor,
+    ) -> crate::Result<()> {
+        let key = (component.ty.type_id, component.scope.id());
+        let new_manual = component.effective_factory()?.is_none();
+
+        let Some(position) = positions.get(&key).copied() else {
+            positions.insert(key, chosen.len());
+            chosen.push(component);
+
+            return Ok(());
+        };
+
+        let existing = &chosen[position];
+        let existing_manual = existing.effective_factory()?.is_none();
+
+        let replaces_factory_built = new_manual && !existing_manual;
+        let replaces_catalog_seed = new_manual
+            && existing_manual
+            && existing.id == component.id
+            && existing.is_retainable()
+            && !component.is_retainable();
+
+        if replaces_factory_built || replaces_catalog_seed {
+            chosen[position] = component;
+        } else if new_manual == existing_manual && existing.id != component.id {
+            return Err(Error::DuplicateComponentType(
+                (component.ty.type_name)().to_string(),
+            ));
+        }
+
+        Ok(())
     }
 
     /// Validates the component graph using the legacy rank-based scope model.
@@ -127,23 +143,32 @@ impl ComponentRegistry {
         let components = self.resolved_components()?;
         let selection = self.provider_selection_model(&components)?;
 
-        self.validate_with_scope_access(&components, &selection, scope_allows_by_rank)
+        self.validate_with_scope_access(
+            &components,
+            &selection,
+            scope_allows_by_rank,
+            never_encloses,
+        )
     }
 
     /// Validates the component graph against caller-defined scope reachability.
     ///
-    /// The predicate receives the consumer and dependency stable scope IDs and
-    /// should return `true` only when the dependency's boundary is the consumer's
-    /// boundary or an ancestor reachable from it. Transient dependencies remain
-    /// universally constructible and do not invoke the predicate.
+    /// `can_reach` receives the consumer and dependency stable scope IDs and should return
+    /// `true` only when the dependency's boundary is the consumer's boundary or an ancestor on
+    /// every chain the consumer opens in. `may_enclose(ancestor, descendant)` returns whether
+    /// `ancestor` is open around `descendant` on at least one chain: an optional edge may name a
+    /// target there, which is absent on the other chains. Pass `|_, _| false` for a topology
+    /// whose every ancestor is on every chain. Transient dependencies remain universally
+    /// constructible and invoke neither predicate.
     pub fn validate_with_scope_reachability(
         &self,
         can_reach: impl Fn(ScopeId, ScopeId) -> bool,
+        may_enclose: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<()> {
         let components = self.resolved_components()?;
         let selection = self.provider_selection_model(&components)?;
 
-        self.validate_with_scope_reachability_using(&components, &selection, can_reach)
+        self.validate_with_scope_reachability_using(&components, &selection, can_reach, may_enclose)
     }
 
     /// Validates an effective component set with its retained provider selection model.
@@ -156,25 +181,31 @@ impl ComponentRegistry {
         components: &[ComponentDescriptor],
         selection: &selection::ProviderSelectionModel,
         can_reach: impl Fn(ScopeId, ScopeId) -> bool,
+        may_enclose: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<()> {
-        self.validate_with_scope_access(components, selection, |consumer, dependency| {
-            scope_allows_with(consumer, dependency, &can_reach)
-        })
+        self.validate_with_scope_access(
+            components,
+            selection,
+            |consumer, dependency| scope_allows_with(consumer, dependency, &can_reach),
+            may_enclose,
+        )
     }
 
     pub(crate) fn validate_with_scope_access(
         &self,
         components: &[ComponentDescriptor],
         selection: &selection::ProviderSelectionModel,
-        can_access: impl Fn(&dyn Scope, &dyn Scope) -> bool,
+        can_access: impl Fn(ScopeKey, ScopeKey) -> bool,
+        may_enclose: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<()> {
         self.validate_component_ids(components)?;
+        Self::validate_construction(components)?;
         selection::validate_provider_components(components, &self.providers)?;
         self.validate_dependencies_with(components, selection, &can_access)?;
         self.validate_provider_qualifiers(components)?;
         self.validate_deferred_dependencies_with(components, selection, &can_access)?;
         self.validate_fresh_dependencies_with(components, selection, &can_access)?;
-        self.validate_scopes_with(components, selection, &can_access)?;
+        self.validate_scopes_with(components, selection, &can_access, &may_enclose)?;
 
         Ok(())
     }
@@ -184,6 +215,27 @@ impl ComponentRegistry {
         for c in components {
             if !seen.insert(c.id) {
                 return Err(Error::DuplicateComponentId(c.id.to_string()));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Rejects an eager component of the root or the transient scope: neither opens scope
+    /// instances, so there is no opening to build it on.
+    fn validate_construction(components: &[ComponentDescriptor]) -> crate::Result<()> {
+        for component in components.iter().filter(|c| c.construction.is_eager()) {
+            if component.scope.is_transient() || component.scope.id() == Singleton::ID {
+                return Err(Error::EagerOutsideScope {
+                    component_id: component.id.to_string(),
+                    scope: component.scope.name(),
+                });
+            }
+
+            if component.effective_factory()?.is_none() {
+                return Err(Error::EagerWithoutFactory {
+                    component_id: component.id.to_string(),
+                });
             }
         }
 

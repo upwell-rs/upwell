@@ -1,0 +1,5 @@
+error: `reconcile` is not a valid entry key: it needs at least two `/`-separated segments of lowercase ASCII letters, digits, `.`, `_` or `-`, each starting with a letter or digit
+ --> tests/ui/entries/invalid_entry_key.rs:4:49
+  |
+4 | #[entry(scope = upwell::scope::Singleton, key = "reconcile")]
+  |                                                 ^^^^^^^^^^^

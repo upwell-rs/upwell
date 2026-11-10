@@ -1,0 +1,5 @@
+error: `Local` is listed twice; a component builds once in each scope
+  --> tests/ui/scope_lists/repeated_scope.rs:12:29
+   |
+12 | #[component(scope = [Local, Local])]
+   |                             ^^^^^

@@ -55,7 +55,11 @@ pub mod protocol;
 #[cfg(not(target_family = "wasm"))]
 pub mod request_meta;
 #[cfg(not(target_family = "wasm"))]
+mod request_scope;
+#[cfg(not(target_family = "wasm"))]
 pub mod scope;
+#[cfg(not(target_family = "wasm"))]
+mod target;
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
 pub mod ws;
 
@@ -88,10 +92,11 @@ pub use utoipa;
 
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
 pub use ws::{
-    ControllerWsRoute, SOCKET_SEND_TIMEOUT, WS_CONTROLLERS, WebsocketController, WebsocketHandler,
-    WebsocketProtocol, WebsocketUpgradeMeta, WsConnectionMeta, WsConnectionSettings,
-    WsControllerDescriptor, WsControllerRegistration, WsDispatchError, WsFuture, WsHandlerFn,
-    WsIdle, WsMessageDescriptor, WsMessageMode, WsRespond, WsRoute, WsRouteDescriptor, WsShutdown,
+    ControllerWsRoute, PreparedConnection, SOCKET_SEND_TIMEOUT, WS_CONTROLLERS,
+    WebsocketController, WebsocketHandler, WebsocketProtocol, WebsocketUpgradeMeta,
+    WsConnectionMeta, WsConnectionScope, WsConnectionSettings, WsControllerDescriptor,
+    WsControllerRegistration, WsDispatchError, WsFuture, WsHandlerFn, WsIdle, WsMessageDescriptor,
+    WsMessageMode, WsRespond, WsRoute, WsRouteDescriptor, WsShutdown, scope_failure_close,
 };
 
 /// The `PubSubProtocol` capability (server side): the seam a topic-bearing protocol implements so
@@ -173,11 +178,11 @@ pub use upwell_axum_macros::dto;
 /// body/stream path stays wasm-safe. Referenced by generated code and available on every target.
 pub use bytes;
 
-/// Re-exported so `#[message]` ws-handler codegen can name the per-message scope container the
-/// generated handler resolves its `Inject<T>` parameters from. Referenced only by generated code.
+/// The per-message scope a `#[message]` ws handler resolves its `Inject<T>` parameters from,
+/// named by generated code. Referenced only by generated code.
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
 #[doc(hidden)]
-pub use upwell_di::ScopeContainer as __ScopeContainer;
+pub type __MessageScope = upwell_app::EntryScope<crate::scope::WebsocketMessage>;
 
 /// The DI scope container, re-exported for downstream WebSocket protocol implementations.
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
@@ -191,15 +196,23 @@ pub use upwell_di::{
 };
 
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
-pub use upwell_core::{StaticScope, TypeDescriptor};
+pub use upwell_core::{DependencyDescriptor, Scope, TypeDescriptor};
 
 /// The DI error returned while resolving protocol-owned connection dependencies.
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
 pub use upwell_di::Error as DiError;
 
-/// The standard HTTP request scope marker.
+/// The application error a connection scope's opening fails with, for downstream protocols.
+#[cfg(all(feature = "ws", not(target_family = "wasm")))]
+pub use upwell_app::Error as AppError;
+
+/// The standard HTTP request scope marker, and the parent a request scope may open under.
 #[cfg(not(target_family = "wasm"))]
-pub use scope::{HttpRequest, HttpRequest as HttpRequestScope};
+pub use scope::{HttpRequest, HttpRequest as HttpRequestScope, RequestParent};
+
+/// The invocation targets the HTTP protocol establishes contexts for.
+#[cfg(not(target_family = "wasm"))]
+pub use target::HttpTarget;
 
 /// Standard WebSocket scope markers available to downstream protocol implementations.
 #[cfg(all(feature = "ws", not(target_family = "wasm")))]
@@ -221,7 +234,7 @@ pub type AppBuilder = upwell_app::AppBuilder<Axum>;
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_app::{
     AppRegistry, AppRuntime, LoggingConfig, Plugin, PreparedProtocol, ProtocolDefinition,
-    ProtocolRuntime, Serve, ServerConfig, ShutdownHandle, ShutdownSignal,
+    ProtocolRuntime, Seeds, Serve, ServerConfig, ShutdownHandle, ShutdownSignal,
 };
 
 /// Re-exported so macro-generated code can reach the `#[distributed_slice]` attribute for

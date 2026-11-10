@@ -97,6 +97,25 @@ decision. Its contract (`HookOutcome`, an `Err` aborting the reload, routing by 
 paths) is documented on `ConfigReload` in
 [`upwell-config`](../crates/config/src/managed/reload.rs).
 
+### `ScopeEnded`: observe a scope instance ending
+
+```rust
+#[methods]
+impl Audit {
+    #[hook(ScopeEnded<Session>)]
+    async fn ended(&self, end: ScopeEnd) {
+        self.record(end.scope, end.kind, &end.params);
+    }
+}
+```
+
+Not a transition hook: it fires whenever a scope instance (a run, a request, a connection) ends.
+`ScopeEnded<S>` observes one scope; `AnyScopeEnded` observes every scope and filters on
+`ScopeEnd::scope`. Both fire for the same instance. It runs on a
+spawned task after the instance's work and before its log closes, so it never delays the code
+that ended the instance and the events it makes are captured. See
+`crates/app/src/runtime/opener/end/mod.rs` for the full contract.
+
 ### `ComponentRetired`: learn you have been displaced
 
 ```rust

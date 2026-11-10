@@ -111,7 +111,9 @@ where
     ) -> crate::Result<Self> {
         let registry = scope.registry();
         let descriptor = registry
-            .factory_backed(std::any::TypeId::of::<H>())
+            .factory_backed(std::any::TypeId::of::<H>(), |scope_key| {
+                scope.can_access(scope_key)
+            })
             .ok_or_else(|| Error::UnsupportedFreshFactory {
                 component: short_name::<H>().into(),
                 component_id: None,
@@ -206,7 +208,9 @@ where
     );
 
     for provider in providers {
-        let Some(descriptor) = registry.factory_backed(provider.concrete_ty.type_id) else {
+        let Some(descriptor) = registry.factory_backed(provider.concrete_ty.type_id, |scope_key| {
+            scope.can_access(scope_key)
+        }) else {
             if let Some(component) = registry.component(provider.concrete_ty.type_id) {
                 return Err(Error::UnsupportedFreshFactory {
                     component: component.name.to_string(),
@@ -243,7 +247,9 @@ where
     let registry = scope.registry();
     let target = std::any::TypeId::of::<T>();
 
-    if let Some(descriptor) = registry.factory_backed(target) {
+    if let Some(descriptor) =
+        registry.factory_backed(target, |scope_key| scope.can_access(scope_key))
+    {
         if !scope.can_access(descriptor.scope) {
             return Ok(None);
         }
@@ -264,7 +270,9 @@ where
         return Ok(None);
     };
     let descriptor = registry
-        .factory_backed(provider.concrete_ty.type_id)
+        .factory_backed(provider.concrete_ty.type_id, |scope_key| {
+            scope.can_access(scope_key)
+        })
         .ok_or_else(|| Error::UnsupportedFreshFactory {
             component: provider.concrete_ty.name.into(),
             component_id: None,

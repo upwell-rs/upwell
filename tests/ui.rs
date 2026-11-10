@@ -14,3 +14,61 @@ fn invalid_transition_recipes_fail_to_compile() {
 
     cases.compile_fail("tests/ui/recipes/*.rs");
 }
+
+#[test]
+fn invalid_entries_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/entries/*.rs");
+}
+
+#[test]
+fn eager_components_outside_scopes_below_the_root_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/construction/*.rs");
+}
+
+#[test]
+fn invalid_scope_declarations_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/scopes/*.rs");
+}
+
+#[test]
+fn unsupported_attributes_on_context_accessors_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/access/*.rs");
+}
+
+#[cfg(feature = "rayon")]
+#[test]
+fn nested_parallel_adapters_after_current_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/rayon/*.rs");
+}
+
+#[test]
+fn end_hooks_of_a_type_that_is_not_a_scope_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/end_hooks/*.rs");
+}
+
+#[test]
+fn invalid_scope_lists_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/scope_lists/*.rs");
+}
+
+#[cfg(feature = "daemon")]
+#[test]
+fn scope_lists_on_services_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/scope_lists/daemon/*.rs");
+}

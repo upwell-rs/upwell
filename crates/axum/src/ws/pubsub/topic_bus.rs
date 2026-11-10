@@ -10,11 +10,11 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use upwell_core::{Singleton, TypeDescriptor};
+use upwell_core::{Scope, Singleton, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentFactoryRole, DependencyDescriptor, GenerationSnapshot,
-    Injectable,
+    Injectable, ScopedConstruction,
 };
 use upwell_hooks::no_hooks;
 use upwell_transport::CodecError;
@@ -156,10 +156,10 @@ fn construct_topic_bus<P: PubSubProtocol>(
     _: &mut ComponentConstructionContext,
 ) -> std::pin::Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
     Box::pin(async {
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<TopicBus<P>>(std::any::type_name::<TopicBus<P>>()),
-            value: Box::new(Injectable::into_stored(TopicBus::<P>::new())),
-        })
+        Ok(BoxedComponent::stored(
+            TypeDescriptor::of::<TopicBus<P>>(std::any::type_name::<TopicBus<P>>()),
+            Injectable::into_stored(TopicBus::<P>::new()),
+        ))
     })
 }
 
@@ -167,8 +167,10 @@ fn topic_bus_factories<P: PubSubProtocol>() -> &'static [ComponentFactoryDescrip
     &[ComponentFactoryDescriptor {
         id: "static",
         construct: construct_topic_bus::<P>,
+        construct_ready: None,
         dependencies: topic_bus_dependencies,
         role: ComponentFactoryRole::Default,
+        scopes: &[],
     }]
 }
 
@@ -181,11 +183,14 @@ pub fn topic_bus_descriptor<P: PubSubProtocol>() -> ComponentDescriptor {
         id,
         name,
         ty: TypeDescriptor::of::<TopicBus<P>>(name),
-        scope: &Singleton,
+        scope: Singleton::KEY,
         condition: None,
         factories: topic_bus_factories::<P>,
         hooks: no_hooks,
+        construction: ScopedConstruction::OnDemand,
         generation_snapshot: Some(GenerationSnapshot::of::<TopicBus<P>>()),
+        scopes: &[],
+        declared_scope: None,
     }
 }
 

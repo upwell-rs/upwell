@@ -301,5 +301,6 @@ fn resource_kind_matches(kind: &ResourceKind, filter: InspectResourceKind) -> bo
             | (ResourceKind::Contributor, InspectResourceKind::Contributor)
             | (ResourceKind::PluginSlot, InspectResourceKind::PluginSlot)
             | (ResourceKind::Condition, InspectResourceKind::Condition)
+            | (ResourceKind::Entry, InspectResourceKind::Entry)
     )
 }

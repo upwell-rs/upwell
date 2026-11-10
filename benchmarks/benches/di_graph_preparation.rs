@@ -74,6 +74,7 @@ fn effective(c: &mut Criterion) {
                         RuntimeGenerationId::INITIAL,
                         black_box(&registry),
                         |_, _| true,
+                        |_, _| false,
                     )
                     .expect("graph validates"),
                 )
@@ -164,6 +165,7 @@ fn closure(c: &mut Criterion) {
             RuntimeGenerationId::INITIAL,
             &graph::registry(size),
             |_, _| true,
+            |_, _| false,
         )
         .expect("graph validates");
         let candidate = active.same_graph();

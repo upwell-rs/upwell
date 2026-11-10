@@ -51,6 +51,7 @@ impl<'a, D: ProtocolDefinition> Projection<'a, D> {
         self.project_providers();
         self.project_config_bindings();
         self.project_hooks();
+        self.project_entries();
         self.project_conditions();
         self.project_plugins();
         self.project_cli();

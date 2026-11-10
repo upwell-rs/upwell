@@ -54,6 +54,7 @@ fn rename_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     let destination = CString::new(destination.as_os_str().as_bytes()).map_err(io::Error::other)?;
 
     // SAFETY: both C strings are NUL-terminated and remain alive for the syscall.
+    #[allow(unsafe_code)]
     let result = unsafe {
         libc::renameat2(
             libc::AT_FDCWD,
@@ -76,6 +77,7 @@ fn rename_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     let destination = CString::new(destination.as_os_str().as_bytes()).map_err(io::Error::other)?;
 
     // SAFETY: both C strings are NUL-terminated and remain alive for the syscall.
+    #[allow(unsafe_code)]
     let result =
         unsafe { libc::renamex_np(source.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL) };
 
@@ -110,6 +112,7 @@ fn rename_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
 
     // SAFETY: both buffers are NUL-terminated and remain alive for the call. No replacement flag
     // is supplied, so Windows fails when the destination already exists.
+    #[allow(unsafe_code)]
     let result = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), 0) };
 
     if result == 0 {

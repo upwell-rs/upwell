@@ -278,6 +278,7 @@ pub fn client_method_tokens(m: &ClientMethod, paths: &Paths) -> TokenStream {
 
     quote! {
         #(#attrs)*
+        #[allow(non_snake_case)]
         pub async fn #ident(#args) -> #ret
         where
             #bounds,

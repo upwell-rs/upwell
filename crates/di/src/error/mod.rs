@@ -5,12 +5,15 @@ use upwell_core::ScopeId;
 use crate::ComponentFactoryRole;
 
 mod details;
+mod scope_lists;
 
 pub use details::{
-    DeferredTransientDependency, InvalidFreshDependency, ProviderComponentMissing,
-    ProviderOrderCycle, ProviderOrderSourceTraitMismatch, ProviderOrderTargetTraitMismatch,
-    ScopeUnreachableDependency, ScopeUnreachableProvider, ScopeViolation,
+    AmbiguousEnclosingPlacement, DeferredTransientDependency, InvalidFreshDependency,
+    ProviderComponentMissing, ProviderOrderCycle, ProviderOrderSourceTraitMismatch,
+    ProviderOrderTargetTraitMismatch, ScopeUnreachableDependency, ScopeUnreachableProvider,
+    ScopeViolation,
 };
+pub use scope_lists::{DeclaredScopeMismatch, RepeatedScope};
 
 /// Errors from the DI engine: graph validation and component construction.
 #[derive(Debug, Error)]
@@ -25,6 +28,40 @@ pub enum Error {
         "ambiguous factory for component '{0}': more than one explicit factory (e.g. an #[init] and a factory = ..)"
     )]
     AmbiguousFactory(String),
+
+    #[error(
+        "component '{component}' is placed in scope '{outer}' and in scope '{inner}', but '{outer}' encloses '{inner}' on at least one opening chain; the scopes one component type is placed in may not share a hierarchy"
+    )]
+    OverlappingPlacements {
+        component: String,
+        outer: &'static str,
+        outer_id: ScopeId,
+        inner: &'static str,
+        inner_id: ScopeId,
+    },
+
+    #[error("{0}")]
+    DeclaredScopeMismatch(Box<DeclaredScopeMismatch>),
+
+    #[error("{0}")]
+    RepeatedScope(Box<RepeatedScope>),
+
+    #[error(
+        "component '{component}' is placed in the transient scope and in scope '{other}'; a transient component is built wherever it is requested, so it cannot also be placed in another scope"
+    )]
+    TransientPlacement {
+        component: String,
+        other: &'static str,
+    },
+
+    #[error(
+        "component '{component}' is a seed in scope '{first}' and in scope '{second}'; a seed is addressed by type, so it may be supplied in one scope only"
+    )]
+    AmbiguousSeedScopes {
+        component: String,
+        first: &'static str,
+        second: &'static str,
+    },
 
     #[error("factory for component '{0}' has an empty stable identity")]
     EmptyFactoryId(String),
@@ -103,6 +140,95 @@ pub enum Error {
 
     #[error("dependency cycle: no construction order for components: {0}")]
     DependencyCycle(String),
+
+    /// An eager component lives in the root or the transient scope, which build no scope
+    /// instance it could be built on the opening of.
+    #[error(
+        "component '{component_id}' is eager but lives in scope '{scope}': only scopes below the root build eager components"
+    )]
+    EagerOutsideScope {
+        /// Stable component identity.
+        component_id: String,
+        /// The component's scope.
+        scope: &'static str,
+    },
+
+    /// An eager component has no factory, so a scope's opening cannot build it.
+    #[error("component '{component_id}' is eager but has no factory to build it with")]
+    EagerWithoutFactory {
+        /// Stable component identity.
+        component_id: String,
+    },
+
+    #[error(
+        "dependency '{dependency}' of component '{component_id}' resolves to '{target}' in scope '{scope}', which is not open on every chain of the consumer"
+    )]
+    UnplacedDependency {
+        /// Stable consumer component identity.
+        component_id: String,
+        /// Human-readable dependency description.
+        dependency: String,
+        /// Stable identity of the selected component.
+        target: String,
+        /// The selected component's scope.
+        scope: &'static str,
+    },
+
+    /// An optional edge's target is placed in several scopes that each enclose the consumer on
+    /// a different chain, and none on every chain, so which placement it reads would depend on
+    /// the chain an instance opens in. Not supported yet: place the target in one of them.
+    #[error(
+        "optional dependency '{}' of component '{}' is placed in scopes {:?}, which each enclose the consumer only on some chains; place it in one of them",
+        .0.dependency, .0.component_id, .0.scopes
+    )]
+    AmbiguousEnclosingPlacement(Box<AmbiguousEnclosingPlacement>),
+
+    /// A factory built another component than the slot it runs for holds.
+    #[error("the factory for component '{component}' built '{built}' instead")]
+    FactoryOutputMismatch {
+        component: &'static str,
+        built: &'static str,
+    },
+
+    #[error("component '{component}' has no slot in the layout of scope '{scope}'")]
+    UnplannedComponent {
+        component: &'static str,
+        scope: &'static str,
+    },
+
+    /// A slot was given a second instance after it was built.
+    #[error("component '{component}' was built twice in one instance of scope '{scope}'")]
+    SlotBuiltTwice {
+        component: &'static str,
+        scope: &'static str,
+    },
+
+    /// A scope opened for an entry under `UnplannedConstruction::Deny` was asked to build,
+    /// on demand, a component the entry does not declare.
+    #[error(
+        "component '{component}' was resolved in scope '{scope}' without being declared by the \
+         entry the scope was opened for"
+    )]
+    UndeclaredConstruction {
+        component: &'static str,
+        scope: &'static str,
+    },
+
+    /// A scope was opened with a seed for a component one of its factories builds.
+    #[error(
+        "scope '{scope}' was opened with a seed for component '{component}', which its factory builds"
+    )]
+    SeedForBuiltComponent {
+        component: &'static str,
+        scope: &'static str,
+    },
+
+    /// A scope was opened with two seeds for the same slot.
+    #[error("scope '{scope}' was opened with more than one seed for component '{component}'")]
+    DuplicateSeed {
+        component: &'static str,
+        scope: &'static str,
+    },
 
     /// A provider descriptor references a concrete type outside the effective component set.
     #[error("{0}")]

@@ -1,0 +1,207 @@
+use std::any::TypeId;
+use std::collections::HashMap;
+
+use upwell_core::{Cardinality, ScopeKey};
+
+use super::{
+    ContainerKind, PlannedDependency, SelectedMany, SelectedSource, SelectedSources, SlotRef,
+};
+use crate::descriptors::{ComponentDescriptor, ComponentFactoryDescriptor, ProviderDescriptor};
+
+/// The position of one component in a scope's slot layout.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct SlotIdx(usize);
+
+impl SlotIdx {
+    pub(crate) fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// One planned component of a scope.
+///
+/// A slot without a factory is filled by a seed when the scope opens. `providers` are the
+/// traits the component provides, in the order its built instance is aliased under them.
+#[derive(Debug)]
+pub(crate) struct SlotSpec {
+    pub(crate) component: ComponentDescriptor,
+    pub(crate) factory: Option<&'static ComponentFactoryDescriptor>,
+    pub(crate) dependencies: Box<[PlannedDependency]>,
+    pub(crate) providers: Box<[ProviderDescriptor]>,
+}
+
+impl SlotSpec {
+    /// The index of `provider` among this slot's provider aliases.
+    pub(crate) fn alias_of(&self, provider: &ProviderDescriptor) -> Option<usize> {
+        self.providers.iter().position(|alias| {
+            alias.trait_ty.type_id == provider.trait_ty.type_id
+                && alias.qualifier == provider.qualifier
+        })
+    }
+}
+
+/// One provider alias reachable by its trait.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ProviderSlot {
+    pub(crate) at: SlotRef,
+    pub(crate) descriptor: ProviderDescriptor,
+}
+
+/// The dense construction plan of one scope, shared by every instance of it opened in the
+/// generation it was prepared for.
+///
+/// Slots are in one topological order, seeds first. Every eager dependency edge of every
+/// factory is resolved to its source once, so construction never selects providers. The
+/// type and trait indexes serve dynamic lookups and are built once with the layout, as are
+/// the sources single-value trait dependencies select from the scope and the eager set: the
+/// slots of [`ScopedConstruction::Eager`] components and their dependencies in this scope,
+/// which every opening builds.
+///
+/// [`ScopedConstruction::Eager`]: crate::ScopedConstruction::Eager
+#[derive(Debug)]
+pub struct SlotLayout {
+    pub(super) scope: ScopeKey,
+    pub(super) slots: Box<[SlotSpec]>,
+    pub(super) eager: Box<[bool]>,
+    pub(super) accessed: Box<[bool]>,
+    pub(super) read: Box<[bool]>,
+    pub(super) by_type: HashMap<TypeId, SlotIdx>,
+    pub(super) by_trait: HashMap<TypeId, Box<[ProviderSlot]>>,
+    pub(super) selected: SelectedSources,
+    pub(super) constructs: bool,
+    pub(super) shares_store: bool,
+    pub(super) kind: ContainerKind,
+}
+
+impl SlotLayout {
+    /// The scope this layout builds.
+    pub fn scope(&self) -> ScopeKey {
+        self.scope
+    }
+
+    /// The number of slots, seeds included.
+    pub fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// Whether the scope holds no components.
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty()
+    }
+
+    /// Whether opening the scope runs any factory. A scope without one holds only seeds,
+    /// so an opening with no seeds needs no store.
+    pub fn constructs(&self) -> bool {
+        self.constructs
+    }
+
+    /// Whether a factory of this scope, or a transient one plans, declares a dynamic edge,
+    /// which may build a transient against the scope's in-progress store.
+    ///
+    /// Any other scope is built into a store its construction context owns, so its planned
+    /// reads take no lock. A planned transient never reads the requesting scope's slots, and a
+    /// transient resolved there for an edge its factory did not declare sees none of the
+    /// scope's in-progress instances, just as undeclared edges are not ordered.
+    pub(crate) fn shares_store(&self) -> bool {
+        self.shares_store
+    }
+
+    /// The container an instance of the scope opens in, chosen by its generation policy.
+    pub(crate) fn kind(&self) -> ContainerKind {
+        self.kind
+    }
+
+    /// The scope's components in construction order, seeds first.
+    pub fn components(&self) -> impl Iterator<Item = &ComponentDescriptor> {
+        self.slots.iter().map(|spec| &spec.component)
+    }
+
+    /// The components every opening of the scope builds because they are eager, in
+    /// construction order. Their dependencies in the scope are built with them. A seed slot
+    /// is never built, so it is never eager.
+    pub fn eager_components(&self) -> impl Iterator<Item = &ComponentDescriptor> {
+        self.slots
+            .iter()
+            .filter(|spec| is_eager(spec))
+            .map(|spec| &spec.component)
+    }
+
+    /// The scope's seeds: its factory-less components, filled by whoever opens the scope.
+    pub fn seeds(&self) -> impl Iterator<Item = &ComponentDescriptor> {
+        self.slots
+            .iter()
+            .filter(|spec| spec.factory.is_none())
+            .map(|spec| &spec.component)
+    }
+
+    /// Whether a factory of this scope depends on the seed of type `seed`, through an edge of
+    /// any kind, so an opening that builds every slot reads it.
+    pub fn factories_read_seed(&self, seed: TypeId) -> bool {
+        self.slot_of(seed)
+            .is_some_and(|slot| self.read[slot.index()] || self.accessed[slot.index()])
+    }
+
+    /// Whether the eager set or the accessed set depends on the seed of type `seed`, so an
+    /// opening that builds only the eager set reads it.
+    pub fn eager_set_reads_seed(&self, seed: TypeId) -> bool {
+        self.slot_of(seed)
+            .is_some_and(|slot| self.eager[slot.index()] || self.accessed[slot.index()])
+    }
+
+    /// Whether an invocation-context accessor anywhere in the generation reads a slot of this
+    /// scope, so every entry declares those slots and the scope opens at once for each.
+    pub fn is_accessed(&self) -> bool {
+        self.accessed.contains(&true)
+    }
+
+    /// The slots every opening builds: the eager components and their dependencies here.
+    pub(crate) fn eager(&self) -> &[bool] {
+        &self.eager
+    }
+
+    pub(crate) fn slots(&self) -> &[SlotSpec] {
+        &self.slots
+    }
+
+    pub(crate) fn spec(&self, slot: SlotIdx) -> &SlotSpec {
+        &self.slots[slot.index()]
+    }
+
+    pub(crate) fn slot_of(&self, type_id: TypeId) -> Option<SlotIdx> {
+        self.by_type.get(&type_id).copied()
+    }
+
+    /// The source a single-value dependency on trait `target` with `qualifier` selects from
+    /// this scope, when it is a planned, non-transient instance.
+    pub(crate) fn selected(
+        &self,
+        target: TypeId,
+        qualifier: Option<&str>,
+    ) -> Option<&SelectedSource> {
+        self.selected.get(target, qualifier)
+    }
+
+    /// The providers a `cardinality` dependency on trait `target` gathers from this scope, when
+    /// each is a planned, non-transient instance. `None` for a single value.
+    pub(crate) fn selected_many(
+        &self,
+        target: TypeId,
+        cardinality: Cardinality,
+    ) -> Option<&SelectedMany> {
+        self.selected.many(target, cardinality)
+    }
+
+    /// The provider aliases of `trait_id` in this scope, in provider order.
+    pub(crate) fn providers_of(&self, trait_id: TypeId) -> &[ProviderSlot] {
+        self.by_trait.get(&trait_id).map_or(&[], AsRef::as_ref)
+    }
+}
+
+/// Whether every opening of the scope builds the factory-backed slot `spec`.
+pub(super) fn is_eager(spec: &SlotSpec) -> bool {
+    spec.factory.is_some() && spec.component.construction.is_eager()
+}

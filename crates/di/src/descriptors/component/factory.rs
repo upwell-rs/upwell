@@ -1,6 +1,6 @@
 use std::{fmt, future::Future, pin::Pin};
 
-use upwell_core::{DependencyDescriptor, Singleton, StaticScope, UpwellDescriptor};
+use upwell_core::{DependencyDescriptor, Scope, ScopeKey, Singleton, UpwellDescriptor};
 use upwell_hooks::HookDescriptor;
 
 use super::{BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor};
@@ -10,6 +10,15 @@ pub type ComponentFactory =
     for<'a> fn(
         &'a mut ComponentConstructionContext,
     ) -> Pin<Box<dyn Future<Output = crate::Result<BoxedComponent>> + Send + 'a>>;
+
+/// Synchronous factory function pointer that builds a component without allocating a
+/// future when every dependency is ready to read.
+///
+/// `Ok(None)` means a dependency needs construction or dynamic selection, so the caller
+/// runs the [`ComponentFactory`] instead. A ready factory only reads, so giving up
+/// part-way has no effect the async run could observe.
+pub type ReadyComponentFactory =
+    fn(&ComponentConstructionContext) -> crate::Result<Option<BoxedComponent>>;
 
 /// How the container uses one of a component's construction recipes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,9 +74,35 @@ pub struct ComponentFactoryDescriptor {
     /// construction semantics change. IDs must be non-empty and unique within a component.
     pub id: &'static str,
     pub construct: ComponentFactory,
+    /// The synchronous path tried before [`construct`](Self::construct), when the
+    /// factory has one.
+    pub construct_ready: Option<ReadyComponentFactory>,
     /// The factory's dependency edges, reported at runtime. Read only at build.
     pub dependencies: fn() -> Vec<DependencyDescriptor>,
     pub role: ComponentFactoryRole,
+    /// The scopes this recipe builds its instance in, one placement each. Empty inherits
+    /// every scope the component declares, so a single-scope component never states it.
+    /// Explicit recipes with distinct scopes, or one recipe listing several, place one
+    /// component type in several scopes (see [`ComponentDescriptor::placements`]); the
+    /// scopes of one type may not share a hierarchy.
+    pub scopes: &'static [ScopeKey],
+}
+
+impl ComponentFactoryDescriptor {
+    /// Builds the component through [`construct_ready`](Self::construct_ready) when every
+    /// dependency is ready, and through [`construct`](Self::construct) otherwise.
+    pub(crate) async fn build(
+        &self,
+        cx: &mut ComponentConstructionContext,
+    ) -> crate::Result<BoxedComponent> {
+        if let Some(construct_ready) = self.construct_ready
+            && let Some(built) = construct_ready(cx)?
+        {
+            return Ok(built);
+        }
+
+        (self.construct)(cx).await
+    }
 }
 
 impl fmt::Debug for ComponentFactoryDescriptor {
@@ -152,12 +187,18 @@ pub trait DeclaredScope: Component {
 }
 
 impl ComponentDescriptor {
-    /// The factory the container should use: an explicit one if present (the default
-    /// is its fallback), or `None` for a manually-provided instance (no ordinary
-    /// factory). Errors if more than one explicit factory exists for the type.
-    /// Replacement factories never take part in this choice.
+    /// The factory the container should use for this descriptor's scope: an explicit one if
+    /// present (the default is its fallback), or `None` for a manually-provided instance
+    /// (no ordinary factory). Errors if more than one explicit factory builds in the
+    /// descriptor's scope. Replacement factories never take part in this choice.
+    ///
+    /// A component with explicit factories in several scopes is expanded into one
+    /// descriptor per scope first ([`placements`](Self::placements)), so each placement
+    /// sees only the factories that build in its own scope.
     pub fn effective_factory(&self) -> crate::Result<Option<&'static ComponentFactoryDescriptor>> {
-        let mut explicit = self.factories_with(ComponentFactoryRole::Explicit);
+        let mut explicit = self
+            .factories_with(ComponentFactoryRole::Explicit)
+            .filter(|factory| self.factory_scopes(factory).contains(&self.scope));
         let first = explicit.next();
 
         if first.is_some() && explicit.next().is_some() {
@@ -167,8 +208,38 @@ impl ComponentDescriptor {
         match first {
             Some(factory) => Ok(Some(factory)),
 
+            None if self.has_explicit_factory() => Ok(None),
+
             None => Ok(self.factories_with(ComponentFactoryRole::Default).next()),
         }
+    }
+
+    /// The scopes `factory` builds in: its own, or every scope this component declares.
+    pub(crate) fn factory_scopes<'a>(
+        &'a self,
+        factory: &'static ComponentFactoryDescriptor,
+    ) -> &'a [ScopeKey] {
+        match factory.scopes {
+            [] => self.declared_scopes(),
+            scopes => scopes,
+        }
+    }
+
+    /// Every scope this component declares: its [`scopes`](Self::scopes) list, or its one
+    /// declared scope. A placement reports the declaration of the component it came from.
+    pub fn declared_scopes(&self) -> &[ScopeKey] {
+        match (self.scopes, &self.declared_scope) {
+            ([], Some(declared)) => std::slice::from_ref(declared),
+            ([], None) => std::slice::from_ref(&self.scope),
+            (scopes, _) => scopes,
+        }
+    }
+
+    /// Whether any explicit factory exists, whatever scope it builds in.
+    pub(crate) fn has_explicit_factory(&self) -> bool {
+        self.factories_with(ComponentFactoryRole::Explicit)
+            .next()
+            .is_some()
     }
 
     /// The static state-aware replacement factory, if the component declares one.
@@ -209,7 +280,7 @@ impl ComponentDescriptor {
         Ok(first)
     }
 
-    fn factories_with(
+    pub(crate) fn factories_with(
         &self,
         role: ComponentFactoryRole,
     ) -> impl Iterator<Item = &'static ComponentFactoryDescriptor> {

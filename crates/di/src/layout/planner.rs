@@ -1,0 +1,502 @@
+use std::any::TypeId;
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use upwell_core::{
+    Cardinality, DependencyDescriptor, ResolutionMode, Scope, ScopeId, ScopeKey, Singleton,
+};
+
+use super::{
+    ContainerKind, DepRef, EagerSelection, PlannedDependency, ProvidedRef, ProviderSlot,
+    RootTarget, SelectedSources, SlotIdx, SlotLayout, SlotRef, SlotSpec, TransientPlan,
+};
+use crate::descriptors::{ComponentDescriptor, ComponentFactoryDescriptor, ProviderDescriptor};
+use crate::error::Error;
+use crate::registry::scopes::scope_allows_with;
+use crate::registry::{DependencyTarget, ProviderSelectionModel};
+
+impl SlotLayout {
+    /// Plans the slot layout of `scope`.
+    ///
+    /// `seeded` are the scope's factory-less components and `order` its factory-backed ones
+    /// in construction order. `ancestors` holds the already planned layouts of the scopes
+    /// open around it, and `can_reach` is the scope reachability validation used, so every
+    /// edge resolves to the source validation selected. The sources single-value trait
+    /// dependencies select from the scope are planned with them.
+    ///
+    /// `ancestors` must hold only the layouts of scopes that may enclose `scope` on some
+    /// chain, never unrelated or sibling scopes: an optional edge whose target is not open
+    /// on every chain falls back to the placement in one of them, and validation
+    /// guarantees at most one such placement exists only for the enclosing scopes. Holding
+    /// others could bind the edge to a scope that is never open around the instance.
+    pub fn plan(
+        scope: ScopeKey,
+        seeded: &[ComponentDescriptor],
+        order: &[ComponentDescriptor],
+        ancestors: &HashMap<ScopeId, Arc<SlotLayout>>,
+        selection: &ProviderSelectionModel,
+        can_reach: impl Fn(ScopeId, ScopeId) -> bool,
+    ) -> crate::Result<Self> {
+        let mut layout = Self::index(scope, seeded, order, selection)?;
+        let planner = Planner {
+            layout: &layout,
+            ancestors,
+            selection,
+            can_reach: &can_reach,
+            dynamic: Cell::new(false),
+        };
+        let mut dependencies = Vec::with_capacity(layout.slots.len());
+        let selected = planner.selected_sources();
+
+        for spec in layout.slots.iter() {
+            let planned = match spec.factory {
+                Some(factory) => {
+                    planner.factory_dependencies(&spec.component, factory, &mut Vec::new())?
+                }
+                None => Box::default(),
+            };
+
+            dependencies.push(planned);
+        }
+
+        layout.shares_store = planner.dynamic.get();
+
+        for (spec, planned) in layout.slots.iter_mut().zip(dependencies) {
+            spec.dependencies = planned;
+        }
+
+        layout.selected = selected;
+        layout.eager = layout.eager_closure(selection, &can_reach);
+        layout.accessed = layout.accessed_closure(selection, &can_reach);
+        layout.read = layout.slots_factories_read();
+
+        Ok(layout)
+    }
+
+    /// The slots of this scope a factory of it depends on, through an edge of any kind.
+    fn slots_factories_read(&self) -> Box<[bool]> {
+        let mut read = vec![false; self.slots.len()].into_boxed_slice();
+
+        for dependency in self.slots.iter().flat_map(|spec| spec.dependencies.iter()) {
+            match &dependency.source {
+                DepRef::Unplanned | DepRef::Contextual => {
+                    self.for_each_target_slot(dependency.target, |slot| {
+                        read[slot.index()] = true;
+                    });
+                }
+
+                source => mark_local_sources(source, &mut read),
+            }
+        }
+
+        read
+    }
+
+    /// Lays out the slots, seeds first, and builds the type and trait indexes.
+    fn index(
+        scope: ScopeKey,
+        seeded: &[ComponentDescriptor],
+        order: &[ComponentDescriptor],
+        selection: &ProviderSelectionModel,
+    ) -> crate::Result<Self> {
+        let mut slots = Vec::with_capacity(seeded.len() + order.len());
+        let mut by_type = HashMap::with_capacity(slots.capacity());
+        let mut by_trait: HashMap<TypeId, Vec<ProviderSlot>> = HashMap::new();
+
+        for component in seeded {
+            slots.push(slot_spec(*component, None, selection));
+        }
+
+        for component in order {
+            slots.push(slot_spec(
+                *component,
+                component.effective_factory()?,
+                selection,
+            ));
+        }
+
+        for (index, spec) in slots.iter().enumerate() {
+            let slot = SlotIdx::new(index);
+
+            by_type.insert(spec.component.ty.type_id, slot);
+
+            for (alias, descriptor) in spec.providers.iter().enumerate() {
+                let at = SlotRef {
+                    slot,
+                    alias: Some(alias),
+                };
+
+                by_trait
+                    .entry(descriptor.trait_ty.type_id)
+                    .or_default()
+                    .push(ProviderSlot {
+                        at,
+                        descriptor: *descriptor,
+                    });
+            }
+        }
+
+        let by_trait = by_trait
+            .into_iter()
+            .map(|(trait_id, mut providers)| {
+                providers.sort_by_key(|provider| selection.ordinal(&provider.descriptor));
+
+                (trait_id, providers.into_boxed_slice())
+            })
+            .collect();
+
+        let constructs = slots.iter().any(|spec| spec.factory.is_some());
+        let eager = vec![false; slots.len()].into_boxed_slice();
+        let read = eager.clone();
+        let accessed = eager.clone();
+
+        Ok(Self {
+            scope,
+            slots: slots.into_boxed_slice(),
+            eager,
+            accessed,
+            read,
+            by_type,
+            by_trait,
+            selected: SelectedSources::default(),
+            constructs,
+            shares_store: false,
+            kind: ContainerKind::of(scope),
+        })
+    }
+}
+
+/// Marks in `read` the slots of this scope `source` reads.
+fn mark_local_sources(source: &DepRef, read: &mut [bool]) {
+    match source {
+        DepRef::Local(at) => read[at.slot.index()] = true,
+
+        DepRef::Many(provided) => {
+            for entry in provided.iter() {
+                mark_local_sources(&entry.source, read);
+            }
+        }
+
+        DepRef::Root(_)
+        | DepRef::Ancestor { .. }
+        | DepRef::Transient(_)
+        | DepRef::Absent
+        | DepRef::Unplanned
+        | DepRef::Contextual => {}
+    }
+}
+
+fn slot_spec(
+    component: ComponentDescriptor,
+    factory: Option<&'static ComponentFactoryDescriptor>,
+    selection: &ProviderSelectionModel,
+) -> SlotSpec {
+    SlotSpec {
+        component,
+        factory,
+        dependencies: Box::default(),
+        providers: selection
+            .providers_for_concrete(component.ty.type_id)
+            .into(),
+    }
+}
+
+/// Whether an edge is resolved by construction itself. Config, dynamic, lazy, deferred
+/// and fresh edges resolve through their own handles, so they keep the dynamic path.
+fn is_planned(dependency: &DependencyDescriptor) -> bool {
+    !dependency.config && !dependency.dynamic && dependency.resolution == ResolutionMode::Eager
+}
+
+/// Whether resolving an edge may build a transient against the scope's in-progress store: a
+/// dynamic edge is selected while the scope is built. Lazy, deferred and fresh edges read the
+/// built scope later, and config edges read only resolvers.
+fn reads_in_progress(dependency: &DependencyDescriptor) -> bool {
+    !dependency.config && dependency.dynamic
+}
+
+/// Resolves the dependency edges of one scope's factories against its own slots and the
+/// layouts of the scopes open around it. `dynamic` records whether a factory planned so far,
+/// a transient's included, declares an edge [`reads_in_progress`].
+struct Planner<'a, R> {
+    layout: &'a SlotLayout,
+    ancestors: &'a HashMap<ScopeId, Arc<SlotLayout>>,
+    selection: &'a ProviderSelectionModel,
+    can_reach: &'a R,
+    dynamic: Cell<bool>,
+}
+
+impl<R: Fn(ScopeId, ScopeId) -> bool> Planner<'_, R> {
+    /// Plans every edge of `factory` at its declared position, so a generated factory reads
+    /// its edges by index. `visiting` holds the transients being planned, so a transient
+    /// cycle is reported instead of recursing forever.
+    fn factory_dependencies(
+        &self,
+        consumer: &ComponentDescriptor,
+        factory: &ComponentFactoryDescriptor,
+        visiting: &mut Vec<TypeId>,
+    ) -> crate::Result<Box<[PlannedDependency]>> {
+        let dependencies = (factory.dependencies)();
+        let mut planned = Vec::with_capacity(dependencies.len());
+
+        for dependency in dependencies {
+            if reads_in_progress(&dependency) {
+                self.dynamic.set(true);
+            }
+
+            let source = if is_planned(&dependency) {
+                self.source(consumer, &dependency, visiting)?
+            } else if dependency.resolution == ResolutionMode::Current {
+                DepRef::Contextual
+            } else {
+                DepRef::Unplanned
+            };
+
+            planned.push(PlannedDependency {
+                target: dependency.ty.type_id,
+                qualifier: dependency.qualifier,
+                cardinality: dependency.cardinality,
+                source,
+            });
+        }
+
+        Ok(planned.into_boxed_slice())
+    }
+
+    fn source(
+        &self,
+        consumer: &ComponentDescriptor,
+        dependency: &DependencyDescriptor,
+        visiting: &mut Vec<TypeId>,
+    ) -> crate::Result<DepRef> {
+        let selected = self
+            .selection
+            .selected_dependencies_with_scope_reachability(consumer, dependency, |from, to| {
+                (self.can_reach)(from, to)
+            });
+
+        if dependency.cardinality != Cardinality::One {
+            let mut provided = Vec::with_capacity(selected.len());
+
+            for target in selected {
+                let qualifier = match target.target {
+                    DependencyTarget::Provider(provider) => provider.qualifier,
+                    DependencyTarget::Component(component) => component.id,
+                };
+                let source = self.locate(consumer, dependency, target.target, visiting)?;
+
+                provided.push(ProvidedRef { qualifier, source });
+            }
+
+            return Ok(DepRef::Many(provided.into_boxed_slice()));
+        }
+
+        match selected.first() {
+            Some(target) => self.locate(consumer, dependency, target.target, visiting),
+
+            None if dependency.optional => Ok(DepRef::Absent),
+
+            None => Err(missing_dependency(consumer, dependency)),
+        }
+    }
+
+    /// The source holding `target` as seen from the scope being planned.
+    ///
+    /// An optional edge whose target has no placement open around the scope on every chain
+    /// reads the placement in an enclosing scope that is open on some chains: `ancestors` holds
+    /// only scopes that may enclose this one, and validation allows one such placement at
+    /// most. On a chain without it the read finds nothing and the edge is `None`.
+    ///
+    /// The fallback is only sound while `ancestors` holds enclosing scopes alone; see
+    /// [`SlotLayout::plan`].
+    fn locate(
+        &self,
+        consumer: &ComponentDescriptor,
+        dependency: &DependencyDescriptor,
+        target: DependencyTarget,
+        visiting: &mut Vec<TypeId>,
+    ) -> crate::Result<DepRef> {
+        let (mut component, provider) = match target {
+            DependencyTarget::Component(component) => (component, None),
+            DependencyTarget::Provider(provider) => (
+                self.placement(provider.concrete_ty.type_id)
+                    .ok_or(Error::MissingComponent(provider.concrete_ty.name))?,
+                Some(provider),
+            ),
+        };
+
+        if dependency.optional && !self.reaches(component.scope) {
+            let Some(enclosing) = self.enclosing_placement(component.ty.type_id) else {
+                return Ok(DepRef::Absent);
+            };
+
+            component = enclosing;
+        }
+
+        if component.scope.is_transient() {
+            let plan = self.transient(component, provider, visiting)?;
+
+            return Ok(DepRef::Transient(Arc::new(plan)));
+        }
+
+        self.stored(component, provider)
+            .ok_or_else(|| unplaced_dependency(consumer, dependency, &component))
+    }
+
+    /// The source holding the non-transient `component`, aliased as `provider` when set, as
+    /// seen from the scope being planned. `None` when no planned slot holds it.
+    fn stored(
+        &self,
+        component: ComponentDescriptor,
+        provider: Option<ProviderDescriptor>,
+    ) -> Option<DepRef> {
+        let scope = component.scope;
+
+        if scope.id() == Singleton::ID {
+            let root = match provider {
+                Some(provider) => RootTarget::Provider(Box::new(provider)),
+                None => RootTarget::Component(component.ty.type_id),
+            };
+
+            return Some(DepRef::Root(root));
+        }
+
+        if scope.id() == self.layout.scope.id() {
+            return Some(DepRef::Local(slot_ref(
+                self.layout,
+                component,
+                provider.as_ref(),
+            )?));
+        }
+
+        let layout = self.ancestors.get(&scope.id())?;
+        let at = slot_ref(layout, component, provider.as_ref())?;
+
+        Some(DepRef::Ancestor {
+            layout: Arc::clone(layout),
+            at,
+        })
+    }
+
+    /// Whether `scope` is open around the scope being planned on every chain it opens in.
+    fn reaches(&self, scope: ScopeKey) -> bool {
+        scope_allows_with(self.layout.scope, scope, &|from, to| {
+            (self.can_reach)(from, to)
+        })
+    }
+
+    /// The placement of `type_id` in a scope that may be open around the scope being planned.
+    fn enclosing_placement(&self, type_id: TypeId) -> Option<ComponentDescriptor> {
+        debug_assert!(
+            self.selection
+                .placements(type_id)
+                .iter()
+                .filter(|placement| self.ancestors.contains_key(&placement.scope.id()))
+                .count()
+                <= 1,
+            "ancestors must hold only scopes that may enclose the planned scope, with at most one placement of an optional target"
+        );
+
+        self.selection
+            .placements(type_id)
+            .iter()
+            .find(|placement| self.ancestors.contains_key(&placement.scope.id()))
+            .copied()
+    }
+
+    /// The placement of `type_id` the scope being planned reaches.
+    fn placement(&self, type_id: TypeId) -> Option<ComponentDescriptor> {
+        let can_access = |consumer, dependency| {
+            scope_allows_with(consumer, dependency, &|from, to| (self.can_reach)(from, to))
+        };
+
+        self.selection
+            .component_from(type_id, self.layout.scope, &can_access)
+    }
+
+    /// The sources single-value trait dependencies select from the scope being planned,
+    /// picked as eager entry targets are.
+    fn selected_sources(&self) -> SelectedSources {
+        let can_access = |consumer, dependency| {
+            scope_allows_with(consumer, dependency, &|from, to| (self.can_reach)(from, to))
+        };
+        let selector = EagerSelection {
+            selection: self.selection,
+            can_access: &can_access,
+        };
+
+        SelectedSources::plan(self.layout.scope, &selector, |provider| {
+            let component = self.placement(provider.concrete_ty.type_id)?;
+
+            self.stored(component, Some(*provider))
+        })
+    }
+
+    fn transient(
+        &self,
+        component: ComponentDescriptor,
+        provider: Option<ProviderDescriptor>,
+        visiting: &mut Vec<TypeId>,
+    ) -> crate::Result<TransientPlan> {
+        let type_id = component.ty.type_id;
+
+        if visiting.contains(&type_id) {
+            return Err(Error::DependencyCycle(component.name.to_string()));
+        }
+
+        let factory = component
+            .effective_factory()?
+            .ok_or(Error::MissingComponent(component.name))?;
+
+        visiting.push(type_id);
+
+        let dependencies = self.factory_dependencies(&component, factory, visiting);
+
+        visiting.pop();
+
+        let dependencies = dependencies?;
+
+        Ok(TransientPlan {
+            factory,
+            provider,
+            dependencies,
+        })
+    }
+}
+
+/// The slot, and provider alias when `provider` is set, that holds `component` in `layout`.
+fn slot_ref(
+    layout: &SlotLayout,
+    component: ComponentDescriptor,
+    provider: Option<&ProviderDescriptor>,
+) -> Option<SlotRef> {
+    let slot = layout.slot_of(component.ty.type_id)?;
+    let alias = match provider {
+        Some(provider) => Some(layout.spec(slot).alias_of(provider)?),
+        None => None,
+    };
+
+    Some(SlotRef { slot, alias })
+}
+
+fn missing_dependency(consumer: &ComponentDescriptor, dependency: &DependencyDescriptor) -> Error {
+    Error::MissingDependency {
+        component: consumer.name.to_string(),
+        component_id: consumer.id.to_string(),
+        dependency: dependency.name.to_string(),
+        type_name: (dependency.ty.type_name)().to_string(),
+    }
+}
+
+fn unplaced_dependency(
+    consumer: &ComponentDescriptor,
+    dependency: &DependencyDescriptor,
+    target: &ComponentDescriptor,
+) -> Error {
+    Error::UnplacedDependency {
+        component_id: consumer.id.to_string(),
+        dependency: dependency.name.to_string(),
+        target: target.id.to_string(),
+        scope: target.scope.name(),
+    }
+}

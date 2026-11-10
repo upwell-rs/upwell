@@ -125,10 +125,10 @@ pub trait ConfigProperties: DeserializeOwned + Send + Sync + 'static + Sized {
     fn bind(tree: &ConfigManager, path: &str) -> Result<BoxedComponent, ConfigError> {
         let (value, snapshot) = tree.get_config_with_snapshot::<Self>(path)?;
 
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<Self>(Self::NAME),
-            value: Box::new(Cfg::new(value, path, snapshot)),
-        })
+        Ok(BoxedComponent::stored(
+            TypeDescriptor::of::<Self>(Self::NAME),
+            Cfg::new(value, path, snapshot),
+        ))
     }
 
     /// Recovers a [`ReloadableConfig`] slot from a [`bind`](Self::bind) seed, sharing

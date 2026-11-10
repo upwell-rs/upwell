@@ -323,16 +323,21 @@ trait CaptureReader: std::io::Read + Send + 'static {
 macro_rules! impl_capture_reader {
     ($type:ty) => {
         impl CaptureReader for $type {
+            #[allow(unsafe_code)]
             fn configure_capture(&self) -> std::io::Result<()> {
                 use std::os::fd::AsRawFd as _;
 
                 let file_descriptor = self.as_raw_fd();
+                // SAFETY: `file_descriptor` is the open descriptor of `self`, and `F_GETFL` takes
+                // no further argument.
                 let flags = unsafe { libc::fcntl(file_descriptor, libc::F_GETFL) };
 
                 if flags == -1 {
                     return Err(std::io::Error::last_os_error());
                 }
 
+                // SAFETY: `file_descriptor` is still the open descriptor of `self`, and `F_SETFL`
+                // takes an int of flags.
                 if unsafe { libc::fcntl(file_descriptor, libc::F_SETFL, flags | libc::O_NONBLOCK) }
                     == -1
                 {

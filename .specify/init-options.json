@@ -1,9 +1,0 @@
-{
-  "ai": "hermes",
-  "ai_skills": true,
-  "branch_numbering": "sequential",
-  "here": false,
-  "integration": "hermes",
-  "script": "sh",
-  "speckit_version": "0.9.5"
-}

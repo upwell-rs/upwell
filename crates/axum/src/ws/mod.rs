@@ -12,24 +12,38 @@
 //! sets up its own routing and the app never sees a route. Concrete protocols live in downstream
 //! crates such as `upwell-axum-json-ws` and `upwell-axum-stomp`.
 
+mod connection;
+mod meta;
+mod mount;
+mod prepared;
 pub mod pubsub;
+mod settings;
 
 use std::any::{Any, TypeId};
 use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 
-use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket, close_code};
+use axum::extract::ws::WebSocket;
 use futures::future::BoxFuture;
 use tokio::time::Duration;
-use upwell_app::{AppRegistry, AppRuntime};
-use upwell_config::ContainerConfigExt;
-use upwell_core::{ItemSource, TypeDescriptor};
-use upwell_di::{BoxedComponent, ScopeContainer};
+use upwell_app::{AppRegistry, AppRuntime, EntryScope};
+use upwell_core::{DependencyDescriptor, EntryKey, ItemSource, TypeDescriptor};
 
-/// How long the framework waits for a WS close handshake to flush before abandoning the socket.
-/// Bounds [`mount_ws`]'s error-path close send so a peer that never drains its receive buffer
-/// can't block the upgrade task forever.
+use crate::scope::WebsocketMessage;
+
+pub use connection::WsConnectionScope;
+pub(crate) use meta::{WEBSOCKET_UPGRADE_META_DESCRIPTOR, WS_CONNECTION_META_DESCRIPTOR};
+pub use meta::{WebsocketUpgradeMeta, WsConnectionMeta};
+pub use mount::WebsocketHandler;
+pub(crate) use mount::mount_ws;
+pub use prepared::{PreparedConnection, scope_failure_close};
+pub(crate) use settings::validate_config;
+pub use settings::{WsConnectionSettings, WsIdle};
+
+/// How long a protocol waits for a WS frame, such as a close handshake, to flush before
+/// abandoning the socket, so a peer that never drains its receive buffer can't block the
+/// connection's task forever.
 pub const SOCKET_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The boxed future a [`WsHandlerFn`] returns — a decoded, dispatched message [`Outcome`], generic
@@ -41,13 +55,15 @@ pub type WsFuture<P> =
 
 /// A type-erased message handler for protocol `P`. It is handed the decoded
 /// [`Payload`](WebsocketProtocol::Payload) and the message's
-/// [`WebsocketMessage`-scope](crate::scope::WebsocketMessage) container, so it can decode the payload into the
+/// [`WebsocketMessage`-scope](crate::scope::WebsocketMessage) instance, so it can decode the payload into the
 /// handler's parameter *and* resolve the handler's `Inject<T>` parameters from the scope chain
 /// (message → connection → singleton) before running the
 /// controller method (the singleton captured by `Arc`) and turning the response into `P`'s
 /// [`Outcome`](WebsocketProtocol::Outcome).
 pub type WsHandlerFn<P> = Arc<
-    dyn Fn(<P as WebsocketProtocol>::Payload, Arc<ScopeContainer>) -> WsFuture<P> + Send + Sync,
+    dyn Fn(<P as WebsocketProtocol>::Payload, EntryScope<WebsocketMessage>) -> WsFuture<P>
+        + Send
+        + Sync,
 >;
 
 /// What can go wrong dispatching one message, independent of the wire protocol framing it.
@@ -180,6 +196,10 @@ pub struct WsMessageDescriptor {
     pub codec: TypeDescriptor,
     /// The handler method's declaration, when the registering macro recorded it.
     pub source: Option<ItemSource>,
+    /// The handler's stable entry identity: `ws/<controller ID>.<handler>`.
+    pub key: EntryKey,
+    /// The dependency edges of the handler's `Inject<T>` parameters, in parameter order.
+    pub targets: fn() -> Vec<DependencyDescriptor>,
 }
 
 impl WsRouteDescriptor {
@@ -386,8 +406,8 @@ pub trait WebsocketProtocol: Send + Sync + Sized + 'static {
 
     /// Builds the protocol's routing from prepared controllers and endpoint `options`. Called once
     /// per `register_ws` entrypoint at app build. The protocol keeps whatever
-    /// it needs from `runtime` (e.g. a clone, to open per-message
-    /// [`WebsocketMessage`](crate::scope::WebsocketMessage) scopes while serving).
+    /// it needs from `runtime`; per-message scopes open through the [`WsConnectionScope`]
+    /// each connection opens.
     fn build(
         controllers: &[WsControllerDescriptor],
         runtime: &AppRuntime,
@@ -395,249 +415,24 @@ pub trait WebsocketProtocol: Send + Sync + Sized + 'static {
     ) -> Result<Self, Self::BuildError>;
 
     /// Drives one upgraded connection until the peer closes it or graceful shutdown fires.
+    ///
     /// `connection` is this socket's
-    /// [`WebsocketConnection`](crate::scope::WebsocketConnection) scope (opened once by the
-    /// framework); the protocol parents each per-message scope at it.
+    /// [`WebsocketConnection`](crate::scope::WebsocketConnection) scope before it opens. The
+    /// protocol decides when to [`open`](PreparedConnection::open) it: at once when it has no
+    /// handshake, or after an in-band handshake with what the handshake produced, so no
+    /// connection-scoped component observes the connection before it is accepted. It opens
+    /// each per-message scope under the opened scope with [`WsConnectionScope::message`]. The
+    /// opening must run on the task `serve` runs on, so the instance joins the connection's
+    /// invocation context.
     fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: Arc<ScopeContainer>,
+        connection: PreparedConnection,
         shutdown: WsShutdown,
     ) -> impl Future<Output = ()> + Send;
 
     /// Contributes protocol-owned DI components before the root container is validated and built.
     fn register(_registry: &mut AppRegistry) {}
-}
-
-/// Framework-owned controls resolved from each WebSocket connection's config store. This remains
-/// internal so adding operational controls does not change the public protocol implementation
-/// contract.
-#[derive(Clone, Copy, Debug)]
-pub struct WsConnectionSettings {
-    idle_timeout: Option<Duration>,
-}
-
-impl WsConnectionSettings {
-    /// Reads framework-owned WebSocket settings from a connection scope.
-    pub fn from_connection(connection: &ScopeContainer) -> Self {
-        let timeout_ms = connection
-            .config::<crate::AxumConfig>(crate::AXUM_CONFIG_PATH)
-            .map(|config| config.snapshot().websocket_idle_timeout_ms)
-            .unwrap_or_else(|| crate::AxumConfig::default().websocket_idle_timeout_ms);
-
-        Self {
-            idle_timeout: (timeout_ms > 0).then(|| Duration::from_millis(timeout_ms)),
-        }
-    }
-
-    /// The configured idle interval, or `None` when liveness probing is disabled.
-    pub fn idle_timeout(&self) -> Option<Duration> {
-        self.idle_timeout
-    }
-}
-
-/// Native HTTP metadata captured from the request that initiated a WebSocket upgrade.
-#[derive(Clone, Debug)]
-pub struct WebsocketUpgradeMeta {
-    /// The upgrade request's HTTP method.
-    pub method: axum::http::Method,
-
-    /// The upgrade request's URI.
-    pub uri: axum::http::Uri,
-
-    /// The upgrade request's headers.
-    pub headers: axum::http::HeaderMap,
-
-    /// Cookies parsed from the upgrade request's `Cookie` headers.
-    pub cookies: std::collections::HashMap<String, String>,
-}
-
-impl WebsocketUpgradeMeta {
-    /// Captures metadata from a WebSocket upgrade request.
-    pub fn from_parts(
-        method: axum::http::Method,
-        uri: axum::http::Uri,
-        headers: axum::http::HeaderMap,
-    ) -> Self {
-        let request = crate::RequestMeta::from_parts(method, uri, headers);
-
-        Self {
-            method: request.method,
-            uri: request.uri,
-            headers: request.headers,
-            cookies: request.cookies,
-        }
-    }
-}
-
-impl upwell_di::Injectable for WebsocketUpgradeMeta {
-    type Target = Self;
-    type Stored = Self;
-
-    fn into_stored(self) -> Self {
-        self
-    }
-
-    fn from_stored(stored: &Self) -> Self {
-        stored.clone()
-    }
-}
-
-#[cfg(feature = "di-check")]
-impl upwell_di::Provided<WebsocketUpgradeMeta> for upwell_di::Wiring {}
-
-pub(crate) static WEBSOCKET_UPGRADE_META_DESCRIPTOR: upwell_di::ComponentDescriptor =
-    upwell_di::ComponentDescriptor::manual(
-        "__upwell_websocket_upgrade_meta",
-        "WebsocketUpgradeMeta",
-        TypeDescriptor::of::<WebsocketUpgradeMeta>("WebsocketUpgradeMeta"),
-        &crate::scope::WebsocketConnection,
-    );
-
-/// Metadata selected while accepting one WebSocket upgrade.
-#[derive(Clone, Debug)]
-pub struct WsConnectionMeta {
-    selected_subprotocol: Option<String>,
-}
-
-impl WsConnectionMeta {
-    /// The negotiated RFC 6455 subprotocol, if one was selected.
-    pub fn selected_subprotocol(&self) -> Option<&str> {
-        self.selected_subprotocol.as_deref()
-    }
-}
-
-impl upwell_di::Injectable for WsConnectionMeta {
-    type Target = Self;
-    type Stored = Self;
-
-    fn into_stored(self) -> Self {
-        self
-    }
-
-    fn from_stored(stored: &Self) -> Self {
-        stored.clone()
-    }
-}
-
-#[cfg(feature = "di-check")]
-impl upwell_di::Provided<WsConnectionMeta> for upwell_di::Wiring {}
-
-pub(crate) static WS_CONNECTION_META_DESCRIPTOR: upwell_di::ComponentDescriptor =
-    upwell_di::ComponentDescriptor::manual(
-        "__upwell_ws_connection_meta",
-        "WsConnectionMeta",
-        TypeDescriptor::of::<WsConnectionMeta>("WsConnectionMeta"),
-        &crate::scope::WebsocketConnection,
-    );
-
-/// Tracks peer activity without spawning a feeder or timer task. A silent connection is probed
-/// once, then dropped if no frame (normally a pong) arrives during the following interval.
-pub struct WsIdle {
-    timeout: Option<Duration>,
-    deadline: Option<tokio::time::Instant>,
-    awaiting_probe_reply: bool,
-}
-
-impl WsIdle {
-    /// Builds the liveness state from one connection's framework settings.
-    pub fn from_connection(connection: &ScopeContainer) -> Self {
-        Self::new(WsConnectionSettings::from_connection(connection).idle_timeout)
-    }
-
-    /// Builds liveness state for an explicit idle interval.
-    pub fn new(timeout: Option<Duration>) -> Self {
-        let deadline = timeout.map(|timeout| tokio::time::Instant::now() + timeout);
-
-        Self {
-            timeout,
-            deadline,
-            awaiting_probe_reply: false,
-        }
-    }
-
-    /// Waits until the current idle deadline, or forever when probing is disabled.
-    pub async fn wait(&self) {
-        match self.deadline {
-            Some(deadline) => tokio::time::sleep_until(deadline).await,
-            None => std::future::pending().await,
-        }
-    }
-
-    /// Records peer activity and resets the liveness deadline.
-    pub fn on_activity(&mut self) {
-        self.awaiting_probe_reply = false;
-        self.reset_deadline();
-    }
-
-    /// Returns `true` when the peer already ignored one probe and must be disconnected.
-    pub fn on_timeout(&mut self) -> bool {
-        if self.awaiting_probe_reply {
-            return true;
-        }
-
-        self.awaiting_probe_reply = true;
-        self.reset_deadline();
-
-        false
-    }
-
-    fn reset_deadline(&mut self) {
-        self.deadline = self
-            .timeout
-            .map(|timeout| tokio::time::Instant::now() + timeout);
-    }
-}
-
-/// Per-endpoint WebSocket admission gate. An owned permit is captured by the upgrade future and is
-/// released automatically when that connection finishes, including scope-build and panic unwind.
-#[derive(Clone)]
-struct WsAdmission {
-    permits: Option<Arc<tokio::sync::Semaphore>>,
-}
-
-impl WsAdmission {
-    fn new(max_connections: usize) -> crate::Result<Self> {
-        if max_connections > tokio::sync::Semaphore::MAX_PERMITS {
-            return Err(crate::Error::Config(format!(
-                "max_websocket_connections ({max_connections}) exceeds Tokio's semaphore limit ({})",
-                tokio::sync::Semaphore::MAX_PERMITS
-            )));
-        }
-
-        Ok(Self {
-            permits: (max_connections > 0)
-                .then(|| Arc::new(tokio::sync::Semaphore::new(max_connections))),
-        })
-    }
-
-    fn try_acquire(
-        &self,
-    ) -> Result<Option<tokio::sync::OwnedSemaphorePermit>, tokio::sync::TryAcquireError> {
-        self.permits
-            .as_ref()
-            .map(|permits| Arc::clone(permits).try_acquire_owned())
-            .transpose()
-    }
-}
-
-/// Temporary protocol-level guard until generic extraction-time validation is available.
-pub(crate) fn validate_config(config: &crate::AxumConfig) -> crate::Result<()> {
-    if config.max_websocket_message_bytes == 0 || config.max_websocket_frame_bytes == 0 {
-        return Err(crate::Error::Config(
-            "WebSocket message and frame byte limits must both be greater than zero".to_owned(),
-        ));
-    }
-
-    if config.max_websocket_connections > tokio::sync::Semaphore::MAX_PERMITS {
-        return Err(crate::Error::Config(format!(
-            "max_websocket_connections ({}) exceeds Tokio's semaphore limit ({})",
-            config.max_websocket_connections,
-            tokio::sync::Semaphore::MAX_PERMITS
-        )));
-    }
-
-    Ok(())
 }
 
 /// A [`WebsocketProtocol`] that carries topic pub/sub: it frames a delivered message for one
@@ -677,7 +472,7 @@ pub trait MessageReply: WebsocketProtocol + crate::messaging::MessagingProtocol 
 /// races [`wait`](Self::wait) against reading the socket, so it can drain on app shutdown rather than
 /// blocking the server's graceful stop on a long-lived connection.
 #[derive(Clone)]
-pub struct WsShutdown(tokio::sync::watch::Receiver<bool>);
+pub struct WsShutdown(pub(crate) tokio::sync::watch::Receiver<bool>);
 
 impl WsShutdown {
     /// Resolves when graceful shutdown has been signalled for this endpoint.
@@ -689,161 +484,6 @@ impl WsShutdown {
 
         let _ = self.0.changed().await;
     }
-}
-
-/// The app-side management handle for one mounted ws endpoint: its path and protocol, and the
-/// trigger that drains its live connections on graceful shutdown. Held by the [`Axum`](crate::Axum)
-/// protocol so endpoints can be inspected and shut down.
-pub struct WebsocketHandler {
-    path: String,
-    protocol_name: &'static str,
-    shutdown: tokio::sync::watch::Sender<bool>,
-}
-
-impl WebsocketHandler {
-    /// The upgrade path this endpoint is mounted at.
-    pub fn path(&self) -> &str {
-        &self.path
-    }
-
-    /// The name of the protocol serving this endpoint.
-    pub fn protocol_name(&self) -> &'static str {
-        self.protocol_name
-    }
-
-    /// Signals every live connection on this endpoint to drain and close.
-    pub fn trigger_shutdown(&self) {
-        let _ = self.shutdown.send(true);
-    }
-}
-
-/// Mounts one ws endpoint: builds the protocol `P` from its controllers and `options`, wires the
-/// framework's generic upgrade handler at `path`, and returns a path-scoped router plus its
-/// management handle. Monomorphized per `P`; `register_ws` stores a closure that calls it.
-pub(crate) fn mount_ws<P: WebsocketProtocol>(
-    path: &str,
-    controllers: Vec<WsControllerDescriptor>,
-    runtime: &AppRuntime,
-    options: P::Options,
-) -> crate::Result<(axum::Router, WebsocketHandler)> {
-    use axum::extract::ws::WebSocketUpgrade;
-    use axum::response::IntoResponse as _;
-
-    let (tx, rx) = tokio::sync::watch::channel(false);
-    let config = runtime
-        .root()
-        .config::<crate::AxumConfig>(crate::AXUM_CONFIG_PATH)
-        .expect("AxumConfig missing from config store; Axum should register it")
-        .snapshot();
-
-    validate_config(&config)?;
-
-    let proto = Arc::new(P::build(&controllers, runtime, options).map_err(|source| {
-        crate::Error::WebsocketBuild {
-            protocol: std::any::type_name::<P>(),
-            source: Box::new(source),
-        }
-    })?);
-    let shutdown = WsShutdown(rx);
-    let admission = WsAdmission::new(config.max_websocket_connections)?;
-    let max_message_bytes = config.max_websocket_message_bytes;
-    let max_frame_bytes = config.max_websocket_frame_bytes;
-    let runtime = runtime.clone();
-
-    // The pre-built generic upgrade handler opens this socket's WebsocketConnection scope with
-    // upgrade and negotiation metadata, then hands the socket to the protocol that owns the
-    // read→decode→dispatch→encode→send loop.
-    let route_handler = move |method: axum::http::Method,
-                              uri: axum::http::Uri,
-                              headers: axum::http::HeaderMap,
-                              ws: WebSocketUpgrade| {
-        let proto = Arc::clone(&proto);
-        let shutdown = shutdown.clone();
-        let runtime = runtime.clone();
-        let admission = admission.clone();
-
-        async move {
-            let permit = match admission.try_acquire() {
-                Ok(permit) => permit,
-
-                Err(_) => {
-                    tracing::warn!(
-                        target: "upwell::axum",
-                        "websocket connection limit reached; rejecting upgrade"
-                    );
-
-                    return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
-                }
-            };
-
-            let ws = ws
-                .max_message_size(max_message_bytes)
-                .max_frame_size(max_frame_bytes)
-                .protocols(P::SUBPROTOCOLS.iter().copied());
-            let selected_subprotocol = ws
-                .selected_protocol()
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_owned);
-
-            if P::REQUIRE_SUBPROTOCOL && selected_subprotocol.is_none() {
-                return axum::http::StatusCode::BAD_REQUEST.into_response();
-            }
-
-            ws.on_upgrade(move |mut socket| async move {
-                // Keep the admission permit for exactly the lifetime of this upgraded connection.
-                let _permit = permit;
-                let upgrade_seed = BoxedComponent {
-                    ty: TypeDescriptor::of::<WebsocketUpgradeMeta>("WebsocketUpgradeMeta"),
-                    value: Box::new(WebsocketUpgradeMeta::from_parts(method, uri, headers)),
-                };
-                let connection_seed = BoxedComponent {
-                    ty: TypeDescriptor::of::<WsConnectionMeta>("WsConnectionMeta"),
-                    value: Box::new(WsConnectionMeta {
-                        selected_subprotocol,
-                    }),
-                };
-
-                let connection = match runtime
-                    .open_scope_from_root(
-                        &crate::scope::WebsocketConnection,
-                        vec![upgrade_seed, connection_seed],
-                    )
-                    .await
-                {
-                    Ok(scope) => scope,
-
-                    Err(error) => {
-                        tracing::error!(
-                            target: "upwell::axum",
-                            %error,
-                            "ws connection scope build failed; closing socket"
-                        );
-
-                        let close = Message::Close(Some(CloseFrame {
-                            code: close_code::ERROR,
-                            reason: Utf8Bytes::from_static("connection scope build failed"),
-                        }));
-
-                        let _ = tokio::time::timeout(SOCKET_SEND_TIMEOUT, socket.send(close)).await;
-
-                        return;
-                    }
-                };
-
-                proto.serve(socket, connection, shutdown).await;
-            })
-            .into_response()
-        }
-    };
-
-    let router = axum::Router::new().route(path, axum::routing::any(route_handler));
-    let handler = WebsocketHandler {
-        path: path.to_string(),
-        protocol_name: std::any::type_name::<P>(),
-        shutdown: tx,
-    };
-
-    Ok((router, handler))
 }
 
 #[cfg(test)]

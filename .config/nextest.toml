@@ -1,4 +1,4 @@
-nextest-version = { required = "0.9.140", recommended = "0.9.140" }
+nextest-version = { required = "0.9.150", recommended = "0.9.150" }
 
 [store]
 dir = "target/nextest"
@@ -59,6 +59,7 @@ test-group = "timing-sensitive"
 filter = '''
   binary_id(=upwell::config_reload)
   | binary_id(=upwell::config_reload_hardening)
+  | binary_id(=upwell::scopes_reload)
   | binary_id(=upwell::config_triggers)
   | binary_id(=upwell::hooks)
   | binary_id(=upwell::hook_abort)
@@ -77,6 +78,7 @@ filter = '''
   | binary_id(=upwell-example-http::extractors)
   | binary_id(=upwell-example-http::stomp)
   | binary_id(=upwell-example-http::ws)
+  | binary_id(=upwell-example-http::ws_reload)
   | (
     binary_id(=upwell-axum)
     & test(=ws::tests::required_subprotocol_is_negotiated_and_seeded)
@@ -128,7 +130,14 @@ filter = '''
   | binary_id(=upwell::provider_primitives)
   | binary_id(=upwell::providers)
   | binary_id(=upwell::scope_local_providers)
+  | binary_id(=upwell::scope_capture)
   | binary_id(=upwell::scopes)
+  | binary_id(=upwell::scopes_on_demand)
+  | binary_id(=upwell::scopes_strict)
+  | binary_id(=upwell::scopes_eager)
+  | binary_id(=upwell::scopes_eager_http)
+  | binary_id(=upwell::request_seeds)
+  | binary_id(=upwell::scopes_reload)
   | binary_id(=upwell::status_codes)
   | binary_id(=upwell::config_reload)
   | binary_id(=upwell::config_reload_hardening)
@@ -151,6 +160,7 @@ filter = '''
   | binary_id(=upwell-example-http::routes)
   | binary_id(=upwell-example-http::stomp)
   | binary_id(=upwell-example-http::ws)
+  | binary_id(=upwell-example-http::ws_reload)
 '''
 priority = 50
 

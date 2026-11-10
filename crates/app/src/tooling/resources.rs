@@ -1,16 +1,17 @@
 use std::collections::BTreeMap;
 
-use upwell_core::{Singleton, StaticScope, Transient};
+use upwell_core::{Scope, Singleton, Transient};
 use upwell_tooling_schema::{Provenance, RelationshipKind, ResourceKind};
 
 use super::{
     Projection, component_id, config_binding_id, contribution_provenance, item_location,
     lifecycle_resource, scope_id, type_location, with_source,
 };
-use crate::ProtocolDefinition;
+use crate::{ProtocolDefinition, ScopeDeclaration};
 
 mod condition;
 mod dependency;
+mod entry;
 
 impl<D: ProtocolDefinition> Projection<'_, D> {
     pub(super) fn project_application(&mut self) {
@@ -93,6 +94,24 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
         }
     }
 
+    /// Where a scope comes from: the application's `declaration`, or the protocol's topology
+    /// without one.
+    fn scope_provenance(&self, declaration: Option<&ScopeDeclaration>) -> Provenance {
+        let Some(declaration) = declaration else {
+            return Provenance {
+                owner: Some(format!("protocol:{}", self.app.protocol_id().as_str())),
+                origin: Some(String::from("protocol")),
+                ..Provenance::default()
+            };
+        };
+
+        Provenance {
+            origin: Some(String::from("application")),
+            source: declaration.source.as_ref().and_then(item_location),
+            ..Provenance::default()
+        }
+    }
+
     pub(super) fn project_scopes(&mut self) {
         self.framework_scope(
             Singleton::ID.as_str(),
@@ -109,23 +128,51 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
 
         for boundary in self.app.scope_topology().boundaries() {
             let id = scope_id(boundary.id().as_str());
-            let parent = scope_id(boundary.parent().id().as_str());
+
+            let mut labels = BTreeMap::from([
+                (String::from("rank"), boundary.rank().to_string()),
+                (String::from("scope-id"), boundary.id().as_str().to_string()),
+                (
+                    String::from("generations"),
+                    boundary.generations().as_str().to_string(),
+                ),
+            ]);
+
+            if let Some(layout) = self.app.tooling_snapshot().scope_layout(&boundary.id()) {
+                labels.insert(String::from("eager"), id_list(&layout.eager));
+                labels.insert(String::from("seeds"), id_list(&layout.seeds));
+
+                if let Some(unreached) = &layout.unreached {
+                    labels.insert(String::from("unreached-by-entries"), id_list(unreached));
+                }
+            }
+
+            let declaration = self
+                .app
+                .registry()
+                .scopes
+                .iter()
+                .find(|scope| scope.boundary.id() == boundary.id());
+
+            if let Some(declaration) = declaration {
+                labels.insert(String::from("params"), declaration.fields.join(","));
+            }
+
+            let provenance = self.scope_provenance(declaration);
 
             self.resource(
                 &id,
                 ResourceKind::Scope,
                 boundary.name(),
-                Some(Provenance {
-                    owner: Some(format!("protocol:{}", self.app.protocol_id().as_str())),
-                    origin: Some(String::from("protocol")),
-                    ..Provenance::default()
-                }),
-                BTreeMap::from([
-                    (String::from("rank"), boundary.rank().to_string()),
-                    (String::from("scope-id"), boundary.id().as_str().to_string()),
-                ]),
+                Some(provenance),
+                labels,
             );
-            self.relationship(RelationshipKind::OpensScope, &parent, &id, []);
+
+            for parent in boundary.parents() {
+                let parent = scope_id(parent.id().as_str());
+
+                self.relationship(RelationshipKind::OpensScope, &parent, &id, []);
+            }
         }
     }
 
@@ -280,4 +327,13 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
             previous = Some(id);
         }
     }
+}
+
+/// Component IDs as one label value: comma-separated, or `none`.
+fn id_list(ids: &[&str]) -> String {
+    if ids.is_empty() {
+        return String::from("none");
+    }
+
+    ids.join(", ")
 }

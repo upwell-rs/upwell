@@ -1,6 +1,7 @@
 //! Provider fallback, ordering and dependency validation after condition filtering.
 
 use super::*;
+use upwell_core::Scope;
 
 static DEFAULT_BEFORE_CUSTOM: [ProviderOrder; 1] = [ProviderOrder {
     target: TypeDescriptor::of::<CustomAuthenticator>("CustomAuthenticator"),
@@ -61,7 +62,7 @@ fn provider_fallback_uses_existing_selection_after_filtering() {
                 TypeDescriptor::of::<dyn Authenticator>("Authenticator").type_id,
                 None,
                 upwell_core::ResolutionMode::Eager,
-                &Singleton,
+                Singleton::KEY,
                 &|_, _| true,
             )
             .expect("custom is selected")

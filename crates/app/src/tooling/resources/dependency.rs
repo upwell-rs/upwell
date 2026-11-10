@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
 use upwell_core::{
-    Cardinality, DependencyDescriptor, DependencyObservation, ResolutionMode, Singleton,
-    StaticScope, Transient,
+    Cardinality, DependencyDescriptor, DependencyObservation, Scope, Singleton, Transient,
 };
 use upwell_di::{DependencyTarget, ProviderDescriptor};
 use upwell_tooling_schema::{RelationshipKind, ResourceKind};
@@ -146,7 +145,7 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
         } else {
             "manual-unseeded"
         };
-        let labels = BTreeMap::from([
+        let mut labels = BTreeMap::from([
             (String::from("component-id"), descriptor.id.to_string()),
             (
                 String::from("rust-type"),
@@ -175,6 +174,13 @@ impl<D: ProtocolDefinition> Projection<'_, D> {
             .plugin_plan()
             .selected_contribution(&id)
             .map(contribution_provenance);
+
+        if descriptor.scope.id() != Singleton::ID && !descriptor.scope.is_transient() {
+            labels.insert(
+                String::from("construction-policy"),
+                descriptor.construction.as_str().to_string(),
+            );
+        }
 
         self.resource(
             &id,
@@ -320,12 +326,7 @@ pub(super) fn dependency_labels(dependency: &DependencyDescriptor) -> BTreeMap<S
         Cardinality::Collection => "collection",
         Cardinality::Keyed => "keyed",
     };
-    let resolution = match dependency.resolution {
-        ResolutionMode::Eager => "eager",
-        ResolutionMode::Deferred => "deferred",
-        ResolutionMode::Lazy => "lazy",
-        ResolutionMode::Fresh => "fresh",
-    };
+    let resolution = dependency.resolution.as_str();
     let observation = match dependency.observation {
         DependencyObservation::Snapshot => "snapshot",
         DependencyObservation::Live => "live",

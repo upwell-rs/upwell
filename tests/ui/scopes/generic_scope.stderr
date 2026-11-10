@@ -1,0 +1,13 @@
+error: a #[scope] type cannot be generic: its identity, rank and parents are constants of one type
+ --> tests/ui/scopes/generic_scope.rs:5:15
+  |
+5 | struct Generic<T>(T);
+  |               ^^^
+
+warning: unused import: `upwell::scope::Root`
+ --> tests/ui/scopes/generic_scope.rs:1:5
+  |
+1 | use upwell::scope::Root;
+  |     ^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

@@ -1,6 +1,7 @@
 //! Availability cycles and the scope and manual-registration rules for conditions.
 
 use super::*;
+use upwell_core::Scope;
 
 static A_TO_B: ConditionDescriptor = ConditionDescriptor::component_eligible("a-to-b", "b");
 static B_TO_A: ConditionDescriptor = ConditionDescriptor::not("b-to-a", &B_TO_A_TARGET);
@@ -66,7 +67,7 @@ fn manual_and_non_singleton_conditions_are_rejected() {
         "manual",
         "manual",
         TypeDescriptor::of::<ComponentA>("manual"),
-        &Singleton,
+        Singleton::KEY,
     );
     manual.condition = Some(&CUSTOM_ENABLED);
     let manual_registry = ComponentRegistry {
@@ -75,7 +76,7 @@ fn manual_and_non_singleton_conditions_are_rejected() {
     };
     let mut transient =
         component::<ComponentB>("transient", factory).with_condition(&CUSTOM_ENABLED);
-    transient.scope = &Transient;
+    transient.scope = Transient::KEY;
     let transient_registry = ComponentRegistry {
         components: vec![transient],
         providers: Vec::new(),
@@ -102,7 +103,7 @@ fn manual_registration_cannot_silently_replace_a_conditional_factory() {
         "manual",
         "manual",
         TypeDescriptor::of::<ComponentA>("manual"),
-        &Singleton,
+        Singleton::KEY,
     );
     let registry = ComponentRegistry {
         components: vec![conditional, manual],

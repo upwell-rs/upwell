@@ -23,11 +23,14 @@ pub use upwell_core::*;
 /// `upwell-rpc`, available with the `daemon` feature.
 #[cfg(not(target_family = "wasm"))]
 pub mod scope {
-    pub use upwell_core::scope::{Singleton, Transient};
+    pub use upwell_core::scope::{Root, Singleton, Transient};
 
     #[cfg(feature = "daemon")]
     pub use upwell_rpc::scope::{Connection, Request}; // should not be here, should be in crate::daemon with the rest of the daemon related items
 }
+
+#[cfg(not(target_family = "wasm"))]
+pub mod context;
 
 /// Component condition descriptors, callback inputs, and [`resolve`](condition::resolve),
 /// the raw config read a condition callback may make.
@@ -51,12 +54,14 @@ pub use upwell_di::{
     FromContainer, GenerationSnapshot, HotUpdate, HotUpdateFactory, HotUpdateOutput, Injectable,
     Lazy, Live, LiveCell, LiveRebind, LiveRef, NodeAction, OneShot, PROVIDERS, PlannedNode,
     Previous, Provided, ProviderDescriptor, ProviderOf, ProviderOrder, ProviderOrderDirection,
-    ReasonKind, Registration, RegistryFor, ReplacementFactory, RootResolver, ScopeContainer,
-    ScopeRegistry, ServiceComponent, StaleGraphCandidate, TransitionPlan, TransitionReason,
+    ReadyComponentFactory, ReadyFactory, ReasonKind, Registration, RegistryFor, ReplacementFactory,
+    RootResolver, ScopeContainer, ScopeRegistry, ScopedConstruction, ServiceComponent,
+    StaleGraphCandidate, StoredValue, TransitionPlan, TransitionReason, UnplannedConstruction,
     UpwellDescriptor, ValidatedConditionEvaluation, Wired, Wiring, dependency_of,
-    dependency_of_observed, dispatch_factory, dispatch_hot_update, dispatch_replacement,
-    dispatch_transition, erase_provider, factories, factory_dependencies, from_boxed,
-    hot_update_dependencies, provider_live_cell, replacement_dependencies, topological_sort,
+    dependency_of_observed, dispatch_factory, dispatch_hot_update, dispatch_ready_factory,
+    dispatch_replacement, dispatch_transition, erase_provider, factories, factory_dependencies,
+    from_boxed, hot_update_dependencies, provider_live_cell, replacement_dependencies,
+    topological_sort,
 };
 /// The DI layer's own error/result, exposed under distinct names so macro-generated
 /// **factory** code can name them without colliding with another layer's `Error`/`Result`.
@@ -110,29 +115,33 @@ pub use upwell_app::HostLifecycleCapabilities;
 pub use upwell_app::contribute;
 #[cfg(not(target_family = "wasm"))]
 pub use upwell_app::{
-    App, AppBuilder, AppConditionEvaluation, AppConditionState, AppHost, AppRegistry, AppRuntime,
-    AppStage, ApplicationPluginRegistrar, BootstrapContext, Built, CandidateGraph,
-    ComponentRetired, ComponentRetirement, ComponentTransitionReport, CompositionDiagnostic,
-    CompositionDiagnostics, CompositionDirective, CompositionEdge, CompositionPhase,
-    CompositionTarget, ContributionId, ContributionProvenance, Contributor, DisplacedGeneration,
-    EarlyPluginCatalog, EarlyPluginPlan, EffectivePluginPlan, ExecutionMode, HostError,
-    IdErrorKind, Initial, InstallationOrigin, InstallationProvenance, InvalidCompositionId,
-    LifecyclePhase, LogFormat, LoggingConfig, PendingTransition, PhaseError, PhaseTiming, Plugin,
-    PluginContribution, PluginContributionKind, PluginContributions, PluginDeclaration, PluginId,
-    PluginPlanError, PluginRelation, PluginResolutionPlan, PluginSlotId, PluginWithOptions,
-    PreBuild, PreBuildContext, PreparedApp, PreparedProtocol, PreparedScopeTopology,
-    ProtocolDefinition, ProtocolId, ProtocolPluginRegistrar, ProtocolRuntime, RelationKind,
-    RelationTarget, ReplacementDecision, ResolvedPlugin, RestartReason, RestartRequired,
-    RetirementContext, RetirementReason, RuntimeReloader, RuntimeTransitionReport, RuntimeView,
-    ScopeBoundary, ScopeParent, ScopeTopology, ScopeTopologyError, Serve, ServerConfig, Setup,
-    ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents, SuppressionDecision, TransitionAborted,
-    TransitionAttemptId, TransitionCommitted, TransitionDecision, TransitionFailure,
-    TransitionHookContext, TransitionHookOutcome, TransitionHookReport, TransitionOutcome,
-    TransitionOutcomeContext, TransitionPhase, TransitionProposal, TransitionRejection,
-    TransitionVerdict, ValidationContext, build_host, build_host_context, build_prepared_host,
-    extend_late_plugins, prepare_host, prepare_host_context, prepare_setup_host_context,
-    resolve_early_plugins, resolve_host_dependency, resolve_host_plugin_catalog,
-    retain_host_plugin_catalog, serve_host, setup_host, setup_host_context,
+    AnyScopeEnded, App, AppBuilder, AppConditionEvaluation, AppConditionState, AppHost,
+    AppRegistry, AppRuntime, AppStage, ApplicationPluginRegistrar, BootstrapContext, Built,
+    CandidateGraph, ComponentRetired, ComponentRetirement, ComponentTransitionReport,
+    CompositionDiagnostic, CompositionDiagnostics, CompositionDirective, CompositionEdge,
+    CompositionPhase, CompositionTarget, ContributionId, ContributionProvenance, Contributor,
+    DisplacedGeneration, ENTRIES, EarlyPluginCatalog, EarlyPluginPlan, EffectivePluginPlan,
+    EntryDescriptor, EntryError, EntryId, EntryOwner, EntryScope, EntryTable, EntryTargets,
+    ExecutionMode, HostError, IdErrorKind, Initial, InstallationOrigin, InstallationProvenance,
+    InvalidCompositionId, LifecyclePhase, LogFormat, LoggingConfig, OpenScope, Opening, OpensUnder,
+    ParentScope, PendingTransition, PhaseError, PhaseTiming, Plugin, PluginContribution,
+    PluginContributionKind, PluginContributions, PluginDeclaration, PluginId, PluginPlanError,
+    PluginRelation, PluginResolutionPlan, PluginSlotId, PluginWithOptions, PreBuild,
+    PreBuildContext, PreparedApp, PreparedProtocol, PreparedScopeTopology, ProtocolDefinition,
+    ProtocolId, ProtocolPluginRegistrar, ProtocolRuntime, RelationKind, RelationTarget,
+    ReplacementDecision, ResolvedPlugin, RestartReason, RestartRequired, RetirementContext,
+    RetirementReason, RunError, RuntimeReloader, RuntimeTransitionReport, RuntimeView, SCOPES,
+    ScopeBoundary, ScopeBuilder, ScopeDeclaration, ScopeEnd, ScopeEndContext, ScopeEndKind,
+    ScopeEnded, ScopeEntry, ScopeOpener, ScopeParent, ScopeRun, ScopeTopology, ScopeTopologyError,
+    ScopeWork, Seeds, Serve, ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy,
+    SpanEvents, SuppressionDecision, TransitionAborted, TransitionAttemptId, TransitionCommitted,
+    TransitionDecision, TransitionFailure, TransitionHookContext, TransitionHookOutcome,
+    TransitionHookReport, TransitionOutcome, TransitionOutcomeContext, TransitionPhase,
+    TransitionProposal, TransitionRejection, TransitionVerdict, TryScopeWork, ValidationContext,
+    build_host, build_host_context, build_prepared_host, extend_late_plugins, prepare_host,
+    prepare_host_context, prepare_setup_host_context, rank_below, resolve_early_plugins,
+    resolve_host_dependency, resolve_host_plugin_catalog, retain_host_plugin_catalog, serve_host,
+    setup_host, setup_host_context,
 };
 
 /// Versioned protocol-neutral developer-tooling schema and prepared-state projection types.
@@ -189,7 +198,7 @@ pub use upwell_transport::{
 // always available; the RPC daemon macros (`service`/`handlers`/`rpc`) live in the `daemon`
 // module behind the `daemon` feature.
 // ---------------------------------------------------------------------------
-pub use upwell_macros::{app, component, config, injectable, methods, when};
+pub use upwell_macros::{app, component, config, entry, injectable, methods, scope, when};
 
 /// Re-exported so macro-generated code can reference the `#[distributed_slice]` attribute
 /// through the facade crate without user crates depending on `linkme` directly. The generated
@@ -256,6 +265,17 @@ pub mod config {
     pub use upwell_config::Yaml;
 }
 
+/// Per-instance scope logs: the `upwell.scope` span, the routing layer and the log stream.
+#[cfg(not(target_family = "wasm"))]
+pub mod logs {
+    #[cfg(feature = "tracing-subscriber")]
+    pub use upwell_app::logs::ScopeLogLayer;
+    pub use upwell_app::logs::{
+        DEFAULT_LOG_BUFFER, InstanceLogs, LogField, LogOptions, LogRecord, SCOPE_LOG_TARGET,
+        SCOPE_SPAN_NAME, ScopeLog, ScopeLogSink, ScopeLogStream, ScopeLogs,
+    };
+}
+
 /// Framework builtins: the seeded [`ShutdownHandle`] and [`RuntimeReloader`] injectables, the opt-in
 /// [`ServerConfig`] / [`LoggingConfig`] property structs, and the feature-gated
 /// `init_tracing` subscriber helper.
@@ -275,69 +295,7 @@ pub mod builtins {
 /// (`#[service]`/`#[handlers]`/`#[rpc]`/`app!`) emit `::upwell::daemon::*` paths, so end
 /// users depend only on `upwell` — never on `upwell-rpc` directly.
 #[cfg(all(feature = "daemon", not(target_family = "wasm")))]
-pub mod daemon {
-    pub use upwell_rpc::{
-        App, AppBuilder, Cancel, Error, ErrorHandler, ErrorResponse, FallibleHandler, FromContext,
-        Guard, GuardLayer, GuardService, Handler, Inject, OperationKind, ParameterDescriptor,
-        ParameterKind, Payload, Peer, PreparedRpc, RequestStream, ResolvedService, Responder,
-        ResponseError, ResponseStream, Result, RouterService, Rpc, RpcAppBuilder, RpcCallContext,
-        RpcDescriptor, RpcGroup, RpcHandler, RpcLimits, RpcOutcome, RpcRequest, RpcResponse,
-        RpcRouter, RpcRuntime, RpcService, SERVICES, ServiceDescriptor, ServiceRpcs, Streaming,
-        dispatch_fallible, dispatch_with,
-    };
-
-    /// Service/RPC route resolution, for introspecting the registered surface.
-    pub use upwell_rpc::routes::resolved_services;
-
-    /// The RPC component scopes.
-    pub use upwell_rpc::scope::{Connection, Request};
-
-    /// The RPC daemon macros, re-exported through `upwell-rpc` (which owns them). With the
-    /// facade's `daemon` feature, `upwell-rpc/facade` is on, so their generated code roots
-    /// protocol types at `::upwell::daemon::*` and core types at `::upwell::*`.
-    /// (`app!` is a protocol-agnostic core macro at the crate root, not here.)
-    pub use upwell_rpc::{handlers, rpc, service};
-
-    /// Re-exported so middleware authors can implement `tower::Layer` / `tower::Service`.
-    pub use upwell_rpc::tower;
-
-    /// Re-exported so `#[rpc(stream)]` client codegen can project a concrete stream's item
-    /// type. Hidden; referenced only by generated code.
-    #[doc(hidden)]
-    pub use upwell_rpc::__Stream;
-
-    /// The RPC byte-stream transport — the daemon's [`ProtocolTransport`](crate::client) impl
-    /// (`StreamClientTransport`), its response stream, and connect helpers. The agnostic client
-    /// surface (`Client` API, capability traits) lives at [`upwell::client`](crate::client);
-    /// this is the RPC carry that plugs into it. Gated behind the `client` feature.
-    #[cfg(feature = "client")]
-    pub use upwell_rpc::{RpcResponses, StreamClientTransport, connect_tcp};
-
-    #[cfg(all(feature = "client", unix))]
-    pub use upwell_rpc::connect_unix;
-
-    /// Deprecated alias for [`App`]. Renamed in 0.7.0; removed in 1.0.0.
-    #[deprecated(since = "0.7.0", note = "renamed to `App`; removed in 1.0.0")]
-    pub type Daemon = App;
-
-    /// Deprecated alias for [`AppBuilder`]. Renamed in 0.7.0; removed in 1.0.0.
-    #[deprecated(since = "0.7.0", note = "renamed to `AppBuilder`; removed in 1.0.0")]
-    pub type DaemonBuilder = AppBuilder;
-
-    /// Common imports for building an RPC daemon: `use upwell::daemon::prelude::*;` (pair
-    /// with the crate-root `use upwell::prelude::*;` for the core framework + `app!`).
-    pub mod prelude {
-        pub use super::{
-            App, FromContext, Handler, Inject, Payload, Peer, Responder, Rpc, RpcAppBuilder,
-            Streaming, handlers, rpc, service,
-        };
-
-        pub use upwell_transport::TcpTransport;
-
-        #[cfg(unix)]
-        pub use upwell_transport::UnixTransport;
-    }
-}
+pub mod daemon;
 
 /// The job scheduler: run `async` methods on an interval or cron schedule as supervised
 /// background tasks, or schedule work at run time.
@@ -418,8 +376,8 @@ pub mod axum {
         /// `stomp` feature.
         #[cfg(all(feature = "stomp", not(target_family = "wasm")))]
         pub use super::{
-            Publisher, Stomp, StompConfig, StompConnect, StompPrincipal, StompSession,
-            StompTopicBus, Topic, topics,
+            Publisher, Stomp, StompAuthenticated, StompConfig, StompConnect, StompPrincipal,
+            StompSession, StompTopicBus, Topic, topics,
         };
     }
 }
@@ -429,7 +387,7 @@ pub mod axum {
 pub mod prelude {
     // The macros are built for the host and usable from any target (their generated server code is
     // gated out on wasm); the framework *types* are the daemon-stack surface, compiled out on wasm.
-    pub use crate::{app, component, config, injectable, methods, when};
+    pub use crate::{app, component, config, entry, injectable, methods, scope, when};
 
     #[cfg(not(target_family = "wasm"))]
     pub use crate::{

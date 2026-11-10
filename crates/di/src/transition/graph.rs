@@ -1,10 +1,10 @@
 //! The effective graph: the selected, validated component graph of one runtime generation.
 
-use std::any::TypeId;
+use crate::registry::scopes::scope_allows_with;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
-use upwell_core::{RuntimeGenerationId, ScopeId, Singleton, StaticScope, Transient};
+use upwell_core::{RuntimeGenerationId, Scope, ScopeId, Singleton, Transient};
 
 use super::plan::{self, LiveClosure};
 use super::{
@@ -32,16 +32,24 @@ pub struct EffectiveGraph {
 }
 
 impl EffectiveGraph {
-    /// Validates and freezes an effective registry using caller-owned scope reachability.
+    /// Validates and freezes an effective registry using caller-owned scope reachability and
+    /// enclosure, with the meaning of
+    /// [`ComponentRegistry::validate_with_scope_reachability`].
     pub fn build(
         generation: RuntimeGenerationId,
         registry: &ComponentRegistry,
         can_reach: impl Fn(ScopeId, ScopeId) -> bool + Copy,
+        may_enclose: impl Fn(ScopeId, ScopeId) -> bool,
     ) -> crate::Result<Self> {
         let components = registry.resolved_components()?;
         let selection = Arc::new(registry.provider_selection_model(&components)?);
 
-        registry.validate_with_scope_reachability_using(&components, &selection, can_reach)?;
+        registry.validate_with_scope_reachability_using(
+            &components,
+            &selection,
+            can_reach,
+            may_enclose,
+        )?;
 
         Self::from_validated(generation, &components, selection, can_reach)
     }
@@ -52,10 +60,6 @@ impl EffectiveGraph {
         selection: Arc<ProviderSelectionModel>,
         can_reach: impl Fn(ScopeId, ScopeId) -> bool + Copy,
     ) -> crate::Result<Self> {
-        let by_type = components
-            .iter()
-            .map(|component| (component.ty.type_id, *component))
-            .collect::<BTreeMap<_, _>>();
         let mut nodes = BTreeMap::new();
 
         for component in components {
@@ -66,9 +70,7 @@ impl EffectiveGraph {
                 .into_iter()
                 .enumerate()
                 .map(|(ordinal, dependency)| {
-                    capture_demand(
-                        *component, ordinal, dependency, &selection, &by_type, can_reach,
-                    )
+                    capture_demand(*component, ordinal, dependency, &selection, can_reach)
                 })
                 .collect::<crate::Result<Vec<_>>>()?
                 .into_boxed_slice();
@@ -251,7 +253,6 @@ fn capture_demand(
     ordinal: usize,
     dependency: upwell_core::DependencyDescriptor,
     selection: &ProviderSelectionModel,
-    by_type: &BTreeMap<TypeId, ComponentDescriptor>,
     can_reach: impl Fn(ScopeId, ScopeId) -> bool + Copy,
 ) -> crate::Result<DependencyDemand> {
     let targets = if dependency.config {
@@ -275,9 +276,12 @@ fn capture_demand(
                     scope: component.scope.id(),
                 }),
                 DependencyTarget::Provider(provider) => {
-                    let component = by_type
-                        .get(&provider.concrete_ty.type_id)
-                        .copied()
+                    let component = selection
+                        .component_from(
+                            provider.concrete_ty.type_id,
+                            consumer.scope,
+                            &|from, to| scope_allows_with(from, to, &can_reach),
+                        )
                         .ok_or_else(|| {
                             crate::Error::ProviderComponentMissing(Box::new(
                                 crate::error::ProviderComponentMissing {

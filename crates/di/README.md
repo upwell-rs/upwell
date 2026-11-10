@@ -57,9 +57,33 @@ static CACHE: ComponentDescriptor = ComponentDescriptor::of::<Cache>()
     .with_factories(factories!["fresh" => Cache::new, replace "carry" => carry]);
 ```
 
+One component type may build in several scopes that do not share a hierarchy, such as a WebSocket connection and an HTTP request: [`ComponentDescriptor::with_scopes`] (what `#[component(scope = [A, B])]` emits) places it in each listed scope, and a factory's own [`scopes`](ComponentFactoryDescriptor::scopes) list places that factory. The registry expands each into one placement per scope, and a consumer resolves the one placement its chain reaches. Preparation rejects scopes where one encloses another, a transient placement beside any other, and a factory-less (seeded) type in more than one scope, because a seed is addressed by type.
+
+A longer-lived component reads a shorter-lived value per invocation through a declared accessor instead of holding it: [`Current<T>`](Current) resolves the closest `T` in the active invocation, [`Scoped<S, T>`](Scoped) the `T` of scope `S`. Work spawned through [`context::tokio`](context::tokio), [`context::thread`](context::thread) or, with the `rayon` feature, `context::rayon` carries the invocation and its span along, and a [`CapturedContext`](context::CapturedContext) carries it into any other executor; a plain `tokio::spawn` does not. Dropping a tokio `JoinHandle` detaches the task rather than cancelling it, and the task keeps the invocation's scope chain alive until it ends, so await request-bound work or manage its handle.
+
+```rust,ignore
+use upwell::context::{Current, ScopedError};
+
+#[component]
+pub struct Audit {
+    identity: Current<Arc<Identity>>,
+}
+
+impl Audit {
+    async fn record(&self, action: &str) -> Result<(), ScopedError> {
+        let identity = self.identity.get().await?;
+        let action = action.to_owned();
+
+        upwell::context::tokio::spawn(async move { store(identity, action).await });
+
+        Ok(())
+    }
+}
+```
+
 ## Internal role
 
-This is the engine the application layer drives. `upwell-dirs` implements [`Component`]/[`Injectable`] for its `Dir<K>` and `DirectoriesManager` against these traits. `upwell-config` seeds itself as an external resolver reachable via the [`ResolverCtx`], and `upwell-app` plus the protocol crates (`upwell-rpc`, `upwell-axum`) build [`ScopeContainer`]s, seed framework singletons (including the [`HookManager`](upwell_hooks::HookManager)), and resolve components through this crate.
+This is the engine the application layer drives. `upwell-dirs` implements [`Component`]/[`Injectable`] for its `Dir<K>` and `DirectoriesManager` against these traits. `upwell-config` seeds itself as an external resolver reachable via the [`ResolverCtx`], and `upwell-app` plus the protocol crates (`upwell-rpc`, `upwell-axum`) build [`ScopeContainer`]s, seed framework singletons (including the [`HookManager`](upwell_hooks::HookManager)), and resolve components through this crate. `upwell-app` plans a [`SlotLayout`] for each protocol-owned scope when a generation is prepared and opens scopes from it, so their dependency edges are resolved once instead of on every opening.
 
 ## Feature flags
 
@@ -67,3 +91,4 @@ This is the engine the application layer drives. `upwell-dirs` implements [`Comp
 |---|---|
 | `di-check` | Emit compile-time DI checks (`Wiring: Provided<Dep>` bounds) so a missing provider is a `cargo check` error rather than a runtime failure. |
 | `serde` | Derive `Serialize` for the transition-planning vocabulary (`NodeAction`, `ReasonKind`, `TransitionReason`, `DependencyDemandId`, `EffectiveNodeRole`) used by redacted transition reports. |
+| `rayon` | Carry the invocation context into rayon pools: `context::rayon::{join, scope, spawn, install}` and the `ParallelIteratorExt::current()` adapter. `CapturedContext::bind` works with any pool without it. |

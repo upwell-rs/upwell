@@ -1,6 +1,7 @@
 //! Structural transition planning: retention, replacement, retirement order and identity.
 
 use super::*;
+use upwell_core::Scope;
 
 #[test]
 fn provider_switch_retains_live_consumer_and_replaces_fixed_closure() {
@@ -58,11 +59,13 @@ fn replacement_suppresses_redundant_live_binding_work() {
         .find(|component| component.id == "live-consumer")
         .expect("live consumer exists");
     live.factories = fixed_factory;
-    let candidate =
-        EffectiveGraph::build(RuntimeGenerationId::INITIAL, &candidate_registry, |_, _| {
-            true
-        })
-        .expect("candidate validates");
+    let candidate = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &candidate_registry,
+        |_, _| true,
+        |_, _| false,
+    )
+    .expect("candidate validates");
 
     let plan = active
         .plan_transition(&candidate)
@@ -101,9 +104,13 @@ fn retirement_orders_fixed_consumers_before_dependencies() {
 #[test]
 fn stale_candidate_generation_is_rejected() {
     let active = graph(false);
-    let candidate =
-        EffectiveGraph::build(RuntimeGenerationId::new(1), &registry(true), |_, _| true)
-            .expect("candidate validates");
+    let candidate = EffectiveGraph::build(
+        RuntimeGenerationId::new(1),
+        &registry(true),
+        |_, _| true,
+        |_, _| false,
+    )
+    .expect("candidate validates");
 
     assert_eq!(
         active.plan_transition(&candidate),
@@ -123,11 +130,12 @@ fn singleton_to_scoped_change_still_retires_the_active_singleton() {
         .iter_mut()
         .find(|component| component.id == "unrelated")
         .expect("unrelated component exists");
-    unrelated.scope = &RequestScope;
+    unrelated.scope = RequestScope::KEY;
     let candidate = EffectiveGraph::build(
         RuntimeGenerationId::INITIAL,
         &candidate_registry,
         |consumer, dependency| consumer == dependency,
+        |_, _| false,
     )
     .expect("candidate validates");
 
@@ -149,11 +157,13 @@ fn changed_recipe_identity_replaces_the_component() {
         .find(|component| component.id == "unrelated")
         .expect("unrelated component exists");
     unrelated.factories = changed_empty_factory;
-    let candidate =
-        EffectiveGraph::build(RuntimeGenerationId::INITIAL, &candidate_registry, |_, _| {
-            true
-        })
-        .expect("candidate validates");
+    let candidate = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &candidate_registry,
+        |_, _| true,
+        |_, _| false,
+    )
+    .expect("candidate validates");
 
     let plan = active
         .plan_transition(&candidate)

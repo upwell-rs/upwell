@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use upwell_core::{
-    ConditionDescriptor, ConditionInputId, ConditionPredicate, ConditionPurity, StaticScope,
+    ConditionDescriptor, ConditionInputId, ConditionPredicate, ConditionPurity, Scope,
 };
 
 use super::{
@@ -227,6 +227,7 @@ impl ConditionCatalog {
 
                 dependency.rank() >= consumer.rank()
             },
+            crate::registry::scopes::never_encloses,
         ) {
             crate::observability::condition_validation_rejected(&evaluation);
 

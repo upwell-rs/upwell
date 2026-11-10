@@ -96,7 +96,10 @@ fs2 = "0.4.3"
 globset = "0.4.19"
 notify = "6"
 thiserror = "2"
+rayon = "1.11"
 tempfile = "3"
+# Counts the allocations of a closure per thread, so allocation contracts need no allocator of our own.
+allocation-counter = "0.8"
 toml = "1.1"
 serde_yaml_ng = "0.10"
 directories = "6"
@@ -107,6 +110,7 @@ xattr = "1.6.1"
 wasmtime = { version = "=36.0.13", default-features = false, features = ["std", "runtime", "component-model", "cranelift"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
+pin-project-lite = "0.2"
 tokio-util = "0.7"
 tower = { version = "0.5", features = ["util"] }
 # Trailing-slash path normalization for the axum server (applied outside the router so it rewrites
@@ -144,6 +148,13 @@ syn = { version = "2", features = ["full"] }
 trybuild = "1"
 quote = "1"
 proc-macro2 = "1"
+heck = "0.5"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
 
 [package]
 name = "upwell"
@@ -156,6 +167,9 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+
+[lints]
+workspace = true
 
 [features]
 default = ["cli", "di-check"]
@@ -172,6 +186,10 @@ tooling = [
     "upwell-rpc?/tooling",
     "upwell-axum?/tooling",
 ]
+
+# Carry the invocation context into rayon pools (`upwell::context::rayon`). Off by default;
+# `upwell::context::CapturedContext::bind` works with any pool without it.
+rayon = ["upwell-di/rayon"]
 
 # Re-export the native RPC daemon through the facade for convenience. The protocol crate owns
 # its own macros; the facade just enables its `facade` feature (so its codegen roots at
@@ -332,6 +350,8 @@ postcard = { workspace = true }
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = { workspace = true }
+# The `rayon` UI test builds parallel iterators to show what `upwell::context::rayon` refuses.
+rayon = { workspace = true }
 # The facade's axum integration tests use `#[controller]`/`#[handlers]`/`#[dto]`, which emit
 # `::utoipa` references when the `openapi` feature is on (as under `--all-features`). Like the http
 # example, a crate using those macros with `openapi` needs `utoipa` as a direct dependency; a
@@ -359,4 +379,9 @@ bench = false
 required-features = ["cli", "tooling"]
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+allocation-counter = { workspace = true }
 upwell-test-utils = { workspace = true }
+# The context tests inspect the invocation contexts protocols and hooks establish.
+upwell-di = { workspace = true, features = ["test-support"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

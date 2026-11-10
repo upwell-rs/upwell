@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use upwell_core::{ResolverCtx, RuntimeGenerationId};
+use upwell_di::context::{InvocationContext, TargetRef};
 use upwell_di::{ComponentDescriptor, EffectiveGraph, ScopeContainer, ScopeRegistry};
 use upwell_hooks::HookManager;
 
@@ -11,6 +12,7 @@ use crate::transition::{CommitActions, HeldLiveCells};
 
 mod commit;
 mod coordinator;
+mod end_tasks;
 mod release;
 mod view;
 
@@ -20,6 +22,7 @@ pub(crate) use coordinator::{
     RuntimeTransition, RuntimeTransitionCoordinator, WeakTransitionCoordinator,
 };
 
+pub(crate) use end_tasks::{EndTask, EndTasks};
 pub use release::DisplacedGeneration;
 use release::{DisplacedGenerations, ReleaseGuard};
 pub use view::RuntimeView;
@@ -84,6 +87,7 @@ impl AppConditionState {
 /// plus the graph, condition state, and hook manager committed with it.
 pub(crate) struct RuntimeGeneration {
     owner: Arc<()>,
+    end_tasks: Arc<EndTasks>,
     id: RuntimeGenerationId,
     root: Arc<ScopeContainer>,
     scopes: Arc<ScopeRegistry>,
@@ -139,6 +143,14 @@ impl PreparedRuntimeGeneration {
         }
     }
 
+    /// A context for `target` on this candidate's root, for hooks that run against the
+    /// candidate before it publishes.
+    pub(crate) fn context(&self, target: TargetRef) -> InvocationContext {
+        let root: Arc<ScopeContainer> = Arc::clone(&self.root);
+
+        InvocationContext::new(target, root)
+    }
+
     /// Attaches the live cells this generation's retained consumers hold, and the
     /// live rebinds and hot updates its terminal publication applies.
     pub(crate) fn with_commit_actions(
@@ -159,6 +171,7 @@ impl PreparedRuntimeGeneration {
     fn commit(
         self,
         owner: Arc<()>,
+        end_tasks: Arc<EndTasks>,
         id: RuntimeGenerationId,
         displaced: &Arc<DisplacedGenerations>,
     ) -> (RuntimeGeneration, CommitActions) {
@@ -169,6 +182,7 @@ impl PreparedRuntimeGeneration {
 
         let generation = RuntimeGeneration {
             owner,
+            end_tasks,
             id,
             root: self.root,
             scopes: self.scopes,

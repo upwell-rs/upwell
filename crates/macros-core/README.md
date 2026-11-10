@@ -8,9 +8,10 @@ Part of the [Upwell](../../README.md) framework — the base codegen layer every
 
 A proc-macro crate can only export proc-macros, so all the reusable parsing and code generation
 lives here as an ordinary library. It owns the base expansions for `#[component]`, `#[config]`,
-`#[methods]`, `#[injectable]`, the `#[when]` component conditions every component macro lowers, and
+`#[methods]`, `#[injectable]`, `#[entry]`, `#[scope]`, the `#[when]` component conditions every component macro lowers, and
 the named `app!` application macro, plus the building blocks the
-expansions share: attribute parsing (`attr`), the extension seams (`extend` — `ParseKeyed`,
+expansions share: attribute parsing (`attr`), the `scope = ..` argument with its scope lists
+(`scopes::ScopeList`, shared by `#[component]` and `#[init]`), the extension seams (`extend` — `ParseKeyed`,
 `ParseItem`, `ParseMethod`, `ComponentExt`), crate-path resolution (`paths::Paths`), field-injection
 (`inject`), hooks (`hook`), the DI assertions (`di`), provider wiring (`provide`), client generation
 (`client`), and the base impl-macro state machine (`methods`). These pieces are public so a plugin's
@@ -34,7 +35,7 @@ the generated code refers to.
 ## Internal role
 
 - `upwell-macros` is a thin proc-macro shim: each entry point forwards its token streams to the
-  matching `component` / `config` / `methods` / `injectable` / `when` / `app` function here.
+  matching `component` / `config` / `methods` / `injectable` / `entry` / `scope` / `when` / `app` function here.
 - `upwell-rpc-macros` builds `#[service]`, `#[handlers]`, `#[rpc]` on top via the extension seam
   — reusing `expand_component`, `methods::expand`, `MethodArgs`, `Paths`, and `run`.
 

@@ -46,6 +46,8 @@ struct RouterContext {
     type_name: LitStr,
     id: LitStr,
     name: LitStr,
+    /// The service's entry-key segment: its ID in `snake_case`.
+    key_segment: LitStr,
     paths: Paths,
 }
 
@@ -80,10 +82,12 @@ impl<T: ComponentExt> ParseItem<ComponentContext> for Router<T> {
     fn parse_item(&mut self, cx: &ComponentContext, paths: &Paths) -> syn::Result<()> {
         // A service is always a singleton; reject a non-singleton scope on the component.
         if let Some(scope) = &cx.scope
-            && scope
-                .segments
-                .last()
-                .is_none_or(|seg| seg.ident != "Singleton")
+            && (scope.is_several()
+                || scope
+                    .primary()
+                    .segments
+                    .last()
+                    .is_none_or(|seg| seg.ident != "Singleton"))
         {
             return Err(syn::Error::new_spanned(
                 scope,
@@ -96,6 +100,7 @@ impl<T: ComponentExt> ParseItem<ComponentContext> for Router<T> {
             type_name: cx.type_name.clone(),
             id: cx.id.clone(),
             name: cx.name.clone(),
+            key_segment: upwell_macros_core::entry::owner_segment(&cx.id)?,
             paths: paths.clone(),
         });
 
@@ -129,6 +134,7 @@ impl<T: ComponentExt> ToTokens for Router<T> {
             type_name,
             id,
             name,
+            key_segment,
             paths,
         } = cx;
         let version = match &self.version {
@@ -144,6 +150,7 @@ impl<T: ComponentExt> ToTokens for Router<T> {
             .clone()
             .unwrap_or_else(|| format_ident!("{}Rpcs", ident));
         let descriptor_trait = paths.core("Descriptor");
+        let entry_key_owner = paths.core("EntryKeyOwner");
         let distributed_slice = paths.core("linkme::distributed_slice");
         let linkme_crate = paths.core("linkme");
         let inventory = paths.core("inventory");
@@ -219,6 +226,10 @@ impl<T: ComponentExt> ToTokens for Router<T> {
 
                 impl #descriptor_trait<#service_descriptor> for #ident {
                     const DESCRIPTOR: #service_descriptor = __UPWELL_SERVICE_DESCRIPTOR;
+                }
+
+                impl #entry_key_owner for #ident {
+                    const KEY_SEGMENT: &'static str = #key_segment;
                 }
 
                 #[#distributed_slice(#services_slice)]

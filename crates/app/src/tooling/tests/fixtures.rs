@@ -105,10 +105,10 @@ pub(super) fn construct(
     Box::pin(async {
         FACTORY_CALLS.fetch_add(1, Ordering::SeqCst);
 
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<ProjectedComponent>(ProjectedComponent::NAME),
-            value: Box::new(Injectable::into_stored(Arc::new(ProjectedComponent))),
-        })
+        Ok(BoxedComponent::stored(
+            TypeDescriptor::of::<ProjectedComponent>(ProjectedComponent::NAME),
+            Injectable::into_stored(Arc::new(ProjectedComponent)),
+        ))
     })
 }
 
@@ -131,16 +131,20 @@ pub(super) fn snapshot_dependencies() -> Vec<upwell_core::DependencyDescriptor> 
 pub(super) static FACTORIES: [ComponentFactoryDescriptor; 1] = [ComponentFactoryDescriptor {
     id: "projected",
     construct,
+    construct_ready: None,
     dependencies,
     role: ComponentFactoryRole::Default,
+    scopes: &[],
 }];
 
 pub(super) static SNAPSHOT_FACTORIES: [ComponentFactoryDescriptor; 1] =
     [ComponentFactoryDescriptor {
         id: "snapshot",
         construct,
+        construct_ready: None,
         dependencies: snapshot_dependencies,
         role: ComponentFactoryRole::Default,
+        scopes: &[],
     }];
 
 pub(super) fn factories() -> &'static [ComponentFactoryDescriptor] {
@@ -215,7 +219,7 @@ pub(super) static ALTERNATE_COMPONENT: ComponentDescriptor = ComponentDescriptor
     AlternateComponent::ID,
     AlternateComponent::NAME,
     TypeDescriptor::of::<AlternateComponent>(AlternateComponent::NAME),
-    &Singleton,
+    Singleton::KEY,
 );
 
 pub(super) static RELOAD_HOOKS: [upwell_hooks::HookDescriptor; 1] =
@@ -261,8 +265,10 @@ pub(super) static CONFIG_CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] =
     [ComponentFactoryDescriptor {
         id: "static",
         construct: construct_config_consumer,
+        construct_ready: None,
         dependencies: exact_config_dependency,
         role: ComponentFactoryRole::Default,
+        scopes: &[],
     }];
 
 pub(super) fn config_consumer_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -352,8 +358,10 @@ pub(super) static PROVIDER_CONSUMER_FACTORIES: [ComponentFactoryDescriptor; 1] =
     [ComponentFactoryDescriptor {
         id: "static",
         construct: construct_config_consumer,
+        construct_ready: None,
         dependencies: provider_consumer_dependencies,
         role: ComponentFactoryRole::Default,
+        scopes: &[],
     }];
 
 pub(super) fn provider_consumer_factories() -> &'static [ComponentFactoryDescriptor] {
@@ -368,5 +376,5 @@ pub(super) static DISPLACED_COMPONENT: ComponentDescriptor = ComponentDescriptor
     "protocol-projected-component",
     "ProtocolProjectedComponent",
     TypeDescriptor::of::<ProjectedComponent>(ProjectedComponent::NAME),
-    &Singleton,
+    Singleton::KEY,
 );

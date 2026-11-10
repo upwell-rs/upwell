@@ -39,11 +39,13 @@ use upwell_transport::{
     PeerInfo, PredefinedCode, StatusCode, StreamDecode, StreamEncode, StreamEncodeError,
 };
 
+use upwell_app::EntryScope;
 use upwell_di::FromContainer;
 
 use crate::{
     Error,
     descriptors::{RpcCallContext, RpcOutcome, RpcResponse},
+    scope::Request,
 };
 
 /// A value a handler can extract from the call context.
@@ -91,7 +93,9 @@ impl FromContext for Peer {
 /// a `Transient`.
 ///
 /// This is how a handler reaches connection- and request-scoped components; the stateful
-/// service singleton itself still arrives through `&self`.
+/// service singleton itself still arrives through `&self`. A target the method's entry
+/// injects is read from the source its plan pre-resolved, and one outside the call's scope,
+/// such as a singleton, is read without opening a call scope the plan left deferred.
 pub struct Inject<H>(pub H);
 
 impl<H> FromContext for Inject<H>
@@ -99,12 +103,28 @@ where
     H: FromContainer,
 {
     async fn from_context(ctx: &RpcCallContext) -> crate::Result<Self> {
-        ctx.scope()
-            .extract::<H>()
-            .await
-            .map(Inject)
-            .map_err(Error::from)
+        let entry = ctx.scope();
+
+        if let Some(value) = entry.read_planned::<H>() {
+            return Ok(Inject(value));
+        }
+
+        Box::pin(extract_opening::<H>(entry)).await.map(Inject)
     }
+}
+
+/// Extracts `H` from the call's scope, opening it first if it is deferred.
+///
+/// Boxed by [`Inject`] because opening a scope and selecting providers make a large future:
+/// inline, it would grow every handler future that injects anything, though a planned target
+/// never awaits it.
+async fn extract_opening<H: FromContainer>(entry: &EntryScope<Request>) -> crate::Result<H> {
+    let scope = entry.container().await.map_err(Error::from)?;
+
+    scope
+        .extract_planned::<H>(entry.plan())
+        .await
+        .map_err(Error::from)
 }
 
 /// The call's cancellation token, fired when the peer cancels the call or the
@@ -473,49 +493,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use serde::Serializer;
-    use serde::ser::Error as _;
-    use upwell_transport::PredefinedCode;
-
-    use super::*;
-
-    /// A type whose serialization always fails, to exercise the FR-011 fallback.
-    struct Unserializable;
-
-    impl Serialize for Unserializable {
-        fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-            Err(S::Error::custom("intentional serialization failure"))
-        }
-    }
-
-    #[test]
-    fn body_serialization_failure_preserves_code_with_empty_body() {
-        // FR-011: a body that fails to serialize yields the intended code with a
-        // fallback (empty) body rather than dropping the code or panicking.
-        let code = StatusCode::from(PredefinedCode::NotFound);
-        let response = ErrorResponse::with_serialized_body(code, &Unserializable);
-
-        assert_eq!(response.code, code);
-        assert!(response.body.is_empty());
-    }
-
-    #[test]
-    fn serializable_error_uses_blanket_impl() {
-        // A `Serialize` error gets the blanket `ResponseError`: the default
-        // `Internal` code, with the error value itself as the body.
-        #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
-        struct PlainError {
-            reason: String,
-        }
-
-        let error = PlainError {
-            reason: "boom".to_string(),
-        };
-        let response = error.error_response();
-        let decoded: PlainError = postcard::from_bytes(&response.body).expect("decode body");
-
-        assert_eq!(decoded.reason, "boom");
-        assert_eq!(response.code.predefined(), PredefinedCode::Internal);
-    }
-}
+mod tests;

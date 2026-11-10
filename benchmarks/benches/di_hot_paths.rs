@@ -7,7 +7,8 @@
 //! - `resolve_by_scope_depth`: `ScopeContainer::get`, resolving a root component from the deepest
 //!   scope, across 1/4/8 nested scopes — the parent-chain walk every injected `Arc<T>` performs.
 //! - `extract_shapes`: `ScopeContainer::extract`, the `FromContainer` path backing every HTTP/RPC
-//!   handler parameter, for a single component, an optional one, and a trait collection.
+//!   handler parameter, for a single component, an optional one, a trait provider, and a trait
+//!   collection.
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -112,7 +113,7 @@ fn resolve_by_scope_depth(c: &mut Criterion) {
     group.finish();
 }
 
-/// The three request-time extraction shapes a handler parameter can take.
+/// The request-time extraction shapes a handler parameter can take.
 fn extract_shapes(c: &mut Criterion) {
     const WIDTH: usize = 8;
     const LAYERS: usize = 4;
@@ -123,12 +124,17 @@ fn extract_shapes(c: &mut Criterion) {
 
     let layered = runtime.block_on(di::build_graph(&roster, WIDTH, LAYERS));
     let with_providers = runtime.block_on(di::build_with_providers(&roster, PROVIDERS));
+    let trait_chain = runtime.block_on(di::build_trait_chain(&roster, LAYERS));
 
     // Verify the fixtures actually resolve what the benches assume before timing them: a broken
     // fixture would otherwise silently benchmark a no-op resolution.
     assert!(
         runtime.block_on(di::extract_single(&layered)),
         "single-component fixture does not resolve"
+    );
+    assert!(
+        runtime.block_on(di::extract_trait(&trait_chain)),
+        "trait fixture does not resolve"
     );
     assert_eq!(
         runtime.block_on(di::extract_collection(&with_providers)),
@@ -148,6 +154,12 @@ fn extract_shapes(c: &mut Criterion) {
         bencher
             .to_async(&runtime)
             .iter(|| async { black_box(di::extract_optional(&layered).await) });
+    });
+
+    group.bench_function("trait_arc", |bencher| {
+        bencher
+            .to_async(&runtime)
+            .iter(|| async { black_box(di::extract_trait(&trait_chain).await) });
     });
 
     group.bench_function(BenchmarkId::new("collection", PROVIDERS), |bencher| {

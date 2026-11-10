@@ -1,0 +1,5 @@
+error[E0425]: cannot find type `Missing` in this scope
+ --> tests/ui/scopes/child_unknown.rs:4:39
+  |
+4 | #[scope(parents = [Root], children = [Missing])]
+  |                                       ^^^^^^^ not found in this scope

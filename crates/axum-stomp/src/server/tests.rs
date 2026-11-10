@@ -98,20 +98,26 @@ fn send_header_seed_carries_custom_headers_through() {
 }
 
 #[test]
-fn stomp_registers_every_message_seed_at_the_message_destination() {
+fn stomp_registers_each_seed_at_its_destination() {
     let mut registry = upwell_axum::AppRegistry::default();
 
     <Stomp as WebsocketProtocol>::register(&mut registry);
 
-    for descriptor in [
-        STOMP_HEADERS_DESCRIPTOR,
-        STOMP_SESSION_DESCRIPTOR,
-        STOMP_PRINCIPAL_DESCRIPTOR,
+    for (descriptor, scope) in [
+        (
+            STOMP_HEADERS_DESCRIPTOR,
+            <upwell_axum::WebsocketMessage as upwell_axum::Scope>::ID,
+        ),
+        (
+            STOMP_SESSION_DESCRIPTOR,
+            <upwell_axum::WebsocketMessage as upwell_axum::Scope>::ID,
+        ),
+        (
+            STOMP_PRINCIPAL_DESCRIPTOR,
+            <upwell_axum::WebsocketConnection as upwell_axum::Scope>::ID,
+        ),
     ] {
-        assert_eq!(
-            descriptor.scope.id(),
-            <upwell_axum::WebsocketMessage as upwell_axum::StaticScope>::ID
-        );
+        assert_eq!(descriptor.scope.id(), scope);
         assert!(
             descriptor
                 .effective_factory()

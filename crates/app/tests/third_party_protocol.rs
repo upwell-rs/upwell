@@ -2,20 +2,20 @@ use std::cell::Cell;
 
 use upwell_app::{
     App, AppRegistry, AppRuntime, PreparedProtocol, ProtocolDefinition, ProtocolId,
-    ProtocolRuntime, ScopeBoundary, ScopeId, ScopeParent, ScopeTopology, Serve, ShutdownSignal,
-    StaticScope, ValidationContext,
+    ProtocolRuntime, Scope, ScopeBoundary, ScopeId, ScopeParent, ScopeTopology, Serve,
+    ShutdownSignal, ValidationContext,
 };
 
 /// A custom boundary authored through `upwell-app` alone.
 struct SessionScope;
 
-impl StaticScope for SessionScope {
+impl Scope for SessionScope {
     const ID: ScopeId = upwell_app::namespaced_id!(ScopeId, "third-party/session");
     const RANK: u8 = 200;
     const NAME: &'static str = "Session";
 }
 
-const BOUNDARIES: [ScopeBoundary; 1] = [ScopeBoundary::new(&SessionScope, ScopeParent::Root)];
+const BOUNDARIES: [ScopeBoundary; 1] = [ScopeBoundary::new::<SessionScope>(&[ScopeParent::Root])];
 
 /// A protocol definition authored through `upwell-app` alone.
 #[derive(Default)]

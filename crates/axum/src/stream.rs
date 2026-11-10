@@ -34,9 +34,6 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use upwell_transport::CodecError;
 
-#[cfg(not(target_family = "wasm"))]
-use upwell_config::ContainerConfigExt;
-
 const MAX_NDJSON_LINE_BYTES: usize = 1024 * 1024;
 
 #[cfg(not(target_family = "wasm"))]
@@ -458,10 +455,7 @@ where
     type Rejection = std::convert::Infallible;
 
     async fn from_request(request: Request, _state: &S) -> Result<Self, Self::Rejection> {
-        let limits = request
-            .extensions()
-            .get::<crate::ScopeHandle>()
-            .and_then(|scope| scope.0.config::<crate::AxumConfig>(crate::AXUM_CONFIG_PATH))
+        let limits = crate::request_scope::config()
             .map(|config| StreamRequestLimits::from(config.snapshot().as_ref()))
             .unwrap_or_else(|| StreamRequestLimits::from(&crate::AxumConfig::default()));
         let body = request.into_body().into_data_stream();

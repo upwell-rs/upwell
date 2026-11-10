@@ -46,7 +46,7 @@
 use std::any::type_name;
 use std::sync::Arc;
 
-use upwell_core::{ConditionDescriptor, Scope, TypeDescriptor};
+use upwell_core::{ConditionDescriptor, ScopeKey, TypeDescriptor};
 use upwell_hooks::HookDescriptor;
 
 use super::component::{
@@ -147,8 +147,10 @@ macro_rules! __factory_entry {
         $crate::ComponentFactoryDescriptor {
             id: $id,
             construct: |cx| $crate::dispatch_factory($factory, cx),
+            construct_ready: ::core::option::Option::None,
             dependencies: || $crate::factory_dependencies($factory),
             role: $crate::ComponentFactoryRole::$role,
+            scopes: &[],
         }
     };
 }
@@ -160,8 +162,10 @@ macro_rules! __replacement_entry {
         $crate::ComponentFactoryDescriptor {
             id: $id,
             construct: |cx| $crate::dispatch_replacement($factory, cx),
+            construct_ready: ::core::option::Option::None,
             dependencies: || $crate::replacement_dependencies($factory),
             role: $crate::ComponentFactoryRole::Replacement,
+            scopes: &[],
         }
     };
 }
@@ -173,8 +177,10 @@ macro_rules! __transition_entry {
         $crate::ComponentFactoryDescriptor {
             id: $id,
             construct: |cx| $crate::dispatch_transition($handler, cx),
+            construct_ready: ::core::option::Option::None,
             dependencies: ::std::vec::Vec::new,
             role: $crate::ComponentFactoryRole::Transition,
+            scopes: &[],
         }
     };
 }
@@ -186,8 +192,10 @@ macro_rules! __hot_update_entry {
         $crate::ComponentFactoryDescriptor {
             id: $id,
             construct: |cx| $crate::dispatch_hot_update($factory, cx),
+            construct_ready: ::core::option::Option::None,
             dependencies: || $crate::hot_update_dependencies($factory),
             role: $crate::ComponentFactoryRole::HotUpdate,
+            scopes: &[],
         }
     };
 }
@@ -227,9 +235,39 @@ impl ComponentDescriptor {
         }
     }
 
-    /// Places the component in `scope` instead of the singleton scope.
-    pub const fn with_scope(self, scope: &'static dyn Scope) -> Self {
-        Self { scope, ..self }
+    /// Places the component in `scope` instead of the singleton scope, replacing any list
+    /// [`with_scopes`](Self::with_scopes) set. On a placement taken from a resolved registry it
+    /// also drops the placement's record of the scopes it was expanded from, so the result is
+    /// an ordinary descriptor again; a placement id (`<id>@<scope id>`) is kept as the new id.
+    pub const fn with_scope(self, scope: ScopeKey) -> Self {
+        Self {
+            scope,
+            scopes: &[],
+            declared_scope: None,
+            ..self
+        }
+    }
+
+    /// Places the component in every scope of `scopes`, as `#[component(scope = [A, B])]`
+    /// does: the first becomes its declared [`scope`](Self::scope), and factories without
+    /// scopes of their own build in each. The scopes may not share a hierarchy or repeat. Like
+    /// [`with_scope`](Self::with_scope), it turns a resolved placement into an ordinary
+    /// descriptor again.
+    ///
+    /// # Panics
+    ///
+    /// Panics, at compile time in a `const`, when `scopes` is empty.
+    pub const fn with_scopes(self, scopes: &'static [ScopeKey]) -> Self {
+        let [scope, ..] = scopes else {
+            panic!("a component declares at least one scope");
+        };
+
+        Self {
+            scope: *scope,
+            scopes,
+            declared_scope: None,
+            ..self
+        }
     }
 
     /// Opts out of retention, so a transition never carries the instance across
@@ -342,10 +380,10 @@ impl ProviderDescriptor {
 impl BoxedComponent {
     /// Boxes a constructed component in its storage handle, as factories return it.
     pub fn new<T: Component>(component: T) -> Self {
-        Self {
-            ty: TypeDescriptor::of::<T>(T::NAME),
-            value: Box::new(Injectable::into_stored(T::into_handle(component))),
-        }
+        Self::stored(
+            TypeDescriptor::of::<T>(T::NAME),
+            Injectable::into_stored(T::into_handle(component)),
+        )
     }
 }
 
@@ -363,17 +401,16 @@ where
     T::Handle: Injectable<Stored = Live<T>>,
     P: ?Sized + Send + Sync + 'static,
 {
-    let shared = concrete
+    let live = concrete
         .value
         .downcast_ref::<Live<T>>()
-        .expect("the container erases only the concrete box the provider's own descriptor built")
-        .snapshot();
-    let erased: Arc<P> = T::upcast(shared);
+        .expect("the container erases only the concrete box the provider's own descriptor built");
+    let erased: Arc<P> = T::upcast(live.snapshot());
 
-    BoxedComponent {
-        ty: TypeDescriptor::of::<P>(type_name::<P>()),
-        value: Box::new(Live::new(erased)),
-    }
+    BoxedComponent::stored(
+        TypeDescriptor::of::<P>(type_name::<P>()),
+        live.with_value(erased),
+    )
 }
 
 /// The live cell an erased trait slot for `P` holds: the
@@ -383,7 +420,10 @@ pub fn provider_live_cell<P>(erased: &BoxedComponent) -> Option<LiveCell>
 where
     P: ?Sized + Send + Sync + 'static,
 {
-    erased.value.downcast_ref::<Live<P>>().map(LiveCell::of)
+    erased
+        .value
+        .downcast_ref::<Live<P>>()
+        .and_then(<Arc<P> as Injectable>::live_cell)
 }
 
 #[cfg(test)]

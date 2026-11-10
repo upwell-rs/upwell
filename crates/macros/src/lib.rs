@@ -71,6 +71,30 @@ use proc_macro::TokenStream;
 /// All optional:
 /// - `id` — unique component id. Defaults to the lowercased type name.
 /// - `name` — display name. Defaults to the type name.
+/// - `scope = Path` — the scope an instance lives in, named by its scope type (such as a
+///   protocol's `Request`). Omitted means a singleton. A component of a scope below the root
+///   is built **on demand**: when the opening entry's plan lists it, or when something first
+///   resolves it from the open scope.
+/// - `scope = [A, B]` — place the component in **each** listed scope: every scope instance of
+///   either kind builds its own instance with the same factory, and a resolution reaches the
+///   one placement on its chain (`#[component(scope = [WebsocketConnection, HttpRequest])]`
+///   for "per connection over WebSocket, per request over REST"). The first listed scope is
+///   the declared one. The listed scopes may not share a hierarchy: preparation rejects a
+///   scope listed beside one of its ancestors (`OverlappingPlacements`), a transient beside
+///   any other, and a manual instance (`default_factory = false`) in more than one scope,
+///   since a seed is addressed by type (`AmbiguousSeedScopes`). An `#[init]` without a scope
+///   builds in every listed scope. An empty list or a path listed twice is a compile error,
+///   one scope named through two paths fails preparation (`RepeatedScope`), and `eager`
+///   checks every listed scope.
+/// - `eager` — with a `scope` below the root, build the component on **every** opening of
+///   its scope instead, whatever the entry injects, together with what it depends on in the
+///   scope. Use it for components whose construction is the intended side effect (an audit
+///   record, a span, a gate); a failing eager constructor fails every opening. `eager`
+///   without a `scope`, with the singleton or transient scope, or with
+///   `default_factory = false` is a compile error. A
+///   protocol that opens a scope only when something injects from it (axum's HTTP request
+///   scope) runs no eager component for a request that opens none: per-request side
+///   effects belong in middleware.
 /// - `factory = path` — register `path` (an async `Factory`) as the constructor
 ///   instead of field injection; its parameters are its dependencies.
 /// - `default_factory = false` — emit no factory (a **manual** instance, provided
@@ -87,6 +111,8 @@ use proc_macro::TokenStream;
 /// #[component(id = "db", name = "Db")]  // explicit
 /// #[component(factory = Db::connect)]   // explicit async factory
 /// #[component(default_factory = false)] // manual, via with_component
+/// #[component(scope = Request, eager)]  // built on every request scope opening
+/// #[component(scope = [WebsocketConnection, HttpRequest])] // one per connection or request
 /// ```
 ///
 /// # What it generates
@@ -168,6 +194,95 @@ pub fn config(attr: TokenStream, item: TokenStream) -> TokenStream {
     upwell_macros_core::config(attr.into(), item.into()).into()
 }
 
+/// Registers a free function as an entry point: a unit of work that runs inside a scope.
+///
+/// The function stays as written. Its parameters are the targets the entry injects, each a
+/// `FromContainer` type as an `#[init]` constructor takes (`Arc<T>`, `Cfg<T>`,
+/// `Vec<Arc<dyn Tr>>`, ..). Beside it the macro emits a unit marker type named after the
+/// function in `UpperCamelCase` that carries the entry's `EntryDescriptor`, and adds the
+/// descriptor to the discovery slice `AppBuilder::auto_discover` reads. Register the entry
+/// explicitly with `AppBuilder::entry::<Marker>()`; an entry registered both ways is kept
+/// once.
+///
+/// Preparation validates the entry like every other one: its scope must be opened by the
+/// active protocol, and each target must resolve from that scope. Under `di-check`, a missing
+/// provider of a concrete `Arc<T>` target is also a compile error.
+///
+/// ```ignore
+/// #[entry(scope = Singleton)]
+/// async fn reconcile(db: Arc<TenantDb>, audit: Arc<Audit>) -> Result<()> { .. }
+///
+/// // Generated: `struct Reconcile;`, keyed `app/reconcile`.
+/// let app = App::<Protocol>::builder("tenants").entry::<Reconcile>();
+/// ```
+///
+/// # Arguments
+///
+/// - `scope = Path` (required): the scope the entry runs in.
+/// - `key = ".."`: the stable entry key, by default `app/<function name in snake_case>`.
+///
+/// # Errors
+///
+/// A missing `scope`, a malformed `key`, a generic function, a `self` parameter or a function
+/// already named in `UpperCamelCase` is a compile error.
+#[proc_macro_attribute]
+pub fn entry(attr: TokenStream, item: TokenStream) -> TokenStream {
+    upwell_macros_core::entry(attr.into(), item.into()).into()
+}
+
+/// Declares a struct as a scope whose fields are the parameters of each instance.
+///
+/// The struct stays as written. From its one `parents` list the macro generates the `Scope`
+/// impl, an `OpensUnder<P>` impl per parent (so `ScopeBuilder::under` accepts exactly those
+/// parents), a compile-time check that each parent outranks the scope, and the scope's
+/// `ScopeDeclaration`, which discovery registers and `AppBuilder::scope::<S>()` registers
+/// explicitly. Preparation adds the scope to the protocol's topology.
+///
+/// Open an instance with `ScopeOpener::<S>::builder(value)`. Components in the scope inject
+/// the value as `Arc<S>`, stored once per instance and immutable; a unit scope stores nothing.
+///
+/// ```ignore
+/// #[scope(parents = [Root])]
+/// pub struct CustomerSync {
+///     customer: CustomerId,
+/// }
+///
+/// #[component(scope = CustomerSync)]
+/// struct CustomerClient {
+///     sync: Arc<CustomerSync>,
+/// }
+///
+/// let synced = opener
+///     .builder(CustomerSync { customer })
+///     .try_run(|client: Arc<CustomerClient>| async move { client.sync().await })
+///     .await?;
+/// ```
+///
+/// # Arguments
+///
+/// - `parents = [Path, ..]` (required): every scope it opens under, `Root` for the application
+///   root. Each path is emitted as written.
+/// - `children = [Path, ..]`: scopes declared elsewhere, such as a protocol's `HttpRequest`, that
+///   may also open under this one. Each gets `impl OpensUnder<Self>` and a compile-time check
+///   that it ranks below the scope; preparation adds the scope to its parents, beside the ones
+///   it declares. A child the topology does not declare fails preparation.
+/// - `generations = pinned | durable | path`: how an open instance relates to later runtime
+///   generations, `pinned` by default.
+/// - `rank = N`: the lifetime rank, between 1 and 254, by default one below the lowest-ranked
+///   parent.
+/// - `id = ".."`: the stable scope ID, by default `app/<type name in snake_case>`.
+/// - `name = ".."`: the display name, by default the type name.
+///
+/// # Errors
+///
+/// A missing or empty `parents`, an empty `children` or a child listed twice, a generic struct,
+/// a malformed `id`, an out-of-range `rank`, a parent that does not outrank the scope, or a
+/// child that does not rank below it is a compile error.
+#[proc_macro_attribute]
+pub fn scope(attr: TokenStream, item: TokenStream) -> TokenStream {
+    upwell_macros_core::scope(attr.into(), item.into()).into()
+}
+
 /// Registers a component's lifecycle methods from an inherent `impl` block.
 ///
 /// That is the `#[init]` constructor, the transition recipes and `#[hook]` methods. The
@@ -179,7 +294,12 @@ pub fn config(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// The constructor's parameters are its dependencies (resolved from the container)
 /// and its return is `Self` or `Result<Self, E>`; a non-`async` constructor is
-/// wrapped to async. Two `#[init]`s on one type is a compile error.
+/// wrapped to async. Two unscoped `#[init]`s on one type is a compile error.
+///
+/// `#[init(scope = Path)]` builds in that scope instead of the component's, and
+/// `#[init(scope = [A, B])]` in each listed scope, so one type can be built by different
+/// constructors in disjoint scopes. Without `scope` it builds in every scope the component
+/// declares. Two constructors building in one scope fail preparation (`AmbiguousFactory`).
 ///
 /// # Transition recipes
 ///
@@ -283,6 +403,7 @@ pub fn methods(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// | `middleware` | `[expression, ...]` | Calls the selected protocol builder extension's `middleware` method in order. |
 /// | `guards` | `[expression, ...]` | Calls the selected protocol builder extension's `guard` method in order. |
 /// | `error_handler` | expression | Calls the selected protocol builder extension's `error_handler` method. |
+/// | `deny_unplanned` | `true` or `false` | With `true`, calls `deny_unplanned()`, so a scope opened for an entry fails to build on demand what the entry does not declare. |
 /// | `plugins` | `[Type, replace SLOT => Type, suppress SLOT, ...]` | Resolves parser-visible static plugins and protocol-default slots before bootstrap. |
 /// | `cli` | reserved-slot block | Customizes framework-owned Clap arguments and the generated serve command. |
 /// | `args` | `{ field: Type, ... }` | Flattens application-owned global `clap::Args` groups. |

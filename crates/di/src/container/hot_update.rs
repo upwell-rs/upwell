@@ -31,7 +31,7 @@ impl ScopeContainer {
             descriptor.scope,
             Some(Arc::clone(self)),
             Arc::clone(&self.registry),
-            self.resolvers().clone(),
+            self.inherited_resolvers(),
             self.slot.clone(),
         );
 

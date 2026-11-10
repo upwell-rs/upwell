@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/scopes/undeclared_parent_under.rs:14:42
+   |
+14 |     let _ = batches.builder(Batch).under(other);
+   |                                    ----- ^^^^^ expected `&OpenScope<Customer>`, found `&OpenScope<Other>`
+   |                                    |
+   |                                    arguments to this method are incorrect
+   |
+   = note: expected reference `&OpenScope<Customer>`
+              found reference `&OpenScope<Other>`
+note: method defined here
+  --> crates/app/src/runtime/opener/builder.rs
+   |
+   |     pub fn under<Q: Scope>(self, parent: &'a OpenScope<Q>) -> ScopeBuilder<'a, S, Q>
+   |            ^^^^^

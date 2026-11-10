@@ -4,6 +4,7 @@
 mod environment;
 mod path;
 mod process;
+mod result;
 #[cfg(feature = "app")]
 mod server;
 mod task;
@@ -14,10 +15,11 @@ mod timeout;
 pub use environment::TestEnvironment;
 pub use path::path_ends_with_components;
 pub use process::{DEFAULT_PROCESS_TIMEOUT, run_command, run_command_with_timeout};
+pub use result::ok;
 #[cfg(feature = "app")]
 pub use server::TestServer;
 pub use task::AbortOnDropTask;
 #[cfg(feature = "app")]
 pub(crate) use task::LoopbackTask;
-pub use temp::TempFixture;
+pub use temp::{FIXTURE_MARKER, TempFixture};
 pub use timeout::{DEFAULT_TEST_TIMEOUT, deadline, deadline_with_timeout};

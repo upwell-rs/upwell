@@ -4,7 +4,7 @@ use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use upwell_core::{Singleton, StaticScope};
+use upwell_core::{Scope, Singleton};
 
 use crate::container::ScopeRegistry;
 use crate::{BoxedComponent, ComponentChange, ComponentDescriptor, Error, ROOT_RESOLVER_ID};

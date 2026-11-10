@@ -7,7 +7,8 @@
 
 use std::sync::{Arc, OnceLock};
 
-use upwell_di::{Component, Injectable};
+use upwell_di::context::ContextRuntime;
+use upwell_di::{Component, Injectable, ScopeContainer};
 
 use crate::runtime::{AppRuntime, RuntimeTransitionReport, WeakAppRuntime};
 
@@ -46,6 +47,11 @@ impl RuntimeReloader {
     /// Attaches the built runtime. Idempotent; a second attach is ignored.
     pub(crate) fn attach(&self, runtime: &AppRuntime) {
         let _ = self.runtime.set(runtime.downgrade());
+    }
+
+    /// The runtime this handle is attached to, held weakly; `None` before it is attached.
+    pub(crate) fn runtime(&self) -> Option<&WeakAppRuntime> {
+        self.runtime.get()
     }
 
     /// Re-reads configuration and transactionally republishes changed bindings and the
@@ -97,3 +103,9 @@ impl Injectable for RuntimeReloader {
 /// Under `di-check`, the reloader is framework-seeded, so it is always provided.
 #[cfg(feature = "di-check")]
 impl upwell_di::Provided<RuntimeReloader> for upwell_di::Wiring {}
+
+impl ContextRuntime for RuntimeReloader {
+    fn root(&self) -> Option<Arc<ScopeContainer>> {
+        Some(self.runtime()?.upgrade()?.root())
+    }
+}

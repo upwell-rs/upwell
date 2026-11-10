@@ -61,10 +61,7 @@ async fn a_pinned_view_defers_release_until_it_drops() {
 #[tokio::test]
 async fn an_open_scope_defers_release_until_it_closes() {
     let (runtime, _) = build_runtime(HashMap::new()).await;
-    let session = runtime
-        .open_scope_from_root(&SESSION, Vec::new())
-        .await
-        .expect("session opens");
+    let session = open_session(&runtime).await;
 
     let (_, committed) = capture_events(publish_next(&runtime)).await;
     let still_alive = displaced(&runtime);
@@ -125,4 +122,31 @@ async fn repeated_switches_release_every_displaced_generation_exactly_once() {
 
     assert_eq!(still_alive, [(0, 1), (1, 2), (2, 3)]);
     assert_eq!(releases(&events), expected);
+}
+
+#[tokio::test]
+async fn a_displaced_generation_waits_for_its_durable_and_pinned_scopes() {
+    let (runtime, _) = build_runtime(HashMap::new()).await;
+    let durable = open_session(&runtime).await;
+    let pinned = runtime
+        .opener::<Shared>()
+        .expect("shared is declared")
+        .builder(Shared)
+        .open_default()
+        .await
+        .expect("a pinned scope opens under the root");
+
+    let (_, committed) = capture_events(publish_next(&runtime)).await;
+    let ((), durable_closed) = capture_events(async move { drop(durable) }).await;
+    let after_durable = displaced(&runtime);
+    let ((), pinned_closed) = capture_events(async move { drop(pinned) }).await;
+
+    assert_eq!(Shared::KEY.generations(), ScopeGenerations::Pinned);
+    assert!(releases(&committed).is_empty());
+    assert!(
+        releases(&durable_closed).is_empty(),
+        "the pinned scope still holds the generation"
+    );
+    assert_eq!(after_durable, [(0, 1)]);
+    assert_eq!(releases(&pinned_closed), [(0, 1)]);
 }

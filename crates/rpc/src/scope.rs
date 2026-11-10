@@ -6,8 +6,8 @@
 //! protocol, so they are defined here in the daemon (RPC) layer with stable identities
 //! and an explicit root-to-connection-to-request topology.
 
-use upwell_app::{ScopeBoundary, ScopeParent, ScopeTopology};
-use upwell_core::{ScopeId, StaticScope};
+use upwell_app::{OpensUnder, ScopeBoundary, ScopeParent, ScopeTopology};
+use upwell_core::{Scope, ScopeGenerations, ScopeId, Singleton};
 
 /// A per-connection scope: a live session between the daemon and one remote peer.
 /// Outlives the requests multiplexed over it, so it ranks above [`Request`].
@@ -16,21 +16,26 @@ pub struct Connection;
 /// A per-request scope: one inbound RPC call.
 pub struct Request;
 
-impl StaticScope for Connection {
+impl Scope for Connection {
     const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "upwell/rpc-connection");
     const RANK: u8 = 200;
     const NAME: &'static str = "Connection";
+    const GENERATIONS: ScopeGenerations = ScopeGenerations::Durable;
 }
 
-impl StaticScope for Request {
+impl Scope for Request {
     const ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "upwell/rpc-request");
     const RANK: u8 = 100;
     const NAME: &'static str = "Request";
 }
 
+impl OpensUnder<Singleton> for Connection {}
+
+impl OpensUnder<Connection> for Request {}
+
 static RPC_SCOPE_BOUNDARIES: [ScopeBoundary; 2] = [
-    ScopeBoundary::new(&Connection, ScopeParent::Root),
-    ScopeBoundary::new(&Request, ScopeParent::of::<Connection>()),
+    ScopeBoundary::new::<Connection>(&[ScopeParent::Root]),
+    ScopeBoundary::new::<Request>(&[ScopeParent::of::<Connection>()]),
 ];
 
 /// RPC-owned scope topology: `root -> connection -> request`.

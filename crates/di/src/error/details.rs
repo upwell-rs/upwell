@@ -151,7 +151,8 @@ impl fmt::Display for ScopeViolation {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "scope violation: component '{}' ({}) depends on '{}' ({}), which is shorter-lived",
+            "scope violation: component '{}' ({}) depends on '{}' ({}), which is shorter-lived; \
+             wrap it in `Current<..>` to read it from the active invocation on each call instead",
             self.component, self.component_scope, self.dependency, self.dependency_scope
         )
     }
@@ -208,4 +209,19 @@ impl fmt::Display for ScopeUnreachableDependency {
             self.component, self.component_scope, self.dependency, providers
         )
     }
+}
+
+/// Stable identities describing an optional edge placed in several enclosing scopes.
+#[derive(Debug)]
+pub struct AmbiguousEnclosingPlacement {
+    /// Stable consumer component identity.
+    pub component_id: String,
+    /// Human-readable dependency description.
+    pub dependency: String,
+    /// Underlying dependency type name.
+    pub dependency_type: String,
+    /// The scopes of the enclosing placements, in registration order.
+    pub scopes: Vec<&'static str>,
+    /// The identities of the enclosing placements' scopes, in the order of `scopes`.
+    pub scope_ids: Vec<ScopeId>,
 }

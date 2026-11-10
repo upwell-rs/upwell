@@ -18,6 +18,7 @@ pub(super) fn app_diagnostics(error: &crate::Error, phase: Option<String>) -> Op
             .collect(),
         crate::Error::PluginPlan(error) => vec![plugin_plan_diagnostic(error)],
         crate::Error::ScopeTopology(error) => vec![scope_topology_diagnostic(error)],
+        crate::Error::Entry(error) => vec![entry_diagnostic(error)],
         crate::Error::UndecidedConditionGraph {
             not_evaluated,
             source,
@@ -260,7 +261,7 @@ fn scope_topology_diagnostic(error: &crate::ScopeTopologyError) -> Diagnostic {
         "upwell/tooling-scope-topology",
         error.to_string(),
         resources,
-        "Correct duplicate, missing, cyclic, or invalid scope parent declarations.",
+        "Correct duplicate, missing, cyclic, or invalid scope parent or child declarations.",
     )
 }
 
@@ -270,8 +271,11 @@ pub(super) fn scope_topology_resources(error: &crate::ScopeTopologyError) -> Vec
     match error {
         ScopeTopologyError::DuplicateId { id }
         | ScopeTopologyError::ReservedId { id }
+        | ScopeTopologyError::NoParents { id }
         | ScopeTopologyError::SelfParent { id } => vec![scope_resource(*id)],
-        ScopeTopologyError::MissingParent { id, parent } => {
+        ScopeTopologyError::MissingParent { id, parent }
+        | ScopeTopologyError::DuplicateParent { id, parent }
+        | ScopeTopologyError::MissingChild { id, child: parent } => {
             vec![scope_resource(*id), scope_resource(*parent)]
         }
         ScopeTopologyError::Cycle { members } => {
@@ -281,6 +285,17 @@ pub(super) fn scope_topology_resources(error: &crate::ScopeTopologyError) -> Vec
             vec![scope_resource(*child), scope_resource(*parent)]
         }
     }
+}
+
+fn entry_diagnostic(error: &crate::EntryError) -> Diagnostic {
+    let resources = error.key().map(super::entry_id).into_iter().collect();
+
+    framework_diagnostic(
+        "upwell/tooling-entry",
+        error.to_string(),
+        resources,
+        "Register each entry once, in a scope the protocol opens, with targets its scope can resolve.",
+    )
 }
 
 #[cfg(feature = "cli")]

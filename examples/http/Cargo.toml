@@ -11,6 +11,9 @@ publish = false
 # client: `wasm-pack build examples/http --target web` builds the generated `{Controller}Client`s,
 # with the server code `cfg`-gated out. `cdylib` is required by wasm-pack; `rlib` lets the binary
 # depend on the library.
+[lints]
+workspace = true
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -53,3 +56,5 @@ tokio-tungstenite = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 upwell-test-utils = { workspace = true, features = ["app"] }
+# The WebSocket tests check the invocation context a message handler runs in.
+upwell-di = { workspace = true, features = ["test-support"] }

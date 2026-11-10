@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::transition::strategy::validate_decision;
+use upwell_core::Scope;
 use upwell_di::{BindingTransition, DependencyDemandId, GraphDiff, TransitionPlan};
 
 /// A structural plan whose only node is a `RebindLive` consumer with one live binding.
@@ -239,7 +240,7 @@ async fn retained_values_must_match_complete_plan_dispositions() {
         "retained",
         "Retained",
         TypeDescriptor::of::<u8>("Retained"),
-        &Singleton,
+        Singleton::KEY,
     );
     let (active_graph, candidate) = graphs(
         &registry([replaceable(ACTIVE_FACTORIES), retained], []),

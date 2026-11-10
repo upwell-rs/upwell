@@ -70,14 +70,7 @@ fn named_host_resolves_static_install_replacement_and_suppression() {
 #[tokio::test(flavor = "current_thread")]
 async fn tooling_probe_projects_real_homeledger_plan_without_building_runtime() {
     let _cwd = workspace_cwd();
-    let _environment = TestEnvironment::set(&[
-        ("UPWELL_CONFIG", None),
-        ("UPWELL_PROFILES", None),
-        ("RUST_LOG", None),
-        ("UPWELL_LOG_FORMAT", None),
-        ("NO_COLOR", None),
-        ("CLICOLOR_FORCE", None),
-    ]);
+    let _environment = clean_bootstrap_environment();
 
     crate::components::reset_database_builds();
     crate::protocol::reset_protocol_builds();
@@ -236,14 +229,7 @@ async fn tooling_probe_projects_real_homeledger_plan_without_building_runtime() 
 #[tokio::test(flavor = "current_thread")]
 async fn generated_host_resolves_parser_defaults_and_loaded_config() {
     let _cwd = workspace_cwd();
-    let _environment = TestEnvironment::set(&[
-        ("UPWELL_CONFIG", None),
-        ("UPWELL_PROFILES", None),
-        ("RUST_LOG", None),
-        ("UPWELL_LOG_FORMAT", None),
-        ("NO_COLOR", None),
-        ("CLICOLOR_FORCE", None),
-    ]);
+    let _environment = clean_bootstrap_environment();
 
     DaemonApplication::run_with(["homeledger", "operator-context"])
         .await
@@ -256,6 +242,18 @@ async fn generated_host_resolves_parser_defaults_and_loaded_config() {
     assert_eq!(state.log, "debug,homeledger=trace,upwell=debug");
     assert_eq!(state.log_format, LogFormat::Compact);
     assert_eq!(state.color, ColorChoice::Never);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn after_build_reconciles_each_account_in_its_own_scope_instance() {
+    let _cwd = workspace_cwd();
+    let _environment = clean_bootstrap_environment();
+
+    DaemonApplication::run_with(["homeledger", "database", "migrate", "--dry-run"])
+        .await
+        .expect("after_build reconciles every account before the command runs");
+
+    assert_eq!(crate::lifecycle::take_reconciled_accounts(), 3);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -355,6 +353,19 @@ async fn generated_host_parser_defaults_fill_absent_config_sources() {
     assert_eq!(state.color, ColorChoice::Always);
 }
 
+/// Clears every environment variable the generated bootstrap reads, so a test sees only its
+/// parser defaults and loaded config.
+fn clean_bootstrap_environment() -> TestEnvironment {
+    TestEnvironment::set(&[
+        ("UPWELL_CONFIG", None),
+        ("UPWELL_PROFILES", None),
+        ("RUST_LOG", None),
+        ("UPWELL_LOG_FORMAT", None),
+        ("NO_COLOR", None),
+        ("CLICOLOR_FORCE", None),
+    ])
+}
+
 fn workspace_cwd() -> WorkspaceCwd {
     let lock = WORKSPACE_CWD
         .lock()
@@ -400,6 +411,7 @@ impl TestEnvironment {
         for (name, value) in values {
             // SAFETY: these current-thread tests hold WORKSPACE_CWD for the guard's full lifetime,
             // serializing every environment mutation and generated bootstrap read in this module.
+            #[allow(unsafe_code)]
             unsafe {
                 match value {
                     Some(value) => std::env::set_var(name, value),
@@ -416,6 +428,7 @@ impl Drop for TestEnvironment {
     fn drop(&mut self) {
         for (name, value) in &self.original {
             // SAFETY: the guard still holds WORKSPACE_CWD while restoring the process environment.
+            #[allow(unsafe_code)]
             unsafe {
                 match value {
                     Some(value) => std::env::set_var(name, value),

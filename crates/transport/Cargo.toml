@@ -10,6 +10,9 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[lints]
+workspace = true
+
 [features]
 # Make `PeerInfo` an Upwell DI injectable (so a connection-scoped component can depend
 # on it). Pulls in `upwell-di`; off by default so the transport stays standalone.

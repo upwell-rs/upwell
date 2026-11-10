@@ -17,6 +17,7 @@ use super::args::WhenAttr;
 use super::inputs::{self, Lowering};
 use super::purity::is_pure;
 use crate::paths::Paths;
+use crate::scopes::ScopeList;
 
 /// The id of the `All` root that stacked `#[when]` nodes combine under.
 pub(super) const ALL_ID: &str = "when";
@@ -35,10 +36,11 @@ pub(crate) struct Condition {
 }
 
 impl Condition {
-    /// Lowers `whens` for a component of `scope` (`None` for the default singleton scope).
+    /// Lowers `whens` for a component of `scope` (`None` for the default singleton scope);
+    /// every scope of a list must be the singleton scope.
     pub(crate) fn lower(
         whens: Vec<WhenAttr>,
-        scope: Option<&syn::Path>,
+        scope: Option<&ScopeList>,
         paths: &Paths,
     ) -> syn::Result<Self> {
         if whens.is_empty() {
@@ -56,7 +58,13 @@ impl Condition {
         reject_duplicate_ids(&nodes)?;
         nodes.sort_by(|left, right| left.id.cmp(&right.id));
 
-        let singleton = scope.map(|scope| singleton_assertion(scope, paths));
+        let singleton = scope.map(|scope| {
+            scope
+                .paths()
+                .iter()
+                .map(|path| singleton_assertion(path, paths))
+                .collect::<TokenStream>()
+        });
         let (node_items, descriptors): (Vec<_>, Vec<_>) = nodes
             .iter()
             .enumerate()
@@ -271,7 +279,7 @@ fn reject_duplicate_ids(nodes: &[Node]) -> syn::Result<()> {
 
 /// A `const` assertion that `scope` is the singleton scope, failing at the scope argument.
 fn singleton_assertion(scope: &syn::Path, paths: &Paths) -> TokenStream {
-    let static_scope = paths.core("StaticScope");
+    let static_scope = paths.core("Scope");
     let singleton = paths.core("scope::Singleton");
 
     quote_spanned! {scope.span()=>

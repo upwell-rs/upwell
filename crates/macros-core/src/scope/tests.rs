@@ -1,0 +1,354 @@
+use quote::quote;
+
+use super::*;
+
+fn expand_str(
+    args: proc_macro2::TokenStream,
+    item: proc_macro2::TokenStream,
+) -> syn::Result<String> {
+    let args: ScopeArgs = syn::parse2(args)?;
+    let item: ItemStruct = syn::parse2(item).expect("test item parses");
+    let paths = args.paths(Paths::upwell());
+
+    expand(args, item, &paths).map(|tokens| tokens.to_string().replace(' ', ""))
+}
+
+fn error(args: proc_macro2::TokenStream, item: proc_macro2::TokenStream) -> String {
+    match expand_str(args, item) {
+        Ok(_) => panic!("the declaration is rejected"),
+        Err(error) => error.to_string(),
+    }
+}
+
+#[test]
+fn a_parameterised_scope_derives_its_identity_and_declares_its_fields() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                customer: u64,
+                region: String,
+            }
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(
+        expanded.contains(r#"::upwell::namespaced_id!(::upwell::ScopeId,"app/customer_sync")"#)
+    );
+    assert!(expanded.contains(r#"constNAME:&'staticstr="CustomerSync""#));
+    assert!(expanded.contains("::upwell::rank_below(&[<Rootas::upwell::Scope>::RANK])"));
+    assert!(expanded.contains("impl::upwell::OpensUnder<Root>forCustomerSync{}"));
+    assert!(expanded.contains(r#".with_fields(&["customer","region"])"#));
+    assert!(expanded.contains("<CustomerSyncas::upwell::Scope>::RANK>=1"));
+    assert!(expanded.contains("::core::mem::size_of::<CustomerSync>()!=0"));
+    assert!(!expanded.contains("GENERATIONS"));
+}
+
+#[test]
+fn a_unit_scope_asserts_no_size() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct Unit;
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(!expanded.contains("size_of"));
+}
+
+#[test]
+fn explicit_arguments_override_the_derived_constants() {
+    let expanded = expand_str(
+        quote!(
+            parents = [Root, Session],
+            generations = durable,
+            rank = 40,
+            id = "billing/run",
+            name = "Billing run"
+        ),
+        quote!(
+            struct Run(u64);
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains(r#"namespaced_id!(::upwell::ScopeId,"billing/run")"#));
+    assert!(expanded.contains("constRANK:u8=40;"));
+    assert!(expanded.contains(r#"constNAME:&'staticstr="Billingrun""#));
+    assert!(expanded.contains(
+        "constGENERATIONS:::upwell::ScopeGenerations=::upwell::ScopeGenerations::Durable;"
+    ));
+    assert!(expanded.contains("impl::upwell::OpensUnder<Session>forRun{}"));
+    assert!(expanded.contains(r#".with_fields(&["0"])"#));
+}
+
+#[test]
+fn children_open_under_the_scope_and_rank_below_it() {
+    let expanded = expand_str(
+        quote!(
+            parents = [Root],
+            generations = durable,
+            children = [HttpRequest, crate::Call]
+        ),
+        quote!(
+            struct Session;
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains("impl::upwell::OpensUnder<Session>forHttpRequest{}"));
+    assert!(expanded.contains("impl::upwell::OpensUnder<Session>forcrate::Call{}"));
+    assert!(
+        expanded.contains("<Sessionas::upwell::Scope>::RANK><HttpRequestas::upwell::Scope>::RANK")
+    );
+    assert!(expanded.contains(
+        ".with_children(&[<HttpRequestas::upwell::Scope>::ID,<crate::Callas::upwell::Scope>::ID])"
+    ));
+}
+
+#[test]
+fn a_scope_without_children_names_none() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct Unit;
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains(".with_children(&[])"));
+}
+
+#[test]
+fn invalid_children_are_rejected() {
+    let unit = quote!(
+        struct Session;
+    );
+
+    assert!(
+        error(quote!(parents = [Root], children = []), unit.clone()).contains("at least one scope")
+    );
+    assert!(
+        error(
+            quote!(parents = [Root], children = [HttpRequest, HttpRequest]),
+            unit
+        )
+        .contains("`HttpRequest` is listed as a child more than once")
+    );
+}
+
+#[test]
+fn a_repeated_argument_is_rejected_at_its_second_mention() {
+    let unit = quote!(
+        struct Session;
+    );
+
+    assert!(
+        error(
+            quote!(
+                parents = [Root],
+                children = [HttpRequest],
+                children = [Call]
+            ),
+            unit.clone()
+        )
+        .contains("`children` is given more than once")
+    );
+    assert!(
+        error(quote!(parents = [Root], parents = [Session]), unit)
+            .contains("`parents` is given more than once")
+    );
+}
+
+#[test]
+fn a_generation_policy_path_is_emitted_verbatim() {
+    let expanded = expand_str(
+        quote!(parents = [Root], generations = my::POLICY),
+        quote!(
+            struct Unit;
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains("constGENERATIONS:::upwell::ScopeGenerations=my::POLICY;"));
+}
+
+#[test]
+fn invalid_declarations_are_rejected() {
+    let unit = quote!(
+        struct Unit;
+    );
+
+    assert!(error(quote!(), unit.clone()).contains("needs every parent"));
+    assert!(error(quote!(parents = []), unit.clone()).contains("at least one parent"));
+    assert!(
+        error(quote!(parents = [Root], rank = 255), unit.clone()).contains("between 1 and 254")
+    );
+    assert!(
+        error(quote!(parents = [Root], id = "Bad"), unit.clone()).contains("not a valid scope ID")
+    );
+    assert!(
+        error(
+            quote!(parents = [Root], generations = forever),
+            unit.clone()
+        )
+        .contains("unknown generation policy")
+    );
+    assert!(error(quote!(parents = [Root], lifetime = 1), unit).contains("unknown argument"));
+    assert!(
+        error(
+            quote!(parents = [Root]),
+            quote!(
+                struct Generic<T>(T);
+            )
+        )
+        .contains("cannot be generic")
+    );
+}
+
+#[test]
+fn log_fields_are_reported_and_the_marker_is_stripped() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                #[log]
+                customer: u64,
+                credentials: String,
+                #[log]
+                region: String,
+            }
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains("fnrecord_log_params(&self,params:&mutdyn::upwell::LogParams)"));
+    assert!(expanded.contains(r#"params.param("customer",&self.customer);"#));
+    assert!(expanded.contains(r#"params.param("region",&self.region);"#));
+    assert!(!expanded.contains(r#"param("credentials""#));
+    assert!(!expanded.contains("#[log]"));
+}
+
+#[test]
+fn a_scope_without_log_fields_reports_nothing() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                customer: u64,
+            }
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(!expanded.contains("record_log_params"));
+}
+
+#[test]
+fn a_log_marker_with_arguments_is_rejected() {
+    let message = error(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                #[log(all)]
+                customer: u64,
+            }
+        ),
+    );
+
+    assert!(message.contains("`#[log]` takes no arguments"), "{message}");
+}
+
+#[test]
+fn a_repeated_log_marker_is_rejected() {
+    let message = error(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                #[log]
+                #[log]
+                customer: u64,
+            }
+        ),
+    );
+
+    assert!(message.contains("at most one `#[log]`"), "{message}");
+}
+
+#[test]
+fn cfg_on_a_logged_tuple_scope_is_rejected() {
+    let message = error(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync(#[cfg(any())] u8, #[log] u64);
+        ),
+    );
+
+    assert!(message.contains("`#[cfg]` or a `#[cfg_attr]`"), "{message}");
+}
+
+#[test]
+fn a_cfg_on_a_logged_named_field_gates_its_report() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                #[cfg(unix)]
+                #[log]
+                customer: u64,
+            }
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains(r#"#[cfg(all(unix))]params.param("customer""#));
+}
+
+#[test]
+fn a_cfg_attr_that_can_remove_a_logged_tuple_field_is_rejected() {
+    let message = error(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync(#[cfg_attr(unix, cfg(any()))] u8, #[log] u64);
+        ),
+    );
+
+    assert!(
+        message.contains("`#[cfg_attr]` that can remove"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_cfg_attr_that_only_adds_attributes_is_accepted_on_a_logged_tuple() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync(#[cfg_attr(unix, allow(dead_code))] u8, #[log] u64);
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(expanded.contains(r#"params.param("1",&self.1);"#));
+}
+
+#[test]
+fn a_cfg_attr_carrying_a_cfg_gates_a_logged_named_field() {
+    let expanded = expand_str(
+        quote!(parents = [Root]),
+        quote!(
+            struct CustomerSync {
+                #[cfg_attr(unix, cfg(feature = "x"))]
+                #[log]
+                customer: u64,
+            }
+        ),
+    )
+    .expect("the scope expands");
+
+    assert!(
+        expanded.contains(r#"#[cfg(all(any(not(unix),all(feature="x"))))]params.param("customer""#)
+    );
+}

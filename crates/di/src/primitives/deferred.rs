@@ -13,7 +13,7 @@ use crate::{
 
 /// Type-erased deferred slot hydrated after a scope finishes construction.
 pub(crate) trait DeferredHydrator: Send + Sync {
-    fn hydrate(&self, scope: &ScopeContainer) -> crate::Result<()>;
+    fn hydrate(&self, scope: &Arc<ScopeContainer>) -> crate::Result<()>;
 }
 
 /// An Arc-specific deferred dependency retaining only a weak cached reference.
@@ -21,9 +21,13 @@ pub struct Deferred<T: ?Sized> {
     inner: Arc<DeferredInner<T>>,
 }
 
+/// The target of a [`Deferred`] once hydrated, and the scope it is read from, kept so a
+/// target its hydration did not find yet, such as one left unbuilt by a cancelled on-demand
+/// build, is read on first access once built.
 struct DeferredInner<T: ?Sized> {
     qualifier: Option<&'static str>,
     value: OnceLock<Weak<T>>,
+    scope: OnceLock<Weak<ScopeContainer>>,
 }
 
 impl<T: ?Sized> Clone for Deferred<T> {
@@ -42,19 +46,50 @@ where
         scope: ScopeResolverSlot,
         qualifier: Option<&'static str>,
     ) -> crate::Result<Self> {
-        let inner = Arc::new(DeferredInner {
-            qualifier,
-            value: OnceLock::new(),
-        });
+        Self::unhydrated(qualifier).register(scope)
+    }
 
-        scope.register_deferred(Arc::clone(&inner) as Arc<dyn DeferredHydrator>)?;
+    /// Captures a dependency of a slot built on demand in the open scope `opened`, hydrated
+    /// with `group` but read from `opened` as soon as its target is built there, so a
+    /// concurrent resolution returning this slot before `group` finishes still reaches it.
+    pub(crate) fn capture_in(
+        group: ScopeResolverSlot,
+        qualifier: Option<&'static str>,
+        opened: &Arc<ScopeContainer>,
+    ) -> crate::Result<Self> {
+        let deferred = Self::unhydrated(qualifier);
 
-        Ok(Self { inner })
+        // The deferred dependency was just created, so its scope is unset.
+        let _ = deferred.inner.scope.set(Arc::downgrade(opened));
+
+        deferred.register(group)
+    }
+
+    fn unhydrated(qualifier: Option<&'static str>) -> Self {
+        Self {
+            inner: Arc::new(DeferredInner {
+                qualifier,
+                value: OnceLock::new(),
+                scope: OnceLock::new(),
+            }),
+        }
+    }
+
+    fn register(self, scope: ScopeResolverSlot) -> crate::Result<Self> {
+        scope.register_deferred(Arc::clone(&self.inner) as Arc<dyn DeferredHydrator>)?;
+
+        Ok(self)
     }
 
     /// Returns the hydrated target when it is still alive.
     pub fn try_get(&self) -> Option<Arc<T>> {
-        self.inner.value.get().and_then(Weak::upgrade)
+        if let Some(value) = self.inner.value.get() {
+            return value.upgrade();
+        }
+
+        let scope = self.inner.scope.get()?.upgrade()?;
+
+        self.inner.read(&scope)
     }
 
     /// Returns the hydrated target.
@@ -72,22 +107,35 @@ where
     }
 }
 
+impl<T> DeferredInner<T>
+where
+    T: ?Sized + Send + Sync + 'static,
+{
+    /// Reads the target from `scope` if it is built there, and keeps it as the hydrated value.
+    fn read(&self, scope: &ScopeContainer) -> Option<Arc<T>> {
+        let value = match self.qualifier {
+            Some(qualifier) => scope.resolve_qualified_built::<Arc<T>>(qualifier),
+            None => scope.resolve_built::<Arc<T>>(),
+        }?;
+
+        // A concurrent read may have kept the same target first; either value is the target.
+        let _ = self.value.set(Arc::downgrade(&value));
+
+        Some(value)
+    }
+}
+
 impl<T> DeferredHydrator for DeferredInner<T>
 where
     T: ?Sized + Send + Sync + 'static,
 {
-    fn hydrate(&self, scope: &ScopeContainer) -> crate::Result<()> {
-        let value = match self.qualifier {
-            Some(qualifier) => scope.resolve_qualified_built::<Arc<T>>(qualifier),
-            None => scope.resolve_built::<Arc<T>>(),
-        }
-        .ok_or(Error::MissingComponent(short_name::<T>()))?;
+    fn hydrate(&self, scope: &Arc<ScopeContainer>) -> crate::Result<()> {
+        // Each slot is registered with exactly one scope; a repeated set keeps the first.
+        let _ = self.scope.set(Arc::downgrade(scope));
 
-        // Each slot is registered with exactly one scope and hydrated once;
-        // a repeated set keeps the first value.
-        let _ = self.value.set(Arc::downgrade(&value));
-
-        Ok(())
+        self.read(scope)
+            .map(|_| ())
+            .ok_or(Error::MissingComponent(short_name::<T>()))
     }
 }
 
@@ -104,6 +152,6 @@ where
     }
 
     async fn from_container(cx: &ComponentConstructionContext) -> crate::Result<Self> {
-        Self::capture(cx.resolver_slot(), None)
+        cx.deferred(None)
     }
 }

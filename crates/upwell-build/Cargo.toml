@@ -11,4 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 
 # Intentionally dependency-free: it is a build-dependency of several framework crates.
+[lints]
+workspace = true
+
 [dependencies]

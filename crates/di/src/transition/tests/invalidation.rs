@@ -253,11 +253,13 @@ fn one_sided_invalidations_preserve_structural_add_and_remove() {
     candidate_registry
         .components
         .retain(|component| component.id != "unrelated");
-    let candidate =
-        EffectiveGraph::build(RuntimeGenerationId::INITIAL, &candidate_registry, |_, _| {
-            true
-        })
-        .expect("candidate validates");
+    let candidate = EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &candidate_registry,
+        |_, _| true,
+        |_, _| false,
+    )
+    .expect("candidate validates");
     let roots = BTreeSet::from(["unrelated", "custom-authenticator"]);
 
     let plan = active

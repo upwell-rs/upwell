@@ -70,6 +70,7 @@ fn runtime_view(
         RuntimeScopePlan::new(
             Arc::new(empty_topology()),
             Arc::new(HashMap::new()),
+            Arc::default(),
             Arc::new(HashMap::new()),
         ),
         Arc::from(resolved),
@@ -81,6 +82,7 @@ fn runtime_view(
         Arc::from("transition-test"),
         generation,
         ConfigReloader::new(ConfigManager::empty(), Vec::new()),
+        Arc::default(),
     )
     .view()
 }
@@ -146,6 +148,7 @@ fn active_graph(registry: &AppRegistry) -> EffectiveGraph {
         RuntimeGenerationId::INITIAL,
         &registry.component_registry(),
         |_, _| true,
+        |_, _| false,
     )
     .expect("active graph validates")
 }

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use upwell_config::{ConfigManager, Toml};
 use upwell_config::{ConfigProperties, ConfigReload};
-use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, StaticScope, TypeDescriptor};
+use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, Scope, TypeDescriptor};
 use upwell_di::{
     BoxedComponent, Component, ComponentConstructionContext, ComponentDescriptor,
     ComponentFactoryDescriptor, ComponentFactoryRole, Injectable, ProviderDescriptor,

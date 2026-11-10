@@ -29,10 +29,10 @@ fn recorder(label: &'static str, log: &Arc<Mutex<Vec<&'static str>>>) -> DropRec
 #[tokio::test]
 async fn retained_guard_drops_once_after_the_container_instances() {
     let log = Arc::new(Mutex::new(Vec::new()));
-    let instance = BoxedComponent {
-        ty: TypeDescriptor::of::<DropRecorder>("DropRecorder"),
-        value: Box::new(recorder("instance", &log)),
-    };
+    let instance = BoxedComponent::stored(
+        TypeDescriptor::of::<DropRecorder>("DropRecorder"),
+        recorder("instance", &log),
+    );
     let root = ScopeContainer::build_root(&[], vec![instance], ResolverSet::new(), registry())
         .await
         .expect("root builds");
@@ -52,4 +52,24 @@ async fn retained_guard_drops_once_after_the_container_instances() {
         *log.lock().expect("drop log is not poisoned"),
         ["second guard", "instance", "guard"]
     );
+}
+
+#[tokio::test]
+async fn a_retained_guard_reads_back_as_its_own_type_only() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let root = ScopeContainer::build_root(&[], Vec::new(), ResolverSet::new(), registry())
+        .await
+        .expect("root builds");
+
+    assert!(root.drop_guard::<DropRecorder>().is_none());
+
+    root.retain_drop_guard(recorder("guard", &log))
+        .map_err(|rejected| rejected.label)
+        .expect("the first guard is retained");
+
+    assert_eq!(
+        root.drop_guard::<DropRecorder>().map(|guard| guard.label),
+        Some("guard")
+    );
+    assert!(root.drop_guard::<u8>().is_none());
 }

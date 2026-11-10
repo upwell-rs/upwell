@@ -1,0 +1,13 @@
+error: unknown generation policy; expected `pinned`, `durable`, or a path to a `ScopeGenerations` value
+ --> tests/ui/scopes/unknown_policy.rs:4:41
+  |
+4 | #[scope(parents = [Root], generations = forever)]
+  |                                         ^^^^^^^
+
+warning: unused import: `upwell::scope::Root`
+ --> tests/ui/scopes/unknown_policy.rs:1:5
+  |
+1 | use upwell::scope::Root;
+  |     ^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

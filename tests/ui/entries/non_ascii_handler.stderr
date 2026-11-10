@@ -1,0 +1,5 @@
+error: `grüßen` cannot name an entry: an entry key needs it in snake_case ASCII (lowercase letters, digits, `.`, `_` or `-`), and it has no such form
+  --> tests/ui/entries/non_ascii_handler.rs:10:14
+   |
+10 |     async fn grüßen() -> u32 {
+   |              ^^^^^^

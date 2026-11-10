@@ -1,5 +1,5 @@
 use upwell_core::{
-    Cardinality, DependencyDescriptor, ResolutionMode, ScopeId, StaticScope, TypeDescriptor,
+    Cardinality, DependencyDescriptor, ResolutionMode, Scope, ScopeId, ScopeKey, TypeDescriptor,
 };
 
 use super::*;
@@ -16,7 +16,7 @@ const SELECTED_TRAIT: TypeDescriptor = TypeDescriptor::of::<dyn Send>("SelectedT
 /// A standalone request branch with the same display label as [`MessageScope`].
 struct HttpScope;
 
-impl StaticScope for HttpScope {
+impl Scope for HttpScope {
     const ID: ScopeId = HTTP_ID;
     const RANK: u8 = 1;
     const NAME: &'static str = "Request";
@@ -25,7 +25,7 @@ impl StaticScope for HttpScope {
 /// A connection boundary reachable by websocket messages.
 struct ConnectionScope;
 
-impl StaticScope for ConnectionScope {
+impl Scope for ConnectionScope {
     const ID: ScopeId = CONNECTION_ID;
     const RANK: u8 = 2;
     const NAME: &'static str = "Connection";
@@ -34,7 +34,7 @@ impl StaticScope for ConnectionScope {
 /// A websocket message boundary sharing a display label with [`HttpScope`].
 struct MessageScope;
 
-impl StaticScope for MessageScope {
+impl Scope for MessageScope {
     const ID: ScopeId = MESSAGE_ID;
     const RANK: u8 = 1;
     const NAME: &'static str = "Request";
@@ -43,7 +43,7 @@ impl StaticScope for MessageScope {
 /// A provider scope with a rank reachable under legacy validation only.
 struct SiblingScope;
 
-impl StaticScope for SiblingScope {
+impl Scope for SiblingScope {
     const ID: ScopeId = SIBLING_ID;
     const RANK: u8 = 2;
     const NAME: &'static str = "Sibling";
@@ -75,7 +75,7 @@ fn component(
     id: &'static str,
     name: &'static str,
     ty: TypeDescriptor,
-    scope: &'static dyn Scope,
+    scope: ScopeKey,
     factories: fn() -> &'static [ComponentFactoryDescriptor],
 ) -> ComponentDescriptor {
     ComponentDescriptor {
@@ -86,7 +86,7 @@ fn component(
 
 fn reaches(consumer: ScopeId, dependency: ScopeId) -> bool {
     consumer == dependency
-        || dependency == Singleton.id()
+        || dependency == Singleton::ID
         || (consumer == MESSAGE_ID && dependency == CONNECTION_ID)
 }
 
@@ -120,14 +120,14 @@ fn topology_rejects_equal_label_sibling_dependency() {
         "http-consumer",
         "HttpConsumer",
         TypeDescriptor::of::<u8>("HttpConsumer"),
-        &HttpScope,
+        HttpScope::KEY,
         dependency_factory,
     );
     let dependency = component(
         "message-dependency",
         "Dependency",
         TypeDescriptor::of::<u16>("Dependency"),
-        &MessageScope,
+        MessageScope::KEY,
         no_dependency_factory,
     );
     let registry = ComponentRegistry {
@@ -137,7 +137,7 @@ fn topology_rejects_equal_label_sibling_dependency() {
 
     assert!(registry.validate().is_ok());
     assert!(matches!(
-        registry.validate_with_scope_reachability(reaches),
+        registry.validate_with_scope_reachability(reaches, |_, _| false),
         Err(Error::ScopeViolation(_))
     ));
 }
@@ -148,14 +148,14 @@ fn topology_accepts_declared_ancestor_dependency() {
         "message-consumer",
         "MessageConsumer",
         TypeDescriptor::of::<u8>("MessageConsumer"),
-        &MessageScope,
+        MessageScope::KEY,
         dependency_factory,
     );
     let dependency = component(
         "connection-dependency",
         "Dependency",
         TypeDescriptor::of::<u16>("Dependency"),
-        &ConnectionScope,
+        ConnectionScope::KEY,
         no_dependency_factory,
     );
     let registry = ComponentRegistry {
@@ -163,7 +163,11 @@ fn topology_accepts_declared_ancestor_dependency() {
         providers: Vec::new(),
     };
 
-    assert!(registry.validate_with_scope_reachability(reaches).is_ok());
+    assert!(
+        registry
+            .validate_with_scope_reachability(reaches, |_, _| false)
+            .is_ok()
+    );
 }
 
 #[test]
@@ -172,14 +176,14 @@ fn topology_rejects_higher_rank_unreachable_sibling() {
         "http-consumer",
         "HttpConsumer",
         TypeDescriptor::of::<u8>("HttpConsumer"),
-        &HttpScope,
+        HttpScope::KEY,
         dependency_factory,
     );
     let dependency = component(
         "sibling-dependency",
         "Dependency",
         TypeDescriptor::of::<u16>("Dependency"),
-        &SiblingScope,
+        SiblingScope::KEY,
         no_dependency_factory,
     );
     let registry = ComponentRegistry {
@@ -189,7 +193,7 @@ fn topology_rejects_higher_rank_unreachable_sibling() {
 
     assert!(registry.validate().is_ok());
     assert!(matches!(
-        registry.validate_with_scope_reachability(reaches),
+        registry.validate_with_scope_reachability(reaches, |_, _| false),
         Err(Error::ScopeViolation(_))
     ));
 }
@@ -200,21 +204,21 @@ fn topology_reports_registered_trait_providers_in_unreachable_sibling_scopes() {
         "http-consumer",
         "HttpConsumer",
         TypeDescriptor::of::<u8>("HttpConsumer"),
-        &HttpScope,
+        HttpScope::KEY,
         provider_dependency_factory,
     );
     let message_provider = component(
         "message-provider",
         "MessageProvider",
         TypeDescriptor::of::<u16>("MessageProvider"),
-        &MessageScope,
+        MessageScope::KEY,
         no_dependency_factory,
     );
     let sibling_provider = component(
         "sibling-provider",
         "SiblingProvider",
         TypeDescriptor::of::<u32>("SiblingProvider"),
-        &SiblingScope,
+        SiblingScope::KEY,
         no_dependency_factory,
     );
     let registry = ComponentRegistry {
@@ -225,7 +229,7 @@ fn topology_reports_registered_trait_providers_in_unreachable_sibling_scopes() {
         ],
     };
     let error = registry
-        .validate_with_scope_reachability(reaches)
+        .validate_with_scope_reachability(reaches, |_, _| false)
         .expect_err("sibling providers are registered but unreachable");
     let Error::ScopeUnreachableDependency(error) = error else {
         panic!("expected scope-unreachable dependency classification");
@@ -261,7 +265,7 @@ fn topology_keeps_truly_absent_trait_provider_as_missing_dependency() {
         "http-consumer",
         "HttpConsumer",
         TypeDescriptor::of::<u8>("HttpConsumer"),
-        &HttpScope,
+        HttpScope::KEY,
         provider_dependency_factory,
     );
     let registry = ComponentRegistry {
@@ -270,9 +274,207 @@ fn topology_keeps_truly_absent_trait_provider_as_missing_dependency() {
     };
 
     assert!(matches!(
-        registry.validate_with_scope_reachability(reaches),
+        registry.validate_with_scope_reachability(reaches, |_, _| false),
         Err(Error::MissingDependency { .. })
     ));
 }
 
 mod introspection;
+
+fn optional_dependency_factory() -> &'static [ComponentFactoryDescriptor] {
+    unbuilt_factories!("static", || {
+        vec![DependencyDescriptor {
+            optional: true,
+            ..dependency(
+                "Dependency",
+                TypeDescriptor::of::<u16>("Dependency"),
+                Cardinality::One,
+                ResolutionMode::Eager,
+            )
+        }]
+    })()
+}
+
+/// An HTTP consumer whose `optional` or required edge targets a [`SiblingScope`] component.
+fn registry_into_sibling(
+    factories: fn() -> &'static [ComponentFactoryDescriptor],
+) -> ComponentRegistry {
+    let consumer = component(
+        "http-consumer",
+        "HttpConsumer",
+        TypeDescriptor::of::<u8>("HttpConsumer"),
+        HttpScope::KEY,
+        factories,
+    );
+    let dependency = component(
+        "sibling-dependency",
+        "Dependency",
+        TypeDescriptor::of::<u16>("Dependency"),
+        SiblingScope::KEY,
+        no_dependency_factory,
+    );
+
+    ComponentRegistry {
+        components: vec![consumer, dependency],
+        providers: Vec::new(),
+    }
+}
+
+/// Whether the sibling scope encloses the HTTP scope on some chain, as an application scope
+/// listing it among its children would.
+fn sibling_encloses_http(ancestor: ScopeId, descendant: ScopeId) -> bool {
+    ancestor == SIBLING_ID && descendant == HTTP_ID
+}
+
+#[test]
+fn an_optional_edge_validates_only_into_a_scope_enclosing_the_consumer_on_some_chain() {
+    let registry = registry_into_sibling(optional_dependency_factory);
+
+    assert!(
+        registry
+            .validate_with_scope_reachability(reaches, sibling_encloses_http)
+            .is_ok(),
+        "an enclosing scope's component is present on the chains that hold it"
+    );
+    assert!(
+        matches!(
+            registry.validate_with_scope_reachability(reaches, |_, _| false),
+            Err(Error::ScopeViolation(_))
+        ),
+        "a scope that never encloses the consumer is rejected"
+    );
+}
+
+#[test]
+fn a_required_edge_into_a_scope_enclosing_the_consumer_on_some_chain_is_rejected() {
+    let registry = registry_into_sibling(dependency_factory);
+
+    assert!(matches!(
+        registry.validate_with_scope_reachability(reaches, sibling_encloses_http),
+        Err(Error::ScopeViolation(_))
+    ));
+}
+
+const SESSION_ID: ScopeId = upwell_core::namespaced_id!(ScopeId, "test/session");
+
+/// A scope that encloses [`HttpScope`] on some chain, as an application scope listing it among
+/// its children does.
+struct SessionScope;
+
+impl Scope for SessionScope {
+    const ID: ScopeId = SESSION_ID;
+    const RANK: u8 = 3;
+    const NAME: &'static str = "Session";
+}
+
+/// Whether the session encloses the HTTP scope on some chain; the sibling never does.
+fn session_encloses_http(ancestor: ScopeId, descendant: ScopeId) -> bool {
+    ancestor == SESSION_ID && descendant == HTTP_ID
+}
+
+/// The dependency placed in `scope`.
+fn placed_dependency(id: &'static str, scope: ScopeKey) -> ComponentDescriptor {
+    component(
+        id,
+        "Dependency",
+        TypeDescriptor::of::<u16>("Dependency"),
+        scope,
+        no_dependency_factory,
+    )
+}
+
+/// An HTTP consumer with an optional edge to a dependency placed in each of `scopes`, in order.
+fn registry_with_placements(scopes: &[ScopeKey]) -> ComponentRegistry {
+    let consumer = component(
+        "http-consumer",
+        "HttpConsumer",
+        TypeDescriptor::of::<u8>("HttpConsumer"),
+        HttpScope::KEY,
+        optional_dependency_factory,
+    );
+    let ids = ["dependency-a", "dependency-b"];
+    let components = std::iter::once(consumer)
+        .chain(
+            scopes
+                .iter()
+                .zip(ids)
+                .map(|(scope, id)| placed_dependency(id, *scope)),
+        )
+        .collect();
+
+    ComponentRegistry {
+        components,
+        providers: Vec::new(),
+    }
+}
+
+/// The per-edge fault of the HTTP consumer's optional edge in `registry`.
+fn optional_edge_fault(registry: &ComponentRegistry) -> Option<crate::DependencyFault> {
+    let components = registry.resolved_components().expect("components resolve");
+    let selection = registry
+        .provider_selection_model(&components)
+        .expect("selection model builds");
+    let dependency = DependencyDescriptor {
+        optional: true,
+        ..dependency(
+            "Dependency",
+            TypeDescriptor::of::<u16>("Dependency"),
+            Cardinality::One,
+            ResolutionMode::Eager,
+        )
+    };
+    let consumer = crate::DependencyConsumer {
+        id: "test/consumer",
+        scope: HttpScope::KEY,
+    };
+
+    selection
+        .dependency_fault(&dependency, consumer, reaches, session_encloses_http)
+        .expect("the edge has a per-edge outcome")
+}
+
+#[test]
+fn an_optional_edge_validates_when_any_placement_encloses_the_consumer_in_either_order() {
+    for scopes in [
+        [SessionScope::KEY, SiblingScope::KEY],
+        [SiblingScope::KEY, SessionScope::KEY],
+    ] {
+        let registry = registry_with_placements(&scopes);
+
+        assert!(
+            registry
+                .validate_with_scope_reachability(reaches, session_encloses_http)
+                .is_ok(),
+            "the session placement validates the edge, whatever the order"
+        );
+        assert_eq!(
+            optional_edge_fault(&registry),
+            None,
+            "as an entry parameter too"
+        );
+    }
+}
+
+#[test]
+fn an_optional_edge_with_no_placement_enclosing_the_consumer_is_rejected() {
+    let registry = registry_with_placements(&[SiblingScope::KEY]);
+
+    assert!(matches!(
+        registry.validate_with_scope_reachability(reaches, session_encloses_http),
+        Err(Error::ScopeViolation(_))
+    ));
+    assert!(optional_edge_fault(&registry).is_some());
+}
+
+#[test]
+fn an_optional_edge_into_placements_enclosing_the_consumer_on_different_chains_is_rejected() {
+    let registry = registry_with_placements(&[SessionScope::KEY, SiblingScope::KEY]);
+    let both_enclose = |ancestor: ScopeId, descendant: ScopeId| {
+        descendant == HTTP_ID && (ancestor == SESSION_ID || ancestor == SIBLING_ID)
+    };
+
+    assert!(matches!(
+        registry.validate_with_scope_reachability(reaches, both_enclose),
+        Err(Error::AmbiguousEnclosingPlacement(_))
+    ));
+}

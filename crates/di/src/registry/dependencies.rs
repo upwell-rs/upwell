@@ -3,10 +3,10 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
-use upwell_core::{Cardinality, Scope, ScopeId};
+use upwell_core::{Cardinality, ResolutionMode, ScopeId, ScopeKey};
 
 use super::ComponentRegistry;
-use super::scopes::{scope_allows_by_rank, scope_allows_with};
+use super::scopes::{scope_allows_by_rank, scope_allows_with, scope_unreachable_dependency};
 use super::selection::{self, SelectedDependency};
 use crate::descriptors::ComponentDescriptor;
 use crate::error::Error;
@@ -45,93 +45,14 @@ impl ComponentRegistry {
         &self,
         components: &[ComponentDescriptor],
         model: &selection::ProviderSelectionModel,
-        can_access: &impl Fn(&dyn Scope, &dyn Scope) -> bool,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> crate::Result<()> {
         let available: HashSet<TypeId> = components.iter().map(|c| c.ty.type_id).collect();
+        let is_component = |type_id: TypeId| available.contains(&type_id);
 
-        for c in components {
-            for dep in c.dependencies() {
-                // Config edges are validated against bindings by the config layer.
-                if dep.config {
-                    continue;
-                }
-
-                let dep_id = dep.ty.type_id;
-                let matching = model.has_matching_provider(dep_id, dep.qualifier);
-                let visible =
-                    model.has_visible_provider(dep_id, dep.qualifier, c.scope, can_access);
-                let must_exist =
-                    dep.cardinality.requires_provider() && !dep.optional && !dep.dynamic;
-
-                if must_exist && matching && !visible && !available.contains(&dep_id) {
-                    return Err(Self::scope_unreachable_dependency(model, c, &dep));
-                }
-
-                if let Some(qualifier) = dep.qualifier {
-                    let found = dep.dynamic || visible;
-
-                    if !found {
-                        return Err(Error::MissingDependency {
-                            component: c.name.to_string(),
-                            component_id: c.id.to_string(),
-                            dependency: format!(
-                                "{} (qualifier `{qualifier}`)",
-                                (dep.ty.type_name)()
-                            ),
-                            type_name: (dep.ty.type_name)().to_string(),
-                        });
-                    }
-
-                    continue;
-                }
-
-                if dep.cardinality == Cardinality::One && !dep.dynamic && matching && visible {
-                    let selected = model.select_runtime_one(
-                        dep_id,
-                        dep.qualifier,
-                        dep.resolution,
-                        c.scope,
-                        can_access,
-                    );
-
-                    if let Some(selected) = selected {
-                        if let Some(component) =
-                            model.component(selected.provider.concrete_ty.type_id)
-                        {
-                            crate::observability::provider_selection(
-                                c,
-                                &dep,
-                                selected.provider,
-                                component,
-                                selected.reason,
-                                selected.stage,
-                            );
-                        }
-                    } else {
-                        crate::observability::selection_absent(c, &dep);
-
-                        return Err(unselectable_provider(
-                            c,
-                            &dep,
-                            model.visible_provider_ids(
-                                dep_id,
-                                dep.qualifier,
-                                dep.resolution,
-                                c.scope,
-                                can_access,
-                            ),
-                        ));
-                    }
-                }
-
-                if must_exist && !available.contains(&dep_id) && (!matching || !visible) {
-                    return Err(Error::MissingDependency {
-                        component: c.name.to_string(),
-                        component_id: c.id.to_string(),
-                        dependency: (dep.ty.type_name)().to_string(),
-                        type_name: (dep.ty.type_name)().to_string(),
-                    });
-                }
+        for consumer in components {
+            for dependency in consumer.dependencies() {
+                check_dependency(model, &is_component, consumer, &dependency, can_access)?;
             }
         }
 
@@ -147,29 +68,160 @@ impl ComponentRegistry {
         &self,
         components: &[ComponentDescriptor],
     ) -> crate::Result<()> {
-        let scope_of: HashMap<TypeId, ScopeId> = components
-            .iter()
-            .map(|component| (component.ty.type_id, component.scope.id()))
-            .collect();
+        let mut scopes_of: HashMap<TypeId, Vec<ScopeId>> = HashMap::new();
         let mut seen: HashSet<(TypeId, &str, ScopeId)> = HashSet::new();
 
-        for provider in &self.providers {
-            let Some(scope) = scope_of.get(&provider.concrete_ty.type_id).copied() else {
-                continue;
-            };
+        for component in components {
+            scopes_of
+                .entry(component.ty.type_id)
+                .or_default()
+                .push(component.scope.id());
+        }
 
-            if !seen.insert((provider.trait_ty.type_id, provider.qualifier, scope)) {
-                return Err(Error::DuplicateProviderQualifier {
-                    trait_name: (provider.trait_ty.type_name)().to_string(),
-                    trait_type: (provider.trait_ty.type_name)().to_string(),
-                    qualifier: provider.qualifier.to_string(),
-                    scope,
-                });
+        for provider in &self.providers {
+            let scopes = scopes_of
+                .get(&provider.concrete_ty.type_id)
+                .map_or(&[][..], Vec::as_slice);
+
+            for scope in scopes.iter().copied() {
+                if !seen.insert((provider.trait_ty.type_id, provider.qualifier, scope)) {
+                    return Err(Error::DuplicateProviderQualifier {
+                        trait_name: (provider.trait_ty.type_name)().to_string(),
+                        trait_type: (provider.trait_ty.type_name)().to_string(),
+                        qualifier: provider.qualifier.to_string(),
+                        scope,
+                    });
+                }
             }
         }
 
         Ok(())
     }
+}
+
+/// Requires one eager dependency edge of `consumer` to resolve to exactly the providers its
+/// cardinality allows. `is_component` reports whether a type is a registered component.
+pub(super) fn check_dependency(
+    model: &selection::ProviderSelectionModel,
+    is_component: &impl Fn(TypeId) -> bool,
+    consumer: &ComponentDescriptor,
+    dep: &upwell_core::DependencyDescriptor,
+    can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
+) -> crate::Result<()> {
+    // Config edges are validated against bindings by the config layer.
+    if dep.config {
+        return Ok(());
+    }
+
+    if dep.resolution == ResolutionMode::Current {
+        return check_current(model, is_component, consumer, dep);
+    }
+
+    let dep_id = dep.ty.type_id;
+    let matching = model.has_matching_provider(dep_id, dep.qualifier);
+    let visible = model.has_visible_provider(dep_id, dep.qualifier, consumer.scope, can_access);
+    let must_exist = dep.cardinality.requires_provider() && !dep.optional && !dep.dynamic;
+    let registered = is_component(dep_id);
+
+    if must_exist && matching && !visible && !registered {
+        return Err(scope_unreachable_dependency(model, consumer, dep));
+    }
+
+    if let Some(qualifier) = dep.qualifier {
+        let found = dep.dynamic || visible;
+
+        if !found {
+            return Err(Error::MissingDependency {
+                component: consumer.name.to_string(),
+                component_id: consumer.id.to_string(),
+                dependency: format!("{} (qualifier `{qualifier}`)", (dep.ty.type_name)()),
+                type_name: (dep.ty.type_name)().to_string(),
+            });
+        }
+
+        return Ok(());
+    }
+
+    if dep.cardinality == Cardinality::One && !dep.dynamic && matching && visible {
+        let selected = model.select_runtime_one(
+            dep_id,
+            dep.qualifier,
+            dep.resolution,
+            consumer.scope,
+            can_access,
+        );
+
+        match selected {
+            Some(selected) => {
+                if let Some(component) = model.component_from(
+                    selected.provider.concrete_ty.type_id,
+                    consumer.scope,
+                    can_access,
+                ) {
+                    crate::observability::provider_selection(
+                        consumer,
+                        dep,
+                        selected.provider,
+                        component,
+                        selected.reason,
+                        selected.stage,
+                    );
+                }
+            }
+
+            None => {
+                crate::observability::selection_absent(consumer, dep);
+
+                return Err(unselectable_provider(
+                    consumer,
+                    dep,
+                    model.visible_provider_ids(
+                        dep_id,
+                        dep.qualifier,
+                        dep.resolution,
+                        consumer.scope,
+                        can_access,
+                    ),
+                ));
+            }
+        }
+    }
+
+    if must_exist && !registered && (!matching || !visible) {
+        return Err(Error::MissingDependency {
+            component: consumer.name.to_string(),
+            component_id: consumer.id.to_string(),
+            dependency: (dep.ty.type_name)().to_string(),
+            type_name: (dep.ty.type_name)().to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+/// Requires the target of an invocation-context edge (`Current<T>`, `Scoped<S, T>`) to be
+/// provided in some scope, unless the edge is optional or runtime-provided. Where it lives is
+/// not checked: the edge resolves from whichever chain is active when it is read.
+fn check_current(
+    model: &selection::ProviderSelectionModel,
+    is_component: &impl Fn(TypeId) -> bool,
+    consumer: &ComponentDescriptor,
+    dep: &upwell_core::DependencyDescriptor,
+) -> crate::Result<()> {
+    let dep_id = dep.ty.type_id;
+    let must_exist = dep.cardinality.requires_provider() && !dep.optional && !dep.dynamic;
+    let provided = is_component(dep_id) || model.has_matching_provider(dep_id, dep.qualifier);
+
+    if !must_exist || provided {
+        return Ok(());
+    }
+
+    Err(Error::MissingDependency {
+        component: consumer.name.to_string(),
+        component_id: consumer.id.to_string(),
+        dependency: (dep.ty.type_name)().to_string(),
+        type_name: (dep.ty.type_name)().to_string(),
+    })
 }
 
 /// The error for a single-provider dependency no provider can be selected for: a tie
@@ -190,7 +242,7 @@ pub(super) fn unselectable_provider(
                 dependency: type_name.clone(),
                 dependency_type: type_name,
                 component_scope: consumer.scope.id(),
-                dependency_scope: <upwell_core::Transient as upwell_core::StaticScope>::ID,
+                dependency_scope: <upwell_core::Transient as upwell_core::Scope>::ID,
             },
         ));
     }

@@ -3,11 +3,12 @@
 use std::any::TypeId;
 use std::sync::Arc;
 
-use upwell_core::{ResolutionMode, Transient};
+use upwell_core::{ResolutionMode, Scope, ScopeKey, Transient};
 
 use super::{ScopeContainer, construct_transient, construct_transient_provider};
-use crate::descriptors::component::{ComponentConstructionContext, SharedStore};
+use crate::descriptors::component::ComponentConstructionContext;
 use crate::descriptors::{Component, Injectable, ProviderDescriptor};
+use crate::layout::{DepRef, RootTarget, SlotLayout, SlotRef};
 
 impl ScopeContainer {
     /// Returns the registered component of type `T` as its handle (`Arc<T>` by
@@ -21,6 +22,10 @@ impl ScopeContainer {
     /// `Transient` — constructs a fresh instance.
     pub async fn resolve<H: Injectable>(self: &Arc<Self>) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
+
+        if let Some(handle) = self.selected_built::<H>(target, None) {
+            return Ok(Some(handle));
+        }
 
         if let Some(provider) = self.registry.selected_runtime_provider(
             target,
@@ -38,14 +43,18 @@ impl ScopeContainer {
                     &self.registry,
                     Some(Arc::clone(self)),
                     self.slot.clone(),
-                    SharedStore::default(),
+                    None,
                     provider,
                 )
                 .await;
             }
 
+            self.ensure_component(provider.concrete_ty.type_id).await?;
+
             return Ok(self.resolve_provider_built::<H>(&provider));
         }
+
+        self.ensure_component(target).await?;
 
         if let Some(handle) = self.resolve_built::<H>() {
             return Ok(Some(handle));
@@ -55,7 +64,7 @@ impl ScopeContainer {
             &self.registry,
             Some(Arc::clone(self)),
             self.slot.clone(),
-            SharedStore::default(),
+            None,
         )
         .await
     }
@@ -67,6 +76,11 @@ impl ScopeContainer {
         qualifier: &str,
     ) -> crate::Result<Option<H>> {
         let target = TypeId::of::<H::Target>();
+
+        if let Some(handle) = self.selected_built::<H>(target, Some(qualifier)) {
+            return Ok(Some(handle));
+        }
+
         let Some(provider) = self.registry.selected_runtime_provider(
             target,
             Some(qualifier),
@@ -86,11 +100,13 @@ impl ScopeContainer {
                 &self.registry,
                 Some(Arc::clone(self)),
                 self.slot.clone(),
-                SharedStore::default(),
+                None,
                 provider,
             )
             .await;
         }
+
+        self.ensure_component(provider.concrete_ty.type_id).await?;
 
         Ok(self.resolve_provider_built::<H>(&provider))
     }
@@ -105,16 +121,84 @@ impl ScopeContainer {
     /// resolver-sourced type) through the threaded resolvers. A protocol's `Inject` extractor
     /// builds on this, so a handler can inject anything a constructor can — not just the
     /// `Injectable` subset that [`resolve`](Self::resolve) covers.
+    ///
+    /// A single component already built in this scope or the scopes it opens under is read
+    /// directly, without selecting providers or creating a construction context. A trait
+    /// is read from the provider its scope's layout selected when the generation was
+    /// prepared.
     pub async fn extract<H: crate::construct::FromContainer>(self: &Arc<Self>) -> crate::Result<H> {
+        if let Some(value) = H::read_built(self) {
+            return Ok(value);
+        }
+
+        self.extract_selected::<H>().await
+    }
+
+    /// Whether a component or provider of `target` with `qualifier` is placed in a scope this
+    /// scope's chain reaches, built or not.
+    pub(crate) fn reaches_provider(&self, target: TypeId, qualifier: Option<&str>) -> bool {
+        let selection = &self.registry.selection;
+        let can_access = |_: ScopeKey, dependency: ScopeKey| self.can_access(dependency);
+        let placed = selection
+            .placements(target)
+            .iter()
+            .any(|placement| self.can_access(placement.scope));
+
+        placed
+            || selection
+                .select_runtime_one(
+                    target,
+                    qualifier,
+                    ResolutionMode::Eager,
+                    self.scope,
+                    &can_access,
+                )
+                .is_some()
+    }
+
+    /// Extracts `H` through runtime provider selection and a construction context, building
+    /// what it resolves to where its scope's opening left it out.
+    pub(super) async fn extract_selected<H: crate::construct::FromContainer>(
+        self: &Arc<Self>,
+    ) -> crate::Result<H> {
+        let dependency = H::dependency();
+
+        if !dependency.config && dependency.resolution == ResolutionMode::Eager {
+            self.ensure_for(
+                dependency.ty.type_id,
+                dependency.qualifier,
+                dependency.cardinality,
+            )
+            .await?;
+        }
+
         let cx = ComponentConstructionContext::new_with_slot(
-            &Transient,
+            Transient::KEY,
             Some(Arc::clone(self)),
             Arc::clone(&self.registry),
-            self.resolvers().clone(),
+            self.inherited_resolvers(),
             self.slot.clone(),
         );
 
         H::from_container(&cx).await
+    }
+
+    /// The handle a planned source outside a scope's own slots resolves to, read from this
+    /// scope's chain: an enclosing scope's slot when that scope was opened from the planned
+    /// layout, or the root's singleton. `None` for any other source.
+    pub(crate) fn read_enclosing<H: Injectable>(&self, source: &DepRef) -> Option<H> {
+        match source {
+            DepRef::Ancestor { layout, at } => {
+                self.ancestor(layout.scope())?.planned::<H>(layout, *at)
+            }
+            DepRef::Root(target) => self.root_container().root_target::<H>(target),
+            DepRef::Local(_)
+            | DepRef::Transient(_)
+            | DepRef::Many(_)
+            | DepRef::Absent
+            | DepRef::Unplanned
+            | DepRef::Contextual => None,
+        }
     }
 
     /// Single concrete-or-primary-provider lookup across this scope and its parents.
@@ -135,6 +219,40 @@ impl ScopeContainer {
         self.parent
             .as_ref()?
             .resolve_qualified_built::<H>(qualifier)
+    }
+
+    /// The container of `scope` on this scope's chain, this scope included.
+    pub(crate) fn ancestor(&self, scope: ScopeKey) -> Option<&ScopeContainer> {
+        let mut current = self;
+
+        loop {
+            if current.scope.id() == scope.id() {
+                return Some(current);
+            }
+
+            current = current.parent.as_deref()?;
+        }
+    }
+
+    /// The root container at the top of this scope's chain.
+    pub(crate) fn root_container(&self) -> &ScopeContainer {
+        let mut current = self;
+
+        while let Some(parent) = current.parent.as_deref() {
+            current = parent;
+        }
+
+        current
+    }
+
+    /// The handle at a planned slot of this scope, when it was opened from `layout`.
+    pub(crate) fn planned<H: Injectable>(&self, layout: &SlotLayout, at: SlotRef) -> Option<H> {
+        self.store.planned::<H>(layout, at)
+    }
+
+    /// The handle a planned root dependency resolves to in this container.
+    pub(crate) fn root_target<H: Injectable>(&self, target: &RootTarget) -> Option<H> {
+        self.store.root::<H>(target)
     }
 
     /// Resolves one exact selected provider from its owning visible scope.

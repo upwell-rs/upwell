@@ -11,7 +11,7 @@ use crate::types::TypeDescriptor;
 /// `Collection` and `Keyed` are *multi-valued* and always satisfiable — zero
 /// providers yields an empty `Vec`/`HashMap`, never a missing-dependency error.
 /// Only `One` (when not `optional`) requires a value to exist.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Cardinality {
     /// A single value, resolved by concrete type or by the chosen trait provider
     /// (`Arc<T>`, a by-value handle, or `Arc<dyn Trait>`).
@@ -23,7 +23,8 @@ pub enum Cardinality {
 }
 
 /// When a dependency is resolved relative to component construction.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ResolutionMode {
     /// Resolve during ordinary component construction and impose build ordering.
     #[default]
@@ -34,14 +35,30 @@ pub enum ResolutionMode {
     Lazy,
     /// Re-run the target component factory without using its declared-scope cache.
     Fresh,
+    /// Resolve from the active invocation's scope chain on every access, never at
+    /// construction and never cached: `Current<T>` and `Scoped<S, T>`.
+    Current,
 }
 
 /// Whether a consumer keeps one resolved snapshot or follows a compatible live binding.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DependencyObservation {
     #[default]
     Snapshot,
     Live,
+}
+
+impl ResolutionMode {
+    /// The mode's stable lowercase name, as tooling reports it.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Eager => "eager",
+            Self::Deferred => "deferred",
+            Self::Lazy => "lazy",
+            Self::Fresh => "fresh",
+            Self::Current => "current",
+        }
+    }
 }
 
 impl Cardinality {

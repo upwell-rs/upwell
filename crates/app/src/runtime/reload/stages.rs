@@ -64,7 +64,9 @@ pub(crate) fn staged_condition_snapshot(
 /// When re-evaluation leaves eligibility unchanged, the candidate graph would equal the
 /// base's, so the base graph and scope plans are shared instead of rebuilt; `evaluation`
 /// was re-evaluated against the base's own catalog, so equal eligibility means an equal
-/// effective registry. Planning still runs, so changed bindings invalidate as usual.
+/// effective registry. Planning still runs, so changed bindings invalidate as usual. A
+/// changed eligibility plans the candidate again, carrying over every entry plan whose
+/// scope layout and selected providers it leaves unchanged.
 ///
 /// The deterministic invalidation roots — changed config bindings, matched by exact
 /// `(TypeId, path)` identity, config-reload hook owners, and `HookManager` consumers —
@@ -76,16 +78,13 @@ pub(super) fn plan_transition(
     staged: &StagedReload,
     evaluation: &AppConditionEvaluation,
 ) -> crate::Result<(CandidateGraph, ResolvedTransitionPlan)> {
-    let catalog = base.condition().catalog();
-    let topology = &base.scope_plan().topology;
-
     let candidate = if evaluation
         .evaluation()
         .same_eligibility(base.condition().evaluation().evaluation())
     {
         CandidateGraph::reuse(base)
     } else {
-        CandidateGraph::prepare_evaluation(base.id(), catalog, evaluation, topology)?
+        CandidateGraph::prepare_from(base, evaluation)?
     };
     let resolved_plan = resolve_staged_transition(&candidate, base.effective_graph(), staged)?;
 
@@ -133,10 +132,10 @@ pub(super) async fn construct_candidate(
         .collect();
     let hook_manager = HookManager::new(hooks);
     let mut externals = ResolverSet::new();
-    let overrides = vec![BoxedComponent {
-        ty: TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
-        value: Box::new(Injectable::into_stored(hook_manager.clone())),
-    }];
+    let overrides = vec![BoxedComponent::stored(
+        TypeDescriptor::of::<HookManager>(HOOK_MANAGER_NAME),
+        Injectable::into_stored(hook_manager.clone()),
+    )];
 
     externals.insert(staged.candidate_store());
 

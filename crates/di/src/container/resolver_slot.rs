@@ -16,6 +16,10 @@ pub(crate) struct ScopeResolverSlot {
 pub(super) enum ScopeResolverSlotState {
     Pending(Arc<std::sync::Mutex<ScopeResolverState>>),
     Attached(Weak<ScopeContainer>),
+    /// For a scope under construction whose layout plans no capture. A factory that captures
+    /// it anyway gets a pending slot from its construction context, and the built container
+    /// gets an attached slot.
+    Detached,
 }
 
 /// Mutable hydration state shared while a scope is under construction.
@@ -23,6 +27,8 @@ pub(super) enum ScopeResolverSlotState {
 pub(super) struct ScopeResolverState {
     container: Weak<ScopeContainer>,
     deferred: Vec<Arc<dyn crate::primitives::DeferredHydrator>>,
+    /// Other pending slots created for the same scope, attached together with this one.
+    followers: Vec<ScopeResolverSlot>,
 }
 
 impl Default for ScopeResolverSlot {
@@ -42,23 +48,79 @@ impl ScopeResolverSlot {
         }
     }
 
+    pub(crate) fn detached() -> Self {
+        Self {
+            state: ScopeResolverSlotState::Detached,
+        }
+    }
+
+    /// Whether this slot was opened detached, for a scope whose layout plans no capture.
+    pub(crate) fn is_detached(&self) -> bool {
+        matches!(self.state, ScopeResolverSlotState::Detached)
+    }
+
+    /// The slot the built `container` keeps: this one, or an attached one when this one
+    /// was detached.
+    pub(super) fn for_container(&self, container: &Weak<ScopeContainer>) -> Self {
+        match self.state {
+            ScopeResolverSlotState::Detached => Self::attached(container.clone()),
+            ScopeResolverSlotState::Pending(_) | ScopeResolverSlotState::Attached(_) => {
+                self.clone()
+            }
+        }
+    }
+
+    /// Attaches `container` and hydrates every deferred dependency registered so far,
+    /// returning the first hydration error after attempting them all.
     pub(crate) fn attach(&self, container: &Arc<ScopeContainer>) -> crate::Result<()> {
         let ScopeResolverSlotState::Pending(state) = &self.state else {
             return Ok(());
         };
-        let deferred = {
+        let (deferred, followers) = {
             let mut state = state.lock().expect("scope resolver slot poisoned");
 
             state.container = Arc::downgrade(container);
 
-            std::mem::take(&mut state.deferred)
+            (
+                std::mem::take(&mut state.deferred),
+                std::mem::take(&mut state.followers),
+            )
+        };
+        let hydrated = deferred
+            .iter()
+            .map(|deferred| deferred.hydrate(container))
+            .fold(Ok(()), crate::Result::and);
+
+        followers
+            .iter()
+            .map(|follower| follower.attach(container))
+            .fold(hydrated, crate::Result::and)
+    }
+
+    /// Attaches `other`, another pending slot created for the same scope, whenever this one
+    /// is attached: at once if it already is, otherwise together with it.
+    pub(crate) fn absorb(&self, other: ScopeResolverSlot) -> crate::Result<()> {
+        let ScopeResolverSlotState::Pending(state) = &self.state else {
+            return match self.resolve() {
+                Ok(container) => other.attach(&container),
+                Err(_) => Ok(()),
+            };
+        };
+        let container = {
+            let mut state = state.lock().expect("scope resolver slot poisoned");
+            let container = state.container.upgrade();
+
+            if container.is_none() {
+                state.followers.push(other.clone());
+            }
+
+            container
         };
 
-        for deferred in deferred {
-            deferred.hydrate(container)?;
+        match container {
+            Some(container) => other.attach(&container),
+            None => Ok(()),
         }
-
-        Ok(())
     }
 
     pub(crate) fn resolve(&self) -> crate::Result<Arc<ScopeContainer>> {
@@ -72,6 +134,7 @@ impl ScopeResolverSlot {
             ScopeResolverSlotState::Attached(container) => {
                 container.upgrade().ok_or(Error::ScopeUnavailable)
             }
+            ScopeResolverSlotState::Detached => Err(Error::ScopeUnavailable),
         }
     }
 

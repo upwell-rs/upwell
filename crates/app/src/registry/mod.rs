@@ -1,5 +1,4 @@
 use std::any::TypeId;
-use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write;
 
@@ -7,24 +6,27 @@ use upwell_config::{CONFIG_BINDINGS, ConditionFactSource, ConfigBinding};
 use upwell_core::DependencyDescriptor;
 use upwell_di::{
     COMPONENTS, Component, ComponentDescriptor, ComponentRegistry, PROVIDERS, ProviderDescriptor,
-    ProviderSelectionModel,
+    ProviderSelectionModel, UnplannedConstruction,
 };
 
-use crate::error::Error;
-use crate::scope::PreparedScopeTopology;
+use crate::entry::{ENTRIES, EntryDescriptor};
+use crate::scope::{PreparedScopeTopology, SCOPES, ScopeDeclaration};
 
 mod condition;
+mod config;
 
 pub use condition::AppConditionEvaluation;
+pub(crate) use config::{BoundConfigs, ConfigFault};
 
-/// Holds the *agnostic* component, provider, and config-binding descriptors of an app —
-/// declarations only. Runtime instances live in the
+/// Holds the *agnostic* component, provider, config-binding and entry descriptors of an
+/// app — declarations only. Runtime instances live in the
 /// [`ScopeContainer`](upwell_di::ScopeContainer).
 ///
 /// Wraps the DI engine's [`ComponentRegistry`] (component/provider graph) with the config
-/// bindings, and runs the cross-cutting validation the component graph alone cannot
-/// (config edges). Protocol-specific declarations (services/routes) live in the protocol
-/// plugin, not here, so this stays usable by any protocol.
+/// bindings and entries, and runs the cross-cutting validation the component graph alone
+/// cannot (config edges, entry targets). Protocols keep their own declarations (services,
+/// routes) and register only protocol-neutral [`EntryDescriptor`]s here, so this stays
+/// usable by any protocol.
 #[derive(Clone, Default, Debug)]
 pub struct AppRegistry {
     pub components: Vec<ComponentDescriptor>,
@@ -35,16 +37,26 @@ pub struct AppRegistry {
     /// Registered condition-fact sources (a config type's condition facts at one binding
     /// path). Populated from explicit builder registrations.
     pub condition_facts: Vec<ConditionFactSource>,
+    /// Entry points, from protocols, plugins and explicit builder registrations.
+    pub entries: Vec<EntryDescriptor>,
+    /// Scopes the application declares beside its protocol's topology, from `#[scope]`
+    /// discovery and explicit builder registrations.
+    pub scopes: Vec<ScopeDeclaration>,
+    /// Whether a scope opened for an entry may build, on demand, what the entry does not
+    /// declare.
+    pub unplanned: UnplannedConstruction,
 }
 
 impl AppRegistry {
     /// Collects every link-time-registered agnostic descriptor (components, providers,
-    /// config bindings) into an `AppRegistry`. Protocol variant slices (e.g. RPC services)
-    /// are folded in by the protocol definition, not here.
+    /// config bindings, `#[entry]` functions) into an `AppRegistry`. Protocol variant slices
+    /// (e.g. RPC services) are folded in by the protocol definition, not here.
     pub fn collect() -> Self {
         let mut components: Vec<_> = COMPONENTS.iter().copied().collect();
         let mut providers: Vec<_> = PROVIDERS.iter().copied().collect();
         let mut config_bindings: Vec<_> = CONFIG_BINDINGS.iter().map(|d| d.to_binding()).collect();
+        let mut entries: Vec<_> = ENTRIES.iter().copied().collect();
+        let mut scopes: Vec<_> = SCOPES.iter().copied().collect();
 
         // Distributed-slice order differs between linkers. Sort auto-discovered
         // descriptors only; explicit builder registrations retain caller order.
@@ -60,12 +72,53 @@ impl AppRegistry {
                 .cmp((right.ty.type_name)())
                 .then_with(|| left.path.cmp(&right.path))
         });
+        entries.sort_by_key(|entry| entry.key);
+        scopes.sort_by_key(|scope| scope.boundary.id());
 
         Self {
             components,
             providers,
             config_bindings,
             condition_facts: Vec::new(),
+            entries,
+            scopes,
+            unplanned: UnplannedConstruction::default(),
+        }
+    }
+
+    /// Registers a declared scope unless the same declaration is already registered, so an
+    /// explicit registration and discovery of one `#[scope]` keep it once. Two different
+    /// declarations sharing a scope identity are both kept and rejected by preparation.
+    pub fn add_scope(&mut self, scope: ScopeDeclaration) {
+        let registered = scope.source.is_some()
+            && self.scopes.iter().any(|existing| {
+                existing.boundary.id() == scope.boundary.id() && existing.source == scope.source
+            });
+
+        if !registered {
+            self.scopes.push(scope);
+        }
+    }
+
+    /// Registers the parameter slot of every declared scope that stores its value.
+    pub(crate) fn lower_scope_params(&mut self) {
+        let params = self.scopes.iter().filter_map(|scope| scope.params);
+
+        self.components.extend(params);
+    }
+
+    /// Registers an entry unless the same declaration is already registered under the same
+    /// key, so an explicit registration and discovery of one `#[entry]` keep it once. Two
+    /// different entries sharing a key are both kept and rejected by preparation.
+    pub fn add_entry(&mut self, entry: EntryDescriptor) {
+        let registered = entry.source.is_some()
+            && self
+                .entries
+                .iter()
+                .any(|existing| existing.key == entry.key && existing.source == entry.source);
+
+        if !registered {
+            self.entries.push(entry);
         }
     }
 
@@ -128,13 +181,17 @@ impl AppRegistry {
         &self,
         topology: &PreparedScopeTopology,
     ) -> crate::Result<()> {
-        self.component_registry()
-            .validate_with_scope_reachability(|consumer, dependency| {
-                topology.is_reachable(&consumer, &dependency)
-            })?;
+        self.component_registry().validate_with_scope_reachability(
+            |consumer, dependency| topology.is_reachable(&consumer, &dependency),
+            |ancestor, descendant| topology.encloses(&ancestor, &descendant),
+        )?;
 
         let components = self.resolved_components()?;
 
+        self.component_registry()
+            .validate_placement_overlap(&components, |outer, inner| {
+                topology.encloses(&outer, &inner)
+            })?;
         self.validate_configs(&components)?;
 
         Ok(())
@@ -151,71 +208,13 @@ impl AppRegistry {
                 components,
                 selection,
                 |consumer, dependency| topology.is_reachable(&consumer, &dependency),
+                |ancestor, descendant| topology.encloses(&ancestor, &descendant),
             )?;
-
+        self.component_registry()
+            .validate_placement_overlap(components, |outer, inner| {
+                topology.encloses(&outer, &inner)
+            })?;
         self.validate_configs(components)?;
-
-        Ok(())
-    }
-
-    /// Validates config edges against the registered bindings: a `#[config("path")]` edge
-    /// must have a binding of its type at that path, and a `#[config]` shorthand edge must
-    /// have exactly one binding of its type.
-    pub(crate) fn validate_configs(&self, components: &[ComponentDescriptor]) -> crate::Result<()> {
-        let mut bound: HashMap<TypeId, Vec<&str>> = HashMap::new();
-
-        for binding in &self.config_bindings {
-            bound
-                .entry(binding.ty.type_id)
-                .or_default()
-                .push(&binding.path);
-        }
-
-        for c in components {
-            for dep in c.dependencies().iter().filter(|dep| dep.config) {
-                let dep_id = dep.ty.type_id;
-                let paths = bound.get(&dep_id);
-
-                match dep.qualifier {
-                    Some(path) => {
-                        let found = paths.is_some_and(|ps| ps.contains(&path));
-
-                        if !found {
-                            return Err(Error::MissingConfig {
-                                component: c.name.to_string(),
-                                type_name: (dep.ty.type_name)().to_string(),
-                                path: path.to_string(),
-                            });
-                        }
-                    }
-
-                    None => {
-                        let bound_paths = paths.cloned().unwrap_or_default();
-
-                        match bound_paths.as_slice() {
-                            [_] => {}
-
-                            [] => {
-                                return Err(Error::MissingConfig {
-                                    component: c.name.to_string(),
-                                    type_name: (dep.ty.type_name)().to_string(),
-                                    path: "<unqualified>".to_string(),
-                                });
-                            }
-
-                            _ => {
-                                return Err(Error::AmbiguousConfig {
-                                    component: c.name.to_string(),
-                                    type_name: (dep.ty.type_name)().to_string(),
-                                    count: bound_paths.len(),
-                                    paths: bound_paths.join(", "),
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         Ok(())
     }

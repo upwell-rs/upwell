@@ -10,5 +10,11 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 inventory.workspace = true
+
+[dev-dependencies]
+allocation-counter = { workspace = true }

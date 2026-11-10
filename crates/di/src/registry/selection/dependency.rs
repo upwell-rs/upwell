@@ -2,7 +2,7 @@
 
 use std::any::TypeId;
 
-use upwell_core::{Cardinality, DependencyDescriptor, Scope, ScopeId};
+use upwell_core::{Cardinality, DependencyDescriptor, ResolutionMode, ScopeId, ScopeKey};
 
 use super::rules::{direct_component_is_selectable, provider_matches, select_provider};
 use super::{
@@ -39,8 +39,8 @@ impl ProviderSelectionModel {
     fn select_dependency(
         &self,
         dependency: &DependencyDescriptor,
-        consumer: &dyn Scope,
-        can_access: &(impl Fn(&dyn Scope, &'static dyn Scope) -> bool + ?Sized),
+        consumer: ScopeKey,
+        can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
     ) -> Vec<ProviderSelection> {
         let providers = self.providers_for_trait(dependency.ty.type_id);
 
@@ -76,7 +76,7 @@ impl ProviderSelectionModel {
         &self,
         consumer: &ComponentDescriptor,
         dependency: &DependencyDescriptor,
-        can_access: &impl Fn(&dyn Scope, &'static dyn Scope) -> bool,
+        can_access: &impl Fn(ScopeKey, ScopeKey) -> bool,
     ) -> Vec<SelectedDependency> {
         if dependency.config {
             crate::observability::selection_external(consumer, dependency, "config-external");
@@ -90,7 +90,14 @@ impl ProviderSelectionModel {
             return Vec::new();
         }
 
-        if let Some(component) = self.component(dependency.ty.type_id)
+        if dependency.resolution == ResolutionMode::Current {
+            crate::observability::selection_external(consumer, dependency, "invocation-context");
+
+            return Vec::new();
+        }
+
+        if let Some(component) =
+            self.component_from(dependency.ty.type_id, consumer.scope, can_access)
             && direct_component_is_selectable(component, dependency, consumer.scope, can_access)
         {
             crate::observability::direct_selection(consumer, dependency, component);
@@ -106,7 +113,13 @@ impl ProviderSelectionModel {
         let provider_selections = self.select_dependency(dependency, consumer.scope, can_access);
 
         for selection in &provider_selections {
-            let component = self.components[&selection.provider.concrete_ty.type_id];
+            let Some(component) = self.component_from(
+                selection.provider.concrete_ty.type_id,
+                consumer.scope,
+                can_access,
+            ) else {
+                continue;
+            };
 
             crate::observability::provider_selection(
                 consumer,
@@ -124,7 +137,11 @@ impl ProviderSelectionModel {
                 target: DependencyTarget::Provider(selection.provider),
                 reason: selection.reason,
                 scope: self
-                    .component(selection.provider.concrete_ty.type_id)
+                    .component_from(
+                        selection.provider.concrete_ty.type_id,
+                        consumer.scope,
+                        can_access,
+                    )
                     .map(|component| component.scope.id()),
                 stage: Some(selection.stage),
             })
@@ -140,8 +157,8 @@ impl ProviderSelectionModel {
     pub(crate) fn construction_providers(
         &self,
         dependency: &DependencyDescriptor,
-        consumer: &dyn Scope,
-        can_access: &(impl Fn(&dyn Scope, &'static dyn Scope) -> bool + ?Sized),
+        consumer: ScopeKey,
+        can_access: &(impl Fn(ScopeKey, ScopeKey) -> bool + ?Sized),
         is_pending: &impl Fn(TypeId) -> bool,
     ) -> Vec<ProviderDescriptor> {
         let selected = self.select_dependency(dependency, consumer, can_access);

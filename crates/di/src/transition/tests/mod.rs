@@ -24,7 +24,7 @@ trait Authenticator: Send + Sync {}
 
 const AUTHENTICATOR: TypeDescriptor = TypeDescriptor::of::<dyn Authenticator>("Authenticator");
 
-impl upwell_core::StaticScope for RequestScope {
+impl upwell_core::Scope for RequestScope {
     const ID: upwell_core::ScopeId =
         upwell_core::namespaced_id!(upwell_core::ScopeId, "test/request");
     const RANK: u8 = 1;
@@ -132,8 +132,13 @@ fn registry(custom: bool) -> ComponentRegistry {
 }
 
 fn graph(custom: bool) -> EffectiveGraph {
-    EffectiveGraph::build(RuntimeGenerationId::INITIAL, &registry(custom), |_, _| true)
-        .expect("fixture graph validates")
+    EffectiveGraph::build(
+        RuntimeGenerationId::INITIAL,
+        &registry(custom),
+        |_, _| true,
+        |_, _| false,
+    )
+    .expect("fixture graph validates")
 }
 
 fn action(plan: &TransitionPlan, component: &str) -> Option<NodeAction> {

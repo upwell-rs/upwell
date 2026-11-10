@@ -48,10 +48,10 @@ fn construct<const HI: usize, const LO: usize>(
     _cx: &mut ComponentConstructionContext,
 ) -> Pin<Box<dyn Future<Output = upwell_di::Result<BoxedComponent>> + Send + '_>> {
     Box::pin(async {
-        Ok(BoxedComponent {
-            ty: TypeDescriptor::of::<Node<HI, LO>>(Node::<HI, LO>::NAME),
-            value: Box::new(Injectable::into_stored(Node::<HI, LO>.into_handle())),
-        })
+        Ok(BoxedComponent::stored(
+            TypeDescriptor::of::<Node<HI, LO>>(Node::<HI, LO>::NAME),
+            Injectable::into_stored(Node::<HI, LO>.into_handle()),
+        ))
     })
 }
 
@@ -86,8 +86,10 @@ fn factories<const HI: usize, const LO: usize>() -> &'static [ComponentFactoryDe
         &[ComponentFactoryDescriptor {
             id: "explicit",
             construct: construct::<HI, LO>,
+            construct_ready: None,
             dependencies: dependencies::<HI, LO>,
             role: ComponentFactoryRole::Explicit,
+            scopes: &[],
         }]
     }
 }

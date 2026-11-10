@@ -17,6 +17,7 @@ pub mod protocol;
 pub mod router;
 pub mod routes;
 pub mod scope;
+mod target;
 
 pub use error::{Error, Result};
 pub use plugin::{PreparedRpc, Rpc, RpcAppBuilder};
@@ -24,6 +25,7 @@ pub use plugin::{PreparedRpc, Rpc, RpcAppBuilder};
 pub use protocol::{RpcLimits, RpcRuntime};
 pub use router::RpcRouter;
 pub use routes::ResolvedService;
+pub use target::RpcTarget;
 /// The RPC daemon macros (`#[service]`, `#[handlers]`, `#[rpc]`), owned by this protocol crate.
 /// Their generated code roots protocol types at this crate (`::upwell_rpc::*`) by default, or
 /// at `::upwell::daemon::*` under the `facade` feature — so they work whether `upwell-rpc`

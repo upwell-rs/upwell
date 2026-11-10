@@ -1,0 +1,55 @@
+error[E0277]: `{closure@$DIR/tests/ui/scopes/run_with_result.rs:10:14: 10:16}` is not work `ScopeBuilder::run` can run
+  --> tests/ui/scopes/run_with_result.rs:10:14
+   |
+10 |         .run(|| async { Ok::<_, std::io::Error>(()) })
+   |          --- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `run` takes a closure of injectable targets returning a future of `()`
+   |          |
+   |          required by a bound introduced by this call
+   |
+   = help: the trait `ScopeWork<_>` is not implemented for closure `{closure@$DIR/tests/ui/scopes/run_with_result.rs:10:14: 10:16}`
+   = note: work that returns a value or a `Result` runs through `ScopeBuilder::try_run`, which needs a `Result`: return `Ok::<_, std::convert::Infallible>(value)` for work that cannot fail
+note: required by a bound in `upwell_app::runtime::opener::run::<impl ScopeBuilder<'a, S, P>>::run`
+  --> crates/app/src/runtime/opener/run.rs
+   |
+   |     pub fn run<W, Targets>(
+   |            --- required by a bound in this associated function
+...
+   |         W: ScopeWork<Targets>,
+   |            ^^^^^^^^^^^^^^^^^^ required by this bound in `upwell_app::runtime::opener::run::<impl ScopeBuilder<'a, S, P>>::run`
+
+error[E0277]: `{closure@$DIR/tests/ui/scopes/run_with_result.rs:10:14: 10:16}` is not work `ScopeBuilder::run` can run
+  --> tests/ui/scopes/run_with_result.rs:8:13
+   |
+ 8 |       let _ = customers
+   |  _____________^
+ 9 | |         .builder(Customer)
+10 | |         .run(|| async { Ok::<_, std::io::Error>(()) })
+   | |______________________________________________________^ `run` takes a closure of injectable targets returning a future of `()`
+   |
+   = help: the trait `ScopeWork<_>` is not implemented for closure `{closure@$DIR/tests/ui/scopes/run_with_result.rs:10:14: 10:16}`
+   = note: work that returns a value or a `Result` runs through `ScopeBuilder::try_run`, which needs a `Result`: return `Ok::<_, std::convert::Infallible>(value)` for work that cannot fail
+note: required by a bound in `upwell_app::runtime::opener::run::<impl ScopeBuilder<'a, S, P>>::run`
+  --> crates/app/src/runtime/opener/run.rs
+   |
+   |     pub fn run<W, Targets>(
+   |            --- required by a bound in this associated function
+...
+   |         W: ScopeWork<Targets>,
+   |            ^^^^^^^^^^^^^^^^^^ required by this bound in `upwell_app::runtime::opener::run::<impl ScopeBuilder<'a, S, P>>::run`
+
+error[E0277]: `{closure@$DIR/tests/ui/scopes/run_with_result.rs:10:14: 10:16}` is not work `ScopeBuilder::run` can run
+  --> tests/ui/scopes/run_with_result.rs:11:10
+   |
+11 |         .await;
+   |          ^^^^^ `run` takes a closure of injectable targets returning a future of `()`
+   |
+   = help: the trait `ScopeWork<_>` is not implemented for closure `{closure@$DIR/tests/ui/scopes/run_with_result.rs:10:14: 10:16}`
+   = note: work that returns a value or a `Result` runs through `ScopeBuilder::try_run`, which needs a `Result`: return `Ok::<_, std::convert::Infallible>(value)` for work that cannot fail
+note: required by a bound in `upwell_app::runtime::opener::run::<impl ScopeBuilder<'a, S, P>>::run`
+  --> crates/app/src/runtime/opener/run.rs
+   |
+   |     pub fn run<W, Targets>(
+   |            --- required by a bound in this associated function
+...
+   |         W: ScopeWork<Targets>,
+   |            ^^^^^^^^^^^^^^^^^^ required by this bound in `upwell_app::runtime::opener::run::<impl ScopeBuilder<'a, S, P>>::run`

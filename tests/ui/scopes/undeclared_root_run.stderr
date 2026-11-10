@@ -1,0 +1,16 @@
+error[E0599]: the method `run` exists for struct `ScopeBuilder<'_, Batch>`, but its trait bounds were not satisfied
+  --> tests/ui/scopes/undeclared_root_run.rs:11:36
+   |
+ 8 | struct Batch;
+   | ------------ doesn't satisfy `Batch: OpensUnder<upwell::Singleton>`
+...
+11 |     let _ = batches.builder(Batch).run(|| async {}).await;
+   |                                    ^^^ method cannot be called on `ScopeBuilder<'_, Batch>` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `Batch: OpensUnder<upwell::Singleton>`
+note: the trait `OpensUnder` must be implemented
+  --> crates/app/src/runtime/opener/mod.rs
+   |
+   | pub trait OpensUnder<P: Scope>: Scope {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

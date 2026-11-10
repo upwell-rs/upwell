@@ -174,18 +174,20 @@
 use super::generation::RuntimeTransition;
 use super::reentrancy::ActiveTransition;
 use super::report::{
-    ComponentTransitionReport, RuntimeTransitionReport, TRANSITION_TARGET, TransitionAttemptId,
-    TransitionCompletion, TransitionPhase, TransitionRecorder,
+    RuntimeTransitionReport, TRANSITION_TARGET, TransitionAttemptId, TransitionCompletion,
+    TransitionPhase, TransitionRecorder,
 };
-use super::transition_hooks::{
-    AffectedComponents, HookOwners, PendingTransition, TransitionDecision, TransitionProposal,
-    fire_gate, observe_outcome,
-};
-use super::{AppRuntime, RuntimeView};
-use stages::{commit_candidate, construct_candidate, evaluate_conditions, plan_transition};
+use super::transition_hooks::{TransitionProposal, fire_gate, observe_outcome};
+use super::{AppRuntime, RuntimeView, hook_target};
+use phases::{PlannedReload, plan_candidate, run_candidate_hooks};
+use stages::{commit_candidate, construct_candidate};
 #[cfg(feature = "tooling")]
 pub(crate) use stages::{resolve_staged_transition, staged_condition_snapshot};
 use upwell_config::ReloadCause;
+
+/// The hook kind a reload transaction's invocation contexts name: its pre-commit phases, which
+/// fire several hook kinds and construct the candidate, share one context on each generation.
+const RELOAD_HOOKS: &str = "reload";
 
 impl AppRuntime {
     /// Re-reads configuration and republishes changed bindings and the derived
@@ -198,7 +200,7 @@ impl AppRuntime {
     /// generation; builds the candidate root over a candidate
     /// [`ConfigStore`](upwell_config::ConfigStore) with a generation-local
     /// [`HookManager`]; runs the affected config-reload hooks and then
-    /// [`TransitionDecision`] hooks against that candidate; and
+    /// [`TransitionDecision`](crate::TransitionDecision) hooks against that candidate; and
     /// commits. A proposal rejection constructs nothing; a decision rejection drops the
     /// constructed candidate.
     ///
@@ -289,8 +291,9 @@ impl AppRuntime {
             self.reloader.generation(),
         );
 
+        let context = base.context(hook_target!(RELOAD_HOOKS));
         let result = active
-            .scope(self.run_reload(transition, &mut recorder))
+            .scope(context.enter(self.run_reload(transition, &mut recorder)))
             .await;
 
         drop(reload_lease);
@@ -322,64 +325,26 @@ impl AppRuntime {
     ) -> crate::Result<(TransitionCompletion, Option<RuntimeView>)> {
         let base = transition.base().clone();
 
-        recorder.enter(TransitionPhase::Stage);
-
-        let staged = self.reloader.stage()?;
-
-        recorder.record_changed(staged.changed());
-
-        if staged.is_empty() && !base.condition().evaluation().reads_raw_config() {
+        let Some((staged, evaluation)) = self.stage_and_evaluate(&base, recorder)? else {
             transition.finish_noop();
 
             return Ok((TransitionCompletion::NoOp, None));
-        }
+        };
 
-        recorder.enter(TransitionPhase::Evaluate);
+        let PlannedReload {
+            candidate,
+            resolved_plan,
+            hooks: plan,
+        } = plan_candidate(&transition, &base, &staged, &evaluation, recorder)?;
 
-        let evaluation = evaluate_conditions(&base, &staged)?;
-
-        if staged.is_empty()
-            && evaluation
-                .evaluation()
-                .same_eligibility(base.condition().evaluation().evaluation())
-        {
-            transition.finish_noop();
-
-            return Ok((TransitionCompletion::NoOp, None));
-        }
-
-        recorder.enter(TransitionPhase::Plan);
-
-        let (candidate, resolved_plan) = plan_transition(&base, &staged, &evaluation)?;
-        let components = ComponentTransitionReport::project(
-            resolved_plan.structural(),
-            base.effective_graph(),
-            candidate.graph(),
-        );
-        let affected = AffectedComponents::new(
-            &components,
-            base.resolved_components(),
-            candidate.components(),
-        );
-        let active_owners = HookOwners::new(base.resolved_components());
-        let candidate_owners = HookOwners::new(candidate.components());
-        let pending = PendingTransition::proposed(
-            transition.attempt(),
-            base.id(),
-            staged.changed(),
-            &components,
-        );
-
-        recorder.record_components(components);
-        recorder.record_displaced(resolved_plan.displaced());
         recorder.enter(TransitionPhase::Proposal);
 
         fire_gate::<TransitionProposal>(
             base.hooks(),
-            &active_owners,
-            &pending,
+            &plan.active_owners,
+            &plan.pending,
             &staged,
-            &affected,
+            &plan.affected,
             recorder,
         )
         .await?;
@@ -391,23 +356,9 @@ impl AppRuntime {
 
         recorder.enter(TransitionPhase::Hooks);
 
-        let hook_reports = staged
-            .run_config_reload_hooks(&hook_manager, |owner| candidate_owners.id(owner))
-            .await?;
-        let pending = pending.decided(&hook_reports);
+        let candidate_context = prepared.context(hook_target!(RELOAD_HOOKS));
 
-        recorder.record_hooks(hook_reports);
-        recorder.enter(TransitionPhase::Decision);
-
-        fire_gate::<TransitionDecision>(
-            &hook_manager,
-            &candidate_owners,
-            &pending,
-            &staged,
-            &affected,
-            recorder,
-        )
-        .await?;
+        run_candidate_hooks(candidate_context, &hook_manager, &staged, &plan, recorder).await?;
 
         recorder.enter(TransitionPhase::Commit);
 
@@ -431,6 +382,7 @@ fn reentrant_reload(attempt: TransitionAttemptId) -> crate::Error {
 }
 
 mod invalidation;
+mod phases;
 mod stages;
 mod trigger;
 

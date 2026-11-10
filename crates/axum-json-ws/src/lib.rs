@@ -17,11 +17,11 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_family = "wasm"))]
 use tracing::{debug, warn};
 #[cfg(not(target_family = "wasm"))]
+use upwell_axum::AppRuntime;
+#[cfg(not(target_family = "wasm"))]
 use upwell_axum::axum::body::Bytes;
 #[cfg(not(target_family = "wasm"))]
 use upwell_axum::axum::extract::ws::{Message, Utf8Bytes, WebSocket};
-#[cfg(not(target_family = "wasm"))]
-use upwell_axum::{AppRuntime, ScopeContainer};
 #[cfg(feature = "client")]
 use upwell_client::{ClientError, ErrorBody};
 use upwell_transport::CodecError;
@@ -35,8 +35,9 @@ use upwell_axum::client::{
 };
 #[cfg(not(target_family = "wasm"))]
 use upwell_axum::{
-    MessageReply, SOCKET_SEND_TIMEOUT, WebsocketMessageScope, WebsocketProtocol,
+    MessageReply, PreparedConnection, SOCKET_SEND_TIMEOUT, WebsocketProtocol, WsConnectionScope,
     WsControllerDescriptor, WsDispatchError, WsHandlerFn, WsIdle, WsRespond, WsShutdown,
+    scope_failure_close,
 };
 use upwell_axum::{MessagingProtocol, TopicCodec};
 
@@ -44,13 +45,11 @@ use upwell_axum::{MessagingProtocol, TopicCodec};
 pub type WsValue = serde_json::Value;
 
 /// The baseline JSON-envelope protocol: a flat destination → handler table, point-to-point
-/// request/response over one socket. Holds a clone of the [`AppRuntime`] so it can open a fresh
-/// per-message [`WebsocketMessage`](upwell_axum::WebsocketMessage) scope for handler DI.
+/// request/response over one socket. Each message opens a fresh
+/// [`WebsocketMessage`](upwell_axum::WebsocketMessage) scope for handler DI.
 pub struct JsonWs {
     #[cfg(not(target_family = "wasm"))]
     routes: HashMap<&'static str, WsHandlerFn<Self>>,
-    #[cfg(not(target_family = "wasm"))]
-    runtime: AppRuntime,
 }
 
 /// [`JsonWs`]'s handler outcome: no reply for send mode or one encoded request reply.
@@ -127,19 +126,23 @@ impl WebsocketProtocol for JsonWs {
             }
         }
 
-        Ok(Self {
-            routes,
-            runtime: runtime.clone(),
-        })
+        Ok(Self { routes })
     }
 
     async fn serve(
         self: Arc<Self>,
         mut socket: WebSocket,
-        connection: Arc<ScopeContainer>,
+        connection: PreparedConnection,
         mut shutdown: WsShutdown,
     ) {
-        let mut idle = WsIdle::from_connection(&connection);
+        let Ok(connection) = connection.open().await else {
+            let _ =
+                tokio::time::timeout(SOCKET_SEND_TIMEOUT, socket.send(scope_failure_close())).await;
+
+            return;
+        };
+
+        let mut idle = WsIdle::from_connection(connection.container());
 
         loop {
             tokio::select! {
@@ -238,7 +241,7 @@ impl JsonWs {
     /// parented at the socket's connection scope, so a handler's `Inject<T>` resolves
     /// message-scoped components per message
     /// (and connection-/singleton-scoped ones through the chain).
-    async fn handle_text(&self, text: &str, connection: &Arc<ScopeContainer>) -> Option<String> {
+    async fn handle_text(&self, text: &str, connection: &WsConnectionScope) -> Option<String> {
         let inbound: Inbound = match serde_json::from_str(text) {
             Ok(inbound) => inbound,
 
@@ -250,12 +253,15 @@ impl JsonWs {
         };
 
         let result = match self.routes.get(inbound.dest.as_str()) {
-            Some(handler) => match self
-                .runtime
-                .open_scope(&WebsocketMessageScope, Arc::clone(connection), Vec::new())
+            Some(handler) => match connection
+                .open_message(inbound.dest.as_str(), connection.message())
                 .await
             {
-                Ok(scope) => handler(inbound.payload, scope).await,
+                Ok(scope) => {
+                    let context = connection.message_context(&scope);
+
+                    context.enter(handler(inbound.payload, scope)).await
+                }
 
                 Err(error) => Err(WsDispatchError::Inject(error.to_string())),
             },

@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 mod app;
+mod context;
 
 use std::sync::Arc;
 

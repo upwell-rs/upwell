@@ -10,6 +10,9 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[lints]
+workspace = true
+
 [features]
 default = ["cli"]
 cli = []
@@ -29,6 +32,7 @@ hybrid-registry = []
 syn = { workspace = true, features = ["visit-mut"] }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }
+heck = { workspace = true }
 
 [dev-dependencies]
 proc-macro2 = { workspace = true, features = ["span-locations"] }

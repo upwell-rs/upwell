@@ -3,6 +3,7 @@
 use crate::components::Database;
 use crate::operations::OperationsArgs;
 use crate::protocol::{ComplianceAuditArgs, HomeledgerRpc};
+use crate::reconcile::{AccountReconcile, reconcile_accounts};
 use upwell::{App, BootstrapContext, DiError, resolve_host_dependency};
 
 #[cfg(test)]
@@ -13,6 +14,14 @@ use std::sync::Mutex;
 
 #[cfg(test)]
 static TEST_BOOTSTRAP: Mutex<Option<TestBootstrapState>> = Mutex::new(None);
+
+#[cfg(test)]
+static TEST_RECONCILED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
+pub(crate) fn take_reconciled_accounts() -> usize {
+    TEST_RECONCILED.swap(0, std::sync::atomic::Ordering::SeqCst)
+}
 
 /// Resolved bootstrap values captured by generated-host integration tests.
 #[cfg(test)]
@@ -34,6 +43,9 @@ pub(crate) fn take_test_bootstrap() -> TestBootstrapState {
         .expect("generated host captured bootstrap state")
 }
 
+/// The accounts `after_build` reconciles before the application starts.
+const HOUSEHOLD_ACCOUNTS: [u64; 3] = [1, 2, 3];
+
 /// Bootstrap provenance retained for diagnostics throughout the host lifecycle.
 pub struct StartupProvenance {
     pub(crate) config_path: String,
@@ -45,6 +57,7 @@ pub struct StartupProvenance {
 /// Database readiness information produced after application construction.
 pub struct BuildReadiness {
     pub(crate) schema_version: u64,
+    pub(crate) reconciled_accounts: usize,
 }
 
 /// Captures generated bootstrap choices before tracing is finalized or a builder exists.
@@ -113,12 +126,26 @@ pub async fn after_build(
     let database =
         resolve_host_dependency::<HomeledgerRpc, Database>(&app, "Homeledger after_build").await?;
     let schema_version = database.verify_schema();
+    let runs = app
+        .runtime()
+        .opener::<AccountReconcile>()
+        .map_err(|error| DiError::Other(Box::new(error)))?;
+    let reconciled_accounts = reconcile_accounts(runs, HOUSEHOLD_ACCOUNTS)
+        .await
+        .map_err(|error| DiError::Other(Box::new(error)))?;
 
-    let readiness = BuildReadiness { schema_version };
+    #[cfg(test)]
+    TEST_RECONCILED.store(reconciled_accounts, std::sync::atomic::Ordering::SeqCst);
+
+    let readiness = BuildReadiness {
+        schema_version,
+        reconciled_accounts,
+    };
 
     tracing::info!(
         target: "homeledger::lifecycle",
         schema_version = readiness.schema_version,
+        reconciled_accounts = readiness.reconciled_accounts,
         "Homeledger database schema verified"
     );
     context.insert(readiness);
