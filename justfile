@@ -110,8 +110,14 @@ test-ui:
 test-doc:
     cargo test --doc --workspace --all-features --locked
 
-review pr worktree model="gpt-6.1-terra" effort="medium" provider="codex" focus="" verify_provider="" verify_model="" verify_effort="":
-    scripts/review/review-pr.sh {{ quote(pr) }} {{ quote(worktree) }} {{ quote(model) }} {{ quote(effort) }} {{ quote(provider) }} {{ quote(focus) }} {{ quote(verify_provider) }} {{ quote(verify_model) }} {{ quote(verify_effort) }}
+[positional-arguments]
+review-tool *args:
+    @command -v upwell-review >/dev/null || { echo "upwell-review is not installed: cargo install --locked --git https://github.com/upwell-rs/upwell-review" >&2; exit 1; }
+    @upwell-review "$@"
+
+[positional-arguments]
+review *args:
+    @just review-tool review "$@"
 
 test-config:
     #!/usr/bin/env bash
