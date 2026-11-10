@@ -79,6 +79,7 @@ fn opener(name: &str, seeds: Vec<TypeDescriptor>) -> OpenerSeeds {
         scope: Session::KEY,
         seeds,
         entries: None,
+        roots: Vec::new(),
     }
 }
 

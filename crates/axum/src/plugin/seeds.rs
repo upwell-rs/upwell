@@ -62,11 +62,14 @@ impl RequestSeeds {
 /// The two openers of the HTTP request scope: controller routes, which run the request seeders
 /// and serve the controller entries, and every other request (one no route matches, a
 /// WebSocket upgrade), whose scope opens only when something injects from it, without the
-/// request seeds. Global middleware runs for both, so a component no controller entry reaches
-/// must be seeded by both; a controller handler's needs only by the first.
+/// request seeds. The DI-backed middleware in `middleware` runs for both, so both take it as
+/// roots: what it reaches over declared edges must be seeded by both openers, and what only a
+/// controller handler reaches only by the first. Middleware that injects at run time without
+/// a declared edge is not seen.
 pub(super) fn request_openers(
     seeds: &RequestSeeds,
     controllers: &[crate::controller::ControllerDescriptor],
+    middleware: &[TypeDescriptor],
 ) -> [upwell_app::OpenerSeeds; 2] {
     let request = <crate::scope::HttpRequest as upwell_core::Scope>::KEY;
     let meta = crate::request_meta::REQUEST_META_DESCRIPTOR.ty;
@@ -82,12 +85,14 @@ pub(super) fn request_openers(
                 .chain(seeds.types.iter().copied())
                 .collect(),
             entries: Some(entries),
+            roots: middleware.to_vec(),
         },
         upwell_app::OpenerSeeds {
             opener: String::from(OTHER_REQUESTS),
             scope: request,
             seeds: vec![meta],
             entries: Some(Vec::new()),
+            roots: middleware.to_vec(),
         },
     ]
 }

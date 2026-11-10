@@ -34,12 +34,14 @@ pub(super) fn of(
                 .chain(seeds(WebsocketConnection::KEY))
                 .collect(),
             entries: entries.clone(),
+            roots: Vec::new(),
         },
         OpenerSeeds {
             opener,
             scope: WebsocketMessage::KEY,
             seeds: seeds(WebsocketMessage::KEY).collect(),
             entries,
+            roots: Vec::new(),
         },
     ]
 }

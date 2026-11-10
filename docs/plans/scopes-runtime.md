@@ -1175,8 +1175,15 @@ openers a scope has:
   what it injects are checked against the first only; an eager request-scoped component, and
   one no controller route reaches, against both, so they cannot require a request seed. To keep
   the second opener small, a non-controller request now opens the scope with its eager set
-  only (`Opening::OnDemand`), not every slot. A requirement only a dynamic `Inject` in
-  middleware creates is not an edge, so preparation cannot see it; it fails when resolved.
+  only (`Opening::OnDemand`), not every slot. DI-backed middleware (`middleware::<M>()`,
+  `parent_middleware::<M>()`) runs for both kinds of request, so both openers take it as roots
+  (`OpenerSeeds::roots`): what it reaches over declared edges, `Current` accessors included,
+  is checked against both, even when a controller handler reaches it too. Middleware that
+  injects at run time without a declared edge, such as a raw `from_fn` layer calling `Inject`,
+  is not seen; such an injection fails when it resolves on a request without the seed.
+  Transient components are checked in every scope a consumer resolves them from, or in every
+  scope when none is known; scope validation already rejects a transient edge onto a scoped
+  seed.
 - **A scope several openers share** (every WebSocket endpoint opens `WebsocketConnection` and
   `WebsocketMessage`) is covered per opener. Each endpoint declares itself with
   `AppRegistry::declare_opener(OpenerSeeds { opener, scope, seeds })` (`"<protocol> at <path>"`):

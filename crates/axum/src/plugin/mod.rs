@@ -45,6 +45,11 @@ pub struct Axum {
     /// request-scope opening, with the readers that hand each seed to the opening.
     request_seeds: RequestSeeds,
 
+    /// The DI-backed middleware registered with [`AxumAppBuilder::middleware`] and
+    /// [`AxumAppBuilder::parent_middleware`], which seed validation walks from as roots of every
+    /// request-scope opener.
+    middleware_roots: Vec<upwell_core::TypeDescriptor>,
+
     /// Discovered `#[controller(ws = ..)]` descriptors. Only mounted for protocols a user opts into
     /// via [`register_ws`](AxumAppBuilder::register_ws).
     #[cfg(feature = "ws")]
@@ -125,7 +130,13 @@ impl ProtocolDefinition for Axum {
             .config_bindings
             .push(ConfigBinding::of::<AxumConfig>(AXUM_CONFIG_PATH));
         registry.components.push(REQUEST_META_DESCRIPTOR);
-        for opener in seeds::request_openers(&self.request_seeds, &self.controllers) {
+        let openers = seeds::request_openers(
+            &self.request_seeds,
+            &self.controllers,
+            &self.middleware_roots,
+        );
+
+        for opener in openers {
             registry.declare_opener(opener);
         }
 

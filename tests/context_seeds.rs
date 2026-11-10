@@ -10,7 +10,7 @@ extern crate upwell as fork;
 use std::sync::Arc;
 
 use upwell::daemon::App;
-use upwell::scope::Root;
+use upwell::scope::{Root, Transient};
 use upwell::{AppError, SeedClaim, component, context, scope};
 use upwell_test_utils::ok;
 
@@ -69,6 +69,18 @@ struct Plain;
 #[component(scope = LeftStep)]
 struct PlainReader {
     plain: Plain,
+}
+
+/// Built wherever it is requested, with the identity of that scope.
+#[component(scope = Transient)]
+struct Stamp {
+    identity: Identity,
+}
+
+/// Requests a [`Stamp`] in a [`Right`] instance.
+#[component(scope = Right)]
+struct StampReader {
+    stamp: Arc<Stamp>,
 }
 
 /// The builder with the three scopes and the context.
@@ -183,4 +195,22 @@ async fn a_claim_for_a_scope_without_a_slot_fails_preparation() {
 
     assert!(message.contains("Identity"), "{message}");
     assert!(message.contains("LeftStep"), "{message}");
+}
+
+/// A transient component cannot hold a scoped seed at all: scope validation rejects the edge
+/// before seed claims are checked, which in turn check a transient component's requirements in
+/// every scope that requests it.
+#[tokio::test]
+async fn a_transient_requirement_of_a_scoped_seed_is_rejected() {
+    let error = builder("context-transient")
+        .component::<Stamp>()
+        .component::<StampReader>()
+        .provides_seed::<Identity, Left>()
+        .build()
+        .await
+        .expect_err("a right instance would build the stamp without an identity");
+    let message = error.to_string();
+
+    assert!(message.contains("Stamp"), "{message}");
+    assert!(message.contains("Identity"), "{message}");
 }

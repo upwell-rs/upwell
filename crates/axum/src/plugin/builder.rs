@@ -92,9 +92,14 @@ pub trait AxumAppBuilder {
     /// rejection ends the request with the seeder's response. WebSocket upgrades and requests
     /// no route matches skip it, and open their scope, when something injects from it, without
     /// the seed. Preparation therefore accepts a requirement of `T` only from what controller
-    /// routes reach: a handler and the components it injects. An eager request-scoped component,
-    /// or one no controller route reaches (one only global middleware injects), must not require
-    /// it, and is rejected with `OpenerWithoutSeed` naming the non-controller requests. Seeders run in registration order. Registering `M` again is a
+    /// routes alone reach: a handler and the components it injects. An eager request-scoped
+    /// component, one no controller route reaches, and one a DI-backed middleware
+    /// ([`middleware`](Self::middleware), [`parent_middleware`](Self::parent_middleware))
+    /// reaches over a declared edge, such as a `Current` accessor, must not require it, and are
+    /// rejected with `OpenerWithoutSeed` naming the non-controller requests. Middleware that
+    /// injects at run time without a declared edge, such as a raw `from_fn` layer calling
+    /// `Inject`, is not seen: such an injection fails when it resolves on a request without the
+    /// seed. Seeders run in registration order. Registering `M` again is a
     /// no-op; a second seeder of the same `T` fails preparation with
     /// [`DuplicateRequestSeeder`](crate::Error::DuplicateRequestSeeder).
     fn request_seed<T, M>(self) -> Self
@@ -162,6 +167,9 @@ impl AxumAppBuilder for AppBuilder<Axum> {
         self.protocol_mut()
             .middleware
             .push(di_applier::<M>(Attach::Router));
+        self.protocol_mut()
+            .middleware_roots
+            .push(upwell_core::TypeDescriptor::of::<M>(M::NAME));
 
         self.component::<M>()
     }
@@ -188,6 +196,9 @@ impl AxumAppBuilder for AppBuilder<Axum> {
         self.protocol_mut()
             .parent_layers
             .push(di_applier::<M>(Attach::MatchedRoutes));
+        self.protocol_mut()
+            .middleware_roots
+            .push(upwell_core::TypeDescriptor::of::<M>(M::NAME));
 
         self.component::<M>()
     }

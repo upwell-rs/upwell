@@ -25,7 +25,7 @@ mod error;
 mod reach;
 
 pub use error::{SeedClaimError, SeedConsumer};
-use reach::EntryReach;
+use reach::{ComponentReach, EntryReach};
 
 /// The claimant of the seeds the application claims with
 /// [`AppBuilder::provides_seed`](crate::AppBuilder::provides_seed).
@@ -57,6 +57,10 @@ pub struct OpenerSeeds {
     /// requirement only those entries reach is checked against it alone. `None` when it cannot
     /// be tied to entries: it counts for every consumer of its scope.
     pub entries: Option<Vec<EntryKey>>,
+    /// Components every instance it opens may resolve beyond its entries, such as global
+    /// middleware: anything they reach over declared edges, `Current` accessors included, is
+    /// checked against this opener too.
+    pub roots: Vec<TypeDescriptor>,
 }
 
 /// What reaches a consumer, deciding which openers of a shared scope must seed what it
@@ -65,8 +69,8 @@ pub struct OpenerSeeds {
 enum Reached<'r, 'a> {
     /// One entry: the consumer is that entry.
     Entry(&'r EntryKey),
-    /// The entries that transitively depend on a component.
-    Entries(&'r HashSet<&'a EntryKey>),
+    /// What transitively reaches a component: entries, and openers through their roots.
+    Component(&'r ComponentReach<'a>),
     /// Unknown: every opener of the scope may open an instance for it.
     Any,
 }
@@ -117,7 +121,10 @@ impl OpenerSeeds {
         match reached {
             Reached::Any => true,
             Reached::Entry(key) => entries.contains(key),
-            Reached::Entries(keys) => entries.iter().any(|entry| keys.contains(entry)),
+            Reached::Component(reach) => {
+                reach.openers.contains(self.opener.as_str())
+                    || entries.iter().any(|entry| reach.entries.contains(entry))
+            }
         }
     }
 }
@@ -162,7 +169,18 @@ impl AppRegistry {
             return Ok(());
         }
 
-        let reach = EntryReach::of(components, &self.providers, &self.entries, topology);
+        let reach = EntryReach::of(
+            components,
+            &self.providers,
+            &self.entries,
+            &self.scope_openers,
+            topology,
+        );
+        let every_scope: HashSet<ScopeId> = topology
+            .boundaries()
+            .iter()
+            .map(|boundary| boundary.id())
+            .collect();
 
         for component in components {
             let consumer = SeedConsumer::Component {
@@ -171,12 +189,26 @@ impl AppRegistry {
             };
             let reached = reach
                 .of_component(component)
-                .map_or(Reached::Any, Reached::Entries);
+                .map_or(Reached::Any, Reached::Component);
+            let scopes = match component.scope.is_transient() {
+                true => reach
+                    .transient_scopes(component)
+                    .unwrap_or(&every_scope)
+                    .iter()
+                    .copied()
+                    .collect(),
+                false => vec![component.scope.id()],
+            };
 
-            for dependency in component.dependencies() {
+            for (scope, dependency) in scopes.iter().flat_map(|scope| {
+                component
+                    .dependencies()
+                    .into_iter()
+                    .map(move |dependency| (*scope, dependency))
+            }) {
                 let required = Requirement {
                     dependency: &dependency,
-                    scope: component.scope,
+                    scope,
                     consumer,
                     reached,
                 };
@@ -189,7 +221,7 @@ impl AppRegistry {
             for dependency in (entry.targets)() {
                 let required = Requirement {
                     dependency: &dependency,
-                    scope: entry.scope,
+                    scope: entry.scope.id(),
                     consumer: SeedConsumer::Entry(entry.key),
                     reached: Reached::Entry(&entry.key),
                 };
@@ -278,7 +310,7 @@ impl Provided<'_> {
 /// reaches its consumer.
 struct Requirement<'d, 'r, 'a> {
     dependency: &'d DependencyDescriptor,
-    scope: ScopeKey,
+    scope: ScopeId,
     consumer: SeedConsumer,
     reached: Reached<'r, 'a>,
 }
@@ -339,7 +371,7 @@ impl SeedPlacements {
 
         let Some(placement) = placements
             .iter()
-            .find(|placement| topology.is_reachable(&scope.id(), &placement.id()))
+            .find(|placement| topology.is_reachable(&scope, &placement.id()))
         else {
             return Ok(());
         };
