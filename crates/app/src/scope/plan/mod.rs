@@ -29,10 +29,11 @@ pub(crate) struct ScopePlan {
     pub(crate) seed_destinations: HashMap<TypeId, SeedDestination>,
 }
 
-/// The declared destination and diagnostic name of a factory-less scoped component.
-#[derive(Clone, Copy, Debug)]
+/// The declared destinations and diagnostic name of a factory-less scoped component: one
+/// scope, or each scope a `#[context]` value lists.
+#[derive(Clone, Debug)]
 pub(crate) struct SeedDestination {
-    pub(crate) scope: ScopeId,
+    pub(crate) scopes: Vec<ScopeId>,
     pub(crate) type_name: &'static str,
 }
 
@@ -169,13 +170,14 @@ impl DescriptorPartitions {
                 .entry(scope)
                 .or_default()
                 .insert(component.ty.type_id);
-            self.seed_destinations.insert(
-                component.ty.type_id,
-                SeedDestination {
-                    scope,
+            self.seed_destinations
+                .entry(component.ty.type_id)
+                .or_insert_with(|| SeedDestination {
+                    scopes: Vec::new(),
                     type_name: (component.ty.type_name)(),
-                },
-            );
+                })
+                .scopes
+                .push(scope);
         }
 
         Ok(())

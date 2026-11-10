@@ -222,8 +222,22 @@ impl ComponentRegistry {
     }
 
     /// Rejects an eager component of the root or the transient scope: neither opens scope
-    /// instances, so there is no opening to build it on.
+    /// instances, so there is no opening to build it on. Rejects a context value of the root
+    /// or the transient scope, or one with a factory, for the same reason: it is seeded into
+    /// scope instances and never built.
     fn validate_construction(components: &[ComponentDescriptor]) -> crate::Result<()> {
+        for component in components.iter().filter(|c| c.construction.is_context()) {
+            let outside = component.scope.is_transient() || component.scope.id() == Singleton::ID;
+
+            if outside || component.effective_factory()?.is_some() {
+                return Err(Error::InvalidContext {
+                    component_id: component.id.to_string(),
+                    scope: component.scope.name(),
+                    scope_id: component.scope.id(),
+                });
+            }
+        }
+
         for component in components.iter().filter(|c| c.construction.is_eager()) {
             if component.scope.is_transient() || component.scope.id() == Singleton::ID {
                 return Err(Error::EagerOutsideScope {

@@ -63,6 +63,11 @@ pub enum Error {
         actual: ScopeId,
     },
 
+    /// A seed claim names a scope without a slot of its type, or a required context value is
+    /// not provided in its scope.
+    #[error(transparent)]
+    SeedClaim(#[from] crate::registry::SeedClaimError),
+
     /// A deferred scope instance failed to open earlier, so it cannot open again.
     #[error("the deferred instance of scope '{scope}' failed to open")]
     DeferredScopeFailed {

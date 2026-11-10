@@ -1,0 +1,5 @@
+error: unknown `#[context]` argument `scope`, expected one of: scopes, id, name, upwell
+ --> tests/ui/context/unknown_argument.rs:4:11
+  |
+4 | #[context(scope = Local)]
+  |           ^^^^^

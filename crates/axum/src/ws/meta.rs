@@ -137,3 +137,20 @@ pub(crate) static WS_CONNECTION_META_DESCRIPTOR: upwell_di::ComponentDescriptor 
         TypeDescriptor::of::<WsConnectionMeta>("WsConnectionMeta"),
         crate::scope::WebsocketConnection::KEY,
     );
+
+/// Registers the upgrade's seed slots of the connection scope. Each endpoint declares that it
+/// fills them when it declares itself an opener of the scope.
+pub(crate) fn register_framework_seeds(registry: &mut upwell_app::AppRegistry) {
+    registry.components.extend([
+        WEBSOCKET_UPGRADE_META_DESCRIPTOR,
+        WS_CONNECTION_META_DESCRIPTOR,
+    ]);
+}
+
+/// The seeds every endpoint fills in each connection scope it opens.
+pub(crate) fn upgrade_seeds() -> [upwell_core::TypeDescriptor; 2] {
+    [
+        WEBSOCKET_UPGRADE_META_DESCRIPTOR.ty,
+        WS_CONNECTION_META_DESCRIPTOR.ty,
+    ]
+}

@@ -123,18 +123,19 @@ pub use upwell_app::{
     DisplacedGeneration, ENTRIES, EarlyPluginCatalog, EarlyPluginPlan, EffectivePluginPlan,
     EntryDescriptor, EntryError, EntryId, EntryOwner, EntryScope, EntryTable, EntryTargets,
     ExecutionMode, HostError, IdErrorKind, Initial, InstallationOrigin, InstallationProvenance,
-    InvalidCompositionId, LifecyclePhase, LogFormat, LoggingConfig, OpenScope, Opening, OpensUnder,
-    ParentScope, PendingTransition, PhaseError, PhaseTiming, Plugin, PluginContribution,
-    PluginContributionKind, PluginContributions, PluginDeclaration, PluginId, PluginPlanError,
-    PluginRelation, PluginResolutionPlan, PluginSlotId, PluginWithOptions, PreBuild,
-    PreBuildContext, PreparedApp, PreparedProtocol, PreparedScopeTopology, ProtocolDefinition,
-    ProtocolId, ProtocolPluginRegistrar, ProtocolRuntime, RelationKind, RelationTarget,
-    ReplacementDecision, ResolvedPlugin, RestartReason, RestartRequired, RetirementContext,
-    RetirementReason, RunError, RuntimeReloader, RuntimeTransitionReport, RuntimeView, SCOPES,
-    ScopeBoundary, ScopeBuilder, ScopeDeclaration, ScopeEnd, ScopeEndContext, ScopeEndKind,
-    ScopeEnded, ScopeEntry, ScopeOpener, ScopeParent, ScopeRun, ScopeTopology, ScopeTopologyError,
-    ScopeWork, Seeds, Serve, ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy,
-    SpanEvents, SuppressionDecision, TransitionAborted, TransitionAttemptId, TransitionCommitted,
+    InvalidCompositionId, LifecyclePhase, LogFormat, LoggingConfig, OpenScope, OpenerSeeds,
+    Opening, OpensUnder, ParentScope, PendingTransition, PhaseError, PhaseTiming, Plugin,
+    PluginContribution, PluginContributionKind, PluginContributions, PluginDeclaration, PluginId,
+    PluginPlanError, PluginRelation, PluginResolutionPlan, PluginSlotId, PluginWithOptions,
+    PreBuild, PreBuildContext, PreparedApp, PreparedProtocol, PreparedScopeTopology,
+    ProtocolDefinition, ProtocolId, ProtocolPluginRegistrar, ProtocolRuntime, RelationKind,
+    RelationTarget, ReplacementDecision, ResolvedPlugin, RestartReason, RestartRequired,
+    RetirementContext, RetirementReason, RunError, RuntimeReloader, RuntimeTransitionReport,
+    RuntimeView, SCOPES, ScopeBoundary, ScopeBuilder, ScopeDeclaration, ScopeEnd, ScopeEndContext,
+    ScopeEndKind, ScopeEnded, ScopeEntry, ScopeOpener, ScopeParent, ScopeRun, ScopeTopology,
+    ScopeTopologyError, ScopeWork, SeedClaim, SeedClaimError, SeedConsumer, Seeds, Serve,
+    ServerConfig, Setup, ShutdownHandle, ShutdownSignal, SlotPolicy, SpanEvents,
+    SuppressionDecision, TransitionAborted, TransitionAttemptId, TransitionCommitted,
     TransitionDecision, TransitionFailure, TransitionHookContext, TransitionHookOutcome,
     TransitionHookReport, TransitionOutcome, TransitionOutcomeContext, TransitionPhase,
     TransitionProposal, TransitionRejection, TransitionVerdict, TryScopeWork, ValidationContext,
@@ -198,7 +199,7 @@ pub use upwell_transport::{
 // always available; the RPC daemon macros (`service`/`handlers`/`rpc`) live in the `daemon`
 // module behind the `daemon` feature.
 // ---------------------------------------------------------------------------
-pub use upwell_macros::{app, component, config, entry, injectable, methods, scope, when};
+pub use upwell_macros::{app, component, config, context, entry, injectable, methods, scope, when};
 
 /// Re-exported so macro-generated code can reference the `#[distributed_slice]` attribute
 /// through the facade crate without user crates depending on `linkme` directly. The generated
@@ -387,7 +388,7 @@ pub mod axum {
 pub mod prelude {
     // The macros are built for the host and usable from any target (their generated server code is
     // gated out on wasm); the framework *types* are the daemon-stack surface, compiled out on wasm.
-    pub use crate::{app, component, config, entry, injectable, methods, scope, when};
+    pub use crate::{app, component, config, context, entry, injectable, methods, scope, when};
 
     #[cfg(not(target_family = "wasm"))]
     pub use crate::{

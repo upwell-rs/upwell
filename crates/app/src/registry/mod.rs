@@ -14,9 +14,11 @@ use crate::scope::{PreparedScopeTopology, SCOPES, ScopeDeclaration};
 
 mod condition;
 mod config;
+mod seeds;
 
 pub use condition::AppConditionEvaluation;
 pub(crate) use config::{BoundConfigs, ConfigFault};
+pub use seeds::{APPLICATION_CLAIMANT, OpenerSeeds, SeedClaim, SeedClaimError, SeedConsumer};
 
 /// Holds the *agnostic* component, provider, config-binding and entry descriptors of an
 /// app — declarations only. Runtime instances live in the
@@ -45,6 +47,12 @@ pub struct AppRegistry {
     /// Whether a scope opened for an entry may build, on demand, what the entry does not
     /// declare.
     pub unplanned: UnplannedConstruction,
+    /// Which values protocols, endpoints and the application guarantee to seed into which
+    /// scopes; added with [`claim_seed`](Self::claim_seed).
+    pub seed_claims: Vec<SeedClaim>,
+    /// The openers of scopes several openers share, each with the seeds it fills; added with
+    /// [`declare_opener`](Self::declare_opener).
+    pub scope_openers: Vec<OpenerSeeds>,
 }
 
 impl AppRegistry {
@@ -83,6 +91,8 @@ impl AppRegistry {
             entries,
             scopes,
             unplanned: UnplannedConstruction::default(),
+            seed_claims: Vec::new(),
+            scope_openers: Vec::new(),
         }
     }
 
@@ -192,6 +202,7 @@ impl AppRegistry {
             .validate_placement_overlap(&components, |outer, inner| {
                 topology.encloses(&outer, &inner)
             })?;
+        self.validate_seed_claims(&components, topology)?;
         self.validate_configs(&components)?;
 
         Ok(())
@@ -214,6 +225,7 @@ impl AppRegistry {
             .validate_placement_overlap(components, |outer, inner| {
                 topology.encloses(&outer, &inner)
             })?;
+        self.validate_seed_claims(components, topology)?;
         self.validate_configs(components)?;
 
         Ok(())

@@ -65,6 +65,13 @@ fn invalid_scope_lists_fail_to_compile() {
     cases.compile_fail("tests/ui/scope_lists/*.rs");
 }
 
+#[test]
+fn invalid_contexts_fail_to_compile() {
+    let cases = trybuild::TestCases::new();
+
+    cases.compile_fail("tests/ui/context/*.rs");
+}
+
 #[cfg(feature = "daemon")]
 #[test]
 fn scope_lists_on_services_fail_to_compile() {

@@ -16,6 +16,16 @@ pub enum StompBuildError {
     #[error("STOMP topic bus is missing from the DI root")]
     MissingTopicBus,
 
+    /// The endpoint claims to seed a value with `StompConfig::provides_seed` but has no
+    /// authenticator, which is the only step that produces connection seeds.
+    #[error(
+        "STOMP endpoint claims to seed `{seed}` into its connections but has no authenticator to produce it"
+    )]
+    SeedWithoutAuthenticator {
+        /// The claimed value's type.
+        seed: &'static str,
+    },
+
     /// An authenticator argument only a scope provides. An authenticator runs before the
     /// connection scope opens, so it resolves its arguments from the application root.
     #[error(

@@ -103,7 +103,7 @@ fn visitor_destination() -> HashMap<TypeId, SeedDestination> {
     HashMap::from([(
         TypeId::of::<Visitor>(),
         SeedDestination {
-            scope: SESSION_ID,
+            scopes: vec![SESSION_ID],
             type_name: std::any::type_name::<Visitor>(),
         },
     )])

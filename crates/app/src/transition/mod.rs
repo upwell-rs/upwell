@@ -230,10 +230,15 @@ impl CandidateGraph {
         self.scope_orders.get(scope).map(Vec::as_slice)
     }
 
-    pub fn seed_destination(&self, type_id: std::any::TypeId) -> Option<(ScopeId, &'static str)> {
+    /// The scopes a factory-less component of `type_id` is seeded in, with its type name:
+    /// one scope, or each scope a `#[context]` value lists.
+    pub fn seed_destination(
+        &self,
+        type_id: std::any::TypeId,
+    ) -> Option<(&[ScopeId], &'static str)> {
         self.seed_destinations
             .get(&type_id)
-            .map(|destination| (destination.scope, destination.type_name))
+            .map(|destination| (destination.scopes.as_slice(), destination.type_name))
     }
 
     /// Consumes the candidate into the runtime-generation parts: the resolved descriptor

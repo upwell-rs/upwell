@@ -1150,12 +1150,100 @@ fallback mechanism, so it answers the open questions of #136 as follows:
   chain. Neither needs to know that `T` has several placements.
 - Status: done; the rules are tested in `crates/di/src/registry/tests/scope_lists.rs`,
   `tests/multi_scope_runtime.rs` and `tests/multi_scope_seed_list.rs`.
+- `#[context]` values are the one exception (#127): a seed-only value declared with
+  `#[context(scopes = [WebsocketConnection, HttpRequest])]` is a by-value, factory-less
+  component with the `ScopedConstruction::Context` policy, placed in each listed scope through
+  the scope-list machinery. `AmbiguousSeedScopes` is not raised when every seed placement of a
+  type is a context; the overlap rule still keeps the scopes apart, so a chain reaches at most
+  one slot, and `seed_destinations` lists every scope of a context. Each slot is filled by the
+  builder of its own scope (`ScopeBuilder::seed`, `PreparedConnection::seed`,
+  `StompAuthenticated::seed`, a `RequestSeeder`), which already addresses one scope. A context
+  with a factory, or in the root or the transient scope, is `InvalidContext`.
+
+Status (#128, seed claims): DI core knows only that a value is seeded from outside; the app
+records who seeds it, without knowing any concrete protocol. There are two forms, by how many
+openers a scope has:
+
+- **A scope with one opener** (a scope the application opens) is covered by plain claims,
+  `SeedClaim { ty, scope, claimant }` on `AppRegistry::seed_claims`;
+  `AppBuilder::provides_seed::<T, S>()` is that claim.
+- **The HTTP request scope has two openers** (#496 review, round 5). *Axum controller routes*
+  run the request seeders, so they fill `RequestMeta` and every `request_seed::<T, M>()` type,
+  and serve the controller entries. *Axum non-controller requests* (one no route matches, a
+  WebSocket upgrade) open the scope only when something such as global middleware injects
+  from it, with `RequestMeta` but no request seed, and serve no entry. A controller handler and
+  what it injects are checked against the first only; an eager request-scoped component, and
+  one no controller route reaches, against both, so they cannot require a request seed. To keep
+  the second opener small, a non-controller request now opens the scope with its eager set
+  only (`Opening::OnDemand`), not every slot. DI-backed middleware (`middleware::<M>()`,
+  `parent_middleware::<M>()`) runs for both kinds of request, so both openers take it as roots
+  (`OpenerSeeds::roots`): what it reaches over declared edges, `Current` accessors included,
+  is checked against both, even when a controller handler reaches it too. Middleware that
+  injects at run time without a declared edge, such as a raw `from_fn` layer calling `Inject`,
+  is not seen; such an injection fails when it resolves on a request without the seed.
+  Transient components are checked in every scope a consumer resolves them from, or in every
+  scope when none is known; scope validation already rejects a transient edge onto a scoped
+  seed.
+- **A scope several openers share** (every WebSocket endpoint opens `WebsocketConnection` and
+  `WebsocketMessage`) is covered per opener. Each endpoint declares itself with
+  `AppRegistry::declare_opener(OpenerSeeds { opener, scope, seeds })` (`"<protocol> at <path>"`):
+  the upgrade metadata, plus what `WebsocketProtocol::seed_claims(&options)` returns. STOMP
+  returns its headers and session for the message scope, its principal for the connection scope,
+  and every `StompConfig::provides_seed::<T>()`; a STOMP endpoint that claims a seed without an
+  authenticator is rejected while the application prepares (`WebsocketProtocol::check_options`,
+  `StompBuildError::SeedWithoutAuthenticator`), so tooling reports it. Once a scope has a
+  declared opener, plain claims do not count there (`WebsocketProtocol::register` says so), and
+  a value is provided for a consumer only when **every opener that can reach that consumer**
+  seeds it. An opener records the entries it serves (`OpenerSeeds::entries`: an endpoint serves
+  the message handlers of the controllers speaking its protocol). An entry is reached by the
+  openers serving it; a component by the openers serving any entry that transitively depends on
+  it (over dependency edges and trait providers, each edge followed only to the placement its
+  consumer's scope resolves, never to the same type's placement in an unrelated scope). An eager component, a component no entry
+  reaches, and an opener that cannot be tied to entries (`entries: None`) fall back to every
+  declared opener of the scope. The reviews of #496 found both holes this closes: with claims
+  collapsed to `(type, scope)`, one endpoint's seed vouched for another endpoint's connections;
+  with every opener checked for every consumer, a STOMP handler reading `StompHeaders` failed as
+  soon as a JSON-WS endpoint was mounted. Reachability by entry is the smallest sound model:
+  openers say what they fill and whom they serve, and nothing else changes.
+
+Preparation (`validate_seed_claims`, beside the placement-overlap check) then rejects:
+
+- a claim or an opener's seed for a scope without a factory-less slot of its type
+  (`SeedClaimError::ClaimWithoutSlot`), since every opening that fills it would reject the seed;
+- a required edge (eager or deferred, not optional, not configuration) of a component or an
+  entry onto a checked seed whose placement on the consumer's chain is not provided: no claim
+  covers it (`UnprovidedSeed`), or an opener that reaches the consumer does not seed it
+  (`OpenerWithoutSeed`, naming that opener; tooling adds an `opener:<name>` resource). The
+  placement is the one the consumer's chain reaches, so a connection
+  seed covers consumers in message scopes below it. Checked seeds are every `#[context]` value
+  and every type something claims; a plain factory-less slot no one claims keeps its old rules
+  and fails only when resolved.
+
+Several claimants of one `(type, scope)` pair are accepted: each describes an opener that fills
+its own instances. Two fills of one opening are caught where the opening is assembled: two
+request seeders of one type fail the axum build (`DuplicateRequestSeeder`), registering the same
+seeder twice is a no-op, and any other double fill fails the opening (`DuplicateSeed`).
+
+Tooling reports them as `upwell/tooling-seed-unprovided` and `upwell/tooling-seed-opener-missing`
+(naming the consumer by component id or entry key), `upwell/tooling-seed-claim-without-slot` and
+`upwell/tooling-context-invalid`, and labels a context's `construction-policy` as `context`. A
+claim is a guarantee, not a check of each opening: an opener that claims a seed and opens a
+scope without it fails the opening of an eager consumer, or the first resolution of an
+on-demand one.
+
+The REST path (#127): a `RequestSeeder` is a DI singleton producing the seed from the request or
+rejecting it with a response. It runs for every request a controller route serves, inside the
+parent layers and before global middleware and the eager request-scope opening, which covers the
+same routes: a WebSocket upgrade opens no request scope, so neither runs for it (before, the
+eager opening also opened a request scope for an upgrade); the seed waits in the request's extensions and is cloned into
+the scope's slot when the scope opens, whichever way it opens. Seeders that are not registered
+cost nothing: the opening reads extensions only when at least one is.
 
 Use matrix:
 
 | Need | Feature | Why not the others |
 |---|---|---|
-| Authenticated identity | A seed (`Identity`, filled by the protocol or `ScopeBuilder::seed`) | It is produced outside DI and is immutable; a placement would construct it. |
+| Authenticated identity | A `#[context(scopes = [..])]` value (`Identity`), seeded by the protocol (`StompAuthenticated::seed`, a `RequestSeeder`) or `ScopeBuilder::seed` and claimed for each scope | It is produced outside DI and is immutable; a placement would construct it. |
 | Protocol metadata (headers, peer) | A seed, lazily captured where declared (`RequestMeta`, `PeerInfo`) | Same as identity: the protocol owns its lifecycle. |
 | Per-request optimised service | `#[component(scope = HttpRequest)]` | One lifecycle, one scope. |
 | Per-connection optimised service | `#[component(scope = WebsocketConnection)]` | Same. |

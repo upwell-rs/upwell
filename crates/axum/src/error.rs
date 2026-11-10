@@ -23,6 +23,18 @@ pub enum Error {
     #[error("axum configuration error: {0}")]
     Config(String),
 
+    /// Two different request seeders produce the same type, so every request scope would be
+    /// filled twice.
+    #[error("request seeders `{first}` and `{second}` both seed `{seed}` into the request scope")]
+    DuplicateRequestSeeder {
+        /// The seeded type.
+        seed: &'static str,
+        /// The seeder registered first.
+        first: &'static str,
+        /// The seeder registered second.
+        second: &'static str,
+    },
+
     /// A registered WebSocket protocol could not construct its endpoint state.
     #[error("building WebSocket protocol `{protocol}`: {source}")]
     WebsocketBuild {

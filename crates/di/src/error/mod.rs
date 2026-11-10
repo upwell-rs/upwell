@@ -153,6 +153,20 @@ pub enum Error {
         scope: &'static str,
     },
 
+    /// A context value is placed in the root or the transient scope, or has a factory: a
+    /// context value is never built, only seeded into instances of scopes below the root.
+    #[error(
+        "context '{component_id}' in scope '{scope}' is invalid: a context value has no factory and lives only in scopes below the root"
+    )]
+    InvalidContext {
+        /// Stable component identity.
+        component_id: String,
+        /// The offending placement's scope.
+        scope: &'static str,
+        /// The offending placement's scope identity.
+        scope_id: ScopeId,
+    },
+
     /// An eager component has no factory, so a scope's opening cannot build it.
     #[error("component '{component_id}' is eager but has no factory to build it with")]
     EagerWithoutFactory {

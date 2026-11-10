@@ -48,7 +48,8 @@ impl ComponentRegistry {
 }
 
 /// Rejects the placement sets that need no topology to be invalid: a transient placement
-/// beside any other, and more than one seed of a type.
+/// beside any other, and more than one seed of a type unless every seed is a `#[context]`
+/// value, which may be seeded in several scopes that share no hierarchy.
 pub(super) fn validate_placement_set(components: &[ComponentDescriptor]) -> crate::Result<()> {
     for placements in group_by_type(components).values() {
         let mut seeds = Vec::new();
@@ -72,7 +73,11 @@ pub(super) fn validate_placement_set(components: &[ComponentDescriptor]) -> crat
             }
         }
 
-        if let [first, second, ..] = seeds.as_slice() {
+        let contexts = seeds.iter().all(|seed| seed.construction.is_context());
+
+        if let [first, second, ..] = seeds.as_slice()
+            && !contexts
+        {
             return Err(Error::AmbiguousSeedScopes {
                 component: first.name.to_string(),
                 first: first.scope.name(),

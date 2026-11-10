@@ -23,10 +23,12 @@ WebSocket connection components use `WebsocketUpgradeMeta` for the upgrade reque
 
 A request opens its `HttpRequest` scope the first time something injects from it, so a route that
 injects nothing pays for no scope. An eager component (`#[component(scope = HttpRequest, eager)]`)
-changes that: it runs for every routed request before any middleware, as RPC opens a call's
-scope before its middleware. So it also runs for a request global middleware rejects, and reads
-the request head as the client sent it, before middleware rewrites it. A request no route
-matches (a 404) runs none.
+changes that: it runs for every request a controller route serves, before any middleware, as
+RPC opens a call's scope before its middleware. So it also runs for a request global
+middleware rejects, and reads the request head as the client sent it, before middleware
+rewrites it. A request no route matches (a 404) and a WebSocket upgrade open no scope up front;
+if middleware injects from one, its scope opens then, with only its eager components built,
+and without request seeds.
 
 A request's scope opens under the application root unless the application picks a parent: an
 application scope that lists `HttpRequest` among its `children`, such as a cached per-user
@@ -35,6 +37,23 @@ application scope that lists `HttpRequest` among its `children`, such as a cache
 request's extensions. Parent layers run before global middleware and before the eager opening,
 so every opening sees the parent, and only for requests a route matches. Without a parent layer,
 nothing reads `RequestParent`.
+
+An application value such as an authenticated identity, declared once with
+`#[context(scopes = [WebsocketConnection, HttpRequest])]`, reaches both paths as a seed. Over
+REST a `RequestSeeder` registered with `request_seed::<Identity, M>()` produces it from the
+request (or rejects it) before global middleware and fills the request scope of each
+controller route with it. A request no route matches and a WebSocket upgrade get no seed, so
+only handlers and what they inject may require it; an eager request-scoped component, one no
+handler reaches, and one DI-backed middleware reaches over a declared edge may not. Middleware
+that injects without a declared edge (a raw `from_fn` calling `Inject`) is not checked. Such a request opens its scope, when something injects from
+it, with only the eager set. Over
+WebSocket the protocol's `serve` receives a `PreparedConnection` and opens the connection scope
+itself, after its handshake: STOMP opens it after `CONNECT` authentication, seeded with the
+`StompPrincipal` and whatever the authenticator returns in `StompAuthenticated::seed`, and
+`StompConfig::provides_seed::<Identity>()` claims it. Every WebSocket endpoint is declared an
+opener of the connection and message scopes with the seeds it fills, so preparation rejects a
+required context value that no one claims for its scope (`UnprovidedSeed`), or that one
+endpoint opening the scope does not seed (`OpenerWithoutSeed`).
 
 `RequestMeta` copies the request's method, URI and headers, so it is captured only when something
 reads it, once per request: when the scope opens if the route reads it (directly or through a

@@ -119,6 +119,9 @@ pub struct ComponentArgs<Ext: ParseKeyed = NoExt> {
     /// The `eager` keyword, kept for its span: the component is built on every opening of its
     /// scope. `None` means on demand.
     pub eager: Option<Ident>,
+    /// Set by `#[context]`, never parsed from `#[component]`: the component is a context
+    /// value, seeded into each listed scope and never built. Kept for its span.
+    pub context: Option<Ident>,
     /// Overrides the generated per-type registration slice name (`factory_slice = Ident`).
     ///
     /// Since factories and hooks share one merged `{Type}Registrations` slice on the `linkme`

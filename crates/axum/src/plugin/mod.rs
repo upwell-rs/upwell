@@ -16,11 +16,12 @@ use crate::request_scope::{ParentChoice, RequestScopeLayer, open_eager_scope};
 use crate::scope::{HttpRequest as HttpRequestScope, SCOPE_TOPOLOGY};
 
 pub use builder::AxumAppBuilder;
+use seeds::RequestSeeds;
 use timeout::RequestTimeoutLayer;
 
 /// The axum HTTP protocol definition.
 ///
-/// Accumulates the registered/discovered controllers, contributes no extra DI seeds, and
+/// Accumulates the registered/discovered controllers, claims the seeds it provides, and
 /// builds the [`AxumRuntime`]: each controller's [`axum::Router`] merged together and
 /// wrapped by a request-scope layer, so the [`Inject`](crate::Inject) extractor opens the
 /// request scope on first use.
@@ -38,6 +39,16 @@ pub struct Axum {
     /// the global middleware and the eager request-scope opening (via
     /// [`AxumAppBuilder::parent_layer`] and [`AxumAppBuilder::parent_middleware`]).
     parent_layers: Vec<MiddlewareApplier>,
+
+    /// The layers of the [`RequestSeeder`](crate::RequestSeeder)s registered with
+    /// [`AxumAppBuilder::request_seed`], applied inside the parent layers and outside the eager
+    /// request-scope opening, with the readers that hand each seed to the opening.
+    request_seeds: RequestSeeds,
+
+    /// The DI-backed middleware registered with [`AxumAppBuilder::middleware`] and
+    /// [`AxumAppBuilder::parent_middleware`], which seed validation walks from as roots of every
+    /// request-scope opener.
+    middleware_roots: Vec<upwell_core::TypeDescriptor>,
 
     /// Discovered `#[controller(ws = ..)]` descriptors. Only mounted for protocols a user opts into
     /// via [`register_ws`](AxumAppBuilder::register_ws).
@@ -72,6 +83,9 @@ struct WsRegistration {
     protocol_name: &'static str,
     mount: WsMount,
     register: fn(&mut AppRegistry),
+    claims: Vec<upwell_app::SeedClaim>,
+    /// Why the endpoint's options are rejected, reported when the application prepares.
+    rejected: Option<crate::Error>,
 }
 
 /// One validated WebSocket endpoint and the exact route plan retained from preparation.
@@ -92,6 +106,7 @@ pub struct PreparedAxum {
     controllers: Vec<ControllerDescriptor>,
     middleware: Vec<MiddlewareApplier>,
     parent_layers: Vec<MiddlewareApplier>,
+    request_seeds: RequestSeeds,
     #[cfg(feature = "tooling")]
     base_prefix: String,
     #[cfg(feature = "ws")]
@@ -115,14 +130,21 @@ impl ProtocolDefinition for Axum {
             .config_bindings
             .push(ConfigBinding::of::<AxumConfig>(AXUM_CONFIG_PATH));
         registry.components.push(REQUEST_META_DESCRIPTOR);
+        let openers = seeds::request_openers(
+            &self.request_seeds,
+            &self.controllers,
+            &self.middleware_roots,
+        );
+
+        for opener in openers {
+            registry.declare_opener(opener);
+        }
+
         registry
             .entries
             .extend(entries::route_entries(&self.controllers));
         #[cfg(feature = "ws")]
-        registry.components.extend([
-            crate::ws::WEBSOCKET_UPGRADE_META_DESCRIPTOR,
-            crate::ws::WS_CONNECTION_META_DESCRIPTOR,
-        ]);
+        crate::ws::register_framework_seeds(registry);
 
         #[cfg(feature = "openapi")]
         registry
@@ -139,6 +161,10 @@ impl ProtocolDefinition for Axum {
                 if registered.insert(registration.protocol) {
                     (registration.register)(registry);
                 }
+
+                for opener in openers::of(registration, &self.ws_controllers) {
+                    registry.declare_opener(opener);
+                }
             }
 
             registry
@@ -147,12 +173,16 @@ impl ProtocolDefinition for Axum {
         }
     }
 
-    fn prepare(self, _context: &ValidationContext<'_>) -> crate::Result<Self::Prepared> {
+    fn prepare(mut self, _context: &ValidationContext<'_>) -> crate::Result<Self::Prepared> {
         let config = _context
             .config::<AxumConfig>(AXUM_CONFIG_PATH)
             .expect("AxumConfig missing from config store; Axum should register it")
             .snapshot();
         let base_prefix = normalize_base_path(&config.base_path);
+
+        if let Some(conflict) = self.request_seeds.conflict.take() {
+            return Err(conflict);
+        }
 
         if !base_prefix.is_empty() {
             crate::config::validate_mount_path("Axum base path", &base_prefix)?;
@@ -166,6 +196,10 @@ impl ProtocolDefinition for Axum {
             let mut paths = std::collections::HashSet::new();
 
             for registration in self.ws_registrations {
+                if let Some(rejected) = registration.rejected {
+                    return Err(rejected);
+                }
+
                 crate::config::validate_mount_path("WebSocket mount path", &registration.path)?;
 
                 if !endpoints.insert((registration.protocol, registration.path.clone())) {
@@ -222,6 +256,7 @@ impl ProtocolDefinition for Axum {
             controllers: self.controllers,
             middleware: self.middleware,
             parent_layers: self.parent_layers,
+            request_seeds: self.request_seeds,
             #[cfg(feature = "tooling")]
             base_prefix,
             #[cfg(feature = "ws")]
@@ -293,6 +328,10 @@ impl PreparedProtocol for PreparedAxum {
             router = router.layer(axum::middleware::from_fn(open_eager_scope));
         }
 
+        for applier in self.request_seeds.layers.into_iter().rev() {
+            router = applier(runtime, router);
+        }
+
         let parents = if self.parent_layers.is_empty() {
             ParentChoice::Root
         } else {
@@ -325,6 +364,7 @@ impl PreparedProtocol for PreparedAxum {
             routes,
             config.clone(),
             parents,
+            self.request_seeds.readers.into_boxed_slice(),
         ));
 
         // One canonical prefix drives both the OpenAPI server/UI URLs and the router nesting, so the
@@ -390,6 +430,9 @@ fn normalize_base_path(base_path: &str) -> String {
 
 mod builder;
 mod entries;
+#[cfg(feature = "ws")]
+mod openers;
+mod seeds;
 #[cfg(test)]
 mod tests;
 mod timeout;

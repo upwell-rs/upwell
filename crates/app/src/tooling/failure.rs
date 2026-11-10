@@ -5,6 +5,7 @@ use crate::{ContributionProvenance, InstallationOrigin, InstallationProvenance};
 
 mod details;
 mod di;
+mod seeds;
 
 pub(in crate::tooling) use details::*;
 pub(in crate::tooling) use di::di_failure;
@@ -19,6 +20,7 @@ pub(super) fn app_diagnostics(error: &crate::Error, phase: Option<String>) -> Op
         crate::Error::PluginPlan(error) => vec![plugin_plan_diagnostic(error)],
         crate::Error::ScopeTopology(error) => vec![scope_topology_diagnostic(error)],
         crate::Error::Entry(error) => vec![entry_diagnostic(error)],
+        crate::Error::SeedClaim(error) => vec![seeds::seed_claim_diagnostic(error)],
         crate::Error::UndecidedConditionGraph {
             not_evaluated,
             source,

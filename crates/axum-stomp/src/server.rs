@@ -38,7 +38,7 @@ use stomp_parser::server::{ConnectedFrameBuilder, ErrorFrame, ReceiptFrameBuilde
 use tokio::sync::mpsc;
 use upwell_axum::axum::extract::ws::{Message, WebSocket};
 use upwell_axum::{
-    AppRuntime, ComponentDescriptor, Scope, TypeDescriptor, WebsocketConnectionScope,
+    AppRuntime, ComponentDescriptor, Scope, SeedClaim, TypeDescriptor, WebsocketConnectionScope,
     WebsocketMessageScope,
 };
 
@@ -103,6 +103,10 @@ pub struct StompConfig {
     /// it accepts the connection, and the connection scope opens with what it produced; a
     /// rejection receives `ERROR` and is closed.
     pub authenticator: Option<Arc<dyn StompAuthenticator>>,
+
+    /// The application values the authenticator seeds into every connection scope, claimed
+    /// for it with [`provides_seed`](Self::provides_seed).
+    pub provided_seeds: Vec<TypeDescriptor>,
 }
 
 impl Default for StompConfig {
@@ -111,6 +115,7 @@ impl Default for StompConfig {
             server_heartbeat: None,
             versions: vec![StompVersion::V1_2, StompVersion::V1_1],
             authenticator: None,
+            provided_seeds: Vec::new(),
         }
     }
 }
@@ -129,7 +134,22 @@ impl StompConfig {
 
         self
     }
+
+    /// Claims that the authenticator seeds `T` into every connection scope, as
+    /// [`StompAuthenticated::seed`] does, so a `#[context]` value placed in the connection
+    /// scope passes preparation. Preparation rejects a required context value of the connection
+    /// scope no endpoint claims (`UnprovidedSeed`).
+    #[must_use]
+    pub fn provides_seed<T: 'static>(mut self) -> Self {
+        self.provided_seeds
+            .push(TypeDescriptor::of::<T>(std::any::type_name::<T>()));
+
+        self
+    }
 }
+
+/// The claimant of the seeds STOMP provides.
+pub const STOMP_CLAIMANT: &str = "upwell/axum-stomp";
 
 // The `Stomp` struct is defined in the wasm-safe `crate::stomp` module (so a `#[topics(protocol =
 // Stomp)]` set and its client can name it on wasm), with its server-only fields behind a `cfg`. The
@@ -179,6 +199,8 @@ impl WebsocketProtocol for Stomp {
             .root()
             .get::<StompTopicBus>()
             .ok_or(StompBuildError::MissingTopicBus)?;
+
+        Self::check_options(&config)?;
 
         if let Some(authenticator) = &config.authenticator {
             auth::check_root_dependencies(authenticator.as_ref(), runtime)?;
@@ -330,11 +352,42 @@ impl WebsocketProtocol for Stomp {
 
     fn register(registry: &mut upwell_axum::AppRegistry) {
         upwell_axum::register_topic_bus::<Self>(registry);
+
         registry.components.extend([
             STOMP_HEADERS_DESCRIPTOR,
             STOMP_SESSION_DESCRIPTOR,
             STOMP_PRINCIPAL_DESCRIPTOR,
         ]);
+    }
+
+    fn check_options(config: &StompConfig) -> Result<(), StompBuildError> {
+        match (&config.authenticator, config.provided_seeds.first()) {
+            (None, Some(seed)) => Err(StompBuildError::SeedWithoutAuthenticator {
+                seed: (seed.type_name)(),
+            }),
+
+            _ => Ok(()),
+        }
+    }
+
+    fn seed_claims(config: &StompConfig) -> Vec<SeedClaim> {
+        let own = [
+            STOMP_HEADERS_DESCRIPTOR,
+            STOMP_SESSION_DESCRIPTOR,
+            STOMP_PRINCIPAL_DESCRIPTOR,
+        ]
+        .map(|descriptor| SeedClaim {
+            ty: descriptor.ty,
+            scope: descriptor.scope,
+            claimant: STOMP_CLAIMANT,
+        });
+        let provided = config.provided_seeds.iter().map(|ty| SeedClaim {
+            ty: *ty,
+            scope: WebsocketConnectionScope::KEY,
+            claimant: STOMP_CLAIMANT,
+        });
+
+        own.into_iter().chain(provided).collect()
     }
 }
 

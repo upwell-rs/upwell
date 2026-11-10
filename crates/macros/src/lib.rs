@@ -82,7 +82,8 @@ use proc_macro::TokenStream;
 ///   the declared one. The listed scopes may not share a hierarchy: preparation rejects a
 ///   scope listed beside one of its ancestors (`OverlappingPlacements`), a transient beside
 ///   any other, and a manual instance (`default_factory = false`) in more than one scope,
-///   since a seed is addressed by type (`AmbiguousSeedScopes`). An `#[init]` without a scope
+///   since a seed is addressed by type (`AmbiguousSeedScopes`); a value seeded in several
+///   unrelated scopes is a [`macro@context`]. An `#[init]` without a scope
 ///   builds in every listed scope. An empty list or a path listed twice is a compile error,
 ///   one scope named through two paths fails preparation (`RepeatedScope`), and `eager`
 ///   checks every listed scope.
@@ -158,6 +159,49 @@ use proc_macro::TokenStream;
 #[proc_macro_attribute]
 pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
     upwell_macros_core::component(attr.into(), item.into()).into()
+}
+
+/// Declares a **context value**: an app-defined value, such as an authenticated `Identity`,
+/// that is never built but seeded by a protocol or the application into an instance of each
+/// scope it lists, and injected by value wherever one of those scopes is on the chain.
+///
+/// ```ignore
+/// #[context(scopes = [WebsocketConnection, HttpRequest])]
+/// #[derive(Clone)]
+/// pub struct Identity {
+///     subject: Arc<str>,
+/// }
+///
+/// #[component(scope = [WebsocketMessage, HttpRequest])]
+/// struct Audit {
+///     identity: Identity, // from the connection over WebSocket, from the request over REST
+/// }
+/// ```
+///
+/// A context is a by-value component (`Clone`, injected as `Identity` or `Option<Identity>`)
+/// with no factory and the `Context` construction policy. Unlike a `#[component(scope = [..],
+/// default_factory = false)]`, which may be a seed in one scope only, it may be seeded in
+/// several scopes; like every placement, the scopes may not share a hierarchy. A STOMP
+/// authenticator seeds it with `StompAuthenticated::seed`, an HTTP request with a
+/// `RequestSeeder` registered by `request_seed`, and a user-opened scope with
+/// `ScopeBuilder::seed`.
+///
+/// Preparation checks that each placement something requires is covered by a seed claim for
+/// its scope: `StompConfig::provides_seed`, `AxumAppBuilder::request_seed`, or
+/// `AppBuilder::provides_seed` for a scope the application opens itself. A placement a
+/// required dependency reaches without a claim fails with `UnprovidedSeed`, naming the value,
+/// the scope and the consumer.
+///
+/// # Arguments
+///
+/// - `scopes = [A, B]` (required) — the scopes the value is seeded in, each below the root.
+///   An empty list or a path listed twice is a compile error, as is the root or the transient
+///   scope.
+/// - `id` / `name` — the component identity, defaulting to the lowercased type name and the
+///   type name.
+#[proc_macro_attribute]
+pub fn context(attr: TokenStream, item: TokenStream) -> TokenStream {
+    upwell_macros_core::context(attr.into(), item.into()).into()
 }
 
 /// Implements the `ConfigProperties` trait for a config `struct` or `enum`, making it

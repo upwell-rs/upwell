@@ -18,6 +18,7 @@ use super::Axum;
 use super::WsRegistration;
 use crate::controller::ControllerDescriptor;
 use crate::middleware::{AxumMiddleware, MiddlewareApplier, as_layer};
+use crate::request_seed::{RequestSeeder, SeederMiddleware, read_seed};
 
 /// axum-specific builder methods, contributed to [`AppBuilder<Axum>`] as an extension
 /// trait. Bring it into scope to register controllers by type; it is in the prelude.
@@ -83,6 +84,29 @@ pub trait AxumAppBuilder {
     where
         M: AxumMiddleware + Component<Handle = Arc<M>> + Descriptor<ComponentDescriptor>;
 
+    /// Registers the [`RequestSeeder`] `M`, a DI singleton, to seed its `T` into the
+    /// [`HttpRequest`](crate::HttpRequest) scope of every request a controller route serves.
+    ///
+    /// The seeder runs inside the parent layers and before global middleware and the eager
+    /// request-scope opening, so every opening of a controller route's scope holds the seed. A
+    /// rejection ends the request with the seeder's response. WebSocket upgrades and requests
+    /// no route matches skip it, and open their scope, when something injects from it, without
+    /// the seed. Preparation therefore accepts a requirement of `T` only from what controller
+    /// routes alone reach: a handler and the components it injects. An eager request-scoped
+    /// component, one no controller route reaches, and one a DI-backed middleware
+    /// ([`middleware`](Self::middleware), [`parent_middleware`](Self::parent_middleware))
+    /// reaches over a declared edge, such as a `Current` accessor, must not require it, and are
+    /// rejected with `OpenerWithoutSeed` naming the non-controller requests. Middleware that
+    /// injects at run time without a declared edge, such as a raw `from_fn` layer calling
+    /// `Inject`, is not seen: such an injection fails when it resolves on a request without the
+    /// seed. Seeders run in registration order. Registering `M` again is a
+    /// no-op; a second seeder of the same `T` fails preparation with
+    /// [`DuplicateRequestSeeder`](crate::Error::DuplicateRequestSeeder).
+    fn request_seed<T, M>(self) -> Self
+    where
+        T: Clone + Send + Sync + 'static,
+        M: RequestSeeder<Seed = T> + Component<Handle = Arc<M>> + Descriptor<ComponentDescriptor>;
+
     /// Opts the app into a WebSocket protocol `P`, mounting its upgrade handler at `path` with the
     /// protocol's default [`Options`](crate::ws::WebsocketProtocol::Options). Only
     /// `#[controller(ws = P)]` controllers speaking `P` are then served, under `path` (the path
@@ -143,6 +167,9 @@ impl AxumAppBuilder for AppBuilder<Axum> {
         self.protocol_mut()
             .middleware
             .push(di_applier::<M>(Attach::Router));
+        self.protocol_mut()
+            .middleware_roots
+            .push(upwell_core::TypeDescriptor::of::<M>(M::NAME));
 
         self.component::<M>()
     }
@@ -169,6 +196,33 @@ impl AxumAppBuilder for AppBuilder<Axum> {
         self.protocol_mut()
             .parent_layers
             .push(di_applier::<M>(Attach::MatchedRoutes));
+        self.protocol_mut()
+            .middleware_roots
+            .push(upwell_core::TypeDescriptor::of::<M>(M::NAME));
+
+        self.component::<M>()
+    }
+
+    fn request_seed<T, M>(mut self) -> Self
+    where
+        T: Clone + Send + Sync + 'static,
+        M: RequestSeeder<Seed = T> + Component<Handle = Arc<M>> + Descriptor<ComponentDescriptor>,
+    {
+        let seeds = &mut self.protocol_mut().request_seeds;
+
+        if !seeds.register::<T, M>() {
+            return self;
+        }
+
+        seeds.layers.push(Box::new(|runtime, router| {
+            let seeder = runtime
+                .root()
+                .get::<M>()
+                .expect("request seeder missing from DI root — did you register it?");
+
+            Attach::MatchedRoutes.apply(router, as_layer(Arc::new(SeederMiddleware(seeder))))
+        }));
+        seeds.readers.push(read_seed::<T>);
 
         self.component::<M>()
     }
@@ -190,6 +244,14 @@ impl AxumAppBuilder for AppBuilder<Axum> {
         P: crate::ws::WebsocketProtocol,
     {
         let path = path.into();
+        let claims = P::seed_claims(&options);
+        let rejected =
+            P::check_options(&options)
+                .err()
+                .map(|source| crate::Error::WebsocketBuild {
+                    protocol: std::any::type_name::<P>(),
+                    source: Box::new(source),
+                });
 
         // Capture the path and options in the mount closure so the non-generic registration can
         // carry protocol-specific `Options` without erasing their type.
@@ -206,6 +268,8 @@ impl AxumAppBuilder for AppBuilder<Axum> {
             protocol_name: std::any::type_name::<P>(),
             mount,
             register: P::register,
+            claims,
+            rejected,
         });
 
         self

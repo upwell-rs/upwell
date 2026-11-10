@@ -1,0 +1,5 @@
+error: a scope list needs at least one scope, as in `scope = [WebsocketConnection, HttpRequest]`
+ --> tests/ui/context/empty_list.rs:4:20
+  |
+4 | #[context(scopes = [])]
+  |                    ^^

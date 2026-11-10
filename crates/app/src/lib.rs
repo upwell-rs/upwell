@@ -73,7 +73,10 @@ pub use protocol::{
     PreBuildContext, PreparedProtocol, ProtocolDefinition, ProtocolRuntime, Serve,
     ValidationContext,
 };
-pub use registry::{AppConditionEvaluation, AppRegistry};
+pub use registry::{
+    APPLICATION_CLAIMANT, AppConditionEvaluation, AppRegistry, OpenerSeeds, SeedClaim,
+    SeedClaimError, SeedConsumer,
+};
 pub use runtime::{
     AnyScopeEnded, AppConditionState, AppRuntime, ComponentRetired, ComponentRetirement,
     ComponentTransitionReport, DisplacedGeneration, EntryScope, HookTarget, OpenScope, Opening,

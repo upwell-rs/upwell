@@ -8,10 +8,12 @@
 //! request that injects nothing request-scoped opens no scope.
 //!
 //! A request to a controller route opens its scope with the route's entry plan, which builds
-//! only what the route injects; anything else is built when something resolves it. Other
-//! requests build every slot of the scope.
+//! only what the route injects; anything else is built when something resolves it. Another
+//! request, such as a WebSocket upgrade or one no route matches, opens it, when something
+//! injects from it, with only its eager components, and builds the rest on demand.
 //!
-//! The exception is a scope with eager components, which must run for every routed request,
+//! The exception is a scope with eager components, which must run for every request a controller
+//! route serves (a WebSocket upgrade opens no request scope),
 //! or one a `Current`/`Scoped` accessor reads, which must be open for any code of the request
 //! to read it. [`open_eager_scope`] then opens the scope before global middleware runs, as RPC opens a
 //! call's scope before its middleware: eager components run for a request middleware rejects
@@ -83,6 +85,7 @@ use upwell_di::{FromContainer, ScopeContainer};
 use crate::config::AxumConfig;
 use crate::extract::InjectRejection;
 use crate::request_meta::RequestMeta;
+use crate::request_seed::{self, SeedReader};
 use crate::scope::{HttpRequest, RequestParent};
 use crate::target::HttpTarget;
 
@@ -96,6 +99,7 @@ pub(crate) struct RequestScopes {
     routes: RouteEntries,
     config: Cfg<AxumConfig>,
     parents: ParentChoice,
+    seeds: Box<[SeedReader]>,
 }
 
 /// Whether a request's scope may open under a parent other than the application root.
@@ -124,15 +128,6 @@ struct Head<'a> {
     method: &'a Method,
     uri: &'a Uri,
     headers: &'a HeaderMap,
-}
-
-/// What opening a request's scope builds when no route entry says.
-#[derive(Clone, Copy)]
-enum WithoutEntry {
-    /// Every slot of the scope.
-    Everything,
-    /// Only the eager set; the rest is built when something resolves it.
-    Eager,
 }
 
 /// Makes [`RequestScopes`] reachable for each request it serves, so its scope opens on the
@@ -175,12 +170,14 @@ impl<'a> Head<'a> {
 
 impl RequestScopeLayer {
     /// The layer opening request scopes with `opener`, under the root or, as `parents` says,
-    /// under a [`RequestParent`] a parent layer set.
+    /// under a [`RequestParent`] a parent layer set, with the seeds `seeds` read from the
+    /// request's extensions.
     pub(crate) fn new(
         opener: ScopeOpener<HttpRequest>,
         routes: RouteEntries,
         config: Cfg<AxumConfig>,
         parents: ParentChoice,
+        seeds: Box<[SeedReader]>,
     ) -> Self {
         Self {
             scopes: Arc::new(RequestScopes {
@@ -188,6 +185,7 @@ impl RequestScopeLayer {
                 routes,
                 config,
                 parents,
+                seeds,
             }),
         }
     }
@@ -267,6 +265,19 @@ impl<S: Service<Request>> Service<Request> for RequestScopeService<S> {
     }
 }
 
+/// Whether a request with `method` and `extensions` is served by a controller route: a route
+/// whose [`HttpRequest`] scope this protocol opens, unlike a WebSocket upgrade or a route
+/// another router contributes. Request seeders and the eager opening cover exactly these.
+pub(crate) fn is_controller_route(method: &Method, extensions: &Extensions) -> bool {
+    let Some(path) = extensions.get::<MatchedPath>() else {
+        return false;
+    };
+
+    REQUEST_SCOPES
+        .try_with(|scopes| scopes.routes.get(method, path.as_str()).is_some())
+        .unwrap_or(false)
+}
+
 /// The protocol's configuration, for a request served by the protocol's router.
 pub(crate) fn config() -> Option<Cfg<AxumConfig>> {
     REQUEST_SCOPES.try_with(|scopes| scopes.config.clone()).ok()
@@ -278,12 +289,7 @@ async fn of_parts(parts: &mut Parts) -> Result<Arc<ScopeContainer>, InjectReject
         return Ok(scope);
     }
 
-    let scope = open(
-        Head::of_parts(parts),
-        &parts.extensions,
-        WithoutEntry::Everything,
-    )
-    .await?;
+    let scope = open(Head::of_parts(parts), &parts.extensions).await?;
 
     parts.extensions.insert(OpenedScope(Arc::clone(&scope)));
 
@@ -296,7 +302,7 @@ async fn of_request(request: &mut Request) -> Result<Arc<ScopeContainer>, Inject
         return Ok(scope);
     }
 
-    open_request(request, WithoutEntry::Everything).await
+    open_request(request).await
 }
 
 /// Resolves `H` from the request's scope, opened on first use. When `H` reads a [`RequestMeta`]
@@ -346,9 +352,10 @@ fn capture_into(scope: &ScopeContainer, head: Head<'_>) -> Result<(), InjectReje
         .map_err(InjectRejection::SeedFailed)
 }
 
-/// Middleware opening a routed request's scope, unless something has already. Without an entry
-/// it builds only the eager set, so a route that injects nothing does not pay for the rest of
-/// the scope.
+/// Middleware opening the scope of a request a controller route serves, unless something has
+/// already. Without an entry it builds only the eager set, so a route that injects nothing does
+/// not pay for the rest of the scope. A WebSocket upgrade opens no request scope: its work runs
+/// in the connection scope the protocol opens, and request seeders skip it too.
 ///
 /// The protocol installs it only when the application registers an eager request-scoped
 /// component or a component with a `Current`/`Scoped` accessor, so other applications do not
@@ -357,7 +364,7 @@ fn capture_into(scope: &ScopeContainer, head: Head<'_>) -> Result<(), InjectReje
 /// middleware, so it runs before all of it, as RPC opens a call's scope before its middleware,
 /// and inside the request timeout, which covers eager construction.
 pub(crate) async fn open_eager_scope(mut request: Request, next: Next) -> Response {
-    let routed = request.extensions().get::<MatchedPath>().is_some();
+    let routed = is_controller_route(request.method(), request.extensions());
     let at_once = REQUEST_SCOPES
         .try_with(|scopes| scopes.opens_at_once(request.extensions()))
         .unwrap_or(false);
@@ -365,7 +372,7 @@ pub(crate) async fn open_eager_scope(mut request: Request, next: Next) -> Respon
     if routed
         && at_once
         && opened(request.extensions()).is_none()
-        && let Err(rejection) = open_request(&mut request, WithoutEntry::Eager).await
+        && let Err(rejection) = open_request(&mut request).await
     {
         return rejection.into_response();
     }
@@ -379,16 +386,8 @@ fn opened(extensions: &Extensions) -> Option<Arc<ScopeContainer>> {
         .map(|OpenedScope(scope)| Arc::clone(scope))
 }
 
-async fn open_request(
-    request: &mut Request,
-    without_entry: WithoutEntry,
-) -> Result<Arc<ScopeContainer>, InjectRejection> {
-    let scope = open(
-        Head::of_request(request),
-        request.extensions(),
-        without_entry,
-    )
-    .await?;
+async fn open_request(request: &mut Request) -> Result<Arc<ScopeContainer>, InjectRejection> {
+    let scope = open(Head::of_request(request), request.extensions()).await?;
 
     request
         .extensions_mut()
@@ -397,12 +396,13 @@ async fn open_request(
     Ok(scope)
 }
 
-/// Opens the request's scope under the parent in `extensions`, or the root, capturing
-/// [`RequestMeta`] from `head` when the opening reads it.
+/// Opens the request's scope under the parent in `extensions`, or the root, with the seeds
+/// request seeders left in `extensions`, capturing [`RequestMeta`] from `head` when the
+/// opening reads it. A controller route opens with its entry's plan, any other request with
+/// only the eager set.
 async fn open(
     head: Head<'_>,
     extensions: &Extensions,
-    without_entry: WithoutEntry,
 ) -> Result<Arc<ScopeContainer>, InjectRejection> {
     let scopes = REQUEST_SCOPES
         .try_with(Arc::clone)
@@ -410,16 +410,19 @@ async fn open(
     let entry = extensions
         .get::<MatchedPath>()
         .and_then(|path| scopes.routes.get(head.method, path.as_str()));
-    let opening = match (entry, without_entry) {
-        (Some(entry), _) => Opening::Entry(entry),
-        (None, WithoutEntry::Everything) => Opening::Everything,
-        (None, WithoutEntry::Eager) => Opening::OnDemand,
+    let opening = match entry {
+        Some(entry) => Opening::Entry(entry),
+        None => Opening::OnDemand,
     };
     let parent = scopes.parent(extensions);
     let builder = scopes.opener.builder(HttpRequest);
     let builder = match parent {
         Some(parent) => builder.under_parent(parent),
         None => builder,
+    };
+    let builder = match scopes.seeds.is_empty() {
+        true => builder,
+        false => builder.seeds(request_seed::collect(&scopes.seeds, extensions)),
     };
 
     let opened = builder

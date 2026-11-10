@@ -33,8 +33,8 @@ use upwell_core::{DependencyDescriptor, EntryKey, ItemSource, TypeDescriptor};
 use crate::scope::WebsocketMessage;
 
 pub use connection::WsConnectionScope;
-pub(crate) use meta::{WEBSOCKET_UPGRADE_META_DESCRIPTOR, WS_CONNECTION_META_DESCRIPTOR};
 pub use meta::{WebsocketUpgradeMeta, WsConnectionMeta};
+pub(crate) use meta::{register_framework_seeds, upgrade_seeds};
 pub use mount::WebsocketHandler;
 pub(crate) use mount::mount_ws;
 pub use prepared::{PreparedConnection, scope_failure_close};
@@ -431,8 +431,34 @@ pub trait WebsocketProtocol: Send + Sync + Sized + 'static {
         shutdown: WsShutdown,
     ) -> impl Future<Output = ()> + Send;
 
-    /// Contributes protocol-owned DI components before the root container is validated and built.
+    /// Contributes protocol-owned DI components, such as the seed slots the protocol fills,
+    /// before the root container is validated and built. The seeds an endpoint fills are
+    /// declared by [`seed_claims`](Self::seed_claims), not here: every endpoint opens the
+    /// connection and message scopes, so a plain [`AppRegistry::claim_seed`] for them does not
+    /// count, and only what each endpoint declares covers its own instances.
     fn register(_registry: &mut AppRegistry) {}
+
+    /// Rejects endpoint `options` that can never work, such as a claimed seed nothing would
+    /// produce, while the application prepares, before any endpoint is built, so tooling
+    /// reports it too. [`build`](Self::build) may check the same again. Accepts every option by
+    /// default.
+    ///
+    /// # Errors
+    ///
+    /// The protocol's build error for the options it rejects.
+    fn check_options(_options: &Self::Options) -> Result<(), Self::BuildError> {
+        Ok(())
+    }
+
+    /// Every seed one endpoint configured with `options` fills in each
+    /// [`WebsocketConnection`](crate::scope::WebsocketConnection) and
+    /// [`WebsocketMessage`](crate::scope::WebsocketMessage) scope it opens, beyond the upgrade
+    /// metadata: the protocol's own seeds and the application values its handshake seeds. The
+    /// endpoint is declared an opener of both scopes with these seeds, and a value one endpoint
+    /// seeds does not count for another's instances. None by default.
+    fn seed_claims(_options: &Self::Options) -> Vec<upwell_app::SeedClaim> {
+        Vec::new()
+    }
 }
 
 /// A [`WebsocketProtocol`] that carries topic pub/sub: it frames a delivered message for one
