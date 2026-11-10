@@ -79,7 +79,7 @@ pub use runtime::{
     ComponentTransitionReport, DisplacedGeneration, EntryScope, HookTarget, OpenScope, Opening,
     OpensUnder, ParentScope, PendingTransition, PhaseTiming, RetirementContext, RetirementReason,
     RunError, RuntimeTransitionReport, RuntimeView, ScopeBuilder, ScopeEnd, ScopeEndContext,
-    ScopeEndKind, ScopeEnded, ScopeEntry, ScopeOpener, ScopeRun, ScopeRunTarget, ScopeWork,
+    ScopeEndKind, ScopeEnded, ScopeEntry, ScopeOpener, ScopeRun, ScopeRunTarget, ScopeWork, Seeds,
     TransitionAborted, TransitionAttemptId, TransitionCommitted, TransitionDecision,
     TransitionFailure, TransitionHookContext, TransitionHookOutcome, TransitionHookReport,
     TransitionOutcome, TransitionOutcomeContext, TransitionPhase, TransitionProposal,

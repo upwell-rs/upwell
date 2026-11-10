@@ -119,6 +119,44 @@ impl StampSock {
     }
 }
 
+/// Fired when a STOMP `CONNECT` is being authenticated.
+static AUTHENTICATING: Notify = Notify::const_new();
+
+/// Lets a parked STOMP authentication continue.
+static AUTHENTICATED: Notify = Notify::const_new();
+
+/// A STOMP request for the stamp its connection scope read.
+#[dto]
+struct StampAsk {}
+
+/// The STOMP socket whose connection scope reads the stamp of its generation.
+#[controller(ws = Stomp)]
+struct StompStamp;
+
+#[handlers(ws = Stomp)]
+impl StompStamp {
+    /// The stamp the message's connection scope read.
+    #[message("/app/stamp")]
+    async fn stamp(
+        &self,
+        _ask: StampAsk,
+        Inject(connection): Inject<Arc<ConnStamp>>,
+    ) -> Result<u32, upwell::axum::CodecError> {
+        Ok(connection.stamp.value)
+    }
+}
+
+/// A STOMP endpoint whose authenticator parks until released, so a test can commit a
+/// generation between the upgrade and the connection scope's opening.
+fn parking_stomp() -> StompConfig {
+    StompConfig::default().with_authenticator(|_connect: StompConnect| async move {
+        AUTHENTICATING.notify_one();
+        AUTHENTICATED.notified().await;
+
+        Ok(StompPrincipal::authenticated("parked"))
+    })
+}
+
 /// A served app over a config file holding `value`, with its runtime and the config fixture.
 async fn start(value: u32) -> (TestServer<upwell::axum::Axum>, AppRuntime, TempFixture) {
     let fixture = TempFixture::new("upwell-http-ws-reload-");
@@ -135,6 +173,7 @@ async fn start(value: u32) -> (TestServer<upwell::axum::Axum>, AppRuntime, TempF
             fixture.child("dirs"),
         ))
         .register_ws::<JsonWs>("/ws")
+        .register_ws_with::<Stomp>("/stomp", parking_stomp())
         .build()
         .await
         .expect("app builds");
@@ -247,5 +286,40 @@ async fn messages_on_a_connection_opened_before_a_commit_stay_on_its_generation(
         "a new connection opens on the committed one"
     );
 
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_stomp_connection_opens_on_the_generation_it_authenticated_on() {
+    let (server, runtime, fixture) = start(1).await;
+    let url = format!("ws://{}/stomp", server.address());
+
+    let (connection, ()) = tokio::join!(
+        deadline(
+            "STOMP connect",
+            upwell::axum::StompClientTransport::connect(&url)
+        ),
+        async {
+            AUTHENTICATING.notified().await;
+            commit(&runtime, &fixture, 2).await;
+            AUTHENTICATED.notify_one();
+        }
+    );
+    let connection = connection.expect("the parked connection connects");
+    let stamp = deadline(
+        "stamp over STOMP",
+        StompStampClient::new(connection.clone()).stamp(StampAsk {}),
+    )
+    .await
+    .expect("a reply");
+
+    assert_eq!(
+        stamp, 1,
+        "the connection opens on the generation its handshake ran on, not the one committed meanwhile"
+    );
+
+    deadline("disconnect", connection.disconnect())
+        .await
+        .expect("disconnect cleanly");
     server.shutdown().await;
 }

@@ -37,16 +37,20 @@ use stomp_parser::headers::{HeaderValue, StompVersion, StompVersions};
 use stomp_parser::server::{ConnectedFrameBuilder, ErrorFrame, ReceiptFrameBuilder};
 use tokio::sync::mpsc;
 use upwell_axum::axum::extract::ws::{Message, WebSocket};
-use upwell_axum::{AppRuntime, ComponentDescriptor, Scope, TypeDescriptor, WebsocketMessageScope};
+use upwell_axum::{
+    AppRuntime, ComponentDescriptor, Scope, TypeDescriptor, WebsocketConnectionScope,
+    WebsocketMessageScope,
+};
 
 use upwell_axum::{
-    MessageReply, PubSubProtocol, SOCKET_SEND_TIMEOUT, WebsocketProtocol, WsConnectionScope,
-    WsControllerDescriptor, WsDispatchError, WsHandlerFn, WsIdle, WsRespond, WsShutdown,
+    MessageReply, PreparedConnection, PubSubProtocol, SOCKET_SEND_TIMEOUT, WebsocketProtocol,
+    WsConnectionScope, WsControllerDescriptor, WsDispatchError, WsHandlerFn, WsIdle, WsRespond,
+    WsShutdown,
 };
 
 pub use auth::{
     Direct, Injected, IntoAuthenticator, ResolvedAuthenticator, StompAuthFuture,
-    StompAuthenticationError, StompAuthenticator, StompConnect, StompPrincipal,
+    StompAuthenticated, StompAuthenticationError, StompAuthenticator, StompConnect, StompPrincipal,
 };
 pub use body::{Publish, StompOutcome};
 pub use broker::{Broker, BrokerExt};
@@ -74,7 +78,7 @@ static STOMP_PRINCIPAL_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor::ma
     "__upwell_stomp_principal",
     "StompPrincipal",
     TypeDescriptor::of::<StompPrincipal>("StompPrincipal"),
-    WebsocketMessageScope::KEY,
+    WebsocketConnectionScope::KEY,
 );
 
 /// STOMP's protocol-specific instantiation of the neutral topic bus.
@@ -96,7 +100,8 @@ pub struct StompConfig {
     pub versions: Vec<StompVersion>,
 
     /// Optional CONNECT authenticator. When present, a connection receives `CONNECTED` only after
-    /// it returns a principal; a rejection receives `ERROR` and is closed.
+    /// it accepts the connection, and the connection scope opens with what it produced; a
+    /// rejection receives `ERROR` and is closed.
     pub authenticator: Option<Arc<dyn StompAuthenticator>>,
 }
 
@@ -114,7 +119,7 @@ impl StompConfig {
     /// Requires successful authentication for this endpoint using `authenticator`.
     ///
     /// Accepts either an async function whose arguments after [`StompConnect`] are injected from the
-    /// connection's DI scope, a value that implements [`StompAuthenticator`] directly, or an
+    /// application root, a value that implements [`StompAuthenticator`] directly, or an
     /// [`Injected<T>`] adapter that resolves a component authenticator from the container.
     pub fn with_authenticator<A, M>(mut self, authenticator: A) -> Self
     where
@@ -175,6 +180,10 @@ impl WebsocketProtocol for Stomp {
             .get::<StompTopicBus>()
             .ok_or(StompBuildError::MissingTopicBus)?;
 
+        if let Some(authenticator) = &config.authenticator {
+            auth::check_root_dependencies(authenticator.as_ref(), runtime)?;
+        }
+
         Ok(Self {
             app_routes,
             broker: Arc::clone(bus.registry()),
@@ -185,11 +194,11 @@ impl WebsocketProtocol for Stomp {
     async fn serve(
         self: Arc<Self>,
         socket: WebSocket,
-        connection: WsConnectionScope,
+        connection: PreparedConnection,
         mut shutdown: WsShutdown,
     ) {
         let (mut sender, mut receiver) = socket.split();
-        let mut idle = WsIdle::from_connection(connection.container());
+        let mut idle = WsIdle::from_connection(connection.root());
         // The handshake must come first: read one frame and expect CONNECT/STOMP. A non-CONNECT
         // opener (or a parse failure) is a protocol violation — reply ERROR and abandon the socket.
         let opener = loop {
@@ -218,22 +227,22 @@ impl WebsocketProtocol for Stomp {
             }
         };
 
-        let (negotiated, principal) = match opener {
-            Some(Ok(message)) => match self.negotiate(message, &connection).await {
-                Ok(handshake) => handshake,
+        let Some(Ok(message)) = opener else {
+            return;
+        };
 
-                Err(error) => {
-                    let _ = tokio::time::timeout(
-                        SOCKET_SEND_TIMEOUT,
-                        sender.send(to_message(error_frame(&error))),
-                    )
-                    .await;
+        let (negotiated, connection) = match self.handshake(message, connection).await {
+            Ok(handshake) => handshake,
 
-                    return;
-                }
-            },
+            Err(error) => {
+                let _ = tokio::time::timeout(
+                    SOCKET_SEND_TIMEOUT,
+                    sender.send(to_message(error_frame(&error))),
+                )
+                .await;
 
-            _ => return,
+                return;
+            }
         };
 
         // A rejected connection never enters the broker registry.
@@ -279,7 +288,7 @@ impl WebsocketProtocol for Stomp {
                         Some(Ok(Message::Text(text))) if is_heartbeat(text.as_bytes()) => {}
 
                         Some(Ok(Message::Text(text))) => {
-                            if self.dispatch(text.as_bytes().to_vec(), &tx, conn_id, &connection, &principal).await.is_break() {
+                            if self.dispatch(text.as_bytes().to_vec(), &tx, conn_id, &connection).await.is_break() {
                                 break;
                             }
                         }
@@ -287,7 +296,7 @@ impl WebsocketProtocol for Stomp {
                         Some(Ok(Message::Binary(bytes))) if is_heartbeat(&bytes) => {}
 
                         Some(Ok(Message::Binary(bytes))) => {
-                            if self.dispatch(bytes.to_vec(), &tx, conn_id, &connection, &principal).await.is_break() {
+                            if self.dispatch(bytes.to_vec(), &tx, conn_id, &connection).await.is_break() {
                                 break;
                             }
                         }
@@ -335,13 +344,14 @@ impl Stomp {
         &self.broker
     }
 
-    /// Negotiates the protocol version from a CONNECT/STOMP frame, erroring on a non-CONNECT opener
-    /// or when no offered version is supported.
+    /// Negotiates the protocol version from a CONNECT/STOMP frame and authenticates it, erroring
+    /// on a non-CONNECT opener, when no offered version is supported, or when the authenticator
+    /// rejects the connection.
     async fn negotiate(
         &self,
         message: Message,
-        connection: &WsConnectionScope,
-    ) -> Result<(StompVersion, StompPrincipal), StompError> {
+        connection: &PreparedConnection,
+    ) -> Result<(StompVersion, StompAuthenticated), StompError> {
         let bytes = match message {
             Message::Text(text) => text.as_bytes().to_vec(),
             Message::Binary(bytes) => bytes.to_vec(),
@@ -376,18 +386,38 @@ impl Stomp {
                 offered: offered.to_string(),
             })?;
 
-        let connect = connect_metadata(&connect);
-        let principal = match &self.config.authenticator {
+        let authenticated = match &self.config.authenticator {
             Some(authenticator) => {
+                let connect = connect_metadata(&connect, connection.upgrade_handle());
+
                 Arc::clone(authenticator)
-                    .authenticate(connect, Arc::clone(connection.container()))
+                    .authenticate(connect, Arc::clone(connection.root()))
                     .await?
             }
 
-            None => StompPrincipal::anonymous(),
+            None => StompAuthenticated::new(StompPrincipal::anonymous()),
         };
 
-        Ok((version, principal))
+        Ok((version, authenticated))
+    }
+
+    /// Negotiates and authenticates the CONNECT `message`, then opens the accepted connection's
+    /// scope with its principal and the authenticator's seeds.
+    async fn handshake(
+        &self,
+        message: Message,
+        connection: PreparedConnection,
+    ) -> Result<(StompVersion, WsConnectionScope), StompError> {
+        let (version, authenticated) = self.negotiate(message, &connection).await?;
+        let (principal, seeds) = authenticated.into_parts();
+
+        connection
+            .seed(principal)
+            .seeds(seeds)
+            .open()
+            .await
+            .map(|scope| (version, scope))
+            .map_err(StompError::ConnectionScope)
     }
 
     /// Parses and routes one inbound frame. Returns [`ControlFlow::Break`] when the connection
@@ -398,7 +428,6 @@ impl Stomp {
         tx: &mpsc::Sender<OutFrame>,
         conn_id: ConnectionId,
         connection: &WsConnectionScope,
-        principal: &StompPrincipal,
     ) -> std::ops::ControlFlow<()> {
         use std::ops::ControlFlow::{Break, Continue};
 
@@ -477,10 +506,7 @@ impl Stomp {
                     headers,
                 };
 
-                if self
-                    .route_send(message, conn_id, connection, principal, reply)
-                    .await
-                {
+                if self.route_send(message, conn_id, connection, reply).await {
                     self.send_receipt(tx, receipt).await;
                 }
 
@@ -514,7 +540,6 @@ impl Stomp {
         message: InboundMessage,
         conn_id: ConnectionId,
         connection: &WsConnectionScope,
-        principal: &StompPrincipal,
         reply: ReplyContext<'_>,
     ) -> bool {
         let InboundMessage {
@@ -532,8 +557,7 @@ impl Stomp {
         let builder = connection
             .message()
             .seed(headers)
-            .seed(StompSession::new(Arc::clone(&self.broker), conn_id))
-            .seed(principal.clone());
+            .seed(StompSession::new(Arc::clone(&self.broker), conn_id));
         let opening = connection.open_message(destination.as_str(), builder);
 
         let scope = match opening.await {
@@ -869,8 +893,12 @@ fn send_header_seed(
     header_list
 }
 
-/// Copies the authentication-relevant CONNECT fields out of the parser's borrowing frame.
-fn connect_metadata(connect: &stomp_parser::client::ConnectFrame<'_>) -> StompConnect {
+/// Copies the authentication-relevant CONNECT fields out of the parser's borrowing frame, with
+/// the upgrade's head.
+fn connect_metadata(
+    connect: &stomp_parser::client::ConnectFrame<'_>,
+    upgrade: Arc<upwell_axum::WebsocketUpgradeMeta>,
+) -> StompConnect {
     let headers = connect
         .custom
         .iter()
@@ -887,5 +915,6 @@ fn connect_metadata(connect: &stomp_parser::client::ConnectFrame<'_>) -> StompCo
         connect.login().map(|value| value.value().to_owned()),
         connect.passcode().map(|value| value.value().to_owned()),
         headers,
+        upgrade,
     )
 }

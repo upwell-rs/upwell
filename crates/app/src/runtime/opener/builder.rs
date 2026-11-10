@@ -7,9 +7,10 @@ use std::sync::Arc;
 use upwell_core::{Scope, ScopeId, Singleton, TypeDescriptor};
 use upwell_di::{BoxedComponent, EntryPlan, Injectable, ScopeContainer};
 
+use super::seeds::boxed_seed;
 use super::{
     EntryScope, InstanceEnd, OpenScope, OpensUnder, ParentScope, ScopeEndKind, ScopeEntry,
-    ScopeOpener,
+    ScopeOpener, Seeds,
 };
 use crate::entry::EntryId;
 use crate::logs::{InstanceLogs, LogOptions, ScopeLogSink};
@@ -48,6 +49,7 @@ pub enum Opening<'e, S: Scope> {
 pub struct ScopeBuilder<'a, S: Scope, P: Scope = Singleton> {
     pub(super) opener: &'a ScopeOpener<S>,
     parent: Option<&'a Arc<ScopeContainer>>,
+    generation: Option<&'a RuntimeView>,
     pub(super) params: S,
     parent_type: PhantomData<fn() -> P>,
     pub(super) seeds: Vec<BoxedComponent>,
@@ -59,6 +61,7 @@ impl<'a, S: Scope> ScopeBuilder<'a, S> {
         Self {
             opener,
             parent: None,
+            generation: None,
             params,
             parent_type: PhantomData,
             seeds: Vec::new(),
@@ -76,6 +79,7 @@ impl<'a, S: Scope, P: Scope> ScopeBuilder<'a, S, P> {
         ScopeBuilder {
             opener: self.opener,
             parent: Some(parent.container()),
+            generation: self.generation,
             params: self.params,
             parent_type: PhantomData,
             seeds: self.seeds,
@@ -96,9 +100,28 @@ impl<'a, S: Scope, P: Scope> ScopeBuilder<'a, S, P> {
         self
     }
 
+    /// Opens the instance under the root of `view`'s generation instead of the current one, so
+    /// work that ran before the opening on `view`, such as a handshake that resolved from its
+    /// root, and the instance see one generation even when a reload committed in between. A
+    /// parent given with [`under`](Self::under) or [`under_parent`](Self::under_parent) takes
+    /// precedence: the instance opens on the parent's generation.
+    pub fn on_generation(mut self, view: &'a RuntimeView) -> Self {
+        self.generation = Some(view);
+
+        self
+    }
+
     /// Fills the scope's factory-less slot for `T` with `value`.
     pub fn seed<T: Any + Send + Sync>(mut self, value: T) -> Self {
         self.seeds.push(boxed_seed(value));
+
+        self
+    }
+
+    /// Fills the scope's factory-less slots with every seed of `seeds`, after the ones already
+    /// added.
+    pub fn seeds(mut self, seeds: Seeds) -> Self {
+        self.seeds.extend(seeds.into_values());
 
         self
     }
@@ -265,14 +288,14 @@ impl<S: OpensUnder<P>, P: Scope> ScopeBuilder<'_, S, P> {
     /// The generation the instance opens on and the container it opens under.
     pub(super) fn target(&self) -> crate::Result<(RuntimeView, Arc<ScopeContainer>)> {
         let runtime = self.opener.runtime.get::<S>()?;
-        let (view, parent) = match self.parent {
-            Some(parent) => (runtime.pinned_view(S::ID, parent)?, Arc::clone(parent)),
-            None => {
-                let view = runtime.view();
-                let root = Arc::clone(view.root());
-
-                (view, root)
-            }
+        let view = match (self.parent, self.generation) {
+            (Some(parent), _) => runtime.pinned_view(S::ID, parent)?,
+            (None, Some(view)) => runtime.owned_view(S::ID, view)?,
+            (None, None) => runtime.view(),
+        };
+        let parent = match self.parent {
+            Some(parent) => Arc::clone(parent),
+            None => Arc::clone(view.root()),
         };
 
         debug_assert!(
@@ -292,10 +315,6 @@ fn plans_nothing<S: Scope>(view: &RuntimeView, entry: &ScopeEntry<S>) -> bool {
         .layouts
         .entry(entry.id)
         .is_some_and(|plan| plan.is_empty() && !plan.is_accessed())
-}
-
-fn boxed_seed<T: Any + Send + Sync>(value: T) -> BoxedComponent {
-    BoxedComponent::stored(TypeDescriptor::of::<T>(std::any::type_name::<T>()), value)
 }
 
 /// The value of an instance of scope `S`, stored in the scope's own slot as the fixed handle

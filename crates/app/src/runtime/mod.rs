@@ -34,7 +34,7 @@ use generation::{RuntimeGeneration, RuntimeTransitionCoordinator, WeakTransition
 pub use opener::{
     AnyScopeEnded, EntryScope, OpenScope, Opening, OpensUnder, ParentScope, RunError, ScopeBuilder,
     ScopeEnd, ScopeEndContext, ScopeEndKind, ScopeEnded, ScopeEntry, ScopeOpener, ScopeRun,
-    ScopeWork, TryScopeWork,
+    ScopeWork, Seeds, TryScopeWork,
 };
 #[cfg(feature = "tooling")]
 pub(crate) use reload::{resolve_staged_transition, staged_condition_snapshot};

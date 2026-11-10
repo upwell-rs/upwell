@@ -15,6 +15,18 @@ pub enum StompBuildError {
     /// The protocol registration hook did not install its shared topic bus.
     #[error("STOMP topic bus is missing from the DI root")]
     MissingTopicBus,
+
+    /// An authenticator argument only a scope provides. An authenticator runs before the
+    /// connection scope opens, so it resolves its arguments from the application root.
+    #[error(
+        "STOMP authenticator argument `{dependency}` is provided only in scope `{scope}`; an authenticator runs before the connection scope opens and can inject singletons and configuration only"
+    )]
+    ScopedAuthenticatorDependency {
+        /// The argument's type.
+        dependency: &'static str,
+        /// The scope that provides it.
+        scope: &'static str,
+    },
 }
 
 /// A STOMP protocol-level error on one connection.
@@ -38,6 +50,11 @@ pub enum StompError {
     /// The endpoint authenticator rejected the CONNECT credentials.
     #[error("authentication failed: {0}")]
     Authentication(#[from] StompAuthenticationError),
+
+    /// The accepted connection's scope could not be opened, for example because an
+    /// authenticator seed has no slot in it. Only this summary reaches the client.
+    #[error("connection scope build failed")]
+    ConnectionScope(#[source] upwell_axum::AppError),
 
     /// A frame was missing a header the command requires.
     #[error("missing required header `{0}`")]

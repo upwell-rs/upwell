@@ -236,7 +236,7 @@ fn prepared_axum_projects_websocket_path_and_protocol_identity() {
         async fn serve(
             self: Arc<Self>,
             _socket: WebSocket,
-            _connection: crate::ws::WsConnectionScope,
+            _connection: crate::ws::PreparedConnection,
             _shutdown: crate::WsShutdown,
         ) {
         }

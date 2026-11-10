@@ -27,6 +27,7 @@ mod log_options;
 mod parent;
 mod run;
 mod run_error;
+mod seeds;
 mod work;
 
 use builder::{Builds, open_in};
@@ -39,6 +40,7 @@ pub use entry_scope::EntryScope;
 pub use parent::ParentScope;
 pub use run::ScopeRun;
 pub use run_error::RunError;
+pub use seeds::Seeds;
 pub use work::{ScopeWork, TryScopeWork};
 
 /// Declares that scope `Self` may open under scope `P`.
@@ -111,6 +113,18 @@ impl AppRuntime {
         }
 
         Ok(())
+    }
+
+    /// `view`, checked to be a generation of this runtime, for a `child` opened under its root.
+    fn owned_view(&self, child: ScopeId, view: &RuntimeView) -> crate::Result<RuntimeView> {
+        if !self.transitions.owns(&view.generation_state()) {
+            return Err(crate::Error::ForeignScopeParent {
+                child,
+                parent: view.root().scope().id(),
+            });
+        }
+
+        Ok(view.clone())
     }
 
     /// The generation a child of `parent` opens under: the one `parent` runs on.

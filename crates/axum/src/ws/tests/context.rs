@@ -49,9 +49,11 @@ impl WebsocketProtocol for ContextReport {
     async fn serve(
         self: Arc<Self>,
         mut socket: WebSocket,
-        connection: crate::ws::WsConnectionScope,
+        connection: crate::ws::PreparedConnection,
         shutdown: WsShutdown,
     ) {
+        let before_open = describe();
+        let connection = connection.open().await.expect("the connection scope opens");
         let in_connection = describe();
         let message = connection
             .open_message("undeclared", connection.message())
@@ -69,7 +71,7 @@ impl WebsocketProtocol for ContextReport {
 
         let _ = socket
             .send(Message::Text(
-                format!("{in_connection}|{in_message}|{after}").into(),
+                format!("{before_open}|{in_connection}|{in_message}|{after}").into(),
             ))
             .await;
         let _ = (self, shutdown);
@@ -77,7 +79,7 @@ impl WebsocketProtocol for ContextReport {
 }
 
 #[tokio::test]
-async fn a_connection_and_each_message_run_in_their_own_context() {
+async fn a_connection_joins_its_context_when_it_opens_and_each_message_runs_in_its_own() {
     let environment = TestEnvironment::new("upwell-axum-ws-context-");
     let app = crate::App::builder("ws-context-test")
         .config_source(environment.config())
@@ -99,7 +101,7 @@ async fn a_connection_and_each_message_run_in_their_own_context() {
 
     assert_eq!(
         report.into_text().expect("a text frame"),
-        "connection:connection|message:message|connection:connection"
+        "connection:other|connection:connection|message:message|connection:connection"
     );
 
     server.shutdown().await;

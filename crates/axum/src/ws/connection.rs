@@ -1,7 +1,8 @@
 //! One upgraded socket's connection scope, handed to its [`WebsocketProtocol`](super::WebsocketProtocol).
 //!
 //! A protocol's whole `serve` runs in the connection's invocation context, whose innermost scope
-//! is the connection, so connection-level code never sees a message scope. Each message's handler
+//! is the connection once the protocol opens it, so connection-level code never sees a message
+//! scope. Each message's handler
 //! runs in a context of its own ([`WsConnectionScope::message_context`]), nested in the
 //! connection's and ending with the handler. Work a protocol does between messages stays in the
 //! connection's.
@@ -20,7 +21,8 @@ use crate::target::HttpTarget;
 /// The entry of each message handler of one endpoint, by destination.
 pub(crate) type MessageEntries = HashMap<&'static str, ScopeEntry<WebsocketMessage>>;
 
-/// One upgraded socket's [`WebsocketConnection`] scope and the prepared opener of the
+/// One upgraded socket's open [`WebsocketConnection`] scope, made by
+/// [`PreparedConnection::open`](super::PreparedConnection::open), and the prepared opener of the
 /// [`WebsocketMessage`] scopes a protocol opens under it.
 pub struct WsConnectionScope {
     scope: OpenScope<WebsocketConnection>,
@@ -44,14 +46,6 @@ impl WsConnectionScope {
     /// The connection scope's container.
     pub fn container(&self) -> &Arc<ScopeContainer> {
         self.scope.container()
-    }
-
-    /// The invocation context of the connection, in its scope. The upgrade runs the protocol's
-    /// [`serve`](super::WebsocketProtocol::serve) in it.
-    pub(crate) fn connection_context(&self) -> InvocationContext {
-        self.messages
-            .context(TargetRef::from_static(&HttpTarget::WebsocketConnection))
-            .with_scope(Arc::clone(self.scope.container()))
     }
 
     /// The invocation context of one message dispatched in `scope`, a message scope this

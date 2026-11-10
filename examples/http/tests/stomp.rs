@@ -248,11 +248,11 @@ impl StompAuthenticator for TokenAuth {
     fn authenticate(
         self: Arc<Self>,
         connect: StompConnect,
-        _connection: Arc<ScopeContainer>,
+        _root: Arc<ScopeContainer>,
     ) -> StompAuthFuture {
         Box::pin(async move {
             if self.users.validate(connect.login(), connect.passcode()) {
-                Ok(StompPrincipal::authenticated("alice"))
+                Ok(StompPrincipal::authenticated("alice").into())
             } else {
                 Err(StompAuthenticationError::new("invalid credentials"))
             }

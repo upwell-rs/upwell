@@ -235,6 +235,48 @@ async fn a_child_runs_on_its_parent_generation_after_publication() {
 }
 
 #[tokio::test]
+async fn a_scope_opens_on_the_generation_its_builder_was_pinned_to() {
+    let (runtime, _) = build_runtime(HashMap::new()).await;
+    let sessions = runtime.opener::<Session>().expect("session is declared");
+    let before = runtime.view();
+
+    publish_next(&runtime).await;
+
+    let pinned = sessions
+        .builder(Session)
+        .on_generation(&before)
+        .open_default()
+        .await
+        .expect("the session opens on the earlier generation");
+
+    assert_eq!(
+        runtime.scope_generation(pinned.container()),
+        Some(RuntimeGenerationId::INITIAL),
+        "work that ran on the earlier generation and the instance see one generation"
+    );
+}
+
+#[tokio::test]
+async fn a_generation_of_another_runtime_is_rejected() {
+    let (runtime, _) = build_runtime(HashMap::new()).await;
+    let (other, _) = build_runtime(HashMap::new()).await;
+    let foreign = other.view();
+
+    let error = expect_app_error(
+        runtime
+            .opener::<Session>()
+            .expect("session is declared")
+            .builder(Session)
+            .on_generation(&foreign)
+            .open_default()
+            .await,
+        "another runtime's generation is rejected",
+    );
+
+    assert!(matches!(error, Error::ForeignScopeParent { .. }));
+}
+
+#[tokio::test]
 async fn a_durable_scope_reports_the_generations_it_fell_behind() {
     let (runtime, _) = build_runtime(HashMap::new()).await;
     let session = open_session(&runtime).await;

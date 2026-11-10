@@ -18,8 +18,15 @@ permit a protocol crate to blanket-adapt every downstream codec trait implementa
   `SUBSCRIBE`/`UNSUBSCRIBE`, `SEND`, server-pushed `MESSAGE`, `DISCONNECT`, and `ERROR` on a
   protocol violation. A hostless `CONNECT` (e.g. from stomp.js) is tolerated.
 - **CONNECT authentication.** `StompConfig::with_authenticator` validates standard
-  `login`/`passcode` credentials or custom CONNECT headers before `CONNECTED`; successful auth
-  produces an `Inject<StompPrincipal>` available to message handlers, while rejection returns
+  `login`/`passcode` credentials, custom CONNECT headers or the upgrade request's head
+  (`StompConnect::upgrade()`) before `CONNECTED`. The connection scope opens only after a
+  successful authentication, seeded with its `StompPrincipal` and any app seeds the
+  authenticator returns (`StompAuthenticated::new(principal).seed(identity)`), so every
+  connection- and message-scoped component can inject them and none is built for a rejected
+  connection. An authenticator therefore resolves its arguments from the application root
+  (singletons and configuration): an argument only a scope provides fails the endpoint build
+  (`StompBuildError::ScopedAuthenticatorDependency`), and one the root cannot resolve at
+  `CONNECT` rejects the connection (`StompAuthenticationError::Unresolved`). Rejection returns
   `ERROR` and never registers the connection with the broker.
 - **App handlers.** `#[controller(ws = Stomp)]` + `#[handlers(ws = Stomp)] #[message("/app/..")]`;
   handlers get frame headers (`Inject<StompHeaders>`), a session (`Inject<StompSession>`), and a
