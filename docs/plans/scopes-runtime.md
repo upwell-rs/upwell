@@ -1164,11 +1164,19 @@ Status (#128, seed claims): DI core knows only that a value is seeded from outsi
 records who seeds it, without knowing any concrete protocol. There are two forms, by how many
 openers a scope has:
 
-- **A scope with one opener** (the HTTP request scope, a scope the application opens) is
-  covered by plain claims, `SeedClaim { ty, scope, claimant }` on `AppRegistry::seed_claims`.
-  Axum claims `RequestMeta` in `HttpRequest`, `AxumAppBuilder::request_seed::<T, M>()` claims
-  `T` there as it registers the seeder, and `AppBuilder::provides_seed::<T, S>()` is the claim
-  for a scope the application opens itself.
+- **A scope with one opener** (a scope the application opens) is covered by plain claims,
+  `SeedClaim { ty, scope, claimant }` on `AppRegistry::seed_claims`;
+  `AppBuilder::provides_seed::<T, S>()` is that claim.
+- **The HTTP request scope has two openers** (#496 review, round 5). *Axum controller routes*
+  run the request seeders, so they fill `RequestMeta` and every `request_seed::<T, M>()` type,
+  and serve the controller entries. *Axum non-controller requests* (one no route matches, a
+  WebSocket upgrade) open the scope only when something such as global middleware injects
+  from it, with `RequestMeta` but no request seed, and serve no entry. A controller handler and
+  what it injects are checked against the first only; an eager request-scoped component, and
+  one no controller route reaches, against both, so they cannot require a request seed. To keep
+  the second opener small, a non-controller request now opens the scope with its eager set
+  only (`Opening::OnDemand`), not every slot. A requirement only a dynamic `Inject` in
+  middleware creates is not an edge, so preparation cannot see it; it fails when resolved.
 - **A scope several openers share** (every WebSocket endpoint opens `WebsocketConnection` and
   `WebsocketMessage`) is covered per opener. Each endpoint declares itself with
   `AppRegistry::declare_opener(OpenerSeeds { opener, scope, seeds })` (`"<protocol> at <path>"`):
@@ -1182,7 +1190,8 @@ openers a scope has:
   seeds it. An opener records the entries it serves (`OpenerSeeds::entries`: an endpoint serves
   the message handlers of the controllers speaking its protocol). An entry is reached by the
   openers serving it; a component by the openers serving any entry that transitively depends on
-  it (over dependency edges and trait providers). An eager component, a component no entry
+  it (over dependency edges and trait providers, each edge followed only to the placement its
+  consumer's scope resolves, never to the same type's placement in an unrelated scope). An eager component, a component no entry
   reaches, and an opener that cannot be tied to entries (`entries: None`) fall back to every
   declared opener of the scope. The reviews of #496 found both holes this closes: with claims
   collapsed to `(type, scope)`, one endpoint's seed vouched for another endpoint's connections;

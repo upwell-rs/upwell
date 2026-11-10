@@ -45,11 +45,11 @@ impl Greeting {
     }
 }
 
-/// Built on every controller request with the request's identity. A WebSocket upgrade opens no
-/// request scope, so it never builds one.
+/// Built on every controller request. A WebSocket upgrade opens no request scope at once, so it
+/// never builds one there.
 #[component(scope = HttpRequest, eager)]
 struct Audit {
-    identity: Identity,
+    meta: upwell::axum::RequestMeta,
 }
 
 /// Seeds the identity from the `x-user` header, rejecting a request without one.

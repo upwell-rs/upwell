@@ -8,8 +8,9 @@
 //! request that injects nothing request-scoped opens no scope.
 //!
 //! A request to a controller route opens its scope with the route's entry plan, which builds
-//! only what the route injects; anything else is built when something resolves it. Other
-//! requests build every slot of the scope.
+//! only what the route injects; anything else is built when something resolves it. Another
+//! request, such as a WebSocket upgrade or one no route matches, opens it, when something
+//! injects from it, with only its eager components, and builds the rest on demand.
 //!
 //! The exception is a scope with eager components, which must run for every request a controller
 //! route serves (a WebSocket upgrade opens no request scope),
@@ -127,15 +128,6 @@ struct Head<'a> {
     method: &'a Method,
     uri: &'a Uri,
     headers: &'a HeaderMap,
-}
-
-/// What opening a request's scope builds when no route entry says.
-#[derive(Clone, Copy)]
-enum WithoutEntry {
-    /// Every slot of the scope.
-    Everything,
-    /// Only the eager set; the rest is built when something resolves it.
-    Eager,
 }
 
 /// Makes [`RequestScopes`] reachable for each request it serves, so its scope opens on the
@@ -297,12 +289,7 @@ async fn of_parts(parts: &mut Parts) -> Result<Arc<ScopeContainer>, InjectReject
         return Ok(scope);
     }
 
-    let scope = open(
-        Head::of_parts(parts),
-        &parts.extensions,
-        WithoutEntry::Everything,
-    )
-    .await?;
+    let scope = open(Head::of_parts(parts), &parts.extensions).await?;
 
     parts.extensions.insert(OpenedScope(Arc::clone(&scope)));
 
@@ -315,7 +302,7 @@ async fn of_request(request: &mut Request) -> Result<Arc<ScopeContainer>, Inject
         return Ok(scope);
     }
 
-    open_request(request, WithoutEntry::Everything).await
+    open_request(request).await
 }
 
 /// Resolves `H` from the request's scope, opened on first use. When `H` reads a [`RequestMeta`]
@@ -385,7 +372,7 @@ pub(crate) async fn open_eager_scope(mut request: Request, next: Next) -> Respon
     if routed
         && at_once
         && opened(request.extensions()).is_none()
-        && let Err(rejection) = open_request(&mut request, WithoutEntry::Eager).await
+        && let Err(rejection) = open_request(&mut request).await
     {
         return rejection.into_response();
     }
@@ -399,16 +386,8 @@ fn opened(extensions: &Extensions) -> Option<Arc<ScopeContainer>> {
         .map(|OpenedScope(scope)| Arc::clone(scope))
 }
 
-async fn open_request(
-    request: &mut Request,
-    without_entry: WithoutEntry,
-) -> Result<Arc<ScopeContainer>, InjectRejection> {
-    let scope = open(
-        Head::of_request(request),
-        request.extensions(),
-        without_entry,
-    )
-    .await?;
+async fn open_request(request: &mut Request) -> Result<Arc<ScopeContainer>, InjectRejection> {
+    let scope = open(Head::of_request(request), request.extensions()).await?;
 
     request
         .extensions_mut()
@@ -419,11 +398,11 @@ async fn open_request(
 
 /// Opens the request's scope under the parent in `extensions`, or the root, with the seeds
 /// request seeders left in `extensions`, capturing [`RequestMeta`] from `head` when the
-/// opening reads it.
+/// opening reads it. A controller route opens with its entry's plan, any other request with
+/// only the eager set.
 async fn open(
     head: Head<'_>,
     extensions: &Extensions,
-    without_entry: WithoutEntry,
 ) -> Result<Arc<ScopeContainer>, InjectRejection> {
     let scopes = REQUEST_SCOPES
         .try_with(Arc::clone)
@@ -431,10 +410,9 @@ async fn open(
     let entry = extensions
         .get::<MatchedPath>()
         .and_then(|path| scopes.routes.get(head.method, path.as_str()));
-    let opening = match (entry, without_entry) {
-        (Some(entry), _) => Opening::Entry(entry),
-        (None, WithoutEntry::Everything) => Opening::Everything,
-        (None, WithoutEntry::Eager) => Opening::OnDemand,
+    let opening = match entry {
+        Some(entry) => Opening::Entry(entry),
+        None => Opening::OnDemand,
     };
     let parent = scopes.parent(extensions);
     let builder = scopes.opener.builder(HttpRequest);

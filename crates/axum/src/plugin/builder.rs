@@ -7,9 +7,9 @@ use axum::extract::Request;
 use axum::response::IntoResponse;
 use axum::routing::Route;
 use tower::{Layer, Service};
+use upwell_app::AppBuilder;
 #[cfg(feature = "ws")]
 use upwell_app::AppRuntime;
-use upwell_app::{AppBuilder, SeedClaim};
 use upwell_core::Descriptor;
 use upwell_di::{Component, ComponentDescriptor};
 
@@ -19,7 +19,6 @@ use super::WsRegistration;
 use crate::controller::ControllerDescriptor;
 use crate::middleware::{AxumMiddleware, MiddlewareApplier, as_layer};
 use crate::request_seed::{RequestSeeder, SeederMiddleware, read_seed};
-use crate::scope::HttpRequest;
 
 /// axum-specific builder methods, contributed to [`AppBuilder<Axum>`] as an extension
 /// trait. Bring it into scope to register controllers by type; it is in the prelude.
@@ -86,13 +85,16 @@ pub trait AxumAppBuilder {
         M: AxumMiddleware + Component<Handle = Arc<M>> + Descriptor<ComponentDescriptor>;
 
     /// Registers the [`RequestSeeder`] `M`, a DI singleton, to seed its `T` into the
-    /// [`HttpRequest`](crate::HttpRequest) scope of every request a controller route serves,
-    /// and claims `T` for that scope, so a `#[context]` value seeded there passes preparation.
+    /// [`HttpRequest`](crate::HttpRequest) scope of every request a controller route serves.
     ///
     /// The seeder runs inside the parent layers and before global middleware and the eager
-    /// request-scope opening, so every opening of the request's scope holds the seed. A
+    /// request-scope opening, so every opening of a controller route's scope holds the seed. A
     /// rejection ends the request with the seeder's response. WebSocket upgrades and requests
-    /// no route matches skip it. Seeders run in registration order. Registering `M` again is a
+    /// no route matches skip it, and open their scope, when something injects from it, without
+    /// the seed. Preparation therefore accepts a requirement of `T` only from what controller
+    /// routes reach: a handler and the components it injects. An eager request-scoped component,
+    /// or one no controller route reaches (one only global middleware injects), must not require
+    /// it, and is rejected with `OpenerWithoutSeed` naming the non-controller requests. Seeders run in registration order. Registering `M` again is a
     /// no-op; a second seeder of the same `T` fails preparation with
     /// [`DuplicateRequestSeeder`](crate::Error::DuplicateRequestSeeder).
     fn request_seed<T, M>(self) -> Self
@@ -210,8 +212,6 @@ impl AxumAppBuilder for AppBuilder<Axum> {
             Attach::MatchedRoutes.apply(router, as_layer(Arc::new(SeederMiddleware(seeder))))
         }));
         seeds.readers.push(read_seed::<T>);
-        self.registry_mut()
-            .claim_seed(SeedClaim::of::<T, HttpRequest>(std::any::type_name::<M>()));
 
         self.component::<M>()
     }

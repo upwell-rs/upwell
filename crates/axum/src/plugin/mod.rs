@@ -3,7 +3,7 @@
 use std::future::Future;
 
 use upwell_app::{
-    AppRegistry, AppRuntime, PreparedProtocol, ProtocolDefinition, SeedClaim, ValidationContext,
+    AppRegistry, AppRuntime, PreparedProtocol, ProtocolDefinition, ValidationContext,
 };
 use upwell_config::{ConfigBinding, ContainerConfigExt};
 
@@ -54,9 +54,6 @@ pub struct Axum {
     #[cfg(feature = "ws")]
     ws_registrations: Vec<WsRegistration>,
 }
-
-/// The claimant of the seeds the axum protocol itself provides.
-pub const AXUM_CLAIMANT: &str = "upwell/axum";
 
 /// A mount closure: builds one ws endpoint's router + handle from its controllers and runtime. A
 /// boxed `FnOnce` (not a `fn` pointer) so it can capture the path and the protocol's `Options`,
@@ -128,9 +125,10 @@ impl ProtocolDefinition for Axum {
             .config_bindings
             .push(ConfigBinding::of::<AxumConfig>(AXUM_CONFIG_PATH));
         registry.components.push(REQUEST_META_DESCRIPTOR);
-        registry.claim_seed(SeedClaim::of::<crate::RequestMeta, HttpRequestScope>(
-            AXUM_CLAIMANT,
-        ));
+        for opener in seeds::request_openers(&self.request_seeds, &self.controllers) {
+            registry.declare_opener(opener);
+        }
+
         registry
             .entries
             .extend(entries::route_entries(&self.controllers));

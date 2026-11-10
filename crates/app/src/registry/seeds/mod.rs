@@ -162,7 +162,7 @@ impl AppRegistry {
             return Ok(());
         }
 
-        let reach = EntryReach::of(components, &self.providers, &self.entries);
+        let reach = EntryReach::of(components, &self.providers, &self.entries, topology);
 
         for component in components {
             let consumer = SeedConsumer::Component {

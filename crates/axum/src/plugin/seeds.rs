@@ -3,6 +3,8 @@
 use std::any::{TypeId, type_name};
 use std::collections::HashMap;
 
+use upwell_core::TypeDescriptor;
+
 use crate::middleware::MiddlewareApplier;
 use crate::request_seed::SeedReader;
 
@@ -12,6 +14,8 @@ use crate::request_seed::SeedReader;
 pub(super) struct RequestSeeds {
     pub(super) layers: Vec<MiddlewareApplier>,
     pub(super) readers: Vec<SeedReader>,
+    /// The type of each registered seed, in registration order.
+    pub(super) types: Vec<TypeDescriptor>,
     seeders: HashMap<TypeId, RegisteredSeeder>,
     pub(super) conflict: Option<crate::Error>,
 }
@@ -47,9 +51,50 @@ impl RequestSeeds {
             None => {
                 self.seeders
                     .insert(TypeId::of::<T>(), RegisteredSeeder { seeder, name });
+                self.types.push(TypeDescriptor::of::<T>(type_name::<T>()));
 
                 true
             }
         }
     }
 }
+
+/// The two openers of the HTTP request scope: controller routes, which run the request seeders
+/// and serve the controller entries, and every other request (one no route matches, a
+/// WebSocket upgrade), whose scope opens only when something injects from it, without the
+/// request seeds. Global middleware runs for both, so a component no controller entry reaches
+/// must be seeded by both; a controller handler's needs only by the first.
+pub(super) fn request_openers(
+    seeds: &RequestSeeds,
+    controllers: &[crate::controller::ControllerDescriptor],
+) -> [upwell_app::OpenerSeeds; 2] {
+    let request = <crate::scope::HttpRequest as upwell_core::Scope>::KEY;
+    let meta = crate::request_meta::REQUEST_META_DESCRIPTOR.ty;
+    let entries = super::entries::route_entries(controllers)
+        .map(|entry| entry.key)
+        .collect();
+
+    [
+        upwell_app::OpenerSeeds {
+            opener: String::from(CONTROLLER_REQUESTS),
+            scope: request,
+            seeds: std::iter::once(meta)
+                .chain(seeds.types.iter().copied())
+                .collect(),
+            entries: Some(entries),
+        },
+        upwell_app::OpenerSeeds {
+            opener: String::from(OTHER_REQUESTS),
+            scope: request,
+            seeds: vec![meta],
+            entries: Some(Vec::new()),
+        },
+    ]
+}
+
+/// The opener of the request scope of controller routes.
+pub(super) const CONTROLLER_REQUESTS: &str = "axum controller routes";
+
+/// The opener of the request scope of every other request: one no route matches, or a
+/// WebSocket upgrade.
+pub(super) const OTHER_REQUESTS: &str = "axum non-controller requests";

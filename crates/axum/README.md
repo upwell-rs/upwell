@@ -39,7 +39,11 @@ nothing reads `RequestParent`.
 An application value such as an authenticated identity, declared once with
 `#[context(scopes = [WebsocketConnection, HttpRequest])]`, reaches both paths as a seed. Over
 REST a `RequestSeeder` registered with `request_seed::<Identity, M>()` produces it from the
-request (or rejects it) before global middleware and fills each request scope with it. Over
+request (or rejects it) before global middleware and fills the request scope of each
+controller route with it. A request no route matches and a WebSocket upgrade get no seed, so
+only handlers and what they inject may require it; an eager request-scoped component, or one
+only middleware injects, may not. Such a request opens its scope, when something injects from
+it, with only the eager set. Over
 WebSocket the protocol's `serve` receives a `PreparedConnection` and opens the connection scope
 itself, after its handshake: STOMP opens it after `CONNECT` authentication, seeded with the
 `StompPrincipal` and whatever the authenticator returns in `StompAuthenticated::seed`, and
